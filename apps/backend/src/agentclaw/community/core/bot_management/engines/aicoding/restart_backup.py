@@ -84,7 +84,13 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
                    bot_id: str, target_id: str) -> Callable[[], None]:
     """Wait outside the legacy restart lock; return a short receipt verifier."""
     started = time.monotonic()
-    deadline = started + DEADLINE_SECONDS
+    # Ordinary durable operations share one budget across task redeliveries and
+    # all physical targets. Published/Caller paths retain their existing budget.
+    from .restart_state import BACKUP_TIMEOUT, current_restart
+    execution = current_restart.get()
+    remaining = (BACKUP_TIMEOUT - (time.time() - execution.payload["started_at"])
+                 if execution is not None else DEADLINE_SECONDS)
+    deadline = started + remaining
     action, boot, last_status = 'start', None, None
     last_log = started
 
@@ -106,7 +112,11 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
     log('probe', 'started')
     try:
         while True:
+            if time.monotonic() >= deadline:
+                raise TimeoutError("重启备份超过等待预算，禁止销毁")
             value = parse_result(execute(command(action, operation_id)), operation_id)
+            if time.monotonic() >= deadline:
+                raise TimeoutError("重启备份超过等待预算，禁止销毁")
             status = value['status']
             if status == 'legacy':
                 if action != 'start':
@@ -143,10 +153,14 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
 
     def verify():
         try:
+            if execution is not None and time.monotonic() >= deadline:
+                raise TimeoutError("重启备份超过等待预算，禁止销毁")
             # An absent helper is re-probed read-only; never start work on a
             # replacement container while holding the legacy short-lived lock.
             check_action = 'start' if status == 'not_mounted' else 'status'
             current = parse_result(execute(command(check_action, operation_id)), operation_id)
+            if execution is not None and time.monotonic() >= deadline:
+                raise TimeoutError("重启备份超过等待预算，禁止销毁")
             if current['status'] != 'legacy' and (
                     not isinstance(current.get('boot_id'), str) or not current['boot_id']):
                 raise RestartBackupError('invalid_response', '备份复核结果缺少实例身份')
@@ -260,6 +274,40 @@ def _query_inventory(runtime, *, bot_id, target_id, operation_id, phase):
     )
     try:
         state = {'devices': runtime.list_devices_by_bot_uuid(bot_uuid=target_id)}
+        if state['devices'] == []:
+            # An empty projection alone is not proof that replacement is safe.
+            # Consult BaaS, not the local Bot status (durable admission already
+            # changed that to PENDING). Never skip backup for a FAILED Bot that
+            # still has devices. get_bot's devices field is not an inventory
+            # without health_check, so re-read the dedicated devices endpoint.
+            detail = runtime.get_bot(bot_uuid=target_id)
+            if isinstance(detail, dict) and (
+                (detail.get('status') == 'RELEASED'
+                 and detail.get('bot_uuid', target_id) == target_id)
+                or (detail.get('status') == 'FAILED'
+                    and detail.get('bot_uuid') == target_id)
+            ):
+                state['devices'] = runtime.list_devices_by_bot_uuid(bot_uuid=target_id)
+                if state['devices'] == []:
+                    _log_inventory(
+                        bot_id=bot_id, target_id=target_id, state=state, phase=phase,
+                        operation_id=operation_id,
+                        elapsed_ms=int((time.monotonic() - started) * 1000),
+                    )
+                    logger.info(
+                        "event=aicoding_restart_backup phase=%s inventory=resolved "
+                        "reason=confirmed_empty_terminal_bot bot_id=%s target_id=%s "
+                        "operation_id=%s baas_status=%s target_count=0",
+                        phase, bot_id, target_id, operation_id, detail['status'],
+                    )
+                    return {}
+                if isinstance(state['devices'], list) and state['devices']:
+                    # The initial observation had no devices. A newly visible
+                    # target may belong to another in-flight reconstruction;
+                    # never start a backup on it under this recovery attempt.
+                    raise RestartBackupError(
+                        'target_changed', '确认期间目标容器清单变化，禁止替换'
+                    )
     except Exception as error:
         # Shared transport exceptions may contain response bodies/credentials.
         logger.warning(
@@ -327,7 +375,11 @@ class AicodingRestartBackupMixin:
 
         def verify_and_fence():
             verify()
-            execution.fence_mutation()
+            execution.verify_backup = verify
+            # BaaS request preparation is not a remote mutation. Its fence is
+            # installed by before_restart_submission, immediately before POST.
+            if execution.payload["provider"] != "baas":
+                execution.fence_mutation()
         return verify_and_fence
 
     async def prepare_restart_async(self, ctx, **kwargs):

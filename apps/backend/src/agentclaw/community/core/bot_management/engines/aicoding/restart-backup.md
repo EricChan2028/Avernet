@@ -21,8 +21,9 @@ are unchanged. Historical containers need not be upgraded before restarting.
 1. Read the original binding and enforce durable restart ownership as before.
 2. Query BaaS devices; pin backup commands to observed physical IDs.
 3. Call the helper through `/paas/devices/{physical_id}/commands`.
-4. Observe its result, then recheck inventory and any available receipt under
-   the caller's existing restart lock.
+4. Observe its result, then recheck inventory and any available receipt. Ordinary Bot
+   restarts do this under the existing restart lock; published-instance and
+   Caller paths do not hold that lock.
 5. Continue the original destroy/create or stop/start flow, even when backup
    I/O, result validation or the observation budget failed.
 
@@ -65,6 +66,10 @@ converted into successful preparation.
 The **runtime archive execution budget remains 900 seconds (15 minutes)**.
 The Backend observation budget remains 1500 seconds (25 minutes), covering
 service termination (up to 330 seconds), archive execution and transport costs.
+Ordinary durable restarts share one observation budget across queue time,
+redeliveries and physical targets; published/Caller paths retain their existing
+per-target budget. BaaS receipt rechecks and the durable mutation fence remain
+immediately before provider submission, after request preparation.
 Polling remains every 2 seconds. These are not new runtime settings: this patch
 does not install, patch, cancel or upgrade scripts in existing containers.
 In-flight command calls use their existing transport timeout.

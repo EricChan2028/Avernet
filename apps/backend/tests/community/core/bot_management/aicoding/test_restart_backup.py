@@ -643,3 +643,109 @@ async def test_other_engine_ignores_durable_restart_key():
         device_id='target', target_runtime=runtime, restart_key='restart:publish:prod',
     )
     assert not runtime.mock_calls
+
+
+def test_ordinary_backup_budget_includes_time_already_spent_in_queue():
+    import time
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_state import (
+        BACKUP_TIMEOUT, current_restart,
+    )
+
+    assert BACKUP_TIMEOUT == backup.DEADLINE_SECONDS == 1500
+    context_reset_handle = current_restart.set(SimpleNamespace(payload={
+        "started_at": time.time() - BACKUP_TIMEOUT - 1,
+    }))
+    execute = Mock()
+    try:
+        with pytest.raises(TimeoutError):
+            prepare(execute)
+        execute.assert_not_called()
+    finally:
+        current_restart.reset(context_reset_handle)
+
+
+@pytest.mark.parametrize('engine', ['aicoding', 'claude_code'])
+@pytest.mark.parametrize('status', ['ACTIVE', 'PENDING', 'FAILED', 'STOPPED'])
+@pytest.mark.parametrize('record_type', [dict, SimpleNamespace])
+def test_arca_skips_all_backup_io_but_still_verifies_binding(engine, status, record_type):
+    ctx = BotProvisioningContext(
+        bot_id='bot', owner_id='owner', bot_type='personal', active_engine=engine,
+    )
+    device = Mock()
+    # No sandbox_id is needed: even an already destroyed sandbox can be replaced.
+    device.get_device.return_value = record_type(
+        device_id='destroyed-container', device_provider='arca', status=status,
+        device_props={},
+    )
+    device.exec_shell_new.side_effect = RuntimeError('sandbox destroyed')
+    runtime_provider = Mock(side_effect=AssertionError('must not resolve BaaS'))
+    repository = Mock()
+    repository.get_by_id_and_owner.return_value = {'binding_id': 42}
+    with patch.object(backup, 'prepare_backup') as prepared:
+        verify = AicodingProvisioningStrategy(engine).prepare_restart(
+            ctx, binding_id=42, device_service_provider=lambda: device,
+            target_runtime_provider=runtime_provider, bot_repository=repository,
+        )
+        verify()
+        repository.get_by_id_and_owner.return_value = {'binding_id': 99}
+        with pytest.raises(backup.RestartBackupError, match='绑定'):
+            verify()
+    prepared.assert_not_called()
+    device.exec_shell_new.assert_not_called()
+    runtime_provider.assert_not_called()
+    repository.update_by_owner.assert_not_called()
+
+
+@pytest.mark.parametrize('engine', ['aicoding', 'claude_code'])
+@pytest.mark.parametrize('status', ['ACTIVE', 'PENDING'])
+def test_other_provider_keeps_backup_probe_and_verification(engine, status):
+    ctx = BotProvisioningContext(
+        bot_id='bot', owner_id='owner', bot_type='personal', active_engine=engine,
+    )
+    device = Mock()
+    device.get_device.return_value = {
+        'device_id': 'container-1', 'device_provider': 'local', 'status': status,
+    }
+    device.exec_shell_new.return_value = response('not_mounted')
+    runtime_provider = Mock(side_effect=AssertionError('must not resolve BaaS'))
+    repository = Mock()
+    repository.get_by_id_and_owner.return_value = {'binding_id': 42}
+
+    verify = AicodingProvisioningStrategy(engine).prepare_restart(
+        ctx, binding_id=42, device_service_provider=lambda: device,
+        target_runtime_provider=runtime_provider, bot_repository=repository,
+        operation_id=OPERATION,
+    )
+    assert device.exec_shell_new.call_count == 1
+    verify()
+    assert device.exec_shell_new.call_count == 2
+    assert all(call.kwargs['device_id'] == 'container-1'
+               for call in device.exec_shell_new.call_args_list)
+    runtime_provider.assert_not_called()
+    repository.update_by_owner.assert_not_called()
+
+
+@pytest.mark.parametrize('engine', ['aicoding', 'claude_code'])
+@pytest.mark.parametrize('status', ['FAILED', 'STOPPED'])
+def test_other_provider_recovery_backup_failure_degrades(engine, status, caplog):
+    ctx = BotProvisioningContext(
+        bot_id='bot', owner_id='owner', bot_type='personal', active_engine=engine,
+    )
+    device = Mock()
+    device.get_device.return_value = {
+        'device_id': 'container-1', 'device_provider': 'local', 'status': status,
+    }
+    runtime_provider = Mock(side_effect=AssertionError('must not resolve BaaS'))
+    repository = Mock()
+    repository.get_by_id_and_owner.return_value = {'binding_id': 42}
+    with patch.object(backup, 'prepare_backup', side_effect=RuntimeError('unavailable')) as prepared:
+        verify = AicodingProvisioningStrategy(engine).prepare_restart(
+                ctx, binding_id=42, device_service_provider=lambda: device,
+                target_runtime_provider=runtime_provider, bot_repository=repository,
+            )
+        verify()
+    prepared.assert_called_once()
+    assert 'status=degraded' in caplog.text
+    device.exec_shell_new.assert_not_called()
+    runtime_provider.assert_not_called()
+    repository.update_by_owner.assert_not_called()

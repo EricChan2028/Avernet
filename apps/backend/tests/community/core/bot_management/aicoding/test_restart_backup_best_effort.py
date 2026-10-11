@@ -169,3 +169,27 @@ def test_task_cancellation_is_not_converted_to_backup_warning():
     with pytest.raises(asyncio.CancelledError):
         backup._attempt_backup(execute=Mock(side_effect=asyncio.CancelledError()),
                                operation_id=OPERATION, bot_id='b', target_id='p')
+
+
+def test_durable_budget_is_shared_across_replicas_and_redelivery(caplog):
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_state import current_restart
+
+    now = [1498]
+    token = current_restart.set(SimpleNamespace(payload={'started_at': 0}))
+    runtime = Mock()
+    runtime.list_devices_by_bot_uuid.return_value = [
+        {'provider_device_id': p, 'status': 'ACTIVE'} for p in ('p1', 'p2')]
+    runtime.post_bots_api.return_value = response('running')
+    try:
+        with patch.object(backup.time, 'time', side_effect=lambda: now[0]), \
+             patch.object(backup.time, 'monotonic', side_effect=lambda: now[0]), \
+             patch.object(backup.time, 'sleep', side_effect=lambda delay: now.__setitem__(0, now[0] + delay)):
+            for _ in range(2):  # A later delivery cannot restart the budget either.
+                AicodingProvisioningStrategy('aicoding')._prepare_restart(
+                    context(), device_id='target', target_runtime=runtime, operation_id=OPERATION)()
+        assert now[0] == 1500
+        runtime.post_bots_api.assert_called_once()
+        assert runtime.post_bots_api.call_args.kwargs['path'].endswith('/p1/commands')
+        assert 'reason=timeout' in caplog.text
+    finally:
+        current_restart.reset(token)
