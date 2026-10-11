@@ -44,7 +44,9 @@ errors are **not** mislabeled as either of these or as successful backup.
 They produce a sanitized WARNING with `status=degraded`,
 `action=continue_restart`, `data_loss_risk=true`, phase, operation ID and target.
 Raw commands, stdout/stderr and exception messages are never logged by this
-policy. Existing lower-level validators still reject invalid receipts; the
+policy. The shared BaaS client is unchanged and may still log raw response
+bodies; transport-wide log redaction is a separate follow-up, not a guarantee
+of this patch. Existing lower-level validators still reject invalid receipts; the
 coding policy catches their failures at the backup-only boundary.
 
 ## Guards that remain mandatory

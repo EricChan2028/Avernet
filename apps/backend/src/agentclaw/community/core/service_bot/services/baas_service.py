@@ -584,18 +584,22 @@ class BaasService:  # pragma: no cover
 
         response_data = response.json()
 
-        log_response = action != "aicoding_restart_backup"
-        if log_response:
-            logger.info(f"[BaasService.{action}] BaaS raw response: %s", response_data)
+        logger.info(
+            f"[BaasService.{action}] BaaS raw response: %s",
+            response_data,
+        )
 
         if response_data.get("code") != 0:
-            message = response_data.get("message", "Unknown error") if log_response else "request failed"
-            raise BaasServiceError(f"BaaS API error: {message}")
+            raise BaasServiceError(
+                f"BaaS API error: {response_data.get('message', 'Unknown error')}"
+            )
 
         result = response_data.get("data", {})
 
-        if log_response:
-            logger.info(f"[BaasService.{action}] Success: {result}")
+        logger.info(
+            f"[BaasService.{action}] "
+            f"Success: {result}"
+        )
 
         return result
 
@@ -2791,7 +2795,7 @@ class BaasService:  # pragma: no cover
         except httpx.HTTPStatusError as e:
             logger.error(
                 f"[BaasService.list_devices_by_bot_uuid] HTTP error: "
-                f"status={e.response.status_code}"
+                f"{e.response.status_code} - {e.response.text}"
             )
             raise BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
@@ -2802,7 +2806,7 @@ class BaasService:  # pragma: no cover
             # resolve_container_provider) can fall back instead of leaking a raw
             # httpx error into the publish flow.
             logger.error(
-                f"[BaasService.list_devices_by_bot_uuid] Request error: {type(e).__name__}"
+                f"[BaasService.list_devices_by_bot_uuid] Request error: {e}"
             )
             raise BaasServiceError(
                 f"Failed to list devices by bot_uuid: {e}"
