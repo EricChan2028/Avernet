@@ -59,7 +59,7 @@ def test_failed_or_unknown_results_block_and_do_not_log_raw_output(result, caplo
     caplog.set_level(logging.INFO, logger=backup.logger.name)
     with pytest.raises(RuntimeError):
         prepare(Mock(return_value=result))
-    assert 'phase=prepare status=blocked' in caplog.text
+    assert 'phase=prepare status=failed' in caplog.text
     assert 'secret-output' not in caplog.text
 
 
@@ -121,27 +121,29 @@ def test_empty_inventory_logs_raw_summary(caplog):
     caplog.set_level(logging.INFO, logger=backup.logger.name)
     runtime = Mock()
     runtime.list_devices_by_bot_uuid.return_value = []
-    with pytest.raises(RuntimeError, match='清单为空'):
-        AicodingProvisioningStrategy('aicoding')._prepare_restart(
-            BotProvisioningContext(
-                bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
-            ),
-            device_id='caller-uuid', target_runtime=runtime,
-        )
+    verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(
+        BotProvisioningContext(
+            bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
+        ),
+        device_id='caller-uuid', target_runtime=runtime,
+    )
+    verify()
+    runtime.post_bots_api.assert_not_called()
     assert 'raw_device_count=0' in caplog.text
     assert 'raw_status_counts={}' in caplog.text
 
 
-def test_active_empty_inventory_fails_closed():
+def test_active_empty_inventory_continues_without_claiming_backup_success():
     runtime = Mock()
     runtime.list_devices_by_bot_uuid.return_value = []
-    with pytest.raises(RuntimeError, match='清单为空'):
-        AicodingProvisioningStrategy('aicoding')._prepare_restart(
-            BotProvisioningContext(
-                bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
-            ),
-            device_id='caller-uuid', target_runtime=runtime,
-        )
+    verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(
+        BotProvisioningContext(
+            bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
+        ),
+        device_id='caller-uuid', target_runtime=runtime,
+    )
+    verify()
+    runtime.post_bots_api.assert_not_called()
 
 
 def test_all_stopped_inventory_skips_backup_but_verifies_again():
@@ -254,7 +256,7 @@ def test_only_confirmed_absence_is_legacy(capsys):
 
 @pytest.mark.parametrize('phase', ['prepare', 'verify'])
 @pytest.mark.parametrize('provider', ['arca', 'baas'])
-def test_original_lock_and_binding_survive_backup_failure(phase, provider):
+def test_backup_failure_continues_original_restart_and_lock_ownership(phase, provider):
     from tests.community.core.bot_management.services.test_bot_service_restart_idempotency import (
         FakeRestartLockRepo, _make_service, _make_bot, _stateful_bot_repository,
     )
@@ -281,18 +283,18 @@ def test_original_lock_and_binding_survive_backup_failure(phase, provider):
     with patch.object(backup, 'prepare_backup', side_effect=prepare_check), \
          patch.object(svc, 'stop_bot') as stop, patch.object(svc, 'start_bot') as start, \
          patch.object(svc, '_restart_bot_baas') as update:
-        # prepare fails BEFORE the caller's lock exists (raw error, no lock to
-        # clean up); verify fails INSIDE the caller's try (wrapped by the
-        # existing restart error path, lock released by its finally).
-        from agentclaw.community.core.bot_management.services.bot_service import BotServiceError
-        expected = RuntimeError if phase == 'prepare' else BotServiceError
-        with pytest.raises(expected, match='backup failed'):
-            svc.restart_bot(bot_id='bot001', user_id='user001')
-    stop.assert_not_called()
-    start.assert_not_called()
-    update.assert_not_called()
+        assert svc.restart_bot(bot_id='bot001', user_id='user001') is not None
     assert state['binding_id'] == 42 and state['status'] == 'ACTIVE'
-    assert not locks.rows
+    if provider == 'baas':
+        update.assert_called_once()
+        stop.assert_not_called()
+        start.assert_not_called()
+        assert not locks.rows
+    else:
+        stop.assert_called_once()
+        start.assert_called_once()
+        update.assert_not_called()
+        assert locks.rows  # Original ARCA allocation owns the lock hand-off.
 
 
 def test_wait_logs_are_throttled_but_keep_progress(caplog):
@@ -440,13 +442,13 @@ def test_old_coding_bot_without_new_script_completes_original_restart(engine, pr
          patch.object(svc, 'start_bot', return_value=bot) as start, \
          patch.object(svc, '_restart_bot_baas', return_value=bot) as update:
         assert svc.restart_bot(bot_id='bot001', user_id='user001') == bot
-    if provider == 'baas' or binding_status in {'FAILED', 'STOPPED'}:
-        device._exec_shell_new.assert_not_called()
+    device._exec_shell_new.assert_not_called()
+    if provider == 'baas':
         assert runtime.post_bots_api.call_count == 2
+        assert 'status=legacy' in caplog.text and 'reason=helper_absent' in caplog.text
     else:
-        assert device._exec_shell_new.call_count == 2
         runtime.post_bots_api.assert_not_called()
-    assert 'status=legacy' in caplog.text and 'reason=helper_absent' in caplog.text
+        assert 'reason=arca_provider' in caplog.text
     if provider == 'arca':
         stop.assert_called_once()
         start.assert_called_once()

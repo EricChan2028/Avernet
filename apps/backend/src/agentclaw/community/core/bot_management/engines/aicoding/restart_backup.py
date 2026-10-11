@@ -1,7 +1,8 @@
-"""Coding-engine restart precondition; platform exec, never Relay HTTP.
+"""Best-effort coding restart backup; platform exec, never Relay HTTP.
 
-The script is the runtime's v1 lifecycle contract. Only pre-rollout containers
-may omit it. The runtime installs it before enabling canonical data bind mounts.
+Backup failures do not prevent the original restart. Binding, observed physical
+identity and durable mutation fences remain mandatory. No runtime upgrade is
+required; the v1 helper's archive budget remains 900 seconds.
 """
 from __future__ import annotations
 
@@ -112,7 +113,9 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
                     raise RestartBackupError('helper_disappeared', '重启备份脚本在执行期间消失')
             else:
                 current_boot = value.get('boot_id')
-                if not isinstance(current_boot, str) or not current_boot or (boot and boot != current_boot):
+                if not isinstance(current_boot, str) or not current_boot:
+                    raise RestartBackupError('invalid_response', '备份结果缺少实例身份')
+                if boot and boot != current_boot:
                     raise RestartBackupError('instance_changed', '备份期间实例身份发生变化，禁止销毁')
                 boot = current_boot
             if status == 'not_mounted' and action != 'start':
@@ -135,7 +138,7 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
             action = 'status'
     except Exception as error:
         # Do not log raw command, stdout/stderr or exception text (may contain credentials).
-        log('prepare', 'blocked', level='error', error_type=type(error).__name__, reason=error_reason(error))
+        log('prepare', 'failed', level='warning', error_type=type(error).__name__, reason=error_reason(error))
         raise
 
     def verify():
@@ -144,16 +147,54 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
             # replacement container while holding the legacy short-lived lock.
             check_action = 'start' if status == 'not_mounted' else 'status'
             current = parse_result(execute(command(check_action, operation_id)), operation_id)
-            if current['status'] != status or (boot and current.get('boot_id') != boot):
-                raise RestartBackupError('receipt_stale', '备份后实例或挂载状态变化，禁止使用旧凭据重启')
+            if current['status'] != 'legacy' and (
+                    not isinstance(current.get('boot_id'), str) or not current['boot_id']):
+                raise RestartBackupError('invalid_response', '备份复核结果缺少实例身份')
+            if boot and current.get('boot_id') and current['boot_id'] != boot:
+                raise RestartBackupError('instance_changed', '备份后实例身份变化，禁止替换')
+            if current['status'] != status:
+                raise RestartBackupError('receipt_stale', '备份后状态变化')
             if status == 'committed' and receipt(current) != generation:
                 raise RestartBackupError('generation_changed', '备份凭据变化，禁止销毁')
             log('verify', 'allowed', generation=generation)
         except Exception as error:
-            log('verify', 'blocked', level='error', error_type=type(error).__name__, reason=error_reason(error))
+            log('verify', 'failed', level='warning', error_type=type(error).__name__, reason=error_reason(error))
             raise
 
     return verify
+
+
+def _best_effort(callback, *, phase, bot_id, target_id, operation_id):
+    """Downgrade only backup I/O/result failures, never lifecycle writes/fences.
+
+    No raw exception/output is logged: platform errors can contain credentials.
+    None means unconfirmed backup, NOT a successful receipt or empty inventory.
+    """
+    try:
+        return callback()
+    except RestartBackupError as error:
+        if error.reason in {'instance_changed', 'target_changed', 'binding_changed'}:
+            raise
+        failure = error
+    except Exception as error:
+        failure = error
+    logger.warning(
+        "event=aicoding_restart_backup phase=%s status=degraded action=continue_restart "
+        "bot_id=%s target_id=%s operation_id=%s error_type=%s reason=%s "
+        "data_loss_risk=true",
+        phase, bot_id, target_id, operation_id, type(failure).__name__, error_reason(failure),
+    )
+    return None
+
+
+def _attempt_backup(**kwargs):
+    identity = {key: kwargs[key] for key in ('bot_id', 'target_id', 'operation_id')}
+    verify = _best_effort(lambda: prepare_backup(**kwargs), phase='prepare', **identity)
+
+    def check():
+        if verify is not None:
+            _best_effort(verify, phase='verify_receipt', **identity)
+    return check
 
 
 def _log_inventory(*, bot_id, target_id, state, phase, operation_id="-", elapsed_ms=0):
@@ -221,7 +262,7 @@ def _query_inventory(runtime, *, bot_id, target_id, operation_id, phase):
         state = {'devices': runtime.list_devices_by_bot_uuid(bot_uuid=target_id)}
     except Exception as error:
         # Shared transport exceptions may contain response bodies/credentials.
-        logger.error(
+        logger.warning(
             "event=aicoding_restart_backup phase=%s inventory=query_failed "
             "bot_id=%s target_id=%s operation_id=%s source=baas_devices "
             "elapsed_ms=%s error_type=%s reason=inventory_query_failed",
@@ -236,8 +277,8 @@ def _query_inventory(runtime, *, bot_id, target_id, operation_id, phase):
     try:
         targets = _live_targets(state)
     except Exception as error:
-        logger.error(
-            "event=aicoding_restart_backup phase=%s inventory=blocked "
+        logger.warning(
+            "event=aicoding_restart_backup phase=%s inventory=unavailable "
             "bot_id=%s target_id=%s operation_id=%s source=baas_devices "
             "error_type=%s reason=%s",
             phase, bot_id, target_id, operation_id, type(error).__name__,
@@ -266,10 +307,9 @@ class AicodingRestartBackupMixin:
                         target_runtime_provider=None, **kwargs):
         """Back up outside the caller's lock; return the under-lock verifier.
 
-        Self-contained: no lock callbacks. A prepare failure raises before the
-        caller ever acquires its lock, so there is nothing for the strategy to
-        release. Verification failure propagates through the caller's existing
-        error path, which owns lock release.
+        Backup I/O and receipt failures degrade to warnings. Binding reads,
+        target checks and the durable CAS fence stay outside that catch boundary;
+        their failures still propagate through the original lifecycle.
         """
         from .restart_state import current_restart
         execution = current_restart.get()
@@ -302,58 +342,33 @@ class AicodingRestartBackupMixin:
         try:
             operation_id = _operation_id(operation_id)
             if device_id is not None:
-                targets = _query_inventory(
-                    target_runtime, bot_id=ctx.bot_id, target_id=device_id,
-                    operation_id=operation_id, phase='resolve',
+                identity = dict(bot_id=ctx.bot_id, target_id=device_id,
+                                operation_id=operation_id)
+                targets = _best_effort(
+                    lambda: _query_inventory(target_runtime, **identity, phase='resolve'),
+                    phase='resolve', **identity,
                 )
-
-                # BaaS can legitimately report a non-empty inventory whose
-                # devices are all STOPPED/RELEASED.  There is no live physical
-                # target to back up in that case, so continue with replacement
-                # while still re-checking the inventory under the restart lock.
-                if not targets:
+                if targets == {}:
                     logger.info(
                         "event=aicoding_restart_backup phase=resolve status=skipped "
-                        "reason=no_live_targets bot_id=%s target_id=%s",
-                        ctx.bot_id, device_id,
+                        "reason=no_live_targets bot_id=%s target_id=%s operation_id=%s",
+                        ctx.bot_id, device_id, operation_id,
                     )
-
-                    def verify_no_live_targets():
-                        current_targets = _query_inventory(
-                            target_runtime, bot_id=ctx.bot_id, target_id=device_id,
-                            operation_id=operation_id, phase='verify',
-                        )
-                        if current_targets:
-                            logger.error(
-                                "event=aicoding_restart_backup phase=verify status=blocked "
-                                "reason=target_changed bot_id=%s target_id=%s",
-                                ctx.bot_id, device_id,
-                            )
-                            raise RestartBackupError(
-                                'target_changed', '备份期间目标容器清单变化，禁止替换'
-                            )
-                        logger.info(
-                            "event=aicoding_restart_backup phase=verify status=allowed "
-                            "reason=no_live_targets bot_id=%s target_id=%s",
-                            ctx.bot_id, device_id,
-                        )
-
-                    return verify_no_live_targets
-
-                checks = [prepare_backup(
+                checks = [_attempt_backup(
                     execute=lambda cmd, target=physical: _execute_physical(target_runtime, target, cmd),
-                    operation_id=operation_id,
-                    bot_id=ctx.bot_id, target_id=physical,
-                ) for physical in targets]
+                    operation_id=operation_id, bot_id=ctx.bot_id, target_id=physical,
+                ) for physical in (targets or {})]
 
                 def verify():
-                    current_targets = _query_inventory(
-                        target_runtime, bot_id=ctx.bot_id, target_id=device_id,
-                        operation_id=operation_id, phase='verify',
+                    current_targets = _best_effort(
+                        lambda: _query_inventory(target_runtime, **identity, phase='verify'),
+                        phase='verify_inventory', **identity,
                     )
-                    if set(current_targets) != set(targets):
-                        logger.error("event=aicoding_restart_backup phase=verify status=blocked "
-                                     "reason=target_changed bot_id=%s target_id=%s", ctx.bot_id, device_id)
+                    # Unknown inventory is a backup warning, not evidence that
+                    # the target changed. A positively observed change still
+                    # blocks; never start backups on newly appeared targets.
+                    if (targets is not None and current_targets is not None
+                            and set(current_targets) != set(targets)):
                         raise RestartBackupError('target_changed', '备份期间目标容器清单变化，禁止替换')
                     for check in checks:
                         check()
@@ -379,24 +394,17 @@ class AicodingRestartBackupMixin:
                 check = self._prepare_restart(
                     ctx, device_id=target, target_runtime=target_runtime_provider(),
                     operation_id=operation_id)
+            elif provider == 'arca':
+                # Direct ARCA bindings retain stop/start without a new backup
+                # dependency, including old or already unavailable sandboxes.
+                logger.info("event=aicoding_restart_backup phase=skip reason=arca_provider bot_id=%s",
+                            ctx.bot_id)
+                def check():
+                    return None
             else:
-                if _field(binding, 'status') in {'FAILED', 'STOPPED'}:
-                    # Legacy ARCA's physical sandbox ID is already persisted.
-                    # PaaS accepts it independently of OCB's binding status.
-                    props = _field(binding, 'device_props') or {}
-                    physical = props.get('sandbox_id')
-                    if provider != 'arca' or not isinstance(physical, str) or not physical.startswith('ARCA-SANDBOX-'):
-                        raise RestartBackupError('missing_device', '无法定位待恢复容器，禁止跳过重启备份')
-                    runtime = target_runtime_provider()
-                    def execute(cmd):
-                        return _execute_physical(runtime, physical, cmd)
-                else:
-                    def execute(cmd):
-                        return device_service.exec_shell_new(device_id=target, shell_cmd=cmd)
-                check = prepare_backup(
-                    execute=execute,
-                    operation_id=operation_id,
-                    bot_id=ctx.bot_id, target_id=target,
+                check = _attempt_backup(
+                    execute=lambda cmd: device_service.exec_shell_new(device_id=target, shell_cmd=cmd),
+                    operation_id=operation_id, bot_id=ctx.bot_id, target_id=target,
                 )
 
             def verify():
