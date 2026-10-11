@@ -65,6 +65,11 @@ def test_unavailable_inventory_continues_without_random_target(inventory, caplog
     runtime.post_bots_api.assert_not_called()
     assert 'action=continue_restart' in caplog.text
     assert 'secret inventory' not in caplog.text
+    expected_reason = ('transport_error' if isinstance(inventory, Exception)
+                       else 'empty_inventory' if inventory == [] else 'invalid_inventory')
+    degraded = [record.message for record in caplog.records if 'status=degraded' in record.message]
+    assert len(degraded) == 2  # Resolve and under-lock verification use the same reason.
+    assert all(f'reason={expected_reason} ' in message for message in degraded)
 
 
 @pytest.mark.parametrize('failure', [ConnectionError('secret'), response('failed'),

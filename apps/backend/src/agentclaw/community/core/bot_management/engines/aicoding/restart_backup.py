@@ -224,29 +224,29 @@ def _log_inventory(*, bot_id, target_id, state, phase, operation_id="-", elapsed
 
 def _live_targets(state):
     if not isinstance(state, dict):
-        raise RuntimeError("无法确认目标容器状态，禁止替换")
+        raise RestartBackupError("invalid_inventory", "无法确认备份目标容器状态")
     if state.get("status") == "RELEASED":
         return {}
     devices = state.get("devices")
     if not isinstance(devices, list):
-        raise RuntimeError("缺少目标容器清单，禁止替换")
+        raise RestartBackupError("invalid_inventory", "缺少有效的备份目标容器清单")
     targets = {}
     for device in devices:
         if not isinstance(device, dict):
-            raise RuntimeError("目标容器清单无效")
+            raise RestartBackupError("invalid_inventory", "备份目标容器清单无效")
         # Provider contract: these states mean the container was destroyed.
         if device.get("status") in {"RELEASED", "STOPPED"}:
             continue
         physical_id = device.get("provider_device_id")
         if not isinstance(physical_id, str) or not physical_id:
-            raise RuntimeError("无法定位目标物理容器，禁止随机选择实例备份")
+            raise RestartBackupError("invalid_inventory", "无法定位备份目标物理容器")
         targets[physical_id] = device
     # An explicitly non-empty inventory whose every device is STOPPED/RELEASED
     # is a safe no-op: BaaS has confirmed that there is no live container to
-    # enter.  Keep an actually empty inventory fail-closed because it may be a
-    # stale or incomplete BaaS projection while the Bot is still present.
+    # enter. An actually empty inventory remains unconfirmed rather than proof
+    # of release. The caller logs a warning and continues the original restart.
     if not devices:
-        raise RuntimeError("目标容器清单为空，禁止跳过重启备份")
+        raise RestartBackupError("empty_inventory", "备份目标容器清单为空")
     return targets
 
 

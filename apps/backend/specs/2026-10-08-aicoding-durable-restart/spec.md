@@ -59,10 +59,19 @@ The frontend continues to use the original stored-runtime readiness semantics.
 
 ## Failure and recovery limits
 
-- Backup failure saves phase=FAILED, ext.start_status=FAILED and a sanitized
-  ext.start_message through original ext CAS; status-only update_by_owner writes
-  Bot.status=FAILED. The old container is not destroyed by this restart, but its
-  workload may have stopped during backup; continued availability is not promised.
+- Amendment (2026-10-11): backup is best effort. Unavailable/invalid inventory,
+  backup command failures, failed receipts and timeouts log sanitized warnings
+  and continue the original restart. These failures alone do not mark the Bot
+  FAILED. Direct ARCA bindings skip this backup protocol; BaaS-managed containers
+  still attempt it, including those hosted on ARCA.
+- Observed instance/target/binding changes still block replacement. Database,
+  durable mutation-fence and worker-level failures retain their original error
+  handling, including FAILED journal/start status where applicable.
+- Restart may destroy the old container without a confirmed backup, losing data
+  not previously persisted. A backend timeout does not cancel the historical
+  helper. If replacement fails, previously stopped workloads are not guaranteed
+  to recover; continued availability is not promised. No script upgrade,
+  frontend or /status change is required for this policy.
 - Target checks reject already-observed engine/binding changes. No lifecycle-field
   database CAS exists in the restored Repository interface.
 - Ext and status use separate writes. Exceptions propagate; repeat admission or
