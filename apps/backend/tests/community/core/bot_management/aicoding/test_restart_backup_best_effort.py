@@ -193,3 +193,21 @@ def test_durable_budget_is_shared_across_replicas_and_redelivery(caplog):
         assert 'reason=timeout' in caplog.text
     finally:
         current_restart.reset(token)
+
+
+def test_late_valid_inventory_becomes_baseline_without_starting_backup():
+    runtime = Mock()
+    runtime.list_devices_by_bot_uuid.side_effect = [
+        ConnectionError('initial lookup'),
+        [{'provider_device_id': 'old', 'status': 'ACTIVE'}],
+        ConnectionError('temporary lookup'),
+        [{'provider_device_id': 'new', 'status': 'ACTIVE'}],
+    ]
+    verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(
+        context(), device_id='target', target_runtime=runtime)
+    verify()
+    verify()
+    with pytest.raises(backup.RestartBackupError) as caught:
+        verify()
+    assert caught.value.reason == 'target_changed'
+    runtime.post_bots_api.assert_not_called()

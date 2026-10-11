@@ -9,7 +9,8 @@ of an unavailable Bot over preservation of its most recent unbacked-up data.
 The implementation lives in `restart_backup.py`, shared by ordinary coding
 restarts, published-instance restarts and Caller recovery. Default/non-coding
 strategies remain no-ops. Direct ARCA bindings skip the backup protocol and
-retain their original stop/start lifecycle and binding verification. A BaaS
+retain their original stop/start lifecycle and binding verification. Other
+non-BaaS binding providers also skip backup while retaining binding verification. A BaaS
 binding backed by an ARCA sandbox is still a BaaS binding and attempts backup.
 
 Only Backend changes are required. The existing helper's `start|status` v1
@@ -104,3 +105,19 @@ attempts, late verification failures, target/binding fencing, legacy/direct
 ARCA and explicit non-coding no-ops, ordinary durable tasks and instance callers.
 Live ARCA, NAS archive consistency and fault-injected destruction still require
 staging validation. No test here restarts a production Bot.
+
+## Runtime wire contract v1
+
+The existing helper accepts `start|status OPERATION_ID`. A valid response has
+exit code zero and one JSON object in stdout with `version: 1`, the matching
+`operation_id`, and status `legacy`, `not_mounted`, `running`, `committed`, or
+`failed`. Except for `legacy`, `boot_id` must be a nonempty string. A committed
+receipt requires `backup.status: success`, a matching `backup.operation_id`, and
+a nonempty `backup.generation_id`. Invalid responses degrade backup, not identity
+fencing: a changed valid boot identity in a parsed response blocks even when that
+response arrives after the observation deadline.
+
+If initial inventory is unavailable, verification retains the first later valid
+inventory as its comparison baseline, without starting backup on those targets.
+A subsequent observed target change blocks provider submission. An unavailable
+query never erases an already established baseline.

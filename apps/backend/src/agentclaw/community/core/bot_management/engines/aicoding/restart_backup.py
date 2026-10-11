@@ -80,6 +80,14 @@ def parse_result(result: Any, operation: str) -> dict[str, Any]:
     return value
 
 
+def _check_boot_identity(value, expected):
+    boot = value.get('boot_id')
+    if isinstance(boot, str) and boot and expected and boot != expected:
+        raise RestartBackupError('instance_changed', '备份期间实例身份发生变化，禁止替换')
+    if value['status'] != 'legacy' and (not isinstance(boot, str) or not boot):
+        raise RestartBackupError('invalid_response', '备份结果缺少实例身份')
+
+
 def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
                    bot_id: str, target_id: str) -> Callable[[], None]:
     """Wait outside the legacy restart lock; return a short receipt verifier."""
@@ -115,6 +123,8 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
             if time.monotonic() >= deadline:
                 raise TimeoutError("重启备份超过等待预算，禁止销毁")
             value = parse_result(execute(command(action, operation_id)), operation_id)
+            # Identity evidence in a received response must not be hidden by timeout.
+            _check_boot_identity(value, boot)
             if time.monotonic() >= deadline:
                 raise TimeoutError("重启备份超过等待预算，禁止销毁")
             status = value['status']
@@ -122,12 +132,7 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
                 if action != 'start':
                     raise RestartBackupError('helper_disappeared', '重启备份脚本在执行期间消失')
             else:
-                current_boot = value.get('boot_id')
-                if not isinstance(current_boot, str) or not current_boot:
-                    raise RestartBackupError('invalid_response', '备份结果缺少实例身份')
-                if boot and boot != current_boot:
-                    raise RestartBackupError('instance_changed', '备份期间实例身份发生变化，禁止销毁')
-                boot = current_boot
+                boot = value['boot_id']
             if status == 'not_mounted' and action != 'start':
                 raise RestartBackupError('mount_changed', '备份期间挂载状态发生变化')
             generation = receipt(value) if status == 'committed' else '-'
@@ -159,13 +164,9 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
             # replacement container while holding the legacy short-lived lock.
             check_action = 'start' if status == 'not_mounted' else 'status'
             current = parse_result(execute(command(check_action, operation_id)), operation_id)
+            _check_boot_identity(current, boot)
             if execution is not None and time.monotonic() >= deadline:
                 raise TimeoutError("重启备份超过等待预算，禁止销毁")
-            if current['status'] != 'legacy' and (
-                    not isinstance(current.get('boot_id'), str) or not current['boot_id']):
-                raise RestartBackupError('invalid_response', '备份复核结果缺少实例身份')
-            if boot and current.get('boot_id') and current['boot_id'] != boot:
-                raise RestartBackupError('instance_changed', '备份后实例身份变化，禁止替换')
             if current['status'] != status:
                 raise RestartBackupError('receipt_stale', '备份后状态变化')
             if status == 'committed' and receipt(current) != generation:
@@ -412,6 +413,7 @@ class AicodingRestartBackupMixin:
                 ) for physical in (targets or {})]
 
                 def verify():
+                    nonlocal targets
                     current_targets = _best_effort(
                         lambda: _query_inventory(target_runtime, **identity, phase='verify'),
                         phase='verify_inventory', **identity,
@@ -422,6 +424,10 @@ class AicodingRestartBackupMixin:
                     if (targets is not None and current_targets is not None
                             and set(current_targets) != set(targets)):
                         raise RestartBackupError('target_changed', '备份期间目标容器清单变化，禁止替换')
+                    if targets is None and current_targets is not None:
+                        # Retain the first valid observation, but never start
+                        # backup work on targets discovered during verification.
+                        targets = current_targets
                     for check in checks:
                         check()
                 return verify
@@ -454,10 +460,11 @@ class AicodingRestartBackupMixin:
                 def check():
                     return None
             else:
-                check = _attempt_backup(
-                    execute=lambda cmd: device_service.exec_shell_new(device_id=target, shell_cmd=cmd),
-                    operation_id=operation_id, bot_id=ctx.bot_id, target_id=target,
-                )
+                # Only BaaS bindings participate in this backup protocol.
+                logger.info("event=aicoding_restart_backup phase=skip reason=non_baas_provider bot_id=%s",
+                            ctx.bot_id)
+                def check():
+                    return None
 
             def verify():
                 current = bot_repository.get_by_id_and_owner(ctx.bot_id, ctx.owner_id)

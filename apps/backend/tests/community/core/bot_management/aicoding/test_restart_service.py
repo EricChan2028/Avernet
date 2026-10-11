@@ -577,3 +577,68 @@ async def test_degraded_backup_real_worker_submission_boundary(lifecycle, outcom
         assert s.repo.bot['ext'].get('start_status') != 'FAILED'
     s.handler.handle(task.payload)
     assert len(mutations) == (0 if outcome == 'prepare_failed' else 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('changed', [False, True])
+async def test_inventory_after_initial_failure_is_fenced_before_submission(lifecycle, changed):
+    s = lifecycle
+    await s.service.restart_bot_async(bot_id='b', user_id='o')
+    def inventory(target):
+        return [{'status': 'ACTIVE', 'provider_device_id': target}]
+    s.platform.list_devices_by_bot_uuid.side_effect = [
+        ConnectionError('unavailable'), inventory('old'), inventory('new' if changed else 'old')]
+    task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key('b', 'o'))
+    result = s.handler.handle(task.payload)
+    if changed:
+        assert isinstance(result, Fail)
+        s.platform.post_bots_api.assert_not_called()
+    else:
+        assert isinstance(result, Reschedule)
+        s.platform.post_bots_api.assert_called_once()
+        assert s.platform.post_bots_api.call_args.kwargs['action'] == 'coding_restart'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('phase', ['prepare', 'verify'])
+@pytest.mark.parametrize('changed', [False, True])
+async def test_late_boot_response_cannot_hide_identity_change(lifecycle, phase, changed):
+    import json
+    from agentclaw.community.core.bot_management.engines.aicoding import restart_backup as backup
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_state import current_restart
+
+    s = lifecycle
+    await s.service.restart_bot_async(bot_id='b', user_id='o')
+    s.platform.list_devices_by_bot_uuid.return_value = [
+        {'status': 'ACTIVE', 'provider_device_id': 'physical'}]
+    now = [0]
+    commands, mutations = [], []
+
+    def post(**kwargs):
+        if kwargs['action'] != 'aicoding_restart_backup':
+            mutations.append(kwargs)
+            return {'publish_id': 12}
+        commands.append(kwargs)
+        late = len(commands) == 2
+        if late:
+            now[0] = 1501
+        operation = current_restart.get().operation_id
+        status = 'running' if phase == 'prepare' and not late else 'committed'
+        return {'exit_code': 0, 'stdout': json.dumps({
+            'version': 1, 'operation_id': operation, 'status': status,
+            'boot_id': 'B' if late and changed else 'A',
+            'backup': {'status': 'success', 'generation_id': 'g', 'operation_id': operation},
+        })}
+
+    s.platform.post_bots_api.side_effect = post
+    task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key('b', 'o'))
+    with patch.object(backup.time, 'monotonic', side_effect=lambda: now[0]), \
+         patch.object(backup.time, 'sleep'):
+        result = s.handler.handle(task.payload)
+    assert len(commands) == 2
+    if changed:
+        assert isinstance(result, Fail)
+        assert not mutations
+    else:
+        assert isinstance(result, Reschedule)
+        assert len(mutations) == 1  # Timeout alone still does not veto restart.
