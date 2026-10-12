@@ -1,4 +1,5 @@
-import { Button, Empty, Skeleton } from '@/components/ui';
+import { Button, Empty } from '@/components/ui';
+import { ChatMessageSkeleton } from '@/components/Workspace/ChatPanel/ChatMessageSkeleton';
 import { filterVisibleGroupMessages } from '@/pages/Workspace/hooks/groupChatHistoryUtils';
 import { useCollabPanel } from '@/pages/Workspace/hooks/useCollabPanel';
 import { useGroupTaskExecution } from '@/pages/Workspace/hooks/useGroupTaskExecution';
@@ -207,11 +208,12 @@ export function GroupChatPane(props: GroupChatPaneProps) {
         ) : (
           <div className="flex min-h-0 flex-1 flex-col bg-background">
             {isLoadingHistory && !groupBootstrapProcessing ? (
-              <div className="flex min-h-0 flex-1 flex-col space-y-3 px-3 py-6 sm:px-6" aria-label="加载协作群会话历史">
-                <Skeleton.Block className="h-12 w-3/4 rounded-xl" />
-                <Skeleton.Block className="h-12 w-2/3 rounded-xl" />
-                <Skeleton.Block className="h-12 w-5/6 rounded-xl" />
-              </div>
+              /* 消息区加载骨架：复用对话页「誊写稿」占位（协作群 BubbleList 与 Bot 面板同用
+                  MessageSenderLayout，行几何同构）；画布 padding 对齐 BubbleList，真消息换入零横跳。 */
+              <ChatMessageSkeleton
+                ariaLabel="加载协作群会话历史"
+                paddingClassName="px-3 py-3 sm:px-6 sm:py-4"
+              />
             ) : showError ? (
               <div className="flex min-h-0 flex-1 items-center justify-center px-3 py-3 sm:px-6 sm:py-4">
                 <Empty
