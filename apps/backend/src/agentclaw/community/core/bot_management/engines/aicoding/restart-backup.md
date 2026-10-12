@@ -55,8 +55,9 @@ coding policy catches their failures at the backup-only boundary.
 - Original authorization, lifecycle admission and restart lock checks.
 - Durable operation ownership and CAS mutation fencing.
 - Bot binding or engine changes and failed binding/database reads or writes.
-- A positively observed physical target-set change between two valid inventories.
-- A positively observed container boot-identity change.
+Backup-only physical inventory or boot-identity changes are warnings, not
+restart vetoes. Changed inventories stop receipt probing against those targets;
+they do not prevent the original lifecycle from submitting its restart.
 
 Unknown inventory is not proof of a changed identity. If inventory cannot be
 confirmed, backup degrades and the original lifecycle guards remain responsible
@@ -114,10 +115,22 @@ exit code zero and one JSON object in stdout with `version: 1`, the matching
 `failed`. Except for `legacy`, `boot_id` must be a nonempty string. A committed
 receipt requires `backup.status: success`, a matching `backup.operation_id`, and
 a nonempty `backup.generation_id`. Invalid responses degrade backup, not identity
-fencing: a changed valid boot identity in a parsed response blocks even when that
-response arrives after the observation deadline.
+diagnostics: a changed valid boot identity is logged as a degraded backup, even
+when that response arrives after the observation deadline. Restart continues.
 
 If initial inventory is unavailable, verification retains the first later valid
 inventory as its comparison baseline, without starting backup on those targets.
-A subsequent observed target change blocks provider submission. An unavailable
+A subsequent observed target change ends backup receipt verification but does
+not block provider submission. An unavailable
 query never erases an already established baseline.
+
+## Policy amendment (2026-10-12)
+
+Backup has no veto over the existing restart. This supersedes the earlier
+physical-target/boot-change blocking policy and its review conclusions. All
+backup-only failures, including positively observed physical identity changes,
+produce warnings and return control to the original restart. Lifecycle binding,
+engine/operation ownership, database writes and mutation fences remain outside
+this downgrade boundary; cancellation still propagates. This does not guarantee
+preservation of current data or prevent a platform-side replacement during the
+backup interval. Shared BaaS/DeviceService code is unchanged.

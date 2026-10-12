@@ -581,7 +581,7 @@ async def test_degraded_backup_real_worker_submission_boundary(lifecycle, outcom
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('changed', [False, True])
-async def test_inventory_after_initial_failure_is_fenced_before_submission(lifecycle, changed):
+async def test_inventory_change_after_initial_failure_does_not_veto_submission(lifecycle, changed, caplog):
     s = lifecycle
     await s.service.restart_bot_async(bot_id='b', user_id='o')
     def inventory(target):
@@ -590,19 +590,20 @@ async def test_inventory_after_initial_failure_is_fenced_before_submission(lifec
         ConnectionError('unavailable'), inventory('old'), inventory('new' if changed else 'old')]
     task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key('b', 'o'))
     result = s.handler.handle(task.payload)
+    assert isinstance(result, Reschedule)
+    s.platform.post_bots_api.assert_called_once()
+    assert s.platform.post_bots_api.call_args.kwargs['action'] == 'coding_restart'
     if changed:
-        assert isinstance(result, Fail)
-        s.platform.post_bots_api.assert_not_called()
-    else:
-        assert isinstance(result, Reschedule)
-        s.platform.post_bots_api.assert_called_once()
-        assert s.platform.post_bots_api.call_args.kwargs['action'] == 'coding_restart'
+        assert 'reason=target_changed' in caplog.text
+    assert s.repo.bot['ext'].get('start_status') != 'FAILED'
+    assert isinstance(s.handler.handle(task.payload), Reschedule)
+    s.platform.post_bots_api.assert_called_once()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('phase', ['prepare', 'verify'])
 @pytest.mark.parametrize('changed', [False, True])
-async def test_late_boot_response_cannot_hide_identity_change(lifecycle, phase, changed):
+async def test_late_boot_response_does_not_veto_original_restart(lifecycle, phase, changed, caplog):
     import json
     from agentclaw.community.core.bot_management.engines.aicoding import restart_backup as backup
     from agentclaw.community.core.bot_management.engines.aicoding.restart_state import current_restart
@@ -636,9 +637,10 @@ async def test_late_boot_response_cannot_hide_identity_change(lifecycle, phase, 
          patch.object(backup.time, 'sleep'):
         result = s.handler.handle(task.payload)
     assert len(commands) == 2
+    assert isinstance(result, Reschedule)
+    assert len(mutations) == 1  # Neither backup timeout nor identity change vetoes restart.
     if changed:
-        assert isinstance(result, Fail)
-        assert not mutations
-    else:
-        assert isinstance(result, Reschedule)
-        assert len(mutations) == 1  # Timeout alone still does not veto restart.
+        assert 'reason=instance_changed' in caplog.text
+    assert s.repo.bot['ext'].get('start_status') != 'FAILED'
+    assert isinstance(s.handler.handle(task.payload), Reschedule)
+    assert len(mutations) == 1  # Redelivery observes; it never repeats the mutation.

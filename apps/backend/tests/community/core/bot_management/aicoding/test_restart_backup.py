@@ -187,20 +187,19 @@ def test_all_released_inventory_skips_backup():
     runtime.post_bots_api.assert_not_called()
 
 
-def test_no_live_target_recheck_blocks_if_device_reappears():
+def test_no_live_target_recheck_continues_if_device_reappears():
     runtime = Mock()
     runtime.list_devices_by_bot_uuid.side_effect = [state['devices'] for state in [
         {'devices': [{'provider_device_id': 'physical-1', 'status': 'STOPPED'}]},
         {'devices': [{'provider_device_id': 'physical-1', 'status': 'ACTIVE'}]},
     ]]
-    with pytest.raises(RuntimeError, match='清单变化'):
-        verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(
-            BotProvisioningContext(
-                bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
-            ),
-            device_id='caller-uuid', target_runtime=runtime,
-        )
-        verify()
+    verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(
+        BotProvisioningContext(
+            bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
+        ),
+        device_id='caller-uuid', target_runtime=runtime,
+    )
+    verify()
 
 
 def test_operation_id_is_fresh_per_restart_request():
@@ -225,9 +224,8 @@ async def test_instance_targets_are_pinned_and_inventory_is_rechecked():
         {'devices': [{'provider_device_id': 'physical-2', 'status': 'ACTIVE'}]},
     ]]
     with patch.object(backup, 'prepare_backup', return_value=Mock()) as prepared:
-        with pytest.raises(RuntimeError, match='清单变化'):
-            await prepare_instance_restart(bot={'bot_id': 'b', 'owner_id': 'o', 'active_engine': 'aicoding'},
-                                           device_id='caller-uuid', target_runtime=runtime)
+        await prepare_instance_restart(bot={'bot_id': 'b', 'owner_id': 'o', 'active_engine': 'aicoding'},
+                                       device_id='caller-uuid', target_runtime=runtime)
     prepared.call_args.kwargs['execute']('probe')
     runtime.post_bots_api.assert_called_once_with(
         path='/api/v1/paas/devices/physical-1/commands',

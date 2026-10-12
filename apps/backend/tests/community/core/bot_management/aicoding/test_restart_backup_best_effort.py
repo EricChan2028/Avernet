@@ -97,14 +97,14 @@ def test_backup_timeout_continues_without_restarting_backup(caplog):
 
 
 @pytest.mark.parametrize('phase', ['prepare', 'verify'])
-def test_observed_instance_change_still_blocks(phase):
+def test_observed_instance_change_degrades(phase, caplog):
     sequence = [response('running'), committed(boot_id='new')] if phase == 'prepare' else [committed(), committed(boot_id='new')]
-    with patch.object(backup.time, 'sleep'), pytest.raises(backup.RestartBackupError) as caught:
+    with patch.object(backup.time, 'sleep'):
         backup._attempt_backup(execute=Mock(side_effect=sequence), operation_id=OPERATION, bot_id='b', target_id='p')()
-    assert caught.value.reason == 'instance_changed'
+    assert 'reason=instance_changed' in caplog.text
 
 
-def test_inventory_change_still_blocks_even_after_failed_backup():
+def test_inventory_change_continues_after_failed_backup(caplog):
     runtime = Mock()
     runtime.list_devices_by_bot_uuid.side_effect = [
         [{'provider_device_id': 'old', 'status': 'ACTIVE'}],
@@ -112,9 +112,8 @@ def test_inventory_change_still_blocks_even_after_failed_backup():
     ]
     runtime.post_bots_api.side_effect = ConnectionError('unreachable')
     verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(context(), device_id='target', target_runtime=runtime)
-    with pytest.raises(backup.RestartBackupError) as caught:
-        verify()
-    assert caught.value.reason == 'target_changed'
+    verify()
+    assert 'reason=target_changed' in caplog.text
     assert runtime.post_bots_api.call_count == 1
 
 
@@ -195,7 +194,7 @@ def test_durable_budget_is_shared_across_replicas_and_redelivery(caplog):
         current_restart.reset(token)
 
 
-def test_late_valid_inventory_becomes_baseline_without_starting_backup():
+def test_late_valid_inventory_becomes_baseline_without_starting_backup(caplog):
     runtime = Mock()
     runtime.list_devices_by_bot_uuid.side_effect = [
         ConnectionError('initial lookup'),
@@ -207,7 +206,6 @@ def test_late_valid_inventory_becomes_baseline_without_starting_backup():
         context(), device_id='target', target_runtime=runtime)
     verify()
     verify()
-    with pytest.raises(backup.RestartBackupError) as caught:
-        verify()
-    assert caught.value.reason == 'target_changed'
+    verify()
+    assert 'reason=target_changed' in caplog.text
     runtime.post_bots_api.assert_not_called()

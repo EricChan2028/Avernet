@@ -1,8 +1,8 @@
 """Best-effort coding restart backup; platform exec, never Relay HTTP.
 
-Backup failures do not prevent the original restart. Binding, observed physical
-identity and durable mutation fences remain mandatory. No runtime upgrade is
-required; the v1 helper's archive budget remains 900 seconds.
+Backup failures and physical-identity observations do not veto restart.
+Lifecycle binding, operation ownership and durable mutation fences remain
+mandatory. No runtime upgrade is required; the v1 helper's archive budget remains 900 seconds.
 """
 from __future__ import annotations
 
@@ -187,10 +187,6 @@ def _best_effort(callback, *, phase, bot_id, target_id, operation_id):
     """
     try:
         return callback()
-    except RestartBackupError as error:
-        if error.reason in {'instance_changed', 'target_changed', 'binding_changed'}:
-            raise
-        failure = error
     except Exception as error:
         failure = error
     logger.warning(
@@ -419,11 +415,14 @@ class AicodingRestartBackupMixin:
                         phase='verify_inventory', **identity,
                     )
                     # Unknown inventory is a backup warning, not evidence that
-                    # the target changed. A positively observed change still
-                    # blocks; never start backups on newly appeared targets.
+                    # the target changed. Even an observed change only ends
+                    # backup verification; the original restart owns mutation.
                     if (targets is not None and current_targets is not None
                             and set(current_targets) != set(targets)):
-                        raise RestartBackupError('target_changed', '备份期间目标容器清单变化，禁止替换')
+                        def changed():
+                            raise RestartBackupError('target_changed', '备份期间目标容器清单变化')
+                        _best_effort(changed, phase='verify_inventory', **identity)
+                        return  # Never probe a changed target with an old receipt.
                     if targets is None and current_targets is not None:
                         # Retain the first valid observation, but never start
                         # backup work on targets discovered during verification.

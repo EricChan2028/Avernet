@@ -66,7 +66,8 @@ The frontend continues to use the original stored-runtime readiness semantics.
   and continue the original restart. These failures alone do not mark the Bot
   FAILED. Direct ARCA bindings skip this backup protocol; BaaS-managed containers
   still attempt it, including those hosted on ARCA.
-- Observed instance/target/binding changes still block replacement. Database,
+- Amendment (2026-10-12): backup-observed physical target/boot changes only warn
+  and continue restart. Lifecycle binding/engine/operation changes still block. Database,
   durable mutation-fence and worker-level failures retain their original error
   handling, including FAILED journal/start status where applicable.
 - Restart may destroy the old container without a confirmed backup, losing data

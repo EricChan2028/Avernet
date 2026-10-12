@@ -79,12 +79,11 @@ def test_recheck_degrades_if_bot_is_no_longer_terminal(caplog):
     assert 'status=degraded' in caplog.text
 
 
-def test_recheck_blocks_if_device_appears():
+def test_recheck_continues_if_device_appears():
     runtime = runtime_for('FAILED')
     verify = prepare(runtime)
     runtime.list_devices_by_bot_uuid.return_value = LIVE
-    with pytest.raises(RuntimeError, match='清单变化'):
-        verify()
+    verify()
     runtime.post_bots_api.assert_not_called()
 
 
@@ -95,8 +94,7 @@ def test_device_appearing_during_confirmation_never_gets_backed_up(phase):
         verify = prepare(runtime)
     runtime.list_devices_by_bot_uuid.side_effect = [[], LIVE]
     with patch.object(backup, 'prepare_backup') as backup_call:
-        with pytest.raises(backup.RestartBackupError, match='清单变化'):
-            verify() if phase == 'verify' else prepare(runtime)
+        verify() if phase == 'verify' else prepare(runtime)
     backup_call.assert_not_called()
     runtime.post_bots_api.assert_not_called()
 
@@ -148,9 +146,8 @@ def test_confirmation_inventory_query_error_degrades(phase, caplog):
     runtime.post_bots_api.assert_not_called()
 
 
-def test_new_malformed_device_during_confirmation_still_blocks():
+def test_new_malformed_device_during_confirmation_skips_backup():
     runtime = runtime_for('FAILED')
     runtime.list_devices_by_bot_uuid.side_effect = [[], [{'status': 'FAILED'}]]
-    with pytest.raises(backup.RestartBackupError, match='清单变化'):
-        prepare(runtime)
+    prepare(runtime)
     runtime.post_bots_api.assert_not_called()
