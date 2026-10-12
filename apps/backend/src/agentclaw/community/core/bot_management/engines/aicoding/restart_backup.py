@@ -67,23 +67,23 @@ def parse_result(result: Any, operation: str) -> dict[str, Any]:
     # Never infer success from empty/malformed output or a missing exit code.
     exit_code = result.get('exit_code') if isinstance(result, dict) else getattr(result, 'exit_code', None)
     if exit_code != 0:
-        raise RestartBackupError('exec_failed', '重启备份执行失败；旧沙箱未销毁，请检查容器备份日志')
+        raise RestartBackupError('exec_failed', '重启备份命令执行失败，请检查容器备份日志')
     try:
         stdout = result.get('stdout') if isinstance(result, dict) else result.stdout
         value = json.loads(stdout.strip())
     except (AttributeError, ValueError, TypeError) as error:
-        raise RestartBackupError('invalid_response', '重启备份结果无效，禁止销毁旧沙箱') from error
+        raise RestartBackupError('invalid_response', '重启备份结果无效') from error
     if not isinstance(value, dict) or value.get('version') != 1 or value.get('operation_id') != operation:
-        raise RestartBackupError('operation_mismatch', '重启备份操作不匹配，禁止销毁旧沙箱')
+        raise RestartBackupError('operation_mismatch', '重启备份操作不匹配')
     if value.get('status') not in {'legacy', 'not_mounted', 'running', 'committed', 'failed'}:
-        raise RestartBackupError('unknown_status', '未知的重启备份状态，禁止销毁旧沙箱')
+        raise RestartBackupError('unknown_status', '未知的重启备份状态')
     return value
 
 
 def _check_boot_identity(value, expected):
     boot = value.get('boot_id')
     if isinstance(boot, str) and boot and expected and boot != expected:
-        raise RestartBackupError('instance_changed', '备份期间实例身份发生变化，禁止替换')
+        raise RestartBackupError('instance_changed', '备份期间实例身份发生变化')
     if value['status'] != 'legacy' and (not isinstance(boot, str) or not boot):
         raise RestartBackupError('invalid_response', '备份结果缺少实例身份')
 
@@ -114,19 +114,19 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
         event = value.get('backup')
         if (not isinstance(event, dict) or event.get('status') != 'success'
                 or not event.get('generation_id') or event.get('operation_id') != operation_id):
-            raise RestartBackupError('invalid_receipt', '缺少有效的最终备份凭据，禁止销毁')
+            raise RestartBackupError('invalid_receipt', '缺少有效的最终备份凭据')
         return event['generation_id']
 
     log('probe', 'started')
     try:
         while True:
             if time.monotonic() >= deadline:
-                raise TimeoutError("重启备份超过等待预算，禁止销毁")
+                raise TimeoutError("重启备份超过等待预算")
             value = parse_result(execute(command(action, operation_id)), operation_id)
             # Identity evidence in a received response must not be hidden by timeout.
             _check_boot_identity(value, boot)
             if time.monotonic() >= deadline:
-                raise TimeoutError("重启备份超过等待预算，禁止销毁")
+                raise TimeoutError("重启备份超过等待预算")
             status = value['status']
             if status == 'legacy':
                 if action != 'start':
@@ -142,10 +142,10 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
                     'committed': 'receipt_valid'}[status])
                 break
             if status == 'failed':
-                raise RestartBackupError('backup_failed', '强制备份失败，旧沙箱保留；请检查容器备份日志')
+                raise RestartBackupError('backup_failed', '备份脚本报告失败，请检查容器备份日志')
             now = time.monotonic()
             if now >= deadline:
-                raise TimeoutError('强制备份结果未确认，禁止超时放行')
+                raise TimeoutError('备份等待超时，结果未确认')
             if status != last_status or now - last_log >= 60:
                 log('wait', status)
                 last_status, last_log = status, now
@@ -159,18 +159,18 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
     def verify():
         try:
             if execution is not None and time.monotonic() >= deadline:
-                raise TimeoutError("重启备份超过等待预算，禁止销毁")
+                raise TimeoutError("重启备份超过等待预算")
             # An absent helper is re-probed read-only; never start work on a
             # replacement container while holding the legacy short-lived lock.
             check_action = 'start' if status == 'not_mounted' else 'status'
             current = parse_result(execute(command(check_action, operation_id)), operation_id)
             _check_boot_identity(current, boot)
             if execution is not None and time.monotonic() >= deadline:
-                raise TimeoutError("重启备份超过等待预算，禁止销毁")
+                raise TimeoutError("重启备份超过等待预算")
             if current['status'] != status:
                 raise RestartBackupError('receipt_stale', '备份后状态变化')
             if status == 'committed' and receipt(current) != generation:
-                raise RestartBackupError('generation_changed', '备份凭据变化，禁止销毁')
+                raise RestartBackupError('generation_changed', '备份凭据变化')
             log('verify', 'allowed', generation=generation)
         except Exception as error:
             log('verify', 'failed', level='warning', error_type=type(error).__name__, reason=error_reason(error))
@@ -303,7 +303,7 @@ def _query_inventory(runtime, *, bot_id, target_id, operation_id, phase):
                     # target may belong to another in-flight reconstruction;
                     # never start a backup on it under this recovery attempt.
                     raise RestartBackupError(
-                        'target_changed', '确认期间目标容器清单变化，禁止替换'
+                        'target_changed', '确认期间目标容器清单变化'
                     )
     except Exception as error:
         # Shared transport exceptions may contain response bodies/credentials.
@@ -448,9 +448,14 @@ class AicodingRestartBackupMixin:
             if provider == 'baas':
                 # Existing BaaS inventory/POST contracts also work for FAILED
                 # bindings; no change to the ordinary DeviceService exec gate.
-                check = self._prepare_restart(
-                    ctx, device_id=target, target_runtime=target_runtime_provider(),
-                    operation_id=operation_id)
+                # Resolving the backup-only client is not a restart prerequisite.
+                check = _best_effort(
+                    lambda: self._prepare_restart(
+                        ctx, device_id=target, target_runtime=target_runtime_provider(),
+                        operation_id=operation_id),
+                    phase='prepare', bot_id=ctx.bot_id, target_id=target,
+                    operation_id=operation_id,
+                )
             elif provider == 'arca':
                 # Direct ARCA bindings retain stop/start without a new backup
                 # dependency, including old or already unavailable sandboxes.
@@ -471,7 +476,8 @@ class AicodingRestartBackupMixin:
                     logger.error("event=aicoding_restart_backup phase=verify status=blocked "
                                  "reason=binding_changed bot_id=%s binding_id=%s", ctx.bot_id, binding_id)
                     raise RestartBackupError('binding_changed', '备份后绑定已变化，禁止替换其他容器')
-                check()
+                if check is not None:
+                    check()
             return verify
         except Exception as error:
             logger.error("event=aicoding_restart_backup phase=precondition status=blocked "
