@@ -57,6 +57,12 @@ Owns visible-to-other-users state; bugs here can leak unpublished bots or block 
   `POST /v1/workers/{bot_uuid}/sync` with `availability` set to the persisted
   visibility; it does not overwrite user-publication runtime state. This needs
   BCS's `bcsfuse.enabled` configuration and deployment of the updated BCS runtime.
+- Backend schedules lifecycle HTTP calls on a process-local background worker
+  after publication persistence succeeds. Approval callbacks and direct publication
+  return their existing results without waiting for BCSFuse. The worker preserves
+  submission order and carries request context; both online and offline keep their
+  existing HTTP path, method, identity mapping, and 15-second timeout. Notifications
+  are best-effort and are not a durable queue across process restarts.
 - BCSFuse failure remains best-effort and is logged. User-publication logs use
   `[_sync_bcsfuse_runtime_state]` with the exact `worker_id`; Agent-publication
   logs live in BCS (`Worker synced to bcsfuse` / `Worker sync failed, retrying`).

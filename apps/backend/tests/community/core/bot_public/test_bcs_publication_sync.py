@@ -11,6 +11,7 @@ from tests.community.core.bot_public.test_bot_public_service import (
     _make_bot,
     _make_operator,
     _make_service,
+    _wait_for_bcsfuse_sync,
 )
 
 MODULE = "agentclaw.community.core.bot_public.services.bot_public_service"
@@ -44,6 +45,7 @@ def test_private_user_syncs_exact_bcs_uuid_after_persistence(publication, qualif
     result = service.public_bcs_bot(BOT_UUID, "334018", "user", _make_operator(), visibility="private")
     assert result["state"] == "COMPLETED"
     bcn.patch_attributes.assert_called_once_with(bot_uuid=BOT_UUID, body={"user_visibility": "private"})
+    _wait_for_bcsfuse_sync()
     http.assert_called_once()
     request = http.call_args.args[0]
     assert request.get_method() == "PUT"
@@ -63,6 +65,7 @@ def test_agreed_user_callback_syncs_persisted_visibility(publication, visibility
     result = service.handle_public_approval_callback(BOT_UUID, "334018", "p1", "AGREE", public_scope="user")
     assert result["success"]
     assert bcn.patch_attributes.call_args.kwargs["body"]["user_visibility"] == visibility
+    _wait_for_bcsfuse_sync()
     http.assert_called_once()
     assert http.call_args.args[0].full_url == f"http://bcsfuse.test/v1/workers/{BOT_UUID}/{state}"
 
@@ -118,6 +121,7 @@ def test_inline_approval_and_community_fallback_sync_user_publication(publicatio
     service._process_service.start_approval.return_value = approval
     result = service.public_bcs_bot(BOT_UUID, "334018", "user", _make_operator(), visibility="public")
     assert result["success"]
+    _wait_for_bcsfuse_sync()
     http.assert_called_once()
     assert http.call_args.args[0].full_url == f"http://bcsfuse.test/v1/workers/{BOT_UUID}/online"
 
@@ -128,6 +132,7 @@ def test_bcsfuse_failure_is_logged_without_reverting_bcs(publication, caplog):
     result = service.public_bcs_bot(BOT_UUID, "334018", "user", _make_operator(), visibility="private")
     assert result["state"] == "COMPLETED"
     bcn.patch_attributes.assert_called_once()
+    _wait_for_bcsfuse_sync()
     assert "[_sync_bcsfuse_runtime_state]" in caplog.text
     assert f"worker_id={BOT_UUID}" in caplog.text
     assert "status=404" in caplog.text

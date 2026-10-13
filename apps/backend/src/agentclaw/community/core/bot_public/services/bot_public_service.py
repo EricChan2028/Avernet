@@ -36,6 +36,9 @@ from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogSearchUnavailableError,
 )
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
+from agentclaw.community.core.bot_public.services.bcsfuse_runtime_dispatch import (
+    dispatch_runtime_sync,
+)
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
@@ -392,6 +395,17 @@ class BotPublicService(BotPublicServiceProtocol):
         self._sync_bcsfuse_worker_runtime_state(bot_id, worker_id, public)
 
     def _sync_bcsfuse_worker_runtime_state(
+        self, bot_id: str, worker_id: str, public: str
+    ) -> None:
+        """Schedule an exact worker identity without waiting for BCSFuse HTTP."""
+        if not self._resolve_bcsfuse_base_url():
+            self._sync_bcsfuse_worker_runtime_state_now(bot_id, worker_id, public)
+            return
+        dispatch_runtime_sync(
+            self._sync_bcsfuse_worker_runtime_state_now, bot_id, worker_id, public,
+        )
+
+    def _sync_bcsfuse_worker_runtime_state_now(
         self, bot_id: str, worker_id: str, public: str
     ) -> None:
         """Sync an exact worker identity; BCS UUIDs must not be qualified again."""

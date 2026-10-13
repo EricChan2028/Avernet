@@ -96,6 +96,13 @@ def _make_catalog_bot(bot_id: str, entity_id: str):
     }
 
 
+def _wait_for_bcsfuse_sync():
+    """Drain submitted notifications while the test's HTTP double is installed."""
+    from agentclaw.community.core.bot_public.services import bcsfuse_runtime_dispatch
+
+    bcsfuse_runtime_dispatch._executor.submit(lambda: None).result(timeout=3)
+
+
 # ---------------------------------------------------------------------------
 # public_bcs_bot – new-version BCS-delegated publish
 # ---------------------------------------------------------------------------
@@ -779,6 +786,7 @@ class TestPublicBotBCSFuseSync:
         result = svc.public_bot("bot1", "owner1", "1", "caller", "0", _make_operator())
 
         assert result["public"] == "1"
+        _wait_for_bcsfuse_sync()
         request = mock_urlopen.call_args.args[0]
         assert request.full_url == "http://bcsfuse.test/v1/workers/bot1/online"
         assert request.get_method() == "PUT"
@@ -809,6 +817,7 @@ class TestPublicBotBCSFuseSync:
         )
         svc.public_bot("bot1", "owner1", "1", "caller", "0", _make_operator())
 
+        _wait_for_bcsfuse_sync()
         request = mock_urlopen.call_args.args[0]
         assert request.full_url == "http://bcsfuse.test/v1/workers/bot1:owner1/online"
 
@@ -830,6 +839,7 @@ class TestPublicBotBCSFuseSync:
         result = svc.public_bot("bot1", "owner1", "0", "caller", "0", _make_operator())
 
         assert result["public"] == "0"
+        _wait_for_bcsfuse_sync()
         request = mock_urlopen.call_args.args[0]
         assert request.full_url == "http://bcsfuse.test/v1/workers/bot1/offline"
         assert request.get_method() == "PUT"
@@ -847,6 +857,7 @@ class TestPublicBotBCSFuseSync:
         svc = _make_service(bot_repository=bot_repo, bcsfuse_config=MagicMock(base_url="http://bcsfuse.test"))
         result = svc.public_bot("bot1", "owner1", "1", "caller", "0", _make_operator())
 
+        _wait_for_bcsfuse_sync()
         assert result["public"] == "1"
         mock_sync_rel.assert_called_once_with("bot1", "owner1", "OPEN", "1")
 
@@ -1069,6 +1080,7 @@ class TestHandlePublicApprovalCallback:
             response.status = 200
             mock_urlopen.return_value = response
             result = svc.handle_public_approval_callback("bot1", "owner1", "puid1", "agree")
+            _wait_for_bcsfuse_sync()
 
         assert result["success"] is True
         request = mock_urlopen.call_args.args[0]
@@ -1092,6 +1104,7 @@ class TestHandlePublicApprovalCallback:
             patch("agentclaw.community.core.bot_public.services.bot_public_service.urlopen", side_effect=RuntimeError("bcsfuse down")),
         ):
             result = svc.handle_public_approval_callback("bot1", "owner1", "puid1", "agree")
+            _wait_for_bcsfuse_sync()
 
         assert result["success"] is True
 
