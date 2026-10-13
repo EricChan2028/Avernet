@@ -19,8 +19,9 @@ repair are outside this change.
   upload. Unreadable storage must fail before staging or metadata writes.
 - In the Legacy Adapter, stage and verify the upload before publishing it to
   the canonical package. Back up the old package only when one exists.
-- If Legacy Adapter publication, metadata, audit or final cleanup fails, restore
-  the previous metadata and either the old package or its original absence.
+- If missing-package recovery in the Legacy Adapter fails during publication,
+  metadata, audit or final cleanup, restore the previous metadata and original
+  package absence. Existing-package replacement behavior is unchanged.
 - Preserve existing runtime projection semantics: a PENDING projection retains
   the committed new package and reports its unresolved runtime status.
 - Modern Engine package apply already accepts a missing package. Its Backend
@@ -36,14 +37,16 @@ that absence is distinct from permission, transport, proxy and response errors.
 Reviewed against OCB `dev@9098662a21`, whose Avernet gitlink is
 `ee53286ee266cc473a7cd084b870e29c13af064f` at `submodules/avernet`.
 ARCA `DeviceFileSystem.list_dir` delegates through `SandboxRuntimeClient` to
-`arca_io.list_arca_directory`; the client needs strict absence semantics while
-legacy direct listing callers retain their existing behavior.
+`arca_io.list_arca_directory`; the filesystem selects strict absence semantics
+through an optional `preserve_read_errors` argument. Other client and direct
+listing callers retain their existing default behavior.
 The enterprise release must include both changes and the updated gitlink.
 
 ## Acceptance
 
 - Active and inactive missing packages recover without creating a new Skill.
-- Partial publish, metadata, audit and cleanup faults preserve original state.
+- Missing-package recovery faults in publication, metadata, audit and cleanup
+  preserve original absence and metadata.
 - Denied or unavailable directory reads cause no writes.
 - Existing-package replacement, locator validation and runtime PENDING behavior
   remain covered by the existing suite.
