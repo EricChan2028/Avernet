@@ -8,6 +8,8 @@ import http.server
 import json
 import os
 import socket
+import sqlite3
+import tomllib
 import subprocess
 import tempfile
 import threading
@@ -51,6 +53,7 @@ def smoke(directory: Path, lifecycle: bool) -> None:
                 if version != f"bcs-bridge {metadata()['version']}":
                     raise ValueError(f"Installed binary has wrong version: {version}")
                 subprocess.run([str(binary), "--help"], check=True, stdout=subprocess.DEVNULL)
+            check_initializer(binary, root)
             before = hashlib.sha256(binary.read_bytes()).hexdigest()
             server.tamper = True
             failure = subprocess.run(["/bin/sh", str(installer)], env=env, timeout=60)
@@ -62,6 +65,28 @@ def smoke(directory: Path, lifecycle: bool) -> None:
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def check_initializer(binary: Path, root: Path) -> None:
+    database = root / "initializer.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.executescript("CREATE TABLE chats(id TEXT, ext TEXT, deleted_at INTEGER); CREATE TABLE sub_chats(session_id TEXT, chat_id TEXT);")
+    config = root / "initializer.toml"
+    settings = root / "settings.json"
+    config.write_text('provider_id="release-smoke"\nmode="plugin"\n[plugin]\nurl="ws://127.0.0.1:21000/ws/bot"\n[[bot]]\nengine="qwenwork"\nprovider_bot_ref="worker"\nbot_id="release-smoke-bot"\ntoken="local-smoke-placeholder"\ncwd="/tmp"\n')
+    settings.write_text('{"theme":"preserved"}')
+    args = [str(binary), "--config", str(config), "init", "--engine", "qwenwork",
+            "--option", f"database_path={database}", "--option", f"settings_path={settings}"]
+    subprocess.run(args, check=True, timeout=15, stdout=subprocess.DEVNULL)
+    first = config.read_bytes()
+    subprocess.run(args, check=True, timeout=15, stdout=subprocess.DEVNULL)
+    if config.read_bytes() != first:
+        raise ValueError("Packaged initializer is not idempotent")
+    engine = tomllib.loads(first.decode())["bot"][0]["engine_options"]
+    hooks = json.loads(settings.read_text())
+    if (engine["secret"] == engine["hook_secret"] or hooks["theme"] != "preserved"
+            or "QueryEnd" not in hooks["hooks"]):
+        raise ValueError("Packaged initializer lost settings or required credentials/Hooks")
 
 
 def check_lifecycle(binary: Path, root: Path) -> None:

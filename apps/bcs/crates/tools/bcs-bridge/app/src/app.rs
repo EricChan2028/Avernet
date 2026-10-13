@@ -13,6 +13,10 @@ use crate::credentials::{CredentialSource, EnvCredentials};
 use crate::identity::{IdentityResolver, StaticBearer};
 use crate::profile::{DeployProfile, ExplicitProfile};
 
+/// Deployment initializer selected at the binary composition root. It owns
+/// engine-specific filesystem configuration, without constructing an engine.
+pub type EngineInitializer = fn(&std::path::Path, &toml::Table) -> anyhow::Result<String>;
+
 /// Help text and argument defaults of the binary.
 #[derive(Clone, Copy)]
 pub struct CliDefaults {
@@ -42,6 +46,7 @@ pub struct BridgeApp {
     credentials: Arc<dyn CredentialSource>,
     identities: BTreeMap<String, Arc<dyn IdentityResolver>>,
     defaults: CliDefaults,
+    initializers: BTreeMap<String, EngineInitializer>,
 }
 
 impl BridgeApp {
@@ -56,6 +61,7 @@ impl BridgeApp {
             credentials: Arc::new(EnvCredentials),
             identities,
             defaults: CliDefaults::default(),
+            initializers: BTreeMap::new(),
         })
     }
 
@@ -63,6 +69,12 @@ impl BridgeApp {
     pub fn profile(&self) -> &dyn DeployProfile { self.profile.as_ref() }
     pub fn credentials(&self) -> &dyn CredentialSource { self.credentials.as_ref() }
     pub fn defaults(&self) -> CliDefaults { self.defaults }
+
+    pub fn initialize(&self, engine: &str, path: &std::path::Path, options: &toml::Table) -> anyhow::Result<String> {
+        let initialize = self.initializers.get(engine)
+            .with_context(|| format!("No initializer registered for engine '{engine}'"))?;
+        initialize(path, options)
+    }
 
     /// The identity resolver selected by `--provider-auth`.
     pub fn identity(&self, id: &str) -> anyhow::Result<&dyn IdentityResolver> {
@@ -96,6 +108,11 @@ impl BridgeAppBuilder {
     /// Add an engine, or replace the engine registered under the same id.
     pub fn engine(mut self, factory: impl EngineFactory + 'static) -> Self {
         self.0.engines.register(factory);
+        self
+    }
+
+    pub fn initializer(mut self, engine: &str, initialize: EngineInitializer) -> Self {
+        self.0.initializers.insert(engine.to_owned(), initialize);
         self
     }
 

@@ -37,16 +37,26 @@ the archive and copy only `bcs-bridge` into a directory on your PATH.
 
    Register with `--engine qwenwork --mode plugin`, your `--token`, `--api-url`,
    `--bot-name` and `--cwd`. Registration does not complete all QwenWork setup.
-3. Configure that Bot's `engine_options` with a loopback listen address, local
-   channel credentials, a separate Hook credential and your desktop database
-   path. Configure QwenWork's WeCom Bot channel and HTTP Hooks to match.
-   Follow the [QwenWork adapter guide](https://github.com/inclusionAI/Avernet/blob/dev/apps/bcs/crates/tools/bcs-bridge/qwenwork/README.md)
-   for the full schema and required lifecycle Hooks. Keep configuration files
-   private (`chmod 600`); never paste credentials into issues or commit them.
+3. Initialize the registered Bot's local settings and Hooks:
+
+   ```sh
+   bcs-bridge --config "$HOME/.bcn-bridge/qwenwork.toml" init --engine qwenwork
+   ```
+
+   Use the same `--config` path you chose during registration. Initialization
+   detects the desktop database, generates separate channel/Hook credentials,
+   backs up configuration and preserves unrelated settings. Enter the printed
+   WebSocket URL, Bot ID and Secret in QwenWork's WeCom Bot channel. Reload
+   desktop Hooks. If detection is ambiguous, pass `--option database_path=/path/agents.db`
+   and `--option settings_path=/path/settings.json`. Changing `--option listen=...`
+   removes only Hooks matching the previous URL and credential.
+   Provider provisioning and registration authorization belong to your Avernet
+   deployment; the [minimal Singlebox guide](https://github.com/inclusionAI/Avernet/blob/dev/singlebox/QWENWORK.md)
+   describes local validation. Bridge does not create or authorize Providers.
 4. Start and check the bridge:
 
    ```sh
-   bcs-bridge start --daemon
+   bcs-bridge --config "$HOME/.bcn-bridge/qwenwork.toml" start --daemon
    bcs-bridge status
    curl http://127.0.0.1:52491/health
    ```

@@ -142,6 +142,7 @@ def verify_native(directory: Path, target: str, version: str) -> None:
         if actual != f"bcs-bridge {version}":
             raise ValueError(f"Binary version mismatch: {actual}")
         subprocess.run([str(binary), "--help"], check=True, stdout=subprocess.DEVNULL)
+        subprocess.run([str(binary), "init", "--help"], check=True, stdout=subprocess.DEVNULL)
         if not list(root.rglob("LICENSE")) or not list(root.rglob("QUICKSTART.md")):
             raise ValueError("Missing release documentation")
 
