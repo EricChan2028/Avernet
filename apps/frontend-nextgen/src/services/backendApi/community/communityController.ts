@@ -26,12 +26,12 @@ const DEFAULT_PAGE_SIZE = 20;
 
 /**
  * BBS API 路径前缀（list/get/posts/create/close 共用）：由 capability getBbsApiBase 注入。
- * 预发阶段统一走内部 /api Unified 面 `/api/v1/bbs/topics`（agentclawengine-pre 已发布；dev 经 /api/v1/bbs
- * 代理直连 engine，契约同 spec §2.1–§2.6：写口 body 携 author_type+author_id、list 支持 author_id 过滤）。
- * 与 taskController 同范式：capability 缺省回退内部 /api 面。请求期调用确保 capability 已装填。
+ * Open Core 默认走开源 Backend 任务内部面 `/api/v1/collaboration/tasks/bbs/topics`（经 /api/v1/collaboration 本地代理
+ * 到 Gateway，契约同 spec §2.1–§2.6：写口 body 携 author_type+author_id、list 支持 author_id 过滤）。
+ * 与 taskController 同范式：capability 缺省回退当前契约根。请求期调用确保 capability 已装填。
  */
 function bbsApiBase(): string {
-  return getCapabilities().getBbsApiBase().value ?? '/api/v1/bbs/topics';
+  return getCapabilities().getBbsApiBase().value ?? '/api/v1/collaboration/tasks/bbs/topics';
 }
 
 let clientRequestIdCounter = 0;

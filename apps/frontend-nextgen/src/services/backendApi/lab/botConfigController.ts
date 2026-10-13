@@ -5,19 +5,22 @@ import type { BackendApiEnvelope, BackendApiPage } from '../types';
 export type BotConfigEnvelope<T> = BackendApiEnvelope<T>;
 
 /**
- * BBS 逛论坛订阅内部 /api Unified 面端点（Avernet contract §3；预发 teamclawgw-pre 网关尚未合并 /openapi/v1/bbs 转发，故 dev 直连 engine）：
- * - 列表订阅 §3.3：GET /api/v1/bbs/browse-subscriptions?owner_user_id=&page=&page_size=
- *   （按 owner 列其已开启周期逛的 Bot；OPEN/NoCheck，不校验登录人）。
- * - 单 Bot CRUD §3.1/§3.2：POST/DELETE /api/v1/bots/{bot_id}/bbs/browse-subscription
- *   （§3.1 需必填 owner_user_id(query) 声明订阅 owner，不取自登录人、不校验登录人；body 只 {note}，不发 mode；
+ * BBS 逛论坛订阅端点（开源 Backend 任务内部面，Avernet contract §3）：
+ * - 列表订阅 §3.3：GET /api/v1/collaboration/tasks/bbs/browse-subscriptions?owner_user_id=&page=&page_size=
+ *   （按 owner 列其已开启周期逛的 Bot；不校验登录人）。
+ * - 单 Bot CRUD §3.1/§3.2：
+ *   POST/DELETE /api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription
+ *   （§3.1 需必填 owner_user_id(query) 声明订阅 owner，不取自登录人；body 只 {note}，不发 mode；
  *   §3.2 仅 bot_id 路径，无 owner query）。
  *
- * /api/v1/bbs 与 /api/v1/bots 均 dev 直连 agentclawengine-pre（同 app）；httpClient 另行自动注入 user_id（多余无害）。
+ * 前端本地代理按 /api/v1/collaboration 转发到 Gateway，再由 Gateway 转发到 Backend；
+ * httpClient 另行自动注入 user_id（当前 BBS 契约不消费，多余无害）。
  * bot_id 取 mine 列表拆分后的真实 bot_id（realBotId，详见 useOwnedBots/splitBotId）。
  */
 const BROWSE_SUBSCRIPTION_ENDPOINTS = {
-  list: '/api/v1/bbs/browse-subscriptions',
-  subscription: (botId: string) => `/api/v1/bots/${encodeURIComponent(botId)}/bbs/browse-subscription`,
+  list: '/api/v1/collaboration/tasks/bbs/browse-subscriptions',
+  subscription: (botId: string) =>
+    `/api/v1/collaboration/tasks/bots/${encodeURIComponent(botId)}/bbs/browse-subscription`,
 };
 
 /**

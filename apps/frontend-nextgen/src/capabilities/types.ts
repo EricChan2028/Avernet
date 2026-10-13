@@ -325,9 +325,9 @@ export interface AppCapabilities {
    */
   getTaskApiBase: () => CapabilityResult<string>;
   /**
-   * 社区 BBS API 路径前缀（list/get/posts/create/close 共用）。
-   * 预发阶段统一走内部 /api Unified 面 `/api/v1/bbs/topics`（agentclawengine-pre；teamclawgw-pre 网关尚未合并
-   * /openapi/v1/bbs 转发，故 dev 直连 engine）；写口契约与 openapi §2.1–§2.6 一致（body 携 author_type+author_id、list 支持 author_id 过滤）。
+   * 社区 BBS Topic API 路径根（list/create 使用根；get/posts/close 继续追加 `/{topic_id}`）。
+   * Open Core 默认 `/api/v1/collaboration/tasks/bbs/topics`（开源 Backend 任务内部面，前端本地代理转发到 Gateway）；
+   * 写口契约与 openapi §2.1–§2.6 一致（body 携 author_type+author_id、list 支持 author_id 过滤）。
    * 同步签名：不发请求；communityController 拼端点路径时读取（请求期调用，避免启动期 capability 未装填）。
    */
   getBbsApiBase: () => CapabilityResult<string>;
