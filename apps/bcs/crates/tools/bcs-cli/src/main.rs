@@ -1587,7 +1587,11 @@ enum GroupContextCommands {
         session_id: Option<String>,
         #[arg(long)]
         round_id: Option<String>,
+        /// Scope level filter. Repeat to pass multiple levels.
         #[arg(long = "scope-level")]
+        scope_level: Vec<String>,
+        /// Scope level filters as a comma-separated list, e.g. group,session.
+        #[arg(long = "scope-levels", value_delimiter = ',')]
         scope_levels: Vec<String>,
     },
     /// Get visible active contexts ordered round/session/group.
@@ -1600,7 +1604,11 @@ enum GroupContextCommands {
         round_id: Option<String>,
         #[arg(long)]
         name: String,
+        /// Scope level filter. Repeat to pass multiple levels.
         #[arg(long = "scope-level")]
+        scope_level: Vec<String>,
+        /// Scope level filters as a comma-separated list, e.g. group,session.
+        #[arg(long = "scope-levels", value_delimiter = ',')]
         scope_levels: Vec<String>,
         #[arg(long, default_value_t = 3)]
         limit: u32,
@@ -2310,6 +2318,22 @@ fn group_context_insert_optional_string(
 ) {
     if let Some(value) = value {
         body.insert(key.to_string(), serde_json::Value::String(value));
+    }
+}
+
+fn resolve_group_context_scope_levels(
+    scope_level: Vec<String>,
+    scope_levels: Vec<String>,
+) -> Result<Vec<String>> {
+    if !scope_level.is_empty() && !scope_levels.is_empty() {
+        return Err(anyhow!(
+            "--scope-level and --scope-levels cannot be used together"
+        ));
+    }
+    if scope_levels.is_empty() {
+        Ok(scope_level)
+    } else {
+        Ok(scope_levels)
     }
 }
 
@@ -4403,28 +4427,38 @@ pub async fn run() -> Result<()> {
                     group_id,
                     session_id,
                     round_id,
+                    scope_level,
                     scope_levels,
-                } => (
-                    "list",
-                    group_id,
-                    session_id,
-                    round_id,
-                    json!({"scope_levels": if scope_levels.is_empty() { json!(null) } else { json!(scope_levels) }}),
-                ),
+                } => {
+                    let resolved_scope_levels =
+                        resolve_group_context_scope_levels(scope_level, scope_levels)?;
+                    (
+                        "list",
+                        group_id,
+                        session_id,
+                        round_id,
+                        json!({"scope_levels": if resolved_scope_levels.is_empty() { json!(null) } else { json!(resolved_scope_levels) }}),
+                    )
+                }
                 GroupContextCommands::Get {
                     group_id,
                     session_id,
                     round_id,
                     name,
+                    scope_level,
                     scope_levels,
                     limit,
-                } => (
-                    "get",
-                    group_id,
-                    session_id,
-                    round_id,
-                    json!({"name": name, "scope_levels": if scope_levels.is_empty() { json!(null) } else { json!(scope_levels) }, "limit": limit}),
-                ),
+                } => {
+                    let resolved_scope_levels =
+                        resolve_group_context_scope_levels(scope_level, scope_levels)?;
+                    (
+                        "get",
+                        group_id,
+                        session_id,
+                        round_id,
+                        json!({"name": name, "scope_levels": if resolved_scope_levels.is_empty() { json!(null) } else { json!(resolved_scope_levels) }, "limit": limit}),
+                    )
+                }
                 GroupContextCommands::Systemset {
                     group_id,
                     session_id,
@@ -5732,6 +5766,49 @@ mod tests {
             Err(err) => err,
         };
         assert_eq!(err.kind(), ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn group_context_list_parses_plural_scope_levels_flag() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "group-context",
+            "list",
+            "--group-id",
+            "game-room-7",
+            "--scope-levels",
+            "group,session",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::GroupContext {
+                command:
+                    GroupContextCommands::List {
+                        scope_level,
+                        scope_levels,
+                        ..
+                    },
+                ..
+            } => {
+                assert!(scope_level.is_empty());
+                assert_eq!(scope_levels, vec!["group", "session"]);
+            }
+            _ => panic!("expected group-context list command"),
+        }
+    }
+
+    #[test]
+    fn group_context_scope_level_flags_are_mutually_exclusive() {
+        let err = resolve_group_context_scope_levels(
+            vec!["group".to_string()],
+            vec!["session".to_string()],
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("--scope-level and --scope-levels cannot be used together")
+        );
     }
 
     #[test]

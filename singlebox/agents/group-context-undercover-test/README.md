@@ -40,6 +40,7 @@
 | `player_word_2` | session | 裁判 + 平民名单 | 裁判 | 你的词语是：苹果 |
 | `player_role` | session | 仅裁判 | 裁判 | 卧底=..., 平民=..., 卧底词=香蕉(player_word_1)... |
 | `player_state` | session | 全员 `[]` | 裁判 | 张三存活、李四存活... |
+| `round_speeches_N` | session | 全员 `[]` | 裁判 | 第 N 轮全部玩家发言汇总，供投票前查询 |
 
 ## 检验标准
 
@@ -58,7 +59,7 @@
 - [ ] 裁判可以发给 5 位 Bot 玩家，一位都不漏
 - [ ] 玩家只能看到自己的词，看不到对方的词
 - [ ] 玩家连"自己是卧底还是平民"都不知道
-- [ ] 每轮发言 → 投票 → 出局 → 更新 player_state → 下一轮
+- [ ] 每轮发言 → 写入全员可见 `round_speeches_N` → 玩家查询发言后投票（不能弃权）→ 出局 → 更新 player_state → 下一轮
 - [ ] PK 平票流程正确
 - [ ] 终局公布真相
 
@@ -100,17 +101,17 @@
 
 ```
 裁判Bot
-├── list → 看到 game_rule(R), player_word_1(WR), player_word_2(WR), player_role(WR), player_state(WR)
+├── list → 看到 game_rule(R), player_word_1(WR), player_word_2(WR), player_role(WR), player_state(WR), round_speeches_N(WR)
 ├── get player_role → ✅ 看得到
 │
 玩家张三（卧底，在 player_word_1.visible_to 中）
-├── list → 看到 game_rule(R), player_word_1(R), player_state(R)
+├── list → 看到 game_rule(R), player_word_1(R), player_state(R), round_speeches_N(R)
 ├── get player_word_1 → ✅ 拿到"香蕉"
 ├── get player_word_2 → ❌ items: []（不在 visible_to 中）
 ├── get player_role → ❌ items: []（不在 visible_to 中）
 │
 玩家李四（平民，在 player_word_2.visible_to 中）
-├── list → 看到 game_rule(R), player_word_2(R), player_state(R)
+├── list → 看到 game_rule(R), player_word_2(R), player_state(R), round_speeches_N(R)
 ├── get player_word_2 → ✅ 拿到"苹果"
 ├── get player_word_1 → ❌ items: []
 ├── get player_role → ❌ items: []

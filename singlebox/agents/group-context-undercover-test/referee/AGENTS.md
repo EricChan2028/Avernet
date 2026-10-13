@@ -19,7 +19,7 @@
 3. 玩家发言时只能描述自己的词，不能直接说出词语本身。
 4. 禁止通过连续两字、拆字、拼音、英文、谐音等方式泄露词语。
 5. 发言后进入投票，玩家投给自己认为最像卧底的人。
-6. 常规投票只输出“我投N号”或“我弃权”。
+6. 常规投票必须投给一名仍存活玩家，直接说出被投玩家的 Bot 名称，例如“我投玩家张三”，不能弃权。
 7. 被投出的玩家出局；游戏是否结束由裁判判断。
 8. 卧底全部出局则平民胜利；卧底存活到足够少人数时卧底胜利。
 9. 终局前，裁判不得公开任何人的身份和词语。
@@ -34,6 +34,7 @@
 | `player_word_2` | session | 裁判 + 平民玩家 | 裁判 | 平民词 |
 | `player_role` | session | 仅裁判 | 裁判 | 身份映射和词对 |
 | `player_state` | session | `{"userIds": []}` 全员 | 裁判 | 存活状态和阶段 |
+| `round_speeches_N` | session | `{"userIds": []}` 全员 | 裁判 | 第 N 轮所有玩家发言汇总，供玩家投票前查询 |
 
 权限规则：
 
@@ -60,12 +61,21 @@ bcs-cli group-context get --help
 
 ## 主持流程
 
-### 1. 被唤醒后先确认上下文
+### 1. 进入群聊 / 被唤醒后先初始化 group 级规则
 
-- 从本次 BCS 群聊投递中取得真实 `group_id` 和群聊 `session_id`。
-- 先读取 group 级 `game_rule`；如果不存在，用上面的“默认游戏规则”写入 group 级 `game_rule`，设置全员可见。
-- 再 list/get 当前 group/session 范围的条目，判断本局是否已经发牌。
-- 任何 GroupContext 操作失败都要把错误告诉人类玩家，不继续推演。
+这是演示 GroupContext `group` scope 的必要动作：裁判进入本 BCS 群聊、首次被唤醒或开始主持前，必须先处理 `game_rule`，不要等到发牌后才做。
+
+1. 从本次 BCS 群聊投递中取得真实 `group_id` 和群聊 `session_id`。
+2. 立即读取 group 级 `name=game_rule`：只传当前真实 `group_id`，scope level 使用 `group`。
+3. 如果 `game_rule` 已存在：以该 context 内容作为本群游戏规则。
+4. 如果 `game_rule` 不存在：用上面的“默认游戏规则”写入一条 group 级 `game_rule`，设置全员可见：
+   - `scope_level=group`
+   - `visible_to={"userIds":[]}`
+   - `collect_from` 使用裁判 Bot 名称或系统可写身份
+   - content 写完整默认游戏规则
+5. 写入成功后再继续主持开场、发牌或查询 session 级状态。
+6. 再 list/get 当前 group/session 范围的条目，判断本局是否已经发牌。
+7. 任何 GroupContext 操作失败都要把错误告诉人类玩家，不继续推演。
 
 ### 2. 开局发牌
 
@@ -76,14 +86,33 @@ bcs-cli group-context get --help
 3. 随机或按测试需要选 1 名 Bot 玩家为卧底，其余 Bot 和人类为平民；不要告诉玩家身份。
 4. 写入 `player_word_1`、`player_word_2`、`player_role`、`player_state` 四个 session 级条目。
 5. 公开告诉大家已经发牌，并分别通知每个 Bot 玩家应该查询哪个 `player_word_*`；不要说 1/2 分别代表什么身份。
+6. 第一次通知 Bot 玩家查词时，把“查词”和“第一轮发言”合并成同一个任务：要求玩家查到词后立刻用一句话描述自己的词，不要说出词本身。
 
 通知玩家查词时，必须让玩家使用当前 BCS 群聊的 `group_id` 和群聊 `sessionId`。如果使用派任务能力（如 bcs_assign_task），优先走群聊任务/消息链路，确保消息携带本局群聊 sessionId；不要用 `bcs-cli chat` 发送一对一单聊来承载群组游戏任务。
 
+为了减少 assign_task 多轮交互不稳定，第一轮不要先让玩家“只查词/记好后等待”；必须在同一次消息里要求“查询底牌并立即发言”。推荐通知格式：
+
+```text
+请使用以下命令查询你的词语：
+
+bcs-cli group-context get --group-id <当前群真实 groupId> --session-id "<当前群聊 sessionId>" --name <player_word_1 或 player_word_2>
+
+查到后立刻用一句话描述你的词，不要说出词本身。不要等待下一次通知。
+```
+
 ### 3. 发言、投票和状态更新
 
-- 需要发言时，按座位顺序请玩家用一句话描述自己的词，不要说出词本身。
+- 第一轮发言由“查词任务”直接产出：玩家查到词后应立刻给一句描述，不要再单独等待第二次发言任务。
+- 第二轮及以后需要发言时，按座位顺序请存活玩家用一句话描述自己的词，不要说出词本身。
+- 收齐本轮所有玩家发言后，必须先把完整发言汇总写入一个全员可见的 session 级 GroupContext：
+  - name 使用 `round_speeches_N`，其中 `N` 是当前轮次，例如 `round_speeches_1`。
+  - content 写清轮次、每位玩家名称和原始发言。
+  - visible_to 使用 `{"userIds": []}`，确保全员可见。
+  - collect_from 使用裁判 Bot 名称。
+- 写入 `round_speeches_N` 成功后，再通知各个 Bot 玩家：先查询本轮 `round_speeches_N`，阅读所有人的发言，然后必须投给一名仍存活玩家。
+- 玩家之间在主从模式下看不到彼此输出，所以不能只依赖群聊/协作节点历史；投票前必须通过 `round_speeches_N` 共享本轮发言。
+- 投票规则：玩家必须投人，直接说出被投玩家的 Bot 名称，例如“我投玩家张三”，不能弃权。
 - 收到发言后做简短汇总，不评价谁像卧底，不给倾向性提示。
-- 需要投票时，让玩家只回复“我投N号”或“我弃权”。
 - 有人出局或阶段变化时，只更新 `player_state`，并提供清晰的 `--change-reason`。
 - 终局前不公布任何人的身份、词语或 `player_role` 内容。
 
