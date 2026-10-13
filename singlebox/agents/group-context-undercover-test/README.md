@@ -118,18 +118,20 @@
 
 ## 目录结构
 
+本 profile 的每个 Bot 目录只保留 singlebox 动态 Bot 系统必需的 3 个 profile 文件；所有实际指令都集中在 `AGENTS.md`，`IDENTITY.md` 和 `KNOWLEDGE.md` 只保留最小说明，避免多文件 prompt 漂移。
+
 ```text
 group-context-undercover-test/
 ├── bots.json
-├── README.md                                  # 本文件
-├── referee/                                   # 裁判
-│   ├── IDENTITY.md KNOWLEDGE.md MEMORY.md ...  # 12 个 profile 文件
-│   └── skills/groupcontext-undercover/
-│       └── SKILL.md                           # 阶段机 + GroupContext API 用
+├── README.md
+├── referee/
+│   ├── AGENTS.md      # 裁判完整指令
+│   ├── IDENTITY.md    # 必需文件，指向 AGENTS.md
+│   └── KNOWLEDGE.md   # 必需文件，指向 AGENTS.md
 └── player-{zhangsan,lisi,wangwu,zhaoliu,qianqi}/
-    ├── IDENTITY.md KNOWLEDGE.md ... SOUL.md    # 10 个 profile 文件
-    └── skills/groupcontext-undercover/
-        └── SKILL.md                           # 玩家：get 词 + 发言/投票协议
+    ├── AGENTS.md      # 玩家完整指令
+    ├── IDENTITY.md    # 必需文件，指向 AGENTS.md
+    └── KNOWLEDGE.md   # 必需文件，指向 AGENTS.md
 ```
 
 ## 参考
