@@ -90,6 +90,8 @@ class WorkerRuntimeStateService:
         self,
         worker_id: str,
         updated_by: Optional[str] = None,
+        *,
+        defer_vector_sync: bool = False,
     ) -> Worker:
         """
         设置 Worker 为在线状态
@@ -152,7 +154,8 @@ class WorkerRuntimeStateService:
 
         # 如果已经是 online，同步 worker.state 后返回
         if old_state == WorkerRuntimeState.ONLINE:
-            self._sync_vector_runtime_state(worker_id, WorkerRuntimeState.ONLINE)
+            if not defer_vector_sync:
+                self._sync_vector_runtime_state(worker_id, WorkerRuntimeState.ONLINE)
             # 确保 worker.state.runtime_state 同步
             if isinstance(worker, dict):
                 # OSS mode: dict worker
@@ -268,7 +271,8 @@ class WorkerRuntimeStateService:
             worker_id, (perf_counter() - phase_started_at) * 1000,
         )
 
-        self._sync_vector_runtime_state(worker_id, WorkerRuntimeState.ONLINE)
+        if not defer_vector_sync:
+            self._sync_vector_runtime_state(worker_id, WorkerRuntimeState.ONLINE)
 
         logger.info(f"[RuntimeStateService] Worker {worker_id} set to ONLINE by {updated_by}")
 
@@ -279,6 +283,31 @@ class WorkerRuntimeStateService:
             worker_id, (perf_counter() - started_at) * 1000,
         )
         return worker
+
+    def sync_online_vectors_if_current(self, worker_id: str) -> None:
+        """Apply deferred online vector work only while the worker remains online."""
+        worker = self._registry_store.get_by_id(worker_id)
+        if worker is None:
+            logger.info("[ONLINE-TIMING] phase=vector_sync_skipped worker_id=%s reason=worker_missing", worker_id)
+            return
+        if not isinstance(worker, dict) and worker.lifecycle_state in (
+            WorkerLifecycleState.DISABLED, WorkerLifecycleState.INACTIVE
+        ):
+            logger.info("[ONLINE-TIMING] phase=vector_sync_skipped worker_id=%s reason=inactive", worker_id)
+            return
+        state = self._runtime_state_store.get_runtime_state(worker_id)
+        if isinstance(state, dict):
+            state = state.get("state")
+        if state != WorkerRuntimeState.ONLINE:
+            logger.info("[ONLINE-TIMING] phase=vector_sync_skipped worker_id=%s reason=not_online", worker_id)
+            return
+        logger.info("[ONLINE-TIMING] phase=deferred_vector_sync_start worker_id=%s", worker_id)
+        try:
+            self._sync_vector_runtime_state(worker_id, WorkerRuntimeState.ONLINE)
+        except Exception:
+            logger.exception("[ONLINE-TIMING] phase=deferred_vector_sync_failed worker_id=%s", worker_id)
+            return
+        logger.info("[ONLINE-TIMING] phase=deferred_vector_sync_done worker_id=%s", worker_id)
 
     def _sync_vector_runtime_state(self, worker_id: str, state: WorkerRuntimeState) -> None:
         if self._vector_store is None:
