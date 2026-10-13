@@ -1,0 +1,712 @@
+GroupContextScopeLevel:
+  type: string
+  enum:
+    - group
+    - session
+    - round
+  description: >-
+    The scope level at which a context entry lives. `group` is for
+    group-wide contexts, `session` for session-scoped contexts, and
+    `round` for per-round contexts.
+
+GroupContextPolicy:
+  type: object
+  additionalProperties: false
+  required:
+    - userIds
+  properties:
+    userIds:
+      type: array
+      items:
+        type: string
+      description: >-
+        For `visible_to`: empty array means visible to everyone.
+        For `collect_from`: must not be empty.
+  description: >-
+    Policy object for `visible_to` and `collect_from`. A `visible_to`
+    with an empty `userIds` array means the context is visible to every
+    actor in the scope. A `collect_from` with an empty `userIds` array
+    is invalid and will return `invalid_param`.
+
+GroupContextPermission:
+  type: string
+  enum:
+    - R
+    - W
+    - WR
+  description: >-
+    R = readable only (visible_to only). W = writable only (collect_from
+    only). WR = both readable and writable (in both lists).
+
+GroupContextStatus:
+  type: string
+  enum:
+    - ok
+    - invalid_param
+    - permission_denied
+    - not_found
+    - conflict
+    - payload_too_large
+    - internal_error
+  description: >-
+    Status returned by every Group Context endpoint. `ok` on success;
+    otherwise the error type that maps to an HTTP status code.
+
+GroupContextTime:
+  type: string
+  format: date-time
+  description: RFC3339 UTC timestamp returned by Group Context APIs.
+
+GroupContextTimeInput:
+  oneOf:
+    - type: string
+      format: date-time
+      description: RFC3339 datetime with timezone, e.g. 2026-10-12T14:56:08+08:00.
+    - type: string
+      pattern: '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
+      description: Server-local naive datetime, e.g. 2026-10-12 14:56:08. Pure dates are rejected.
+    - type: integer
+      format: int64
+      description: Unix timestamp seconds or milliseconds.
+  description: >-
+    Business validity time input. Pure date strings such as 2026-10-12
+    are not accepted.
+
+GroupContextEntrySummary:
+  type: object
+  additionalProperties: false
+  required:
+    - name
+    - scope_level
+    - scope
+    - permission
+    - gmt_create
+    - gmt_modified
+  properties:
+    name:
+      type: string
+      minLength: 1
+      description: Context name, unique within a (name, scope) current-version pair.
+    scope_level:
+      $ref: "#/GroupContextScopeLevel"
+    scope:
+      type: string
+      minLength: 1
+      description: Raw scope value copied from groupId, sessionId, or roundId.
+    permission:
+      $ref: "#/GroupContextPermission"
+    gmt_create:
+      $ref: "#/GroupContextTime"
+    gmt_modified:
+      $ref: "#/GroupContextTime"
+  description: >-
+    Meta-only list response item. It intentionally omits content,
+    valid_from, and valid_to; use get to read content and business validity.
+
+GroupContextItem:
+  type: object
+  additionalProperties: false
+  required:
+    - name
+    - scope_level
+    - content
+    - valid_from
+    - valid_to
+  properties:
+    name:
+      type: string
+      minLength: 1
+    scope_level:
+      $ref: "#/GroupContextScopeLevel"
+    content:
+      type: string
+      maxLength: 4096
+      description: The raw content string (at most 4 KB).
+    valid_from:
+      $ref: "#/GroupContextTime"
+    valid_to:
+      anyOf:
+        - $ref: "#/GroupContextTime"
+        - type: "null"
+      description: Business validity end; null means no declared end.
+  description: >-
+    A single item in a get response, with content and business validity fields.
+
+GroupContextAck:
+  type: object
+  additionalProperties: false
+  required:
+    - status
+    - error_msg
+  properties:
+    status:
+      $ref: "#/GroupContextStatus"
+    error_msg:
+      type:
+        - string
+        - "null"
+      description: Human-readable error description; null when status is `ok`.
+
+GroupContextListResponse:
+  type: object
+  additionalProperties: false
+  required:
+    - contexts
+  properties:
+    contexts:
+      type: array
+      items:
+        $ref: "#/GroupContextEntrySummary"
+
+GroupContextGetResponse:
+  type: object
+  additionalProperties: false
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/GroupContextItem"
+
+AddGroupContextRequest:
+  type: object
+  additionalProperties: false
+  required:
+    - name
+    - scope_level
+    - content
+    - visible_to
+    - collect_from
+  properties:
+    name:
+      type: string
+      minLength: 1
+      description: Context name (e.g. "game_rule", "player_word_1").
+    scope_level:
+      $ref: "#/GroupContextScopeLevel"
+    content:
+      type: string
+      maxLength: 4096
+      description: >-
+        Content text (max 4096 bytes / 4 KB).
+    visible_to:
+      $ref: "#/GroupContextPolicy"
+    collect_from:
+      $ref: "#/GroupContextPolicy"
+    valid_from:
+      $ref: "#/GroupContextTimeInput"
+      description: Business validity start; omitted defaults to server current time.
+    valid_to:
+      anyOf:
+        - $ref: "#/GroupContextTimeInput"
+        - type: "null"
+      description: Business validity end; omitted defaults to null.
+
+UpdateGroupContextRequest:
+  type: object
+  additionalProperties: false
+  required:
+    - name
+    - scope_level
+  properties:
+    name:
+      type: string
+      minLength: 1
+    scope_level:
+      $ref: "#/GroupContextScopeLevel"
+    content:
+      type: string
+      maxLength: 4096
+      description: New content; omitted to keep current value.
+    change_reason:
+      type: string
+      description: Reason for the supersede; omitted to leave null.
+    visible_to:
+      $ref: "#/GroupContextPolicy"
+      description: >-
+        New visible policy; omitted to keep current value.
+    collect_from:
+      $ref: "#/GroupContextPolicy"
+      description: >-
+        New write policy; omitted to keep current value.
+    valid_from:
+      $ref: "#/GroupContextTimeInput"
+      description: New business validity start; omitted to keep current value.
+    valid_to:
+      anyOf:
+        - $ref: "#/GroupContextTimeInput"
+        - type: "null"
+      description: New business validity end; omitted to keep current value.
+
+ListGroupContextsRequest:
+  type: object
+  additionalProperties: false
+  properties:
+    scope_levels:
+      type: array
+      items:
+        $ref: "#/GroupContextScopeLevel"
+      description: >-
+        Filter by scope levels. Defaults to all levels
+        ["group","session","round"] when omitted or null.
+
+GetGroupContextRequest:
+  type: object
+  additionalProperties: false
+  required:
+    - name
+  properties:
+    name:
+      type: string
+      minLength: 1
+      description: Exact context name to look up.
+    scope_levels:
+      type: array
+      items:
+        $ref: "#/GroupContextScopeLevel"
+      description: >-
+        Filter by scope levels. Defaults to all levels when omitted.
+    limit:
+      type: integer
+      minimum: 1
+      maximum: 100
+      default: 10
+      description: >-
+        Max items to return. Currently at most one item per selected
+        scope level exists, so limit is for forward compatibility.
+
+SystemSetGroupContextRequest:
+  type: object
+  additionalProperties: false
+  required:
+    - name
+    - scope_level
+    - content
+    - visible_to
+    - collect_from
+  properties:
+    name:
+      type: string
+      minLength: 1
+    scope_level:
+      $ref: "#/GroupContextScopeLevel"
+    content:
+      type: string
+      maxLength: 4096
+    visible_to:
+      $ref: "#/GroupContextPolicy"
+    collect_from:
+      $ref: "#/GroupContextPolicy"
+    valid_from:
+      $ref: "#/GroupContextTimeInput"
+      description: Business validity start; omitted defaults to server current time.
+    valid_to:
+      anyOf:
+        - $ref: "#/GroupContextTimeInput"
+        - type: "null"
+      description: Business validity end; omitted defaults to null.
+
+AddGroupContextPath:
+  post:
+    operationId: add_group_context
+    tags:
+      - Group Context
+    summary: Add a new current context entry.
+    x-avernet-security:
+      app: required
+    x-avernet-raw-response: true
+    description: >-
+      Creates a new context with the given name, scope level, content,
+      policy, and optional business validity range. Returns `conflict`
+      if a current version (`is_superseded=false`) already exists for
+      the same (name, scope) pair, regardless of business valid_to.
+
+      The calling actor must be in `collect_from.userIds`. The direct
+      backend auth path resolves the actor server-side; clients must NOT
+      send actor id in the request body or URL query. `groupId` is always required;
+      `sessionId` is required when scope_level=session; `roundId` is
+      required when scope_level=round.
+
+    parameters:
+      - name: groupId
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+        description: Group identifier (always required).
+      - name: sessionId
+        in: query
+        required: false
+        schema:
+          type: string
+        description: >-
+          Session identifier. Required when scope_level=session.
+      - name: roundId
+        in: query
+        required: false
+        schema:
+          type: string
+        description: >-
+          Round identifier. Required when scope_level=round.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/AddGroupContextRequest"
+    responses:
+      "200":
+        description: Context created successfully.
+        content:
+          application/json:
+            schema:
+              $ref: "#/GroupContextAck"
+      "400":
+        description: Invalid parameter (missing required field, blank value, unsupported scope level, empty collect_from.userIds, content too large).
+        x-error-codes:
+          - invalid_param
+        content:
+          application/json:
+            schema:
+              $ref: "#/GroupContextAck"
+      "403":
+        description: Actor is not in collect_from.userIds.
+        x-error-codes:
+          - permission_denied
+        content:
+          application/json:
+            schema:
+              $ref: "#/GroupContextAck"
+      "409":
+        description: A current version already exists for (name, scope).
+        x-error-codes:
+          - conflict
+        content:
+          application/json:
+            schema:
+              $ref: "#/GroupContextAck"
+      "413":
+        description: Content byte length exceeds 4096.
+        x-error-codes:
+          - payload_too_large
+        content:
+          application/json:
+            schema:
+              $ref: "#/GroupContextAck"
+      "500":
+        description: Internal server error.
+        x-error-codes:
+          - internal_error
+        content:
+          application/json:
+            schema:
+              $ref: "#/GroupContextAck"
+
+UpdateGroupContextPath:
+  post:
+    operationId: update_group_context
+    tags:
+      - Group Context
+    summary: Update an existing context (supersede).
+    x-avernet-security:
+      app: required
+    x-avernet-raw-response: true
+    description: >-
+      Atomically supersedes the current version: marks the old row
+      `is_superseded=true`, sets `gmt_superseded` to the write timestamp,
+      then writes a new row with `is_superseded=false` and `supersedes`
+      pointing to the old entry's physical `id`. Omitted fields
+      (`content`, `visible_to`, `collect_from`, `valid_from`, `valid_to`)
+      preserve their old values. Returns `not_found` if no current version
+      exists. Returns `conflict` on a concurrent supersede race.
+
+      The calling actor must be in the current version's
+      `collect_from.userIds`.
+
+    parameters:
+      - name: groupId
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+        description: Group identifier (always required).
+      - name: sessionId
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Session identifier (required when scope_level=session).
+      - name: roundId
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Round identifier (required when scope_level=round).
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/UpdateGroupContextRequest"
+    responses:
+      "200":
+        description: Context superseded successfully.
+        content:
+          application/json:
+            schema:
+              $ref: "#/GroupContextAck"
+      "400":
+        description: Invalid parameter.
+        x-error-codes:
+          - invalid_param
+        content:
+          application/json:
+            schema:
+              $ref: "#/GroupContextAck"
+      "403":
+        description: Actor is not in the current version's collect_from.userIds.
+        x-error-codes:
+          - permission_denied
+        content:
+          application/json:
+            schema:
+              $ref: "#/GroupContextAck"
+      "404":
+        description: No current version exists for (name, scope).
+        x-error-codes:
+          - not_found
+        content:
+          application/json:
+            schema:
+              $ref: "#/GroupContextAck"
+      "409":
+        description: Concurrent supersede race lost.
+        x-error-codes:
+          - conflict
+        content:
+          application/json:
+            schema:
+              $ref: "#/GroupContextAck"
+      "413":
+        description: Content too large.
+        x-error-codes:
+          - payload_too_large
+        content:
+          application/json:
+            schema:
+              $ref: "#/GroupContextAck"
+      "500":
+        description: Internal server error.
+        x-error-codes:
+          - internal_error
+        content:
+          application/json:
+            schema:
+              $ref: "#/GroupContextAck"
+
+ListGroupContextsPath:
+  post:
+    operationId: list_group_contexts
+    tags:
+      - Group Context
+    summary: List all contexts visible or writable by the current actor.
+    x-avernet-security:
+      app: required
+    x-avernet-raw-response: true
+    description: >-
+      Returns current entries where the actor appears in either
+      `visible_to.userIds` or `collect_from.userIds`, annotated with
+      the effective permission label (R/W/WR). Each (name, scope)
+      yields at most one current entry (`is_superseded=false`). List is
+      meta-only and intentionally omits content, valid_from, and valid_to.
+
+      Scope filtering is applied by scope_level. Default is all levels
+      ["group", "session", "round"].
+    parameters:
+      - name: groupId
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: sessionId
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: roundId
+        in: query
+        required: false
+        schema:
+          type: string
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: "#/ListGroupContextsRequest"
+    responses:
+      "200":
+        description: List of visible/writable contexts.
+        content:
+          application/json:
+            schema:
+              $ref: "#/GroupContextListResponse"
+      "400":
+        description: Invalid parameter (unsupported scope level).
+        x-error-codes:
+          - invalid_param
+        content:
+          application/json:
+            schema:
+              $ref: "#/GroupContextAck"
+      "500":
+        description: Internal server error.
+        x-error-codes:
+          - internal_error
+        content:
+          application/json:
+            schema:
+              $ref: "#/GroupContextAck"
+
+GetGroupContextPath:
+  post:
+    operationId: get_group_context
+    tags:
+      - Group Context
+    summary: Look up a context by name, returning its content.
+    x-avernet-security:
+      app: required
+    x-avernet-raw-response: true
+    description: >-
+      Returns current entries whose `name` matches exactly and whose
+      `visible_to.userIds` contains the actor. Results are sorted from
+      finest to broadest: round first, then session, then group.
+      Each (name, scope) yields at most one current entry (`is_superseded=false`).
+      Business valid_from/valid_to do not filter get results.
+
+      If the name exists but the actor is not in `visible_to`, the
+      `items` array is empty — the API does not distinguish "not found"
+      from "not visible" for security.
+
+    parameters:
+      - name: groupId
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: sessionId
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: roundId
+        in: query
+        required: false
+        schema:
+          type: string
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/GetGroupContextRequest"
+    responses:
+      "200":
+        description: Named contexts and their content (sorted finest-to-broadest).
+        content:
+          application/json:
+            schema:
+              $ref: "#/GroupContextGetResponse"
+      "400":
+        description: Invalid parameter (missing name, invalid scope level).
+        x-error-codes:
+          - invalid_param
+        content:
+          application/json:
+            schema:
+              $ref: "#/GroupContextAck"
+      "500":
+        description: Internal server error.
+        x-error-codes:
+          - internal_error
+        content:
+          application/json:
+            schema:
+              $ref: "#/GroupContextAck"
+
+SystemSetGroupContextPath:
+  post:
+    operationId: systemset_group_context
+    tags:
+      - Group Context
+    summary: Create or supersede a context — BCN system only.
+    x-avernet-security:
+      app: required
+    x-avernet-raw-response: true
+    description: >-
+      Update-or-create: if no current version exists for (name, scope),
+      creates a new entry; otherwise supersedes the current version.
+      Unlike `add` and `update`, the `systemset` endpoint does **not**
+      require the actor to be present in `collect_from.userIds`. The
+      BCN system has unrestricted access.
+
+      No actor id query parameter is expected for this endpoint.
+    parameters:
+      - name: groupId
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: sessionId
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: roundId
+        in: query
+        required: false
+        schema:
+          type: string
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/SystemSetGroupContextRequest"
+    responses:
+      "200":
+        description: Context created or superseded successfully.
+        content:
+          application/json:
+            schema:
+              $ref: "#/GroupContextAck"
+      "400":
+        description: Invalid parameter (empty collect_from.userIds, content too large, bad enum).
+        x-error-codes:
+          - invalid_param
+        content:
+          application/json:
+            schema:
+              $ref: "#/GroupContextAck"
+      "413":
+        description: Content too large.
+        x-error-codes:
+          - payload_too_large
+        content:
+          application/json:
+            schema:
+              $ref: "#/GroupContextAck"
+      "500":
+        description: Internal server error.
+        x-error-codes:
+          - internal_error
+        content:
+          application/json:
+            schema:
+              $ref: "#/GroupContextAck"

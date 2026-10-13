@@ -1,7 +1,7 @@
 use axum::{
-    extract::DefaultBodyLimit,
-    routing::{delete, get, patch, post, put, MethodRouter},
     Router,
+    extract::DefaultBodyLimit,
+    routing::{MethodRouter, delete, get, patch, post, put},
 };
 use bcs_channel_api::ChannelHttpMethod;
 
@@ -208,17 +208,35 @@ fn build_api_routes() -> Router<HttpAppState> {
             post(routes::friend_connections::create_friend_request)
                 .get(routes::friend_connections::list_friend_requests),
         )
-        .route("/collaboration/friend-connections/requests/{id}/accept", post(routes::friend_connections::accept_friend_request))
-        .route("/collaboration/friend-connections/requests/{id}/reject", post(routes::friend_connections::reject_friend_request))
-        .route("/collaboration/friend-connections/requests/{id}/cancel", post(routes::friend_connections::cancel_friend_request))
-        .route("/collaboration/friend-connections/{actor}", delete(routes::friend_connections::revoke_friend))
-        .route("/collaboration/friend-connections", get(routes::friend_connections::list_friends_by_actor))
+        .route(
+            "/collaboration/friend-connections/requests/{id}/accept",
+            post(routes::friend_connections::accept_friend_request),
+        )
+        .route(
+            "/collaboration/friend-connections/requests/{id}/reject",
+            post(routes::friend_connections::reject_friend_request),
+        )
+        .route(
+            "/collaboration/friend-connections/requests/{id}/cancel",
+            post(routes::friend_connections::cancel_friend_request),
+        )
+        .route(
+            "/collaboration/friend-connections/{actor}",
+            delete(routes::friend_connections::revoke_friend),
+        )
+        .route(
+            "/collaboration/friend-connections",
+            get(routes::friend_connections::list_friends_by_actor),
+        )
         .route("/bots/search", get(routes::bots::search_bots))
         .route(
             "/bots/{id}/admission",
             get(routes::admission::get_admission),
         )
-        .route("/groups", get(routes::groups::list_groups).post(routes::groups::create_group))
+        .route(
+            "/groups",
+            get(routes::groups::list_groups).post(routes::groups::create_group),
+        )
         .route("/groups/my", get(routes::groups::list_my_groups))
         .route(
             "/groups/{id}",
@@ -247,7 +265,18 @@ fn build_api_routes() -> Router<HttpAppState> {
             "/collaboration/definitions/validate",
             post(routes::collaboration_definitions::validate_collaboration_definition_yaml),
         )
-        .route("/groups/request", post(routes::group_requests::group_request))
+        .route("/groupcontext/add", post(routes::group_context::add))
+        .route("/groupcontext/update", post(routes::group_context::update))
+        .route("/groupcontext/list", post(routes::group_context::list))
+        .route("/groupcontext/get", post(routes::group_context::get))
+        .route(
+            "/groupcontext/systemset",
+            post(routes::group_context::systemset),
+        )
+        .route(
+            "/groups/request",
+            post(routes::group_requests::group_request),
+        )
         .route(
             "/groups/{token}/confirm",
             get(routes::group_requests::confirm_group_page)
@@ -373,8 +402,7 @@ fn build_api_routes() -> Router<HttpAppState> {
         )
         .route(
             "/sessions/{sid}/collect",
-            post(routes::sessions::collect_session)
-                .delete(routes::sessions::uncollect_session),
+            post(routes::sessions::collect_session).delete(routes::sessions::uncollect_session),
         )
         .route(
             "/sessions/{sid}/members",
@@ -386,12 +414,30 @@ fn build_api_routes() -> Router<HttpAppState> {
                 .patch(routes::sessions::update_session_participant_mode),
         )
         .route("/sessions/{sid}/chat", post(routes::sessions::session_chat))
-        .route("/admin/message-delivery/policy", get(routes::delivery_policy::get).put(routes::delivery_policy::put))
-        .route("/openapi/v1/collaboration/messages/{message_id}/deliveries", get(routes::message_deliveries::get))
-        .route("/openapi/v1/collaboration/sessions/{session_id}/message-deliveries/query", post(routes::message_deliveries::query))
-        .route("/openapi/v1/collaboration/messages/{message_id}/deliveries/{delivery_id}/cancel", post(routes::message_deliveries::cancel_one))
-        .route("/openapi/v1/collaboration/messages/{message_id}/deliveries/{delivery_id}/resolve", post(routes::message_deliveries::resolve_one))
-        .route("/openapi/v1/collaboration/messages/{message_id}/deliveries/cancel", post(routes::message_deliveries::cancel_message))
+        .route(
+            "/admin/message-delivery/policy",
+            get(routes::delivery_policy::get).put(routes::delivery_policy::put),
+        )
+        .route(
+            "/openapi/v1/collaboration/messages/{message_id}/deliveries",
+            get(routes::message_deliveries::get),
+        )
+        .route(
+            "/openapi/v1/collaboration/sessions/{session_id}/message-deliveries/query",
+            post(routes::message_deliveries::query),
+        )
+        .route(
+            "/openapi/v1/collaboration/messages/{message_id}/deliveries/{delivery_id}/cancel",
+            post(routes::message_deliveries::cancel_one),
+        )
+        .route(
+            "/openapi/v1/collaboration/messages/{message_id}/deliveries/{delivery_id}/resolve",
+            post(routes::message_deliveries::resolve_one),
+        )
+        .route(
+            "/openapi/v1/collaboration/messages/{message_id}/deliveries/cancel",
+            post(routes::message_deliveries::cancel_message),
+        )
         .route(
             "/sessions/{sid}/messages",
             get(routes::sessions::get_session_messages),

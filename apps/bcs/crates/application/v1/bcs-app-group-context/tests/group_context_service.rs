@@ -1,0 +1,718 @@
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use bcs_app_group_context::GroupContextApplicationServiceImpl;
+use bcs_domain::{GroupContextEntry, GroupContextPermission, GroupContextPolicy, ScopeLevel};
+use bcs_group_context_store::{
+    GroupContextRepo, GroupContextStoreError, MemoryGroupContextRepo, NewGroupContextEntry,
+    StoreResult,
+};
+use bcs_service_api::application::v1::{
+    AddGroupContext, ApplicationError, GetGroupContext, GroupContextApplicationService,
+    GroupContextRequestContext, ListGroupContexts, SystemSetGroupContext, UpdateGroupContext,
+};
+use chrono::{Duration, TimeZone, Utc};
+
+fn ctx() -> GroupContextRequestContext {
+    GroupContextRequestContext {
+        group_id: "game-room-7".into(),
+        session_id: Some("sess-001".into()),
+        round_id: Some("round-003".into()),
+    }
+}
+
+fn policy(users: &[&str]) -> GroupContextPolicy {
+    GroupContextPolicy::users(users.iter().copied())
+}
+
+fn service(repo: Arc<dyn GroupContextRepo>) -> GroupContextApplicationServiceImpl {
+    GroupContextApplicationServiceImpl::new(repo)
+}
+
+fn assert_code(error: ApplicationError, code: &str) {
+    assert_eq!(error.code(), code, "unexpected error: {error}");
+}
+
+#[derive(Clone, Default)]
+struct ConflictOnSupersedeRepo {
+    inner: MemoryGroupContextRepo,
+}
+
+#[async_trait]
+impl GroupContextRepo for ConflictOnSupersedeRepo {
+    async fn create_active(&self, params: NewGroupContextEntry) -> StoreResult<GroupContextEntry> {
+        self.inner.create_active(params).await
+    }
+
+    async fn supersede_active(
+        &self,
+        name: &str,
+        scope: &str,
+        _params: NewGroupContextEntry,
+    ) -> StoreResult<GroupContextEntry> {
+        Err(GroupContextStoreError::Conflict {
+            name: name.to_string(),
+            scope: scope.to_string(),
+        })
+    }
+
+    async fn get_active(&self, name: &str, scope: &str) -> StoreResult<Option<GroupContextEntry>> {
+        self.inner.get_active(name, scope).await
+    }
+
+    async fn list_active_by_scopes(
+        &self,
+        scopes: &[String],
+    ) -> StoreResult<Vec<GroupContextEntry>> {
+        self.inner.list_active_by_scopes(scopes).await
+    }
+
+    async fn list_versions(&self, context_id: &str) -> StoreResult<Vec<GroupContextEntry>> {
+        self.inner.list_versions(context_id).await
+    }
+}
+
+#[tokio::test]
+async fn add_resolves_raw_scope_and_rejects_duplicate_active() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = service(repo.clone());
+
+    app.add(AddGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "player_state".into(),
+        scope_level: ScopeLevel::Session,
+        content: "张三出局".into(),
+        visible_to: policy(&[]),
+        collect_from: policy(&["judge_bot"]),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("add succeeds");
+
+    let active = repo
+        .get_active("player_state", "sess-001")
+        .await
+        .expect("store ok")
+        .expect("active row");
+    assert_eq!(active.scope, "sess-001");
+    assert_eq!(active.scope_level, ScopeLevel::Session);
+
+    let error = app
+        .add(AddGroupContext {
+            actor_id: "judge_bot".into(),
+            request_context: ctx(),
+            name: "player_state".into(),
+            scope_level: ScopeLevel::Session,
+            content: "李四出局".into(),
+            visible_to: policy(&[]),
+            collect_from: policy(&["judge_bot"]),
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect_err("duplicate active conflicts");
+    assert_code(error, "conflict");
+}
+
+#[tokio::test]
+async fn add_validates_content_collect_from_actor_and_required_scope_params() {
+    let app = service(Arc::new(MemoryGroupContextRepo::new()));
+
+    let error = app
+        .add(AddGroupContext {
+            actor_id: "judge_bot".into(),
+            request_context: ctx(),
+            name: "too_big".into(),
+            scope_level: ScopeLevel::Group,
+            content: "x".repeat(4097),
+            visible_to: policy(&[]),
+            collect_from: policy(&["judge_bot"]),
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect_err("oversize rejected");
+    assert_code(error, "payload_too_large");
+
+    let error = app
+        .add(AddGroupContext {
+            actor_id: "judge_bot".into(),
+            request_context: ctx(),
+            name: "empty_collect".into(),
+            scope_level: ScopeLevel::Group,
+            content: "ok".into(),
+            visible_to: policy(&[]),
+            collect_from: policy(&[]),
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect_err("empty collect_from rejected");
+    assert_code(error, "invalid_param");
+
+    let error = app
+        .add(AddGroupContext {
+            actor_id: "other_bot".into(),
+            request_context: ctx(),
+            name: "not_writer".into(),
+            scope_level: ScopeLevel::Group,
+            content: "ok".into(),
+            visible_to: policy(&[]),
+            collect_from: policy(&["judge_bot"]),
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect_err("actor must be collect_from member");
+    assert_code(error, "permission_denied");
+
+    let error = app
+        .add(AddGroupContext {
+            actor_id: "judge_bot".into(),
+            request_context: GroupContextRequestContext {
+                group_id: "game-room-7".into(),
+                session_id: None,
+                round_id: None,
+            },
+            name: "missing_session".into(),
+            scope_level: ScopeLevel::Session,
+            content: "ok".into(),
+            visible_to: policy(&[]),
+            collect_from: policy(&["judge_bot"]),
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect_err("selected session scope requires sessionId");
+    assert_code(error, "invalid_param");
+}
+
+#[tokio::test]
+async fn update_supersedes_preserves_omitted_fields_and_uses_old_writer_policy() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = service(repo.clone());
+    app.add(AddGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "player_state".into(),
+        scope_level: ScopeLevel::Session,
+        content: "第一轮".into(),
+        visible_to: policy(&["张三"]),
+        collect_from: policy(&["judge_bot"]),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("add succeeds");
+    let old = repo
+        .get_active("player_state", "sess-001")
+        .await
+        .expect("store ok")
+        .expect("old active");
+
+    app.update(UpdateGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "player_state".into(),
+        scope_level: ScopeLevel::Session,
+        content: Some("第二轮".into()),
+        change_reason: Some("第一轮投票".into()),
+        visible_to: None,
+        collect_from: None,
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("update succeeds");
+
+    let active = repo
+        .get_active("player_state", "sess-001")
+        .await
+        .expect("store ok")
+        .expect("new active");
+    assert_eq!(active.content, "第二轮");
+    assert_eq!(active.visible_to, old.visible_to);
+    assert_eq!(active.collect_from, old.collect_from);
+    assert_eq!(active.context_id, old.context_id);
+    assert_eq!(active.supersedes, Some(old.id));
+    assert_eq!(active.change_reason.as_deref(), Some("第一轮投票"));
+
+    let versions = repo
+        .list_versions(&active.context_id)
+        .await
+        .expect("versions ok");
+    assert_eq!(versions.len(), 2);
+    assert!(versions.iter().any(|row| {
+        row.id == old.id
+            && row.is_superseded
+            && row.gmt_superseded.is_some()
+            && row.valid_to == old.valid_to
+    }));
+}
+
+#[tokio::test]
+async fn add_defaults_validity_and_preserves_explicit_validity() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = service(repo.clone());
+    let before = Utc::now();
+
+    app.add(AddGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "default_validity".into(),
+        scope_level: ScopeLevel::Session,
+        content: "默认有效期".into(),
+        visible_to: policy(&[]),
+        collect_from: policy(&["judge_bot"]),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("add with default validity succeeds");
+
+    let defaulted = repo
+        .get_active("default_validity", "sess-001")
+        .await
+        .expect("store ok")
+        .expect("active row");
+    assert!(defaulted.valid_from >= before);
+    assert!(defaulted.valid_from <= Utc::now());
+    assert_eq!(defaulted.valid_to, None);
+
+    let explicit_from = Utc.with_ymd_and_hms(2026, 10, 12, 8, 0, 0).unwrap();
+    let explicit_to = Utc.with_ymd_and_hms(2026, 10, 13, 8, 0, 0).unwrap();
+    app.add(AddGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "explicit_validity".into(),
+        scope_level: ScopeLevel::Session,
+        content: "显式有效期".into(),
+        visible_to: policy(&[]),
+        collect_from: policy(&["judge_bot"]),
+        valid_from: Some(explicit_from),
+        valid_to: Some(explicit_to),
+    })
+    .await
+    .expect("add with explicit validity succeeds");
+
+    let explicit = repo
+        .get_active("explicit_validity", "sess-001")
+        .await
+        .expect("store ok")
+        .expect("active row");
+    assert_eq!(explicit.valid_from, explicit_from);
+    assert_eq!(explicit.valid_to, Some(explicit_to));
+}
+
+#[tokio::test]
+async fn update_inherits_omitted_validity_and_can_change_only_valid_range() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = service(repo.clone());
+    let original_from = Utc.with_ymd_and_hms(2026, 10, 12, 8, 0, 0).unwrap();
+    let original_to = Utc.with_ymd_and_hms(2026, 10, 12, 9, 0, 0).unwrap();
+
+    app.add(AddGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "validity_patch".into(),
+        scope_level: ScopeLevel::Session,
+        content: "原内容".into(),
+        visible_to: policy(&["张三"]),
+        collect_from: policy(&["judge_bot"]),
+        valid_from: Some(original_from),
+        valid_to: Some(original_to),
+    })
+    .await
+    .expect("add succeeds");
+
+    app.update(UpdateGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "validity_patch".into(),
+        scope_level: ScopeLevel::Session,
+        content: Some("新内容".into()),
+        change_reason: None,
+        visible_to: None,
+        collect_from: None,
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("content-only update succeeds");
+    let inherited = repo
+        .get_active("validity_patch", "sess-001")
+        .await
+        .expect("store ok")
+        .expect("active row");
+    assert_eq!(inherited.content, "新内容");
+    assert_eq!(inherited.valid_from, original_from);
+    assert_eq!(inherited.valid_to, Some(original_to));
+    assert_eq!(inherited.visible_to, policy(&["张三"]));
+    assert_eq!(inherited.collect_from, policy(&["judge_bot"]));
+
+    let changed_from = Utc.with_ymd_and_hms(2026, 10, 13, 8, 0, 0).unwrap();
+    let changed_to = Utc.with_ymd_and_hms(2026, 10, 13, 9, 0, 0).unwrap();
+    app.update(UpdateGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "validity_patch".into(),
+        scope_level: ScopeLevel::Session,
+        content: None,
+        change_reason: Some("只调整业务有效期".into()),
+        visible_to: None,
+        collect_from: None,
+        valid_from: Some(changed_from),
+        valid_to: Some(changed_to),
+    })
+    .await
+    .expect("validity-only update succeeds");
+    let changed = repo
+        .get_active("validity_patch", "sess-001")
+        .await
+        .expect("store ok")
+        .expect("active row");
+    assert_eq!(changed.content, "新内容");
+    assert_eq!(changed.visible_to, policy(&["张三"]));
+    assert_eq!(changed.collect_from, policy(&["judge_bot"]));
+    assert_eq!(changed.valid_from, changed_from);
+    assert_eq!(changed.valid_to, Some(changed_to));
+}
+
+#[tokio::test]
+async fn get_and_list_do_not_filter_by_business_valid_to() {
+    let app = service(Arc::new(MemoryGroupContextRepo::new()));
+    let past_from = Utc::now() - Duration::days(2);
+    let past_to = Utc::now() - Duration::days(1);
+
+    app.add(AddGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "expired_business_window".into(),
+        scope_level: ScopeLevel::Session,
+        content: "业务有效期已过但仍是当前版本".into(),
+        visible_to: policy(&["张三"]),
+        collect_from: policy(&["judge_bot"]),
+        valid_from: Some(past_from),
+        valid_to: Some(past_to),
+    })
+    .await
+    .expect("add succeeds");
+
+    let list = app
+        .list(ListGroupContexts {
+            actor_id: "张三".into(),
+            request_context: ctx(),
+            scope_levels: Some(vec![ScopeLevel::Session]),
+        })
+        .await
+        .expect("list succeeds");
+    assert_eq!(list.contexts.len(), 1);
+    assert_eq!(list.contexts[0].name, "expired_business_window");
+    assert_eq!(list.contexts[0].scope, "sess-001");
+    assert_eq!(list.contexts[0].permission, GroupContextPermission::R);
+
+    let get = app
+        .get(GetGroupContext {
+            actor_id: "张三".into(),
+            request_context: ctx(),
+            name: "expired_business_window".into(),
+            scope_levels: Some(vec![ScopeLevel::Session]),
+            limit: None,
+        })
+        .await
+        .expect("get succeeds");
+    assert_eq!(get.items.len(), 1);
+    assert_eq!(get.items[0].content, "业务有效期已过但仍是当前版本");
+    assert_eq!(get.items[0].valid_from, past_from);
+    assert_eq!(get.items[0].valid_to, Some(past_to));
+}
+
+#[tokio::test]
+async fn update_maps_missing_permission_and_stale_supersede() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = service(repo.clone());
+
+    let error = app
+        .update(UpdateGroupContext {
+            actor_id: "judge_bot".into(),
+            request_context: ctx(),
+            name: "missing".into(),
+            scope_level: ScopeLevel::Session,
+            content: Some("new".into()),
+            change_reason: None,
+            visible_to: None,
+            collect_from: None,
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect_err("missing row");
+    assert_code(error, "not_found");
+
+    app.add(AddGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: ctx(),
+        name: "private_write".into(),
+        scope_level: ScopeLevel::Session,
+        content: "old".into(),
+        visible_to: policy(&[]),
+        collect_from: policy(&["judge_bot"]),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("add succeeds");
+    let error = app
+        .update(UpdateGroupContext {
+            actor_id: "other_bot".into(),
+            request_context: ctx(),
+            name: "private_write".into(),
+            scope_level: ScopeLevel::Session,
+            content: Some("new".into()),
+            change_reason: None,
+            visible_to: None,
+            collect_from: None,
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect_err("old collect_from controls update permission");
+    assert_code(error, "permission_denied");
+
+    let conflict_repo = Arc::new(ConflictOnSupersedeRepo::default());
+    let conflict_app = service(conflict_repo);
+    conflict_app
+        .add(AddGroupContext {
+            actor_id: "judge_bot".into(),
+            request_context: ctx(),
+            name: "racy".into(),
+            scope_level: ScopeLevel::Session,
+            content: "old".into(),
+            visible_to: policy(&[]),
+            collect_from: policy(&["judge_bot"]),
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect("seed succeeds");
+    let error = conflict_app
+        .update(UpdateGroupContext {
+            actor_id: "judge_bot".into(),
+            request_context: ctx(),
+            name: "racy".into(),
+            scope_level: ScopeLevel::Session,
+            content: Some("new".into()),
+            change_reason: None,
+            visible_to: None,
+            collect_from: None,
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect_err("concurrent supersede maps to conflict");
+    assert_code(error, "conflict");
+}
+
+#[tokio::test]
+async fn systemset_update_or_create_without_actor_membership() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = service(repo.clone());
+
+    app.systemset(SystemSetGroupContext {
+        request_context: ctx(),
+        name: "game_rule".into(),
+        scope_level: ScopeLevel::Group,
+        content: "规则 v1".into(),
+        visible_to: policy(&[]),
+        collect_from: policy(&["admin"]),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("system create succeeds without actor");
+
+    app.systemset(SystemSetGroupContext {
+        request_context: ctx(),
+        name: "game_rule".into(),
+        scope_level: ScopeLevel::Group,
+        content: "规则 v2".into(),
+        visible_to: policy(&[]),
+        collect_from: policy(&["admin"]),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("system supersede succeeds");
+
+    let active = repo
+        .get_active("game_rule", "game-room-7")
+        .await
+        .expect("store ok")
+        .expect("active row");
+    assert_eq!(active.content, "规则 v2");
+    let versions = repo
+        .list_versions(&active.context_id)
+        .await
+        .expect("versions ok");
+    assert_eq!(versions.len(), 2);
+}
+
+#[tokio::test]
+async fn systemset_defaults_validity_on_create_and_supersede() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = service(repo.clone());
+    let explicit_from = Utc.with_ymd_and_hms(2026, 10, 12, 8, 0, 0).unwrap();
+    let explicit_to = Utc.with_ymd_and_hms(2026, 10, 12, 9, 0, 0).unwrap();
+
+    app.systemset(SystemSetGroupContext {
+        request_context: ctx(),
+        name: "system_validity".into(),
+        scope_level: ScopeLevel::Group,
+        content: "规则 v1".into(),
+        visible_to: policy(&[]),
+        collect_from: policy(&["admin"]),
+        valid_from: Some(explicit_from),
+        valid_to: Some(explicit_to),
+    })
+    .await
+    .expect("system create succeeds");
+    let before_supersede = Utc::now();
+
+    app.systemset(SystemSetGroupContext {
+        request_context: ctx(),
+        name: "system_validity".into(),
+        scope_level: ScopeLevel::Group,
+        content: "规则 v2".into(),
+        visible_to: policy(&[]),
+        collect_from: policy(&["admin"]),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("system supersede succeeds");
+
+    let active = repo
+        .get_active("system_validity", "game-room-7")
+        .await
+        .expect("store ok")
+        .expect("active row");
+    assert_eq!(active.content, "规则 v2");
+    assert!(active.valid_from >= before_supersede);
+    assert!(active.valid_from <= Utc::now());
+    assert_eq!(active.valid_to, None);
+}
+
+#[tokio::test]
+async fn list_filters_visible_or_writable_and_labels_permissions() {
+    let app = service(Arc::new(MemoryGroupContextRepo::new()));
+    for (name, visible_to, collect_from) in [
+        ("read_only", policy(&["张三"]), policy(&["judge_bot"])),
+        ("write_only", policy(&["李四"]), policy(&["张三"])),
+        ("read_write", policy(&["张三"]), policy(&["张三"])),
+        ("hidden", policy(&["李四"]), policy(&["judge_bot"])),
+    ] {
+        app.systemset(SystemSetGroupContext {
+            request_context: ctx(),
+            name: name.into(),
+            scope_level: ScopeLevel::Session,
+            content: name.into(),
+            visible_to,
+            collect_from,
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect("seed succeeds");
+    }
+
+    let response = app
+        .list(ListGroupContexts {
+            actor_id: "张三".into(),
+            request_context: ctx(),
+            scope_levels: Some(vec![ScopeLevel::Session]),
+        })
+        .await
+        .expect("list succeeds");
+    let mut names = response
+        .contexts
+        .iter()
+        .map(|item| (item.name.as_str(), item.permission))
+        .collect::<Vec<_>>();
+    names.sort_by_key(|(name, _)| *name);
+    assert_eq!(
+        names,
+        vec![
+            ("read_only", GroupContextPermission::R),
+            ("read_write", GroupContextPermission::WR),
+            ("write_only", GroupContextPermission::W),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn get_filters_visible_only_sorts_fine_to_coarse_and_accepts_limit() {
+    let app = service(Arc::new(MemoryGroupContextRepo::new()));
+    for (scope_level, content) in [
+        (ScopeLevel::Group, "group"),
+        (ScopeLevel::Session, "session"),
+        (ScopeLevel::Round, "round"),
+    ] {
+        app.systemset(SystemSetGroupContext {
+            request_context: ctx(),
+            name: "game_state".into(),
+            scope_level,
+            content: content.into(),
+            visible_to: policy(&["张三"]),
+            collect_from: policy(&["judge_bot"]),
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect("seed visible row");
+    }
+    app.systemset(SystemSetGroupContext {
+        request_context: ctx(),
+        name: "write_only".into(),
+        scope_level: ScopeLevel::Session,
+        content: "secret".into(),
+        visible_to: policy(&["李四"]),
+        collect_from: policy(&["张三"]),
+        valid_from: None,
+        valid_to: None,
+    })
+    .await
+    .expect("seed write-only row");
+
+    let response = app
+        .get(GetGroupContext {
+            actor_id: "张三".into(),
+            request_context: ctx(),
+            name: "game_state".into(),
+            scope_levels: None,
+            limit: Some(1),
+        })
+        .await
+        .expect("get succeeds");
+    assert_eq!(
+        response
+            .items
+            .iter()
+            .map(|item| item.content.as_str())
+            .collect::<Vec<_>>(),
+        vec!["round", "session", "group"]
+    );
+
+    let hidden = app
+        .get(GetGroupContext {
+            actor_id: "张三".into(),
+            request_context: ctx(),
+            name: "write_only".into(),
+            scope_levels: Some(vec![ScopeLevel::Session]),
+            limit: None,
+        })
+        .await
+        .expect("get succeeds");
+    assert!(hidden.items.is_empty());
+}

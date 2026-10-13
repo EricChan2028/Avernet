@@ -2314,3 +2314,32 @@ FriendRequestDecisionEnvelope:
       $ref: "#/FriendRequest"
     request_id:
       type: string
+
+GroupContextScopeLevel:
+  $ref: ./openapi/group-context.yaml#/GroupContextScopeLevel
+GroupContextPolicy:
+  $ref: ./openapi/group-context.yaml#/GroupContextPolicy
+GroupContextPermission:
+  $ref: ./openapi/group-context.yaml#/GroupContextPermission
+GroupContextStatus:
+  $ref: ./openapi/group-context.yaml#/GroupContextStatus
+GroupContextEntrySummary:
+  $ref: ./openapi/group-context.yaml#/GroupContextEntrySummary
+GroupContextItem:
+  $ref: ./openapi/group-context.yaml#/GroupContextItem
+GroupContextAck:
+  $ref: ./openapi/group-context.yaml#/GroupContextAck
+GroupContextListResponse:
+  $ref: ./openapi/group-context.yaml#/GroupContextListResponse
+GroupContextGetResponse:
+  $ref: ./openapi/group-context.yaml#/GroupContextGetResponse
+AddGroupContextRequest:
+  $ref: ./openapi/group-context.yaml#/AddGroupContextRequest
+UpdateGroupContextRequest:
+  $ref: ./openapi/group-context.yaml#/UpdateGroupContextRequest
+ListGroupContextsRequest:
+  $ref: ./openapi/group-context.yaml#/ListGroupContextsRequest
+GetGroupContextRequest:
+  $ref: ./openapi/group-context.yaml#/GetGroupContextRequest
+SystemSetGroupContextRequest:
+  $ref: ./openapi/group-context.yaml#/SystemSetGroupContextRequest

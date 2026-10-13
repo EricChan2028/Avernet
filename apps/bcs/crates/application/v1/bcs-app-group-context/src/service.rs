@@ -1,0 +1,351 @@
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use bcs_domain::{GroupContextEntry, GroupContextPolicy, ScopeLevel};
+use bcs_group_context_store::{GroupContextRepo, GroupContextStoreError, NewGroupContextEntry};
+use bcs_service_api::application::v1::{
+    AddGroupContext, ApplicationError, GetGroupContext, GroupContextAck,
+    GroupContextApplicationService, GroupContextGetItem, GroupContextGetResponse,
+    GroupContextListItem, GroupContextListResponse, ListGroupContexts, SystemSetGroupContext,
+    UpdateGroupContext,
+};
+use chrono::Utc;
+use ulid::Ulid;
+
+use crate::permissions::{actor_can_read, actor_can_write, permission_for};
+use crate::scope::{ResolvedScope, resolve_scope, resolve_scopes};
+
+pub const MAX_CONTENT_BYTES: usize = 4 * 1024;
+
+const INVALID_PARAM: &str = "invalid_param";
+const PERMISSION_DENIED: &str = "permission_denied";
+const NOT_FOUND: &str = "not_found";
+const CONFLICT: &str = "conflict";
+const PAYLOAD_TOO_LARGE: &str = "payload_too_large";
+
+pub struct GroupContextApplicationServiceImpl {
+    repo: Arc<dyn GroupContextRepo>,
+}
+
+impl GroupContextApplicationServiceImpl {
+    pub fn new(repo: Arc<dyn GroupContextRepo>) -> Self {
+        Self { repo }
+    }
+
+    async fn create(
+        &self,
+        scope: ResolvedScope,
+        name: String,
+        content: String,
+        visible_to: GroupContextPolicy,
+        collect_from: GroupContextPolicy,
+        change_reason: Option<String>,
+        valid_from: Option<bcs_domain::GroupContextTime>,
+        valid_to: Option<bcs_domain::GroupContextTime>,
+    ) -> Result<GroupContextEntry, ApplicationError> {
+        validate_content(&content)?;
+        validate_collect_from(&collect_from)?;
+        let now = Utc::now();
+        self.repo
+            .create_active(NewGroupContextEntry {
+                context_id: new_context_id(),
+                name,
+                scope_level: scope.scope_level,
+                scope: scope.scope,
+                content,
+                visible_to,
+                collect_from,
+                supersedes: None,
+                change_reason,
+                valid_from: valid_from.unwrap_or(now),
+                valid_to,
+                tx_time: now,
+            })
+            .await
+            .map_err(map_store_error)
+    }
+
+    async fn supersede(
+        &self,
+        old: &GroupContextEntry,
+        scope: ResolvedScope,
+        name: String,
+        content: String,
+        visible_to: GroupContextPolicy,
+        collect_from: GroupContextPolicy,
+        change_reason: Option<String>,
+        valid_from: bcs_domain::GroupContextTime,
+        valid_to: Option<bcs_domain::GroupContextTime>,
+    ) -> Result<GroupContextEntry, ApplicationError> {
+        validate_content(&content)?;
+        validate_collect_from(&collect_from)?;
+        let now = Utc::now();
+        self.repo
+            .supersede_active(
+                &old.name,
+                &old.scope,
+                NewGroupContextEntry {
+                    context_id: old.context_id.clone(),
+                    name,
+                    scope_level: scope.scope_level,
+                    scope: scope.scope,
+                    content,
+                    visible_to,
+                    collect_from,
+                    supersedes: Some(old.id),
+                    change_reason,
+                    valid_from,
+                    valid_to,
+                    tx_time: now,
+                },
+            )
+            .await
+            .map_err(map_store_error)
+    }
+}
+
+#[async_trait]
+impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
+    async fn add(&self, command: AddGroupContext) -> Result<GroupContextAck, ApplicationError> {
+        let scope = resolve_scope(&command.request_context, command.scope_level)?;
+        validate_actor(&command.actor_id)?;
+        validate_content(&command.content)?;
+        validate_collect_from(&command.collect_from)?;
+        if !command.collect_from.contains_user(&command.actor_id) {
+            return Err(permission_denied(format!(
+                "actor_id={} is not allowed to write {} in {}",
+                command.actor_id, command.name, scope.scope
+            )));
+        }
+        self.create(
+            scope,
+            command.name,
+            command.content,
+            command.visible_to,
+            command.collect_from,
+            None,
+            command.valid_from,
+            command.valid_to,
+        )
+        .await?;
+        Ok(GroupContextAck::ok())
+    }
+
+    async fn update(
+        &self,
+        command: UpdateGroupContext,
+    ) -> Result<GroupContextAck, ApplicationError> {
+        let scope = resolve_scope(&command.request_context, command.scope_level)?;
+        validate_actor(&command.actor_id)?;
+        if let Some(content) = command.content.as_ref() {
+            validate_content(content)?;
+        }
+        if let Some(collect_from) = command.collect_from.as_ref() {
+            validate_collect_from(collect_from)?;
+        }
+        let old = self
+            .repo
+            .get_active(&command.name, &scope.scope)
+            .await
+            .map_err(map_store_error)?
+            .ok_or_else(|| not_found(&command.name, &scope.scope))?;
+        if !actor_can_write(&old, &command.actor_id) {
+            return Err(permission_denied(format!(
+                "actor_id={} is not allowed to update {} in {}",
+                command.actor_id, command.name, scope.scope
+            )));
+        }
+        let content = command.content.unwrap_or_else(|| old.content.clone());
+        let visible_to = command.visible_to.unwrap_or_else(|| old.visible_to.clone());
+        let collect_from = command
+            .collect_from
+            .unwrap_or_else(|| old.collect_from.clone());
+        let valid_from = command.valid_from.unwrap_or(old.valid_from);
+        let valid_to = command.valid_to.or(old.valid_to);
+        self.supersede(
+            &old,
+            scope,
+            command.name,
+            content,
+            visible_to,
+            collect_from,
+            command.change_reason,
+            valid_from,
+            valid_to,
+        )
+        .await?;
+        Ok(GroupContextAck::ok())
+    }
+
+    async fn list(
+        &self,
+        query: ListGroupContexts,
+    ) -> Result<GroupContextListResponse, ApplicationError> {
+        validate_actor(&query.actor_id)?;
+        let resolved = resolve_scopes(&query.request_context, &query.effective_scope_levels())?;
+        let scopes = resolved
+            .iter()
+            .map(|scope| scope.scope.clone())
+            .collect::<Vec<_>>();
+        let rows = self
+            .repo
+            .list_active_by_scopes(&scopes)
+            .await
+            .map_err(map_store_error)?;
+        let contexts = rows
+            .into_iter()
+            .filter_map(|entry| {
+                permission_for(&entry, &query.actor_id).map(|permission| GroupContextListItem {
+                    name: entry.name,
+                    scope_level: entry.scope_level,
+                    scope: entry.scope,
+                    permission,
+                    gmt_create: entry.gmt_create,
+                    gmt_modified: entry.gmt_modified,
+                })
+            })
+            .collect();
+        Ok(GroupContextListResponse { contexts })
+    }
+
+    async fn get(
+        &self,
+        query: GetGroupContext,
+    ) -> Result<GroupContextGetResponse, ApplicationError> {
+        validate_actor(&query.actor_id)?;
+        let resolved = resolve_scopes(&query.request_context, &query.effective_scope_levels())?;
+        let scopes = resolved
+            .iter()
+            .map(|scope| scope.scope.clone())
+            .collect::<Vec<_>>();
+        let mut rows = self
+            .repo
+            .list_active_by_scopes(&scopes)
+            .await
+            .map_err(map_store_error)?;
+        rows.retain(|entry| entry.name == query.name && actor_can_read(entry, &query.actor_id));
+        rows.sort_by_key(|entry| specificity_rank(entry.scope_level));
+        let items = rows
+            .into_iter()
+            .map(|entry| GroupContextGetItem {
+                name: entry.name,
+                scope_level: entry.scope_level,
+                content: entry.content,
+                valid_from: entry.valid_from,
+                valid_to: entry.valid_to,
+            })
+            .collect();
+        Ok(GroupContextGetResponse { items })
+    }
+
+    async fn systemset(
+        &self,
+        command: SystemSetGroupContext,
+    ) -> Result<GroupContextAck, ApplicationError> {
+        let scope = resolve_scope(&command.request_context, command.scope_level)?;
+        validate_content(&command.content)?;
+        validate_collect_from(&command.collect_from)?;
+        let existing = self
+            .repo
+            .get_active(&command.name, &scope.scope)
+            .await
+            .map_err(map_store_error)?;
+        if let Some(old) = existing {
+            self.supersede(
+                &old,
+                scope,
+                command.name,
+                command.content,
+                command.visible_to,
+                command.collect_from,
+                None,
+                command.valid_from.unwrap_or_else(Utc::now),
+                command.valid_to,
+            )
+            .await?;
+        } else {
+            self.create(
+                scope,
+                command.name,
+                command.content,
+                command.visible_to,
+                command.collect_from,
+                None,
+                command.valid_from,
+                command.valid_to,
+            )
+            .await?;
+        }
+        Ok(GroupContextAck::ok())
+    }
+}
+
+fn validate_actor(actor_id: &str) -> Result<(), ApplicationError> {
+    if actor_id.trim().is_empty() {
+        Err(ApplicationError::invalid(
+            INVALID_PARAM,
+            "actor_id is required",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_content(content: &str) -> Result<(), ApplicationError> {
+    if content.as_bytes().len() > MAX_CONTENT_BYTES {
+        Err(ApplicationError::payload_too_large(
+            PAYLOAD_TOO_LARGE,
+            format!("content exceeds {MAX_CONTENT_BYTES} bytes"),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_collect_from(policy: &GroupContextPolicy) -> Result<(), ApplicationError> {
+    if policy.user_ids.is_empty() {
+        Err(ApplicationError::invalid(
+            INVALID_PARAM,
+            "collect_from.userIds must not be empty",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn not_found(name: &str, scope: &str) -> ApplicationError {
+    ApplicationError::not_found(
+        NOT_FOUND,
+        format!("name={name} and scope={scope}, group context not found"),
+    )
+}
+
+fn permission_denied(message: impl Into<String>) -> ApplicationError {
+    ApplicationError::forbidden_code(PERMISSION_DENIED, message)
+}
+
+fn map_store_error(error: GroupContextStoreError) -> ApplicationError {
+    match error {
+        GroupContextStoreError::DuplicateActive { name, scope } => {
+            ApplicationError::conflict(CONFLICT, format!("{name} already exists in {scope}"))
+        }
+        GroupContextStoreError::NotFound { name, scope } => not_found(&name, &scope),
+        GroupContextStoreError::Conflict { name, scope } => ApplicationError::conflict(
+            CONFLICT,
+            format!("concurrent update lost for name={name} scope={scope}"),
+        ),
+        GroupContextStoreError::Backend(message) => ApplicationError::internal(message),
+    }
+}
+
+fn specificity_rank(scope_level: ScopeLevel) -> u8 {
+    match scope_level {
+        ScopeLevel::Round => 0,
+        ScopeLevel::Session => 1,
+        ScopeLevel::Group => 2,
+    }
+}
+
+fn new_context_id() -> String {
+    Ulid::new().to_string()
+}

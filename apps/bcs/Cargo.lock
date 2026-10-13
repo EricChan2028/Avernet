@@ -267,6 +267,7 @@ dependencies = [
  "bcs-app-collaboration-definition",
  "bcs-app-collaboration-template",
  "bcs-app-group",
+ "bcs-app-group-context",
  "bcs-app-invitation",
  "bcs-app-invite-code",
  "bcs-app-register",
@@ -309,6 +310,7 @@ dependencies = [
  "bcs-fuse-client",
  "bcs-fusion",
  "bcs-group",
+ "bcs-group-context-store",
  "bcs-group-store",
  "bcs-http",
  "bcs-human-notify-api",
@@ -514,6 +516,19 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "bcs-app-group-context"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcs-domain",
+ "bcs-group-context-store",
+ "bcs-service-api",
+ "chrono",
+ "tokio",
+ "ulid",
 ]
 
 [[package]]
@@ -1341,6 +1356,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-group-context-store"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcs-db-api",
+ "bcs-db-local",
+ "bcs-domain",
+ "chrono",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
 name = "bcs-group-store"
 version = "0.1.4-beta.3"
 dependencies = [
@@ -1401,6 +1430,7 @@ dependencies = [
  "bcs-test-support",
  "bcs-user-directory-api",
  "bytes",
+ "chrono",
  "futures",
  "hex",
  "opentelemetry",
@@ -1924,6 +1954,8 @@ name = "bcs-services-container"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
+ "bcs-app-group-context",
+ "bcs-group-context-store",
  "bcs-service-api",
  "bcs-test-support",
  "thiserror 2.0.20",
@@ -2390,6 +2422,7 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "serde",
  "wasm-bindgen",
  "windows-link",
 ]
