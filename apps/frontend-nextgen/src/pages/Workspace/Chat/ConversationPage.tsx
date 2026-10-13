@@ -286,6 +286,8 @@ export default function ConversationPage(): JSX.Element {
             headerActions={headerActions}
             headerRightPanels={headerRightPanels}
             highlightMessageId={headerPanels.highlightMessageId}
+            sidePaneOpen={headerPanels.sidePaneOpen}
+            onToggleSidePane={headerPanels.toggleSidePane}
           />
         )}
       </div>

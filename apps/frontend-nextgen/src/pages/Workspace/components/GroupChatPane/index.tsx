@@ -1,5 +1,6 @@
 import { Button, Empty } from '@/components/ui';
 import { ChatMessageSkeleton } from '@/components/Workspace/ChatPanel/ChatMessageSkeleton';
+import { SidePanelCollapseButton } from '@/components/Workspace/SidePanelCollapseButton';
 import { filterVisibleGroupMessages } from '@/pages/Workspace/hooks/groupChatHistoryUtils';
 import { useCollabPanel } from '@/pages/Workspace/hooks/useCollabPanel';
 import { useGroupTaskExecution } from '@/pages/Workspace/hooks/useGroupTaskExecution';
@@ -197,7 +198,8 @@ export function GroupChatPane(props: GroupChatPaneProps) {
   const statusBarVisible = composerVisible && collabPanel.humanJoined && !collabPanel.botActorId;
 
   return (
-    <section className="flex min-w-0 flex-1 flex-col bg-background">
+    // relative 供副屏右上「收起」悬浮钮绝对定位（SidePanelCollapseButton）。
+    <section className="relative flex min-w-0 flex-1 flex-col bg-background">
       <ChatLayout className="min-h-0 flex-1">
         <GroupHeader
           selectedGroup={group}
@@ -324,6 +326,8 @@ export function GroupChatPane(props: GroupChatPaneProps) {
         ) : null}
         <ChatLayout.Panel ref={panelRef} onAction={handlePanelAction} bridge={chatBridge} />
       </ChatLayout>
+      {/* 副屏右上「收起」钮：镜像态开时悬于副屏 TopBar 右侧，点按关闭并同步镜像。 */}
+      {sidePaneOpen && onToggleSidePane ? <SidePanelCollapseButton onClick={onToggleSidePane} /> : null}
       {session && (
         <FuseSlot
           group={group}
