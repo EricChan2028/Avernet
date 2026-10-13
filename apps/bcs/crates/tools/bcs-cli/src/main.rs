@@ -1518,9 +1518,15 @@ enum Commands {
 #[derive(Debug, Subcommand)]
 enum ChatRunCommands {
     /// Read the run and its queue status.
-    Status { #[arg(long)] run_id: String },
+    Status {
+        #[arg(long)]
+        run_id: String,
+    },
     /// Request cancellation; a downstream abort may remain unconfirmed.
-    Cancel { #[arg(long)] run_id: String },
+    Cancel {
+        #[arg(long)]
+        run_id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1547,8 +1553,6 @@ enum GroupContextCommands {
         valid_from: Option<String>,
         #[arg(long)]
         valid_to: Option<String>,
-        #[arg(long)]
-        change_reason: Option<String>,
     },
     /// Supersede the active context version.
     Update {
@@ -1573,7 +1577,7 @@ enum GroupContextCommands {
         #[arg(long)]
         valid_to: Option<String>,
         #[arg(long)]
-        change_reason: Option<String>,
+        change_reason: String,
     },
     /// List visible or writable active contexts.
     List {
@@ -1623,8 +1627,6 @@ enum GroupContextCommands {
         valid_from: Option<String>,
         #[arg(long)]
         valid_to: Option<String>,
-        #[arg(long)]
-        change_reason: Option<String>,
     },
 }
 
@@ -2383,9 +2385,8 @@ fn group_context_systemset_body(
     collect_from: String,
     valid_from: Option<String>,
     valid_to: Option<String>,
-    change_reason: Option<String>,
 ) -> Result<serde_json::Value> {
-    let mut body = match group_context_add_body(
+    let body = match group_context_add_body(
         name,
         scope_level,
         content,
@@ -2397,7 +2398,6 @@ fn group_context_systemset_body(
         serde_json::Value::Object(body) => body,
         _ => unreachable!("group_context_add_body always returns an object"),
     };
-    group_context_insert_optional_string(&mut body, "change_reason", change_reason);
     Ok(serde_json::Value::Object(body))
 }
 
@@ -4160,7 +4160,11 @@ pub async fn run() -> Result<()> {
                 "chat outcome"
             );
 
-            let success = if detach { outcome.admission_succeeded() } else { outcome.delivered };
+            let success = if detach {
+                outcome.admission_succeeded()
+            } else {
+                outcome.delivered
+            };
             if json_mode {
                 // stdout = EXACTLY one JSON object (jq-parseable).
                 let json_value = if detach {
@@ -4213,7 +4217,9 @@ pub async fn run() -> Result<()> {
                 println!("State: {}", outcome.state);
                 if let Some(delivery) = &outcome.delivery {
                     println!("Delivery: {}", delivery.status);
-                    if let Some(reason) = &delivery.wait_reason { println!("Waiting: {}", reason); }
+                    if let Some(reason) = &delivery.wait_reason {
+                        println!("Waiting: {}", reason);
+                    }
                 }
                 if let Some(err) = &outcome.error_message {
                     println!("Error: {}", err);
@@ -4223,25 +4229,41 @@ pub async fn run() -> Result<()> {
             if !success {
                 std::process::exit(1);
             }
-        },
+        }
 
         Commands::ChatRun { token, command } => {
             let token = get_token(token.as_deref())?;
-            let client = create_client(&bcs_url, &token, bcs_cookie.as_deref(), oauth_headers.as_ref());
+            let client = create_client(
+                &bcs_url,
+                &token,
+                bcs_cookie.as_deref(),
+                oauth_headers.as_ref(),
+            );
             let result = match command {
-                ChatRunCommands::Status { run_id } => serde_json::to_value(client.chat_run_status(&run_id, None, None).await?)?,
-                ChatRunCommands::Cancel { run_id } => serde_json::to_value(client.chat_run_cancel(&run_id).await?)?,
+                ChatRunCommands::Status { run_id } => {
+                    serde_json::to_value(client.chat_run_status(&run_id, None, None).await?)?
+                }
+                ChatRunCommands::Cancel { run_id } => {
+                    serde_json::to_value(client.chat_run_cancel(&run_id).await?)?
+                }
             };
-            if structured_mode { println!("{}", serde_json::to_string(&result)?); }
-            else {
+            if structured_mode {
+                println!("{}", serde_json::to_string(&result)?);
+            } else {
                 println!("Run: {}", result["run_id"].as_str().unwrap_or("unknown"));
                 println!("State: {}", result["state"].as_str().unwrap_or("unknown"));
-                if let Some(status) = result.get("delivery").and_then(|d| d.get("status")).and_then(|v| v.as_str()) {
+                if let Some(status) = result
+                    .get("delivery")
+                    .and_then(|d| d.get("status"))
+                    .and_then(|v| v.as_str())
+                {
                     println!("Delivery: {}", status);
-                    if matches!(status, "cancelling" | "cancel_unknown") { println!("Cancellation is not confirmed; query status again."); }
+                    if matches!(status, "cancelling" | "cancel_unknown") {
+                        println!("Cancellation is not confirmed; query status again.");
+                    }
                 }
             }
-        },
+        }
 
         Commands::GroupStatus {
             token,
@@ -4334,7 +4356,6 @@ pub async fn run() -> Result<()> {
                     collect_from,
                     valid_from,
                     valid_to,
-                    change_reason: _,
                 } => (
                     "add",
                     group_id,
@@ -4375,7 +4396,7 @@ pub async fn run() -> Result<()> {
                         collect_from,
                         valid_from,
                         valid_to,
-                        change_reason,
+                        Some(change_reason),
                     )?,
                 ),
                 GroupContextCommands::List {
@@ -4415,7 +4436,6 @@ pub async fn run() -> Result<()> {
                     collect_from,
                     valid_from,
                     valid_to,
-                    change_reason,
                 } => (
                     "systemset",
                     group_id,
@@ -4429,7 +4449,6 @@ pub async fn run() -> Result<()> {
                         collect_from,
                         valid_from,
                         valid_to,
-                        change_reason,
                     )?,
                 ),
             };
@@ -5645,6 +5664,77 @@ mod tests {
     }
 
     #[test]
+    fn group_context_add_rejects_change_reason_flag() {
+        let err = match Cli::try_parse_from([
+            "bcs-cli",
+            "group-context",
+            "add",
+            "--group-id",
+            "game-room-7",
+            "--name",
+            "game_rule",
+            "--scope-level",
+            "group",
+            "--content",
+            "rules",
+            "--collect-from",
+            r#"{"userIds":["judge_bot"]}"#,
+            "--change-reason",
+            "not allowed",
+        ]) {
+            Ok(_) => panic!("expected parse error"),
+            Err(err) => err,
+        };
+        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn group_context_update_requires_change_reason_flag() {
+        let err = match Cli::try_parse_from([
+            "bcs-cli",
+            "group-context",
+            "update",
+            "--group-id",
+            "game-room-7",
+            "--name",
+            "player_state",
+            "--scope-level",
+            "session",
+            "--content",
+            "updated",
+        ]) {
+            Ok(_) => panic!("expected parse error"),
+            Err(err) => err,
+        };
+        assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn group_context_systemset_rejects_change_reason_flag() {
+        let err = match Cli::try_parse_from([
+            "bcs-cli",
+            "group-context",
+            "systemset",
+            "--group-id",
+            "game-room-7",
+            "--name",
+            "game_rule",
+            "--scope-level",
+            "group",
+            "--content",
+            "rules",
+            "--collect-from",
+            r#"{"userIds":["system_bot"]}"#,
+            "--change-reason",
+            "not allowed",
+        ]) {
+            Ok(_) => panic!("expected parse error"),
+            Err(err) => err,
+        };
+        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
+    }
+
+    #[test]
     fn group_context_add_body_includes_valid_fields_only_when_provided() {
         let with_valid = group_context_add_body(
             "game_rule".to_string(),
@@ -5697,7 +5787,7 @@ mod tests {
     }
 
     #[test]
-    fn group_context_systemset_body_forwards_valid_fields() {
+    fn group_context_systemset_body_forwards_valid_fields_without_change_reason() {
         let body = group_context_systemset_body(
             "game_rule".to_string(),
             "group".to_string(),
@@ -5706,7 +5796,6 @@ mod tests {
             r#"{"userIds":["system_bot"]}"#.to_string(),
             Some("1791797768".to_string()),
             Some("1791797768000".to_string()),
-            None,
         )
         .unwrap();
         assert_eq!(body["valid_from"], "1791797768");

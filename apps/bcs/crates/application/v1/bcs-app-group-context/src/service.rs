@@ -160,8 +160,8 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
         let collect_from = command
             .collect_from
             .unwrap_or_else(|| old.collect_from.clone());
-        let valid_from = command.valid_from.unwrap_or(old.valid_from);
-        let valid_to = command.valid_to.or(old.valid_to);
+        let valid_from = command.valid_from.unwrap_or_else(Utc::now);
+        let valid_to = command.valid_to;
         self.supersede(
             &old,
             scope,

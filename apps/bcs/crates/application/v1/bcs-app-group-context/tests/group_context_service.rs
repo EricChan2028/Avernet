@@ -307,7 +307,7 @@ async fn add_defaults_validity_and_preserves_explicit_validity() {
 }
 
 #[tokio::test]
-async fn update_inherits_omitted_validity_and_can_change_only_valid_range() {
+async fn update_defaults_omitted_validity_to_new_effective_time_and_can_change_valid_range() {
     let repo = Arc::new(MemoryGroupContextRepo::new());
     let app = service(repo.clone());
     let original_from = Utc.with_ymd_and_hms(2026, 10, 12, 8, 0, 0).unwrap();
@@ -327,6 +327,7 @@ async fn update_inherits_omitted_validity_and_can_change_only_valid_range() {
     .await
     .expect("add succeeds");
 
+    let before_update = Utc::now();
     app.update(UpdateGroupContext {
         actor_id: "judge_bot".into(),
         request_context: ctx(),
@@ -341,16 +342,17 @@ async fn update_inherits_omitted_validity_and_can_change_only_valid_range() {
     })
     .await
     .expect("content-only update succeeds");
-    let inherited = repo
+    let defaulted = repo
         .get_active("validity_patch", "sess-001")
         .await
         .expect("store ok")
         .expect("active row");
-    assert_eq!(inherited.content, "新内容");
-    assert_eq!(inherited.valid_from, original_from);
-    assert_eq!(inherited.valid_to, Some(original_to));
-    assert_eq!(inherited.visible_to, policy(&["张三"]));
-    assert_eq!(inherited.collect_from, policy(&["judge_bot"]));
+    assert_eq!(defaulted.content, "新内容");
+    assert!(defaulted.valid_from >= before_update);
+    assert!(defaulted.valid_from <= Utc::now());
+    assert_eq!(defaulted.valid_to, None);
+    assert_eq!(defaulted.visible_to, policy(&["张三"]));
+    assert_eq!(defaulted.collect_from, policy(&["judge_bot"]));
 
     let changed_from = Utc.with_ymd_and_hms(2026, 10, 13, 8, 0, 0).unwrap();
     let changed_to = Utc.with_ymd_and_hms(2026, 10, 13, 9, 0, 0).unwrap();
