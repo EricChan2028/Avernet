@@ -61,11 +61,13 @@ export interface GroupChatPaneProps {
   onTogglePanel: (panel: GroupPanelKind) => void;
   /** 头部六图标域的收藏模型（GroupWorkspaceArea 经 useGroupChatHeaderPanels 提供）。 */
   favorites: GroupChatFavoritesModel;
-  /** 副屏镜像开合态（PanelHandle 无 isOpen 查询，本地镜像）。 */
+  /** 副屏开合态（真实态同步：ChatLayoutPanelSlot 承接 SDK onIsOpenChange）。 */
   sidePaneOpen: boolean;
   /** 会话无 <AixUI type="panel"> 副屏内容时 Monitor 禁用（openPanel 会被 autoCloseWhenEmpty 弹回）。 */
   sidePaneDisabled?: boolean;
   onToggleSidePane: () => void;
+  /** 副屏真实开合态同步入口：接线 ChatLayoutPanelSlot onOpenStateChange。 */
+  onSidePaneIsOpenChange?: (open: boolean) => void;
   /** 历史消息面板定位高亮（穿透到 GroupChatMessageList；3s 上层 hook 自清）。 */
   highlightMessageId?: string | null;
   onRequestDissolve: () => void;

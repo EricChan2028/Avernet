@@ -503,14 +503,22 @@ describe('GroupChatBubble edit action', () => {
   });
 });
 
-describe('GroupChatBubble permanent copy action', () => {
-  it('在用户与 Bot 消息末尾显性展示复制入口，并按消息方向对齐', () => {
+describe('GroupChatBubble copy action reveal', () => {
+  it('仅最后一条回复默认展示操作行；用户消息与非末尾回复 hover 时才展示', () => {
     mockBubbleRenders.length = 0;
     const onCopy = jest.fn();
     render(
       <>
         <GroupChatBubble
           message={{ id: 'm-user-copy', role: 'user', content: '用户问题', status: 'history' } as never}
+          isLastMessage={false}
+          isRequesting={false}
+          group={group}
+          participants={[]}
+          onCopy={onCopy}
+        />
+        <GroupChatBubble
+          message={{ id: 'm-bot-mid', role: 'assistant', content: '中间回复', status: 'history' } as never}
           isLastMessage={false}
           isRequesting={false}
           group={group}
@@ -528,10 +536,16 @@ describe('GroupChatBubble permanent copy action', () => {
       </>,
     );
 
-    expect(screen.getByTestId('message-copy-action-m-user-copy')).toHaveClass('justify-end', 'pr-11');
+    // 用户消息与其他回复：默认隐藏，悬停宿主 .group 行 / 键盘聚焦 / 触屏再显。
+    expect(screen.getByTestId('message-copy-action-m-user-copy')).toHaveClass('justify-end', 'pr-11', 'opacity-0');
+    expect(screen.getByTestId('message-copy-action-m-user-copy')).toHaveClass('group-hover:opacity-100');
+    expect(screen.getByTestId('message-copy-action-m-bot-mid')).toHaveClass('justify-start', 'pl-11', 'opacity-0');
+    // 最后一条回复：常显操作行。
     expect(screen.getByTestId('message-copy-action-m-bot-copy')).toHaveClass('justify-start', 'pl-11');
-    expect(screen.getAllByRole('button', { name: '复制整条消息' })).toHaveLength(2);
+    expect(screen.getByTestId('message-copy-action-m-bot-copy')).not.toHaveClass('opacity-0');
+    expect(screen.getAllByRole('button', { name: '复制整条消息' })).toHaveLength(3);
 
+    // 默认隐藏不等于不可用：hover 态只是视觉显隐，按钮始终可触发。
     fireEvent.click(screen.getByTestId('message-copy-action-m-user-copy').querySelector('button') as HTMLButtonElement);
     expect(onCopy).toHaveBeenCalledWith('用户问题');
   });
