@@ -222,6 +222,7 @@ export default function ConversationPage(): JSX.Element {
       fileDrawerOpen={interactiveModel.fileFeature.fileDrawerOpen}
       onToggleFileDrawer={toggleFileDrawer}
       sidePaneOpen={headerPanels.sidePaneOpen}
+      sidePaneDisabled={headerPanels.sidePaneDisabled}
       onToggleSidePane={headerPanels.toggleSidePane}
     />
   );

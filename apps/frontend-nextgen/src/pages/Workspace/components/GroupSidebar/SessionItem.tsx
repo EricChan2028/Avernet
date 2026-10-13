@@ -15,9 +15,9 @@ import type { IdentityView, SessionView } from '@/domain/collaboration';
 import type { DomainResult } from '@/services/workspace/identityService';
 import { cn } from '@/utils/cn';
 import { MoreHorizontal, Pencil, Settings2, Share2, Star, Trash2 } from 'lucide-react';
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { ShareDialog } from '../ManagePanel/ShareDialog';
+import { SharePopover } from '../ManagePanel/SharePopover';
 
 interface SessionItemProps {
   session: SessionView;
@@ -30,7 +30,7 @@ interface SessionItemProps {
   onManageSession?: (sessionId: string) => void;
   onRenameSession?: (sessionId: string, title: string) => Promise<boolean>;
   onDeleteSession?: (sessionId: string) => Promise<boolean>;
-  onShareSession?: (sessionId: string) => Promise<DomainResult<{ invitationUrl: string }>>;
+  onShareSession?: (sessionId: string, expiresInSeconds?: number) => Promise<DomainResult<{ invitationUrl: string }>>;
 }
 
 /** 菜单项通用样式（对齐 Bot 单聊菜单与群菜单）。 */
@@ -63,8 +63,7 @@ export const SessionItem = React.memo(function SessionItem({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
-  const [shareUrl, setShareUrl] = useState<string | null>(null);
-  const [sharing, setSharing] = useState(false);
+  const shareAnchorRef = useRef<HTMLSpanElement | null>(null);
 
   // 会话操作权限（对齐 SessionManagePanel）：会话创建者或 participants 中 driver/manager。
   const isCreator = !!session.createdBy && !!activeIdentity && session.createdBy === activeIdentity.id;
@@ -103,14 +102,10 @@ export const SessionItem = React.memo(function SessionItem({
     setDeleting(false);
     if (ok) setDeleteOpen(false);
   };
-  const startShare = async () => {
+  // 打开即止：生成流程收敛在 SharePopover 气泡（有效期 → 生成链接）；气泡锚定在 dots 触发钮下。
+  const startShare = () => {
     setMenuOpen(false);
     setShareOpen(true);
-    setShareUrl(null);
-    setSharing(true);
-    const res = onShareSession ? await onShareSession(session.sessionId) : null;
-    setSharing(false);
-    if (res?.ok) setShareUrl(res.data.invitationUrl);
   };
 
   return (
@@ -156,13 +151,15 @@ export const SessionItem = React.memo(function SessionItem({
         <div className="absolute right-[64px] top-1/2 z-10 -translate-y-1/2" onClick={(e) => e.stopPropagation()}>
           <Popover open={menuOpen} onOpenChange={setMenuOpen}>
             <PopoverTrigger asChild>
+              {/* span 承载分享气泡锚点 ref（IconButton 本体让给菜单 trigger 的 ref 合并）。 */}
+              <span ref={shareAnchorRef} className="flex shrink-0">
               <IconButton
                 label="会话更多操作"
                 size="sm"
                 icon={<MoreHorizontal className="h-4 w-4" />}
                 className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                onClick={(e) => e.stopPropagation()}
               />
+              </span>
             </PopoverTrigger>
             <PopoverContent align="end" className="w-44 p-1">
               {onManageSession && (
@@ -249,11 +246,15 @@ export const SessionItem = React.memo(function SessionItem({
         </AlertDialogContent>
       </AlertDialog>
 
-      <ShareDialog
+      <SharePopover
         open={shareOpen}
+        anchorRef={shareAnchorRef}
         title="会话"
-        inviting={sharing}
-        invitationUrl={shareUrl}
+        onCreate={(expiresInSeconds) =>
+          onShareSession
+            ? onShareSession(session.sessionId, expiresInSeconds)
+            : Promise.resolve({ ok: false as const, error: { code: 'NO_SHARE', friendlyMessage: '暂不支持分享该会话', canRetry: false } })
+        }
         onClose={() => setShareOpen(false)}
       />
 

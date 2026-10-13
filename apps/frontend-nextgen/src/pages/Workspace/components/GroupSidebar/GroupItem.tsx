@@ -15,8 +15,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { cn } from '@/utils/cn';
 import { ChevronDown, MoreHorizontal, Plus, Settings2, Share2, Trash2 } from 'lucide-react';
-import React, { useState } from 'react';
-import { ShareDialog } from '../ManagePanel/ShareDialog';
+import React, { useRef, useState } from 'react';
+import { SharePopover } from '../ManagePanel/SharePopover';
 import { SessionScopeFilter } from '../SessionScopeFilter';
 import type { GroupItemProps, SessionTab } from './GroupItem.types';
 import { KIND_LABEL, SIDEBAR_TAG_CLASS } from './GroupItem.types';
@@ -44,7 +44,7 @@ function isHttpUrl(url: string): boolean {
  * 超出部分以 N+ 徽标（8px 字、E8EAED 底）表达剩余人数。participants 未回填时不渲染行首
  * 标识（2026-10-12 用户反馈：群行不用文件夹图标,列表缺成员时由 hook 层按详情补拉）。
  */
-function GroupAvatarStack({ participants, totalCount }: { participants: ParticipantView[]; totalCount: number }) {
+export function GroupAvatarStack({ participants, totalCount }: { participants: ParticipantView[]; totalCount: number }) {
   const shown = participants.slice(0, AVATAR_STACK_MAX);
   const remaining = Math.max(0, totalCount - shown.length);
   if (shown.length === 0) return null;
@@ -108,8 +108,7 @@ export const GroupItem = React.memo(function GroupItem({
   const [actionsOpen, setActionsOpen] = useState(false);
   const [dissolveOpen, setDissolveOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
-  const [shareUrl, setShareUrl] = useState<string | null>(null);
-  const [sharing, setSharing] = useState(false);
+  const shareAnchorRef = useRef<HTMLSpanElement | null>(null);
   const safeSessions = sessions ?? [];
   // 群接口只返回当前页会话的收藏状态；仍有下一页时，收藏总数尚不能确定。
   const favoriteCount = hasMoreSessions
@@ -130,14 +129,11 @@ export const GroupItem = React.memo(function GroupItem({
     onSessionTabChange(tab);
     if (!expanded) onToggleGroupExpanded(group.groupId);
   };
-  const handleShare = async () => {
+  // 打开即止：生成流程收敛在 SharePopover 气泡内（选有效期 → 生成链接），本入口不再立即请求；
+  // 气泡锚定在 dots 触发钮下（菜单关闭后气泡从 dots 位置展开）。
+  const handleShare = () => {
     setActionsOpen(false);
     setShareOpen(true);
-    setShareUrl(null);
-    setSharing(true);
-    const result = await onShareGroup(group.groupId);
-    setSharing(false);
-    if (result.ok) setShareUrl(result.data.invitationUrl);
   };
   const openDissolveConfirm = () => {
     setActionsOpen(false);
@@ -220,13 +216,15 @@ export const GroupItem = React.memo(function GroupItem({
           />
           <Popover open={actionsOpen} onOpenChange={setActionsOpen}>
             <PopoverTrigger asChild>
-              <IconButton
-                label="协作群操作"
-                size="sm"
-                icon={<MoreHorizontal className="h-3.5 w-3.5" />}
-                className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                onClick={(event) => event.stopPropagation()}
-              />
+              {/* span 承载气泡锚点 ref（IconButton 本体让给菜单 trigger 的 ref 合并）。 */}
+              <span ref={shareAnchorRef} className="flex shrink-0">
+                <IconButton
+                  label="协作群操作"
+                  size="sm"
+                  icon={<MoreHorizontal className="h-3.5 w-3.5" />}
+                  className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                />
+              </span>
             </PopoverTrigger>
             <PopoverContent align="end" className="w-44 p-1">
               <Button
@@ -284,11 +282,11 @@ export const GroupItem = React.memo(function GroupItem({
         />
       )}
 
-      <ShareDialog
+      <SharePopover
         open={shareOpen}
+        anchorRef={shareAnchorRef}
         title="协作群"
-        inviting={sharing}
-        invitationUrl={shareUrl}
+        onCreate={(expiresInSeconds) => onShareGroup(group.groupId, expiresInSeconds)}
         onClose={() => setShareOpen(false)}
       />
 

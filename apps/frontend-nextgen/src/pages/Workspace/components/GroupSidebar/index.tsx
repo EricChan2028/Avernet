@@ -63,7 +63,7 @@ export interface GroupSidebarProps {
   /** 会话列表菜单：删除会话。 */
   onDeleteSession?: (sessionId: string) => Promise<boolean>;
   /** 会话列表菜单：生成会话邀请链接。 */
-  onShareSession?: (sessionId: string) => Promise<DomainResult<{ invitationUrl: string }>>;
+  onShareSession?: (sessionId: string, expiresInSeconds?: number) => Promise<DomainResult<{ invitationUrl: string }>>;
   /** 当前身份（会话编辑/删除权限判断：创建者或 driver/manager）。 */
   activeIdentity?: IdentityView | null;
   /** 分享群。 */

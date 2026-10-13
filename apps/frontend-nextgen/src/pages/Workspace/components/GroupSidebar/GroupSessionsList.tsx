@@ -23,7 +23,7 @@ interface GroupSessionsListProps {
   onManageSession: (groupId: string, sessionId: string) => void;
   onRenameSession?: (sessionId: string, title: string) => Promise<boolean>;
   onDeleteSession?: (sessionId: string) => Promise<boolean>;
-  onShareSession?: (sessionId: string) => Promise<DomainResult<{ invitationUrl: string }>>;
+  onShareSession?: (sessionId: string, expiresInSeconds?: number) => Promise<DomainResult<{ invitationUrl: string }>>;
   activeIdentity?: IdentityView | null;
 }
 

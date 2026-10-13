@@ -228,7 +228,7 @@ describe('GroupSidebar', () => {
 
   it('v2.1：群行操作区默认透明隐藏，悬停/键盘聚焦可显现；常显（展开/收藏 Tab）须与标题让位同步防重叠，选中不再常显', () => {
     const { rerender } = render(<GroupSidebar {...makeProps({ expandedGroupIds: {}, selectedGroupId: null })} />);
-    const actions = screen.getByRole('button', { name: '协作群操作' }).parentElement as HTMLElement;
+    const actions = screen.getByRole('button', { name: '协作群操作' }).parentElement?.parentElement as HTMLElement;
     expect(actions).toHaveClass('opacity-0', 'transition-opacity');
     expect(actions.className).toContain('group-hover/row:opacity-100');
     expect(actions.className).toContain('group-focus-within/row:opacity-100');
@@ -236,13 +236,13 @@ describe('GroupSidebar', () => {
 
     // 选中态已移除（用户反馈）：不常显、标题不让位。
     rerender(<GroupSidebar {...makeProps({ expandedGroupIds: {}, selectedGroupId: 'g1' })} />);
-    const actionsSelected = screen.getByRole('button', { name: '协作群操作' }).parentElement as HTMLElement;
+    const actionsSelected = screen.getByRole('button', { name: '协作群操作' }).parentElement?.parentElement as HTMLElement;
     expect(actionsSelected).not.toHaveClass('opacity-100');
     expect(screen.getByRole('button', { name: /主站群/ })).not.toHaveClass('pr-[88px]');
 
     // 展开时常显，且标题同步让出 88px——常显按钮不与群名称重叠。
     rerender(<GroupSidebar {...makeProps({ expandedGroupIds: { g1: true }, selectedGroupId: 'g1' })} />);
-    const actionsExpanded = screen.getByRole('button', { name: '协作群操作' }).parentElement as HTMLElement;
+    const actionsExpanded = screen.getByRole('button', { name: '协作群操作' }).parentElement?.parentElement as HTMLElement;
     expect(actionsExpanded).toHaveClass('opacity-100');
     expect(screen.getByRole('button', { name: /主站群/ })).toHaveClass('pr-[88px]');
 
@@ -255,7 +255,7 @@ describe('GroupSidebar', () => {
         })}
       />,
     );
-    const actionsFavorite = screen.getByRole('button', { name: '协作群操作' }).parentElement as HTMLElement;
+    const actionsFavorite = screen.getByRole('button', { name: '协作群操作' }).parentElement?.parentElement as HTMLElement;
     expect(actionsFavorite).toHaveClass('opacity-100');
     expect(screen.getByRole('button', { name: /主站群/ })).toHaveClass('pr-[88px]');
   });
