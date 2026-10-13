@@ -5,7 +5,10 @@ from contextvars import ContextVar
 from threading import Barrier, Event
 
 from agentclaw.community.core.bot_public.services import bcsfuse_runtime_dispatch
-from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
+from agentclaw.community.utils.avernet_tenant import (
+    avernet_tenant_scope,
+    get_current_avernet_tenant,
+)
 
 from tests.community.core.bot_public.test_bot_public_service import (
     _wait_for_bcsfuse_sync,
@@ -97,17 +100,19 @@ def test_worker_capacity_keeps_latest_state_for_existing_workers(
     assert observed == [("bot:owner", "1"), ("bot:owner", "0")]
 
 
-def test_same_worker_id_in_other_tenant_does_not_wait(bcsfuse_dispatcher):
+def test_same_downstream_worker_serializes_across_tenants_with_original_context(bcsfuse_dispatcher):
     entered = Event()
-    other_finished = Event()
+    offline_finished = Event()
     release = Event()
+    observed = []
 
     def sync(bot_id, worker_id, public):
-        if bot_id == "slow":
+        if public == "1":
             entered.set()
             assert release.wait(3)
-        else:
-            other_finished.set()
+        observed.append((public, get_current_avernet_tenant()))
+        if public == "0":
+            offline_finished.set()
 
     try:
         with avernet_tenant_scope("tenant-a"):
@@ -115,7 +120,8 @@ def test_same_worker_id_in_other_tenant_does_not_wait(bcsfuse_dispatcher):
         assert entered.wait(2)
         with avernet_tenant_scope("tenant-b"):
             bcsfuse_dispatcher.dispatch_runtime_sync(sync, "other", "same-worker", "0")
-        assert other_finished.wait(0.5)
+        assert not offline_finished.wait(0.2), "same downstream Worker was updated concurrently"
     finally:
         release.set()
         _wait_for_bcsfuse_sync()
+    assert observed == [("1", "tenant-a"), ("0", "tenant-b")]

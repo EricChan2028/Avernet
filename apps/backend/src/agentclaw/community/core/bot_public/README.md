@@ -62,7 +62,7 @@ Owns visible-to-other-users state; bugs here can leak unpublished bots or block 
 - Backend schedules lifecycle HTTP calls after publication persistence succeeds.
   Approval callbacks and direct publication return their existing results without
   waiting for BCSFuse. The application-owned dispatcher permits four concurrent
-  calls across Workers and serializes calls per tenant/Worker identity. While a
+  calls across Workers and serializes calls per downstream Worker ID, across tenant contexts. While a
   call is queued or running, only the latest pending state and its request context
   are retained; intermediate pending notifications are coalesced.
 - Admission is capped at 1,024 tracked Worker identities, with one pending state

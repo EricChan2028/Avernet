@@ -8,7 +8,6 @@ from threading import Condition
 
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
-from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 
 logger = get_logger()
 _MAX_WORKERS = 4
@@ -32,14 +31,14 @@ class BcsFuseRuntimeDispatcher(LifecycleBase):
             max_workers=_MAX_WORKERS, thread_name_prefix="bcsfuse-runtime",
         )
         self._condition = Condition()
-        self._running: set[tuple[str, str]] = set()
-        self._pending: dict[tuple[str, str], _SyncJob] = {}
+        self._running: set[str] = set()
+        self._pending: dict[str, _SyncJob] = {}
         self._closed = False
 
     def dispatch_runtime_sync(
         self, sync: Callable[[str, str, str], None], bot_id: str, worker_id: str, public: str,
     ) -> None:
-        key = (get_current_avernet_tenant(), worker_id)
+        key = worker_id
         job = _SyncJob(copy_context(), sync, bot_id, worker_id, public)
         with self._condition:
             if self._closed or (
@@ -62,7 +61,7 @@ class BcsFuseRuntimeDispatcher(LifecycleBase):
             bot_id, worker_id, "online" if public == "1" else "offline", coalesced,
         )
 
-    def _submit_locked(self, key: tuple[str, str]) -> None:
+    def _submit_locked(self, key: str) -> None:
         def clear_cancelled(future: Future) -> None:
             if future.cancelled():
                 with self._condition:
@@ -78,10 +77,10 @@ class BcsFuseRuntimeDispatcher(LifecycleBase):
             self._running.discard(key)
             self._condition.notify_all()
             logger.exception(
-                "[_sync_bcsfuse_runtime_state] Background dispatch failed: worker_id=%s", key[1],
+                "[_sync_bcsfuse_runtime_state] Background dispatch failed: worker_id=%s", key,
             )
 
-    def _run_worker(self, key: tuple[str, str]) -> None:
+    def _run_worker(self, key: str) -> None:
         with self._condition:
             job = self._pending.pop(key, None)
             if self._closed or job is None:
