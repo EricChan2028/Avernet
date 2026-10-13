@@ -9,6 +9,7 @@ purpose: "Bot publication / discoverability domain — public bot listing, frien
 provides:
   - "BotPublicService"
   - "BotDiscoverService"
+  - "BcsFuseRuntimeDispatcher"
   - "Bot-public SQLAlchemy models"
 consumes:
   - "BotManagement repo + service"
@@ -25,6 +26,7 @@ internal_dependencies:
   - agentclaw.community.core.skill_center
   - agentclaw.community.core.workspace
   - agentclaw.community.di
+  - agentclaw.community.kernel.lifecycle
   - agentclaw.community.log
   - agentclaw.community.plugin_api.approval_workflow
   - agentclaw.community.plugin_api.auth_relationship
@@ -57,12 +59,20 @@ Owns visible-to-other-users state; bugs here can leak unpublished bots or block 
   `POST /v1/workers/{bot_uuid}/sync` with `availability` set to the persisted
   visibility; it does not overwrite user-publication runtime state. This needs
   BCS's `bcsfuse.enabled` configuration and deployment of the updated BCS runtime.
-- Backend schedules lifecycle HTTP calls on a process-local background worker
-  after publication persistence succeeds. Approval callbacks and direct publication
-  return their existing results without waiting for BCSFuse. The worker preserves
-  submission order and carries request context; both online and offline keep their
-  existing HTTP path, method, identity mapping, and 15-second timeout. Notifications
-  are best-effort and are not a durable queue across process restarts.
+- Backend schedules lifecycle HTTP calls after publication persistence succeeds.
+  Approval callbacks and direct publication return their existing results without
+  waiting for BCSFuse. The application-owned dispatcher permits four concurrent
+  calls across Workers and serializes calls per tenant/Worker identity. While a
+  call is queued or running, only the latest pending state and its request context
+  are retained; intermediate pending notifications are coalesced.
+- Admission is capped at 1,024 tracked Worker identities, with one pending state
+  per identity. Existing Workers may replace their pending state at capacity;
+  new identities are rejected with a warning. Both online and offline retain their
+  existing HTTP path, method, identity mapping, and 15-second timeout.
+- The dispatcher is a discovered Lifecycle participant. Shutdown stops admission,
+  discards pending states, and cancels queued executor tasks without waiting for
+  the queue to drain. At most four in-flight HTTP calls finish under their existing
+  timeout. Notifications remain best-effort and are not durable across restarts.
 - BCSFuse failure remains best-effort and is logged. User-publication logs use
   `[_sync_bcsfuse_runtime_state]` with the exact `worker_id`; Agent-publication
   logs live in BCS (`Worker synced to bcsfuse` / `Worker sync failed, retrying`).

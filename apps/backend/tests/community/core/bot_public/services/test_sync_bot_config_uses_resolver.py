@@ -52,6 +52,7 @@ def _make_service(
         device_sync_dispatcher=device_sync_dispatcher or MagicMock(),
         bcsfuse_config=bcsfuse_config or MagicMock(base_url=""),
         catalog_metadata_service=catalog_metadata_service or MagicMock(),
+        bcsfuse_runtime_dispatcher=MagicMock(),
     )
 
 

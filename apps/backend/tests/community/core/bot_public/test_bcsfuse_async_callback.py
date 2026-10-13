@@ -10,6 +10,7 @@ import pytest
 from tests.community.core.bot_public.test_bot_public_service import (
     _make_bot,
     _make_service,
+    _wait_for_bcsfuse_sync,
 )
 
 MODULE = "agentclaw.community.core.bot_public.services.bot_public_service"
@@ -85,10 +86,8 @@ def test_approval_callback_returns_before_bcsfuse_http_finishes(monkeypatch, sco
             assert finished.wait(3)
 
 
-def test_background_sync_preserves_online_then_offline_order(bcsfuse_executor):
-    from agentclaw.community.core.bot_public.services.bcsfuse_runtime_dispatch import (
-        dispatch_runtime_sync,
-    )
+def test_background_sync_preserves_online_then_offline_order(bcsfuse_dispatcher):
+    dispatch_runtime_sync = bcsfuse_dispatcher.dispatch_runtime_sync
 
     entered = Event()
     release = Event()
@@ -107,25 +106,50 @@ def test_background_sync_preserves_online_then_offline_order(bcsfuse_executor):
         assert states == []
     finally:
         release.set()
-    bcsfuse_executor.submit(lambda: None).result(timeout=3)
+    _wait_for_bcsfuse_sync()
     assert states == ["1", "0"]
 
 
-def test_background_failure_is_logged_without_stopping_later_syncs(bcsfuse_executor, caplog):
-    from agentclaw.community.core.bot_public.services.bcsfuse_runtime_dispatch import (
-        dispatch_runtime_sync,
-    )
+def test_background_failure_is_logged_without_stopping_later_syncs(bcsfuse_dispatcher, caplog):
+    dispatch_runtime_sync = bcsfuse_dispatcher.dispatch_runtime_sync
 
     completed = []
+    failed = Event()
 
     def sync(bot_id, worker_id, public):
         if public == "1":
+            failed.set()
             raise RuntimeError("notification failed")
         completed.append(worker_id)
 
     dispatch_runtime_sync(sync, "bot1", "bot1:owner1", "1")
+    assert failed.wait(3)
     dispatch_runtime_sync(sync, "bot1", "bot1:owner1", "0")
-    bcsfuse_executor.submit(lambda: None).result(timeout=3)
+    _wait_for_bcsfuse_sync()
     assert "notification failed" in caplog.text
     assert "worker_id=bot1:owner1" in caplog.text
     assert completed == ["bot1:owner1"]
+
+
+def test_slow_worker_does_not_block_another_worker(bcsfuse_dispatcher):
+    dispatch_runtime_sync = bcsfuse_dispatcher.dispatch_runtime_sync
+
+    first_entered = Event()
+    other_finished = Event()
+    release = Event()
+
+    def sync(bot_id, worker_id, public):
+        if worker_id == "slow:owner":
+            first_entered.set()
+            assert release.wait(3)
+        else:
+            other_finished.set()
+
+    try:
+        dispatch_runtime_sync(sync, "slow", "slow:owner", "1")
+        assert first_entered.wait(2)
+        dispatch_runtime_sync(sync, "other", "other:owner", "0")
+        assert other_finished.wait(0.5), "unrelated offline waits behind the slow online"
+    finally:
+        release.set()
+        _wait_for_bcsfuse_sync()

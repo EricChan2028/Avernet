@@ -27,6 +27,7 @@ from agentclaw.community.kernel.lifecycle import Lifecycle, discover_lifecycle_p
 # are non-negotiable — losing any of them means part of R11's boot
 # pipeline went dark.
 _EXPECTED_PARTICIPANTS: frozenset[str] = frozenset({
+    "BcsFuseRuntimeDispatcher",  # Cancel queued publication notifications at shutdown
     "SqliteDB",                  # Phase 1: schema bootstrap
     "LocalDeviceLifecycle",      # Phase 2: orphan reallocation + symlink restore
     "SkillScanService",          # Phase 2: scanner + Git safety scheduler

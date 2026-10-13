@@ -22,6 +22,7 @@ from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
 
 # The coalescing key is tenant-scoped; unscoped tests run under the default tenant.
 _SYNC_KEY = f"{DEFAULT_AVERNET_TENANT}:owner1:bot1"
+_TEST_DISPATCHER = MagicMock()
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +59,7 @@ def _make_service(
         device_sync_dispatcher=device_sync_dispatcher or MagicMock(),
         bcsfuse_config=bcsfuse_config or MagicMock(base_url=""),
         catalog_metadata_service=catalog_metadata_service or MagicMock(),
+        bcsfuse_runtime_dispatcher=_TEST_DISPATCHER,
     )
 
 def _make_operator(staff_id="op_user", nick_name="Operator") -> OperatorContext:
@@ -98,9 +100,10 @@ def _make_catalog_bot(bot_id: str, entity_id: str):
 
 def _wait_for_bcsfuse_sync():
     """Drain submitted notifications while the test's HTTP double is installed."""
-    from agentclaw.community.core.bot_public.services import bcsfuse_runtime_dispatch
-
-    bcsfuse_runtime_dispatch._executor.submit(lambda: None).result(timeout=3)
+    with _TEST_DISPATCHER._condition:
+        assert _TEST_DISPATCHER._condition.wait_for(
+            lambda: not _TEST_DISPATCHER._running, timeout=3,
+        ), "BCSFuse notifications did not finish"
 
 
 # ---------------------------------------------------------------------------

@@ -32,6 +32,9 @@ from agentclaw.community.core.bot_management.services.bcn_service import BcnServ
 from agentclaw.community.core.repository.protocols.bot import BotFriendRepositoryProtocol
 from agentclaw.community.core.bot_public.services.bot_discover_service import BotDiscoverService
 from agentclaw.community.core.bot_public.services.bot_public_service import BotPublicService
+from agentclaw.community.core.bot_public.services.bcsfuse_runtime_dispatch import (
+    BcsFuseRuntimeDispatcher,
+)
 from agentclaw.community.core.bot_public.services.bot_catalog_metadata_service import (
     BcsBotCatalogMetadataService,
 )
@@ -116,6 +119,11 @@ class BotPublicModule(Module):
 
     @singleton
     @provider
+    def bcsfuse_runtime_dispatcher(self) -> BcsFuseRuntimeDispatcher:
+        return BcsFuseRuntimeDispatcher()
+
+    @singleton
+    @provider
     def bot_public_service(
         self,
         bot_friend_repo: BotFriendRepositoryProtocol,
@@ -131,6 +139,7 @@ class BotPublicModule(Module):
         device_sync_dispatcher: DeviceSyncDispatcher,
         bcsfuse_config: cfg.BcsFuseConfig,
         catalog_metadata_service: BotCatalogMetadataServiceProtocol,
+        bcsfuse_runtime_dispatcher: BcsFuseRuntimeDispatcher,
     ) -> BotPublicService:
         # Explicit provider (not ``binder.bind``): BotPublicService types
         # ``skill_set_service_factory`` under TYPE_CHECKING to avoid a
@@ -150,6 +159,7 @@ class BotPublicModule(Module):
             device_sync_dispatcher=device_sync_dispatcher,
             bcsfuse_config=bcsfuse_config,
             catalog_metadata_service=catalog_metadata_service,
+            bcsfuse_runtime_dispatcher=bcsfuse_runtime_dispatcher,
         )
 
     @singleton

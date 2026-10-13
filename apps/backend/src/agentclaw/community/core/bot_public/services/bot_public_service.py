@@ -37,7 +37,7 @@ from agentclaw.community.core.bot_public.catalog_metadata import (
 )
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.core.bot_public.services.bcsfuse_runtime_dispatch import (
-    dispatch_runtime_sync,
+    BcsFuseRuntimeDispatcher,
 )
 from agentclaw.community.log import get_logger
 
@@ -155,6 +155,7 @@ class BotPublicService(BotPublicServiceProtocol):
         device_sync_dispatcher: "DeviceSyncDispatcher",
         bcsfuse_config: "BcsFuseConfig",
         catalog_metadata_service: BotCatalogMetadataServiceProtocol,
+        bcsfuse_runtime_dispatcher: BcsFuseRuntimeDispatcher,
     ) -> None:
         self._bot_friend_repo = bot_friend_repo
         self._bot_repository = bot_repository
@@ -173,6 +174,7 @@ class BotPublicService(BotPublicServiceProtocol):
         self._resolver_factory = device_context_resolver_factory
         self._device_sync_dispatcher = device_sync_dispatcher
         self._bcsfuse_config = bcsfuse_config
+        self._bcsfuse_runtime_dispatcher = bcsfuse_runtime_dispatcher
         self._catalog_metadata_service = catalog_metadata_service
         self._sync_lock = threading.Lock()
         self._syncing_bots: set[str] = set()
@@ -401,7 +403,7 @@ class BotPublicService(BotPublicServiceProtocol):
         if not self._resolve_bcsfuse_base_url():
             self._sync_bcsfuse_worker_runtime_state_now(bot_id, worker_id, public)
             return
-        dispatch_runtime_sync(
+        self._bcsfuse_runtime_dispatcher.dispatch_runtime_sync(
             self._sync_bcsfuse_worker_runtime_state_now, bot_id, worker_id, public,
         )
 
