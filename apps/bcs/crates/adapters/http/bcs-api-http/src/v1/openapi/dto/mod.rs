@@ -6,7 +6,6 @@ pub mod event_subscription;
 pub mod friend_connection;
 pub mod friendship;
 pub mod group;
-pub mod group_context;
 pub mod invitation;
 pub mod invite_code;
 pub mod session;

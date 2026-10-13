@@ -137,16 +137,6 @@ paths:
     $ref: ./openapi/event-subscriptions.yaml#/ReplayEventDeliveryPath
   /openapi/v1/collaboration/event-deliveries/{delivery_id}:skip:
     $ref: ./openapi/event-subscriptions.yaml#/SkipEventDeliveryPath
-  /groupcontext/add:
-    $ref: ./openapi/group-context.yaml#/AddGroupContextPath
-  /groupcontext/update:
-    $ref: ./openapi/group-context.yaml#/UpdateGroupContextPath
-  /groupcontext/list:
-    $ref: ./openapi/group-context.yaml#/ListGroupContextsPath
-  /groupcontext/get:
-    $ref: ./openapi/group-context.yaml#/GetGroupContextPath
-  /groupcontext/systemset:
-    $ref: ./openapi/group-context.yaml#/SystemSetGroupContextPath
 components:
   schemas:
     Bot:
