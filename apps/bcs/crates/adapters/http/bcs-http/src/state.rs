@@ -1,14 +1,14 @@
 use crate::service_key::ApiKeyRegistry;
-use axum::http::{HeaderMap, HeaderName};
 use bcs_auth_api::{AuthError, UserIdentityInfo};
 use bcs_channel_api::ChannelHttpIngressRegistry;
 use bcs_config_api::ManifestConfig;
 use bcs_domain::BotCapabilities;
 use bcs_route_security::OutboundUrlGuard;
+use axum::http::{HeaderMap, HeaderName};
+pub use bcs_service_api::{ChatRunCleanupPort, ChatRunEventPort};
 use bcs_service_api::application::v1::{
     GroupService, InternalBotAttributesService, RegisterService, SessionFileApplicationService, SessionService,
 };
-pub use bcs_service_api::{ChatRunCleanupPort, ChatRunEventPort};
 use bcs_service_api::{ProviderCredentialRepoPort, ProviderStreamGrayList};
 use bcs_services_container::Services;
 use std::sync::Arc;
@@ -42,8 +42,11 @@ pub struct HttpUserIdentity {
 
 #[async_trait::async_trait]
 pub trait UserIdentityPort: Send + Sync {
-    async fn extract(&self, headers: &HeaderMap, uri: &axum::http::Uri)
-    -> Option<HttpUserIdentity>;
+    async fn extract(
+        &self,
+        headers: &HeaderMap,
+        uri: &axum::http::Uri,
+    ) -> Option<HttpUserIdentity>;
 
     async fn ensure_identity(
         &self,

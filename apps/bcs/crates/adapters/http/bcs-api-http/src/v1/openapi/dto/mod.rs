@@ -1,12 +1,12 @@
 pub mod bot;
-pub mod channel;
-pub mod collaboration_definition;
 pub mod collaboration_template;
+pub mod collaboration_definition;
+pub mod channel;
 pub mod event_subscription;
-pub mod friend_connection;
 pub mod friendship;
+pub mod friend_connection;
 pub mod group;
 pub mod invitation;
-pub mod invite_code;
 pub mod session;
 pub mod session_file;
+pub mod invite_code;
