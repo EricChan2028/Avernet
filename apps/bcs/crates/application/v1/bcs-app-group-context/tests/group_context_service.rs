@@ -652,6 +652,140 @@ async fn list_filters_visible_or_writable_and_labels_permissions() {
 }
 
 #[tokio::test]
+async fn get_without_scope_levels_queries_only_deepest_supplied_scope() {
+    let app = service(Arc::new(MemoryGroupContextRepo::new()));
+    for (scope_level, content) in [
+        (ScopeLevel::Group, "group"),
+        (ScopeLevel::Session, "session"),
+        (ScopeLevel::Round, "round"),
+    ] {
+        app.systemset(SystemSetGroupContext {
+            request_context: ctx(),
+            name: "game_state".into(),
+            scope_level,
+            content: content.into(),
+            visible_to: policy(&["张三"]),
+            collect_from: policy(&["judge_bot"]),
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect("seed visible row");
+    }
+
+    let group_only = app
+        .get(GetGroupContext {
+            actor_id: "张三".into(),
+            request_context: GroupContextRequestContext {
+                group_id: "game-room-7".into(),
+                session_id: None,
+                round_id: None,
+            },
+            name: "game_state".into(),
+            scope_levels: None,
+            limit: None,
+        })
+        .await
+        .expect("group-only get succeeds");
+    assert_eq!(group_only.items.len(), 1);
+    assert_eq!(group_only.items[0].content, "group");
+
+    let session_only = app
+        .get(GetGroupContext {
+            actor_id: "张三".into(),
+            request_context: GroupContextRequestContext {
+                group_id: "game-room-7".into(),
+                session_id: Some("sess-001".into()),
+                round_id: None,
+            },
+            name: "game_state".into(),
+            scope_levels: None,
+            limit: None,
+        })
+        .await
+        .expect("session get succeeds without roundId");
+    assert_eq!(session_only.items.len(), 1);
+    assert_eq!(session_only.items[0].content, "session");
+
+    let round_only = app
+        .get(GetGroupContext {
+            actor_id: "张三".into(),
+            request_context: ctx(),
+            name: "game_state".into(),
+            scope_levels: None,
+            limit: None,
+        })
+        .await
+        .expect("round get succeeds");
+    assert_eq!(round_only.items.len(), 1);
+    assert_eq!(round_only.items[0].content, "round");
+}
+
+#[tokio::test]
+async fn list_without_scope_levels_queries_only_deepest_supplied_scope() {
+    let app = service(Arc::new(MemoryGroupContextRepo::new()));
+    for (scope_level, name) in [
+        (ScopeLevel::Group, "group_rule"),
+        (ScopeLevel::Session, "session_word"),
+    ] {
+        app.systemset(SystemSetGroupContext {
+            request_context: ctx(),
+            name: name.into(),
+            scope_level,
+            content: name.into(),
+            visible_to: policy(&["张三"]),
+            collect_from: policy(&["judge_bot"]),
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect("seed visible row");
+    }
+
+    let group_list = app
+        .list(ListGroupContexts {
+            actor_id: "张三".into(),
+            request_context: GroupContextRequestContext {
+                group_id: "game-room-7".into(),
+                session_id: None,
+                round_id: None,
+            },
+            scope_levels: None,
+        })
+        .await
+        .expect("group-only list succeeds");
+    assert_eq!(
+        group_list
+            .contexts
+            .iter()
+            .map(|item| item.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["group_rule"]
+    );
+
+    let session_list = app
+        .list(ListGroupContexts {
+            actor_id: "张三".into(),
+            request_context: GroupContextRequestContext {
+                group_id: "game-room-7".into(),
+                session_id: Some("sess-001".into()),
+                round_id: None,
+            },
+            scope_levels: None,
+        })
+        .await
+        .expect("session list succeeds without roundId");
+    assert_eq!(
+        session_list
+            .contexts
+            .iter()
+            .map(|item| item.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["session_word"]
+    );
+}
+
+#[tokio::test]
 async fn get_filters_visible_only_sorts_fine_to_coarse_and_accepts_limit() {
     let app = service(Arc::new(MemoryGroupContextRepo::new()));
     for (scope_level, content) in [
@@ -690,7 +824,11 @@ async fn get_filters_visible_only_sorts_fine_to_coarse_and_accepts_limit() {
             actor_id: "张三".into(),
             request_context: ctx(),
             name: "game_state".into(),
-            scope_levels: None,
+            scope_levels: Some(vec![
+                ScopeLevel::Group,
+                ScopeLevel::Session,
+                ScopeLevel::Round,
+            ]),
             limit: Some(1),
         })
         .await

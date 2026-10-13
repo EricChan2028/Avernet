@@ -158,10 +158,10 @@ POST /groupcontext/list
 
 | 参数 | 类型 | 必填 | 默认值 | 含义 |
 |------|------|------|--------|------|
-| `scope_levels` | string[] | 否 | `["group","session","round"]` | 过滤 scope_level 范围 |
+| `scope_levels` | string[] | 否 | 按 URL 中最细粒度自动推断 | 过滤 scope_level 范围 |
 
 行为：
-1. 按 `scope_levels` 计算出 `scope` 实例值列表，根据  `(name, scope)` 过滤条目
+1. 未传 `scope_levels` 时，只按 URL 已提供的最细层级查询：只有 `groupId` 查 group 层；有 `sessionId` 且无 `roundId` 查 session 层；有 `roundId` 查 round 层。显式传入 `scope_levels` 时按传入范围计算 `scope` 实例值列表，根据 `(name, scope)` 过滤条目
 2. 保留 `actor_id` 在 `visible_to.userIds` 或 `collect_from.userIds` 中的条目（即可见或可写）
 3. 每个 `(name, scope)` 只返回当前版本（`is_superseded = false`），不根据 `valid_from` / `valid_to` 过滤
 4. 每条只返回元信息，不返回 `content`，也不返回业务有效期字段 `valid_from` / `valid_to`
@@ -200,11 +200,11 @@ POST /groupcontext/get
 | 参数 | 类型 | 必填 | 默认值 | 含义 |
 |------|------|------|--------|------|
 | `name` | string | 是 | — | 精确匹配 name |
-| `scope_levels` | string[] | 否 | `["group","session","round"]` | 过滤 scope_level |
+| `scope_levels` | string[] | 否 | 按 URL 中最细粒度自动推断 | 过滤 scope_level |
 | `limit` | int | 否 | `10` | 返回条数上限 |
 
 行为：
-1. 按 `scope_levels` 计算 `scope` 实例值列表，根据  `(name, scope)` 过滤条目
+1. 未传 `scope_levels` 时，只按 URL 已提供的最细层级查询：只有 `groupId` 查 group 层；有 `sessionId` 且无 `roundId` 查 session 层；有 `roundId` 查 round 层。显式传入 `scope_levels` 时按传入范围计算 `scope` 实例值列表，根据 `(name, scope)` 过滤条目
 2. 保留 `actor_id` 在 `visible_to.userIds` 中的条目
 3. 每个 `(name, scope)` 只返回当前版本（`is_superseded = false`），不根据 `valid_from` / `valid_to` 过滤
 4. 从细到粗排序（round → session → group）

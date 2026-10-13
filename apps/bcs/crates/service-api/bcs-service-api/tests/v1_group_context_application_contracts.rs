@@ -77,16 +77,31 @@ fn scope_level_supports_exact_v1_values_and_rejects_unknown_values() {
 }
 
 #[test]
-fn list_and_get_default_to_group_session_round_scope_levels() {
+fn list_and_get_default_to_deepest_supplied_scope_level() {
+    let group_only = GroupContextRequestContext {
+        group_id: "game-room-7".into(),
+        session_id: None,
+        round_id: None,
+    };
+    let session_context = GroupContextRequestContext {
+        group_id: "game-room-7".into(),
+        session_id: Some("sess-001".into()),
+        round_id: None,
+    };
+
     let list = ListGroupContexts {
         actor_id: "judge_bot".into(),
-        request_context: request_context(),
+        request_context: group_only,
         scope_levels: None,
     };
-    assert_eq!(
-        list.effective_scope_levels(),
-        vec![ScopeLevel::Group, ScopeLevel::Session, ScopeLevel::Round]
-    );
+    assert_eq!(list.effective_scope_levels(), vec![ScopeLevel::Group]);
+
+    let list = ListGroupContexts {
+        actor_id: "judge_bot".into(),
+        request_context: session_context,
+        scope_levels: None,
+    };
+    assert_eq!(list.effective_scope_levels(), vec![ScopeLevel::Session]);
 
     let get = GetGroupContext {
         actor_id: "judge_bot".into(),
@@ -95,10 +110,7 @@ fn list_and_get_default_to_group_session_round_scope_levels() {
         scope_levels: None,
         limit: Some(10),
     };
-    assert_eq!(
-        get.effective_scope_levels(),
-        vec![ScopeLevel::Group, ScopeLevel::Session, ScopeLevel::Round]
-    );
+    assert_eq!(get.effective_scope_levels(), vec![ScopeLevel::Round]);
 }
 
 #[test]

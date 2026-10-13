@@ -90,7 +90,7 @@ impl ListGroupContexts {
     pub fn effective_scope_levels(&self) -> Vec<ScopeLevel> {
         self.scope_levels
             .clone()
-            .unwrap_or_else(|| ScopeLevel::DEFAULT_LEVELS.to_vec())
+            .unwrap_or_else(|| infer_scope_levels_from_context(&self.request_context))
     }
 }
 
@@ -113,7 +113,27 @@ impl GetGroupContext {
     pub fn effective_scope_levels(&self) -> Vec<ScopeLevel> {
         self.scope_levels
             .clone()
-            .unwrap_or_else(|| ScopeLevel::DEFAULT_LEVELS.to_vec())
+            .unwrap_or_else(|| infer_scope_levels_from_context(&self.request_context))
+    }
+}
+
+fn infer_scope_levels_from_context(
+    request_context: &GroupContextRequestContext,
+) -> Vec<ScopeLevel> {
+    if request_context
+        .round_id
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        vec![ScopeLevel::Round]
+    } else if request_context
+        .session_id
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        vec![ScopeLevel::Session]
+    } else {
+        vec![ScopeLevel::Group]
     }
 }
 

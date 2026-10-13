@@ -107,6 +107,12 @@ Permission labels:
 { "scope_levels": ["group", "session"] }
 ```
 
+If `scope_levels` is omitted or `null`, the server queries only the deepest
+scope supplied by URL query parameters: `groupId` only → group scope,
+`groupId + sessionId` → session scope, and `groupId + sessionId + roundId` →
+round scope. Pass `scope_levels` explicitly when a caller intentionally wants
+to query multiple levels.
+
 **Response**
 
 ```json
@@ -135,9 +141,13 @@ Permission labels:
 ### POST /groupcontext/get
 
 Look up a context by exact name. Only contexts where the actor appears in
-`visible_to.userIds` are returned. Results are sorted finest-to-broadest
-(round → session → group). Each `(name, scope)` yields at most one current
-row; business validity does not filter results. If the name exists but the actor is not in `visible_to`, the `items`
+`visible_to.userIds` are returned. If `scope_levels` is omitted or `null`, the
+server queries only the deepest scope supplied by URL query parameters: `groupId`
+only → group scope, `groupId + sessionId` → session scope, and
+`groupId + sessionId + roundId` → round scope. Pass `scope_levels` explicitly
+when a caller intentionally wants multiple levels; those results are sorted
+finest-to-broadest (round → session → group). Each `(name, scope)` yields at
+most one current row; business validity does not filter results. If the name exists but the actor is not in `visible_to`, the `items`
 array is empty — the API does not leak "not found" vs. "not visible".
 
 **Request body**
