@@ -34,8 +34,8 @@ that absence is distinct from permission, transport, proxy and response errors.
 
 ## OCB propagation
 
-Reviewed against OCB `dev@9098662a21`, whose Avernet gitlink is
-`ee53286ee266cc473a7cd084b870e29c13af064f` at `submodules/avernet`.
+Reviewed against OCB `dev@d8331bb42b`, whose Avernet gitlink is
+`0f5c58c3909379cd12a873d18fee3b2b8e742486` at `submodules/avernet`.
 ARCA `DeviceFileSystem.list_dir` delegates through `SandboxRuntimeClient` to
 `arca_io.list_arca_directory`; the filesystem selects strict absence semantics
 through an optional `preserve_read_errors` argument. Other client and direct
