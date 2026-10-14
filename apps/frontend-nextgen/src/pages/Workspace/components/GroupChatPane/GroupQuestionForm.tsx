@@ -15,12 +15,10 @@ import type {
   QuestionDraft,
   QuestionDrafts,
 } from '@/domain/collaboration/groupQuestions';
-import {
-  buildGroupQuestionAnswers,
-  GroupQuestionValidationError,
-} from '@/domain/collaboration/groupQuestions';
-import { Button, ConfirmDialog, Textarea } from '@/components/ui';
+import { buildGroupQuestionAnswers, GroupQuestionValidationError } from '@/domain/collaboration/groupQuestions';
+import { Button, ConfirmDialog } from '@/components/ui';
 import { cn } from '@/utils/cn';
+import { GroupQuestionEditor } from './GroupQuestionEditor';
 import { useEffect, useRef, useState } from 'react';
 
 export interface GroupQuestionFormProps {
@@ -40,11 +38,7 @@ export interface GroupQuestionFormProps {
 const DEFAULT_DRAFT: QuestionDraft = { values: [], other: '', skipped: false };
 
 /** 末题跳过自动提交时，本帧 props 尚未携带最新草稿 → 本地覆盖后再构造 answers。 */
-function withDraftOverride(
-  drafts: QuestionDrafts,
-  questionId: string,
-  draft: QuestionDraft,
-): QuestionDrafts {
+function withDraftOverride(drafts: QuestionDrafts, questionId: string, draft: QuestionDraft): QuestionDrafts {
   const next: QuestionDrafts = Object.create(null);
   for (const [existingId, existing] of Object.entries(drafts)) next[existingId] = existing;
   next[questionId] = draft;
@@ -127,9 +121,7 @@ export function GroupQuestionForm({
   };
 
   const submitAnswers = (override?: { questionId: string; draft: QuestionDraft }) => {
-    const effectiveDrafts = override
-      ? withDraftOverride(drafts, override.questionId, override.draft)
-      : drafts;
+    const effectiveDrafts = override ? withDraftOverride(drafts, override.questionId, override.draft) : drafts;
     try {
       const answers = buildGroupQuestionAnswers(questions, effectiveDrafts);
       void onResolve({ action: 'submit', answers });
@@ -151,9 +143,7 @@ export function GroupQuestionForm({
     }
     // 末题跳过：全部题目已回答或跳过 → 整组提交（跳过题 values: []）；
     // 否则跳回首个未完成题，不发送请求。
-    const allHandled = questions.every(
-      (question) => question.questionId === active.questionId || isHandled(question),
-    );
+    const allHandled = questions.every((question) => question.questionId === active.questionId || isHandled(question));
     if (!allHandled) {
       const firstOpenIndex = questions.findIndex(
         (question) => question.questionId !== active.questionId && !isHandled(question),
@@ -174,17 +164,16 @@ export function GroupQuestionForm({
   if (!active) return null;
 
   const activeDraft = draftOf(active.questionId);
-  const showOtherInput = active.options.length === 0 || active.allowOther;
-  const otherLabel = active.options.length > 0 ? '自定义回答' : '你的回答';
-
   return (
     <div className="space-y-2 rounded-lg bg-muted/30 p-3">
       {questions.length > 1 ? (
         <div role="group" aria-label="问题切换" className="flex flex-wrap items-center gap-1">
           {questions.map((question, index) => (
-            <button
+            <Button
               key={question.questionId}
               type="button"
+              variant="ghost"
+              size="sm"
               aria-current={index === activeIndexSafe ? 'step' : undefined}
               disabled={disabled}
               onClick={() => {
@@ -192,76 +181,27 @@ export function GroupQuestionForm({
                 setValidation(null);
               }}
               className={cn(
-                'rounded-t-md border-b-2 px-3 py-1.5 text-xs transition-colors disabled:opacity-50',
+                'h-auto min-h-0 rounded-t-md border-b-2 px-3 py-1.5 text-xs transition-colors',
                 index === activeIndexSafe
-                  ? 'border-primary bg-primary/10 font-medium text-primary'
+                  ? 'border-primary bg-primary/10 font-medium text-primary hover:bg-primary/10 hover:text-primary'
                   : 'border-transparent bg-muted text-muted-foreground hover:bg-muted/70',
               )}
             >
               {question.header || `问题 ${index + 1}`}
-            </button>
+            </Button>
           ))}
         </div>
       ) : null}
 
-      <div className="rounded-md border border-input bg-background p-3">
-        <div className="flex items-center gap-2">
-          <p className="text-sm font-medium text-foreground">{active.question}</p>
-          {activeDraft.skipped ? (
-            <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-              已跳过
-            </span>
-          ) : null}
-        </div>
-        {active.options.length > 0 ? (
-          <div role="group" aria-label={active.question} className="mt-2 space-y-1">
-            {active.options.map((option, index) => (
-              <label
-                key={option.value}
-                className={cn(
-                  'flex items-start gap-2 rounded-md border border-input px-3 py-2 text-sm transition-colors',
-                  activeDraft.values.includes(option.value)
-                    ? 'border-primary/60 bg-primary/5'
-                    : 'bg-background',
-                  disabled ? 'opacity-60' : 'cursor-pointer hover:bg-muted/50',
-                )}
-              >
-                <input
-                  ref={index === 0 ? registerFirstControl(active.questionId) : undefined}
-                  type={active.multiSelect ? 'checkbox' : 'radio'}
-                  name={`${interaction.key}:${active.questionId}`}
-                  value={option.value}
-                  checked={activeDraft.values.includes(option.value)}
-                  onChange={() => handleToggleOption(active, option.value)}
-                  disabled={disabled}
-                  className="mt-0.5"
-                />
-                <span className="leading-snug">
-                  {option.label}
-                  {option.description ? (
-                    <span className="block text-xs text-muted-foreground">{option.description}</span>
-                  ) : null}
-                </span>
-              </label>
-            ))}
-          </div>
-        ) : null}
-        {showOtherInput ? (
-          <label className="mt-2 block">
-            <span className="mb-1 block text-xs text-muted-foreground">{otherLabel}</span>
-            <Textarea
-              ref={active.options.length === 0 ? registerFirstControl(active.questionId) : undefined}
-              aria-label={otherLabel}
-              rows={2}
-              size="sm"
-              value={activeDraft.other}
-              onChange={(event) => handleOtherChange(active, event.target.value)}
-              disabled={disabled}
-              placeholder={active.options.length > 0 ? '填写选项以外的回答' : '填写你的回答'}
-            />
-          </label>
-        ) : null}
-      </div>
+      <GroupQuestionEditor
+        question={active}
+        interactionKey={interaction.key}
+        draft={activeDraft}
+        disabled={disabled}
+        registerFirstControl={registerFirstControl(active.questionId)}
+        onToggleOption={(optionValue) => handleToggleOption(active, optionValue)}
+        onOtherChange={(text) => handleOtherChange(active, text)}
+      />
 
       <footer className="flex flex-wrap items-center justify-end gap-2">
         {validation ? (
@@ -269,9 +209,7 @@ export function GroupQuestionForm({
             {validation}
           </p>
         ) : null}
-        {!connected ? (
-          <p className="mr-auto text-xs text-muted-foreground">连接不可用，暂时无法回答</p>
-        ) : null}
+        {!connected ? <p className="mr-auto text-xs text-muted-foreground">连接不可用，暂时无法回答</p> : null}
         <Button type="button" variant="ghost" size="sm" onClick={handleSkip} disabled={disabled}>
           跳过此题
         </Button>
@@ -296,13 +234,7 @@ export function GroupQuestionForm({
         >
           确认提交
         </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={disabled}
-          onClick={() => setCancelOpen(true)}
-        >
+        <Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={() => setCancelOpen(true)}>
           取消问答
         </Button>
         <ConfirmDialog
