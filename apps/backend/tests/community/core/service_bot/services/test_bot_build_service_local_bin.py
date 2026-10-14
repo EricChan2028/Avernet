@@ -14,9 +14,285 @@ from agentclaw.community.core.service_bot.services.bot_build_service import (
 from agentclaw.community.core.service_bot.services import bot_build_service as module
 from agentclaw.community.core.workspace.engine_sandbox import EngineBuildPlan
 from agentclaw.community.core.service_bot.services.local_bin_artifact import (
+    _resolve_cli_source,
     restore_local_bin_artifact,
     sync_local_bin_artifact,
 )
+
+
+@pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
+def test_node_npm_harness_multi_hop_links_map_to_bot_home(migration, monkeypatch, caplog):
+    caplog.set_level("INFO")
+    source, artifact, commands, migrate = migration
+    home = source.parent
+    bin_dir = home / ".local/bin"
+    bin_dir.mkdir(parents=True)
+    node_root = home / ".local/node24"
+    (node_root / "bin").mkdir(parents=True)
+    (home / ".local/share/runtime").mkdir(parents=True)
+    (home / "launchers").mkdir()
+    npm_dir = node_root / "lib/node_modules/npm/bin"
+    npm_dir.mkdir(parents=True)
+    harness_dir = node_root / "lib/node_modules/td-harnessctl/bin"
+    harness_dir.mkdir(parents=True)
+    targets = {
+        "node": home / ".local/share/runtime/node-real",
+        "npm": home / "launchers/npm-real",
+        "td-harnessctl": harness_dir.parent / "real-harness",
+    }
+    for name, target in targets.items():
+        target.write_text(f"#!/bin/sh\nprintf '{name} bot'\n")
+        target.chmod(0o755)
+    (bin_dir / "node").symlink_to("/home/admin/.local/node24/bin/node")
+    (node_root / "bin/node").symlink_to("../../share/runtime/node-real")
+    (bin_dir / "npm").symlink_to("/home/admin/.local/node24/bin/npm")
+    (node_root / "bin/npm").symlink_to("../lib/node_modules/npm/bin/npm-cli.js")
+    (npm_dir / "npm-cli.js").symlink_to("/home/admin/launchers/npm-real")
+    (bin_dir / "td-harnessctl").symlink_to(
+        "/home/admin/.local/node24/lib/node_modules/td-harnessctl/bin/harness",
+    )
+    (harness_dir / "harness").symlink_to("../real-harness")
+    before = {str(path.relative_to(home)): str(path.readlink())
+              for path in home.rglob("*") if path.is_symlink()}
+    original_lstat = Path.lstat
+
+    def no_host_lstat(path):
+        assert not path.is_relative_to("/home/admin")
+        return original_lstat(path)
+
+    monkeypatch.setattr(Path, "lstat", no_host_lstat)
+    assert migrate()
+    for name, target in targets.items():
+        published = artifact.parent / ".local/bin" / name
+        assert not published.is_symlink()
+        assert published.read_bytes() == target.read_bytes()
+        assert subprocess.check_output([str(published)], text=True) == f"{name} bot"
+    after = {str(path.relative_to(home)): str(path.readlink())
+             for path in home.rglob("*") if path.is_symlink()}
+    assert before == after
+    assert not (artifact.parent / ".local/node24").exists()
+    assert not (artifact.parent / "launchers").exists()
+    stage = Path(commands[-1][-2]).parent
+    assert not stage.exists()
+    assert "service_bot.local_bin.mapping.request" in caplog.text
+    assert "service_bot.local_bin.mapping.success" in caplog.text
+    assert "raw=/home/admin" in caplog.text and "resolved=" in caplog.text
+
+
+@pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
+@pytest.mark.parametrize("root_link", [".local", ".local/bin"])
+def test_source_bin_root_and_parent_absolute_links_are_mapped(migration, root_link):
+    source, artifact, _, migrate = migration
+    home = source.parent
+    actual = home / "payload/bin"
+    actual.mkdir(parents=True)
+    (actual / "cli").write_text("mapped parent")
+    link = home / root_link
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to("/home/admin/payload" if root_link == ".local" else "/home/admin/payload/bin")
+    assert migrate()
+    assert (artifact.parent / ".local/bin/cli").read_text() == "mapped parent"
+    assert link.is_symlink()
+
+
+@pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
+def test_directory_aliases_and_linked_parent_dotdot_preserve_output_paths(migration):
+    source, artifact, _, migrate = migration
+    home = source.parent
+    bin_dir = home / ".local/bin"
+    bin_dir.mkdir(parents=True)
+    actual = home / "tree/deep/tools"
+    actual.mkdir(parents=True)
+    actual.chmod(0o750)
+    (home / "tree/deep/sibling").mkdir()
+    (home / "tree/deep/sibling/cli").write_text("resolved parent dotdot")
+    (actual / "nested").symlink_to("/home/admin/tree/deep/sibling/cli")
+    (actual / "ignored").symlink_to("/home/admin/missing")
+    (home / "alias").symlink_to("/home/admin/tree/deep/tools")
+    (bin_dir / "first").symlink_to("/home/admin/alias")
+    (bin_dir / "second").symlink_to("/home/admin/alias")
+    (bin_dir / "dotdot").symlink_to("/home/admin/alias/../sibling/cli")
+    assert migrate((".local/bin/first/ignored", ".local/bin/second/ignored"))
+    published = artifact.parent / ".local/bin"
+    assert (published / "dotdot").read_text() == "resolved parent dotdot"
+    for name in ("first", "second"):
+        assert (published / name / "nested").read_text() == "resolved parent dotdot"
+        assert (published / name).stat().st_mode & 0o777 == 0o750
+        assert not (published / name / "ignored").exists()
+
+
+@pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
+def test_excluded_broken_links_are_never_resolved(migration):
+    source, artifact, _, migrate = migration
+    bin_dir = source.parent / ".local/bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "valid").write_text("keep")
+    for name in ("cfuse", "cfuse-claude", "cfuse-codex", "ignored"):
+        (bin_dir / name).symlink_to("/etc/not-a-cli")
+    (bin_dir / "cycle").symlink_to("cycle")
+    assert migrate((".local/bin/ignored", ".local/bin/cycle"))
+    assert sorted(path.name for path in (artifact.parent / ".local/bin").iterdir()) == ["valid"]
+
+
+@pytest.mark.parametrize("target", ["/etc/passwd", "/home/administrator/cli", "../../../outside"])
+def test_external_or_escaping_links_fail_before_rsync(tmp_path, target, caplog):
+    caplog.set_level("INFO")
+    home = tmp_path / "home"
+    bin_dir = home / ".local/bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "cli").symlink_to(target)
+    run = MagicMock()
+    with pytest.raises(ValueError, match="escapes"):
+        sync_local_bin_artifact(
+            source_home=home, target_dir=tmp_path / "versions/3/openclaw",
+            device_id="bot", version="3", build_ignore_paths=(), run_command=run,
+        )
+    run.assert_not_called()
+    assert "service_bot.local_bin.mapping.failure" in caplog.text
+    assert "service_bot.local_bin.failure" in caplog.text
+
+
+@pytest.mark.parametrize("kind", ["symlink-cycle", "directory-cycle", "dangling", "fifo"])
+def test_invalid_source_entries_fail_without_copy(tmp_path, kind):
+    import os
+
+    home = tmp_path / "home"
+    bin_dir = home / ".local/bin"
+    bin_dir.mkdir(parents=True)
+    if kind == "symlink-cycle":
+        (bin_dir / "cli").symlink_to("other")
+        (bin_dir / "other").symlink_to("cli")
+    elif kind == "directory-cycle":
+        (bin_dir / "cli").symlink_to(".")
+    elif kind == "dangling":
+        (bin_dir / "cli").symlink_to("/home/admin/missing")
+    else:
+        os.mkfifo(bin_dir / "cli")
+    run = MagicMock()
+    with pytest.raises((ValueError, FileNotFoundError)):
+        sync_local_bin_artifact(
+            source_home=home, target_dir=tmp_path / "versions/3/openclaw",
+            device_id="bot", version="3", build_ignore_paths=(), run_command=run,
+        )
+    run.assert_not_called()
+
+
+@pytest.mark.parametrize("hops", [40, 41])
+def test_symlink_hop_boundary(tmp_path, hops):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "real").write_text("final")
+    for index in range(hops):
+        (home / f"link{index}").symlink_to(f"link{index + 1}" if index < hops - 1 else "real")
+    if hops == 40:
+        assert _resolve_cli_source(home / "link0", home) == home / "real"
+    else:
+        with pytest.raises(ValueError, match="hop limit"):
+            _resolve_cli_source(home / "link0", home)
+
+
+def test_same_container_absolute_link_uses_each_bots_home(tmp_path):
+    for bot in ("bot-a", "bot-b"):
+        home = tmp_path / bot
+        home.mkdir()
+        (home / "real").write_text(bot)
+        (home / "cli").symlink_to("/home/admin/real")
+        assert _resolve_cli_source(home / "cli", home).read_text() == bot
+
+
+def test_already_mapped_absolute_link_stays_in_selected_home(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "real").write_text("NAS target")
+    (home / "cli").symlink_to(home / "real")
+    assert _resolve_cli_source(home / "cli", home) == home / "real"
+
+
+def test_selected_home_root_link_to_another_bot_is_rejected(tmp_path):
+    other = tmp_path / "other-bot"
+    (other / ".local/bin").mkdir(parents=True)
+    (other / ".local/bin/cli").write_text("other Bot content")
+    home = tmp_path / "selected-home"
+    home.symlink_to(other, target_is_directory=True)
+    run = MagicMock()
+    with pytest.raises(ValueError, match="Home root"):
+        sync_local_bin_artifact(
+            source_home=home, target_dir=tmp_path / "versions/3/openclaw",
+            device_id="bot", version="3", build_ignore_paths=(), run_command=run,
+        )
+    run.assert_not_called()
+
+
+def test_file_cannot_be_traversed_by_dotdot(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "file").write_text("regular file")
+    (home / "cli").symlink_to("/home/admin/file/../file")
+    with pytest.raises(NotADirectoryError):
+        _resolve_cli_source(home / "cli", home)
+
+
+@pytest.mark.parametrize("broken", [False, True])
+def test_bin_only_staging_is_removed_after_success_or_failure(tmp_path, monkeypatch, broken):
+    from agentclaw.community.core.service_bot.services import local_bin_artifact as module
+
+    home = tmp_path / "home"
+    (home / ".local/bin").mkdir(parents=True)
+    (home / "dependencies").mkdir()
+    (home / "dependencies/cli").write_text("entry only")
+    (home / ".local/bin/cli").symlink_to(
+        "/home/admin/missing" if broken else "/home/admin/dependencies/cli",
+    )
+    original_temp = module.tempfile.TemporaryDirectory
+    stages = []
+
+    def track_temp(**kwargs):
+        directory = original_temp(dir=tmp_path, **kwargs)
+        stages.append(Path(directory.name))
+        return directory
+
+    monkeypatch.setattr(module.tempfile, "TemporaryDirectory", track_temp)
+    calls = []
+
+    def inspect_stage(**kwargs):
+        calls.append(kwargs)
+        stage_bin = Path(kwargs["cmd"][-2])
+        assert sorted(path.name for path in stage_bin.parent.iterdir()) == ["bin"]
+        assert sorted(path.name for path in stage_bin.iterdir()) == ["cli"]
+        assert (stage_bin / "cli").is_symlink()
+        assert (stage_bin / "cli").readlink() == home / "dependencies/cli"
+
+    arguments = dict(
+        source_home=home, target_dir=tmp_path / "versions/3/openclaw",
+        device_id="bot", version="3", build_ignore_paths=(), run_command=inspect_stage,
+    )
+    if broken:
+        with pytest.raises(FileNotFoundError):
+            sync_local_bin_artifact(**arguments)
+        assert calls == []
+    else:
+        sync_local_bin_artifact(**arguments)
+        assert len(calls) == 1
+    assert len(stages) == 1 and all(not stage.exists() for stage in stages)
+
+
+@pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
+def test_absolute_home_link_is_materialized_without_changing_source(migration):
+    source, artifact, _, migrate = migration
+    home = source.parent
+    (home / ".local/bin").mkdir(parents=True)
+    (home / "tools").mkdir()
+    tool = home / "tools/absolute-cli"
+    tool.write_text("#!/bin/sh\nprintf 'mapped bot CLI'\n")
+    tool.chmod(0o755)
+    link = home / ".local/bin/absolute-cli"
+    link.symlink_to("/home/admin/tools/absolute-cli")
+    assert migrate()
+    published = artifact.parent / ".local/bin/absolute-cli"
+    assert published.is_file() and not published.is_symlink()
+    assert subprocess.check_output([str(published)], text=True) == "mapped bot CLI"
+    assert link.readlink() == Path("/home/admin/tools/absolute-cli")
+    assert tool.read_text() == "#!/bin/sh\nprintf 'mapped bot CLI'\n"
 
 
 @pytest.fixture
@@ -448,7 +724,7 @@ def test_retry_cleans_only_version_bin_and_keeps_other_version_data(migration):
     assert all(cmd[1] != "rm" for cmd in commands)
     cli_copies = [cmd for cmd in commands if cmd[-1] == f"{version_local / 'bin'}/"]
     assert len(cli_copies) == 2
-    assert all(cmd[-2] == f"{source_bin}/" for cmd in cli_copies)
+    assert all(not Path(cmd[-2]).exists() for cmd in cli_copies)
 
 
 def test_retry_cleanup_failure_aborts_before_copy(tmp_path, caplog):
@@ -456,6 +732,7 @@ def test_retry_cleanup_failure_aborts_before_copy(tmp_path, caplog):
     artifact = tmp_path / "versions/3/openclaw"
     (artifact.parent / ".local/bin").mkdir(parents=True)
     source_home = tmp_path / "home"
+    source_home.mkdir()
     run = MagicMock(side_effect=BotBuildMigrationError("cleanup failed"))
     with pytest.raises(BotBuildMigrationError, match="cleanup failed"):
         sync_local_bin_artifact(
@@ -505,7 +782,7 @@ def test_retry_empty_or_absent_payload_clears_only_bin_using_rsync(migration, ca
     assert len(cli_sync) == 1
     assert "--delete" in cli_sync[0] and "--delete-excluded" in cli_sync[0]
     if state == "empty":
-        assert cli_sync[0][-2] == f"{source_bin}/"
+        assert not Path(cli_sync[0][-2]).exists()
         assert "service_bot.local_bin.cleanup.request" not in caplog.text
     else:
         assert not Path(cli_sync[0][-2]).exists()
@@ -518,6 +795,7 @@ def test_retry_empty_or_absent_payload_clears_only_bin_using_rsync(migration, ca
 @pytest.mark.parametrize("excluded", [False, True])
 def test_absent_target_without_payload_does_not_create_bin_or_run_cleanup(tmp_path, excluded):
     source_home = tmp_path / "home"
+    source_home.mkdir()
     if excluded:
         (source_home / ".local/bin").mkdir(parents=True)
         (source_home / ".local/bin/cli").write_text("ignored")
@@ -556,7 +834,7 @@ def test_non_directory_cli_source_fails(tmp_path, dangling_link):
         (source / ".local/bin").symlink_to("missing-directory")
     else:
         (source / ".local/bin").write_text("not a directory")
-    with pytest.raises(NotADirectoryError):
+    with pytest.raises(FileNotFoundError if dangling_link else NotADirectoryError):
         sync_local_bin_artifact(
             source_home=source,
             target_dir=tmp_path / "artifact",
