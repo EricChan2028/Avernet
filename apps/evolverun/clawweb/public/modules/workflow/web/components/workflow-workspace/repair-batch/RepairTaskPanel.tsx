@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { repairBatches } from '../../../api/repair-batches'
 import type { RepairDiff, RepairTaskDetail } from '../../../../server/contracts/repair-workbench'
 import { button, primary, JsonDetails, phases } from './repair-view'
+import PackDiff from './PackDiff'
+import RepairReleaseFlow from './RepairReleaseFlow'
 
 const message = (value: unknown) => value instanceof Error ? value.message : String(value)
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -27,6 +29,7 @@ export default function RepairTaskPanel({ detail, canEdit, onFeedback, onCancel,
   const [filePath, setFilePath] = useState('')
   const [tab, setTab] = useState<'diff' | 'checks' | 'sources'>('diff')
   const [retry, setRetry] = useState(0)
+  const diffCache = useRef(new Map<string, RepairDiff>())
   const revision = detail.revisions.find(item => item.revision === selectedRevision) ?? detail.latestAttempt
   const candidate = typeof revision.draft?.candidateCommit === 'string' ? revision.draft.candidateCommit : null
   const checks = revision.checks
@@ -34,16 +37,27 @@ export default function RepairTaskPanel({ detail, canEdit, onFeedback, onCancel,
   const coverage = records(checks?.coverage)
   useEffect(() => {
     if (tab !== 'diff' || !showDiff || !candidate || !detail.capabilities.diff) return
+    const key = JSON.stringify([detail.taskId, revision.revision, candidate, base, retry])
+    const cached = diffCache.current.get(key)
+    if (cached) { setDiff(cached); setDiffError(''); setDiffLoading(false); return }
     let current = true; setDiffLoading(true); setDiffError(''); setDiff(null)
-    repairBatches.diff(detail.taskId, revision.revision, base).then(value => { if (current) setDiff(value) })
+    repairBatches.diff(detail.taskId, revision.revision, base).then(value => { if (current) {
+      if (diffCache.current.size >= 10) diffCache.current.delete(diffCache.current.keys().next().value!)
+      diffCache.current.set(key, value); setDiff(value)
+    } })
       .catch(error => { if (current) setDiffError(message(error)) }).finally(() => { if (current) setDiffLoading(false) })
     return () => { current = false }
   }, [detail.taskId, revision.revision, candidate, detail.capabilities.diff, base, showDiff, retry, tab])
 
   const failed = detail.latestAttempt.phase === 'failed'
   const awaitingResult = failed && detail.latestAttempt.error?.code === 'GIT_RESULT_UNAVAILABLE'
-  const canGenerate = canEdit && detail.capabilities.generation && !busy
-  return <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_19rem]">
+  const alreadyPublished = detail.revisions.some(row => row.phase === 'published')
+  const canGenerate = canEdit && detail.capabilities.generation && !busy && !alreadyPublished
+  return <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_19rem] pb-20">
+    <div aria-label="当前修复步骤与下一步" className="fixed bottom-3 left-6 right-6 z-50 flex items-center justify-between gap-3 rounded-lg border border-input bg-card px-4 py-3 shadow-lg">
+      <p className="text-sm font-semibold">{detail.release?.deployments[0]?.status === 'succeeded' ? '部署已完成，下一步验证效果' : detail.release?.deployments[0] && ['uncertain', 'running', 'dispatching'].includes(detail.release.deployments[0].status) ? '部署已提交，核对或继续完成同一请求' : detail.release?.approval?.status === 'approved' ? '候选已确认，下一步明确部署' : '审阅差异与检查报告，完成后确认候选'}</p>
+      <button className={primary} onClick={() => document.getElementById(`repair-release-${detail.taskId}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })}>{detail.release?.deployments[0]?.status === 'succeeded' ? '查看效果验证' : detail.release?.approval?.status === 'approved' ? '进入部署确认' : '进入候选确认'}</button>
+    </div>
     <section aria-label="修复任务详情" className="min-w-0 space-y-4">
       <section className={`rounded-lg border bg-card p-5 ${failed ? 'border-destructive/30' : 'border-input'}`}>
         <p className="text-sm font-semibold text-foreground">最近尝试：v{detail.latestAttempt.revision} · {phases[detail.latestAttempt.phase] ?? detail.latestAttempt.phase}</p>
@@ -114,15 +128,13 @@ export default function RepairTaskPanel({ detail, canEdit, onFeedback, onCancel,
         {!diff.files.length && <p className="text-xs text-muted-foreground">此基准下没有文件差异。</p>}
         <div className="grid overflow-hidden rounded border border-input bg-background text-foreground md:grid-cols-[11rem_minmax(0,1fr)]"><nav aria-label="候选变更文件" className="border-r border-input bg-muted/50 p-2">{diff.files.map(file => <button key={file.path} onClick={() => setFilePath(file.path)} className={`block w-full break-all rounded p-2 text-left font-mono text-[10px] ${file.path === filePath || !diff.files.some(f => f.path === filePath) && file === diff.files[0] ? 'bg-primary/10 text-primary' : 'text-muted-foreground'}`}>{file.status} · {file.path}</button>)}</nav><div className="min-w-0">{diff.files.filter(file => file.path === (diff.files.some(f => f.path === filePath) ? filePath : diff.files[0]?.path)).map(file => <details key={file.path} open className="overflow-hidden rounded-lg border border-input">
           <summary className="cursor-pointer break-all bg-muted/50 px-3 py-2 text-xs">{file.status} · {file.path}</summary>
-          {file.binary ? <p className="p-3 text-xs">二进制文件，无法展示文本差异。</p> : <div className="grid sm:grid-cols-2">
-            <div className="min-w-0 bg-destructive/5 p-3"><p className="mb-2 text-xs text-destructive">修改前</p><pre className="max-h-80 overflow-auto text-[11px]">{file.before ?? '(文件不存在)'}</pre></div>
-            <div className="min-w-0 bg-success/5 p-3"><p className="mb-2 text-xs text-success">修改后</p><pre className="max-h-80 overflow-auto text-[11px]">{file.after ?? '(文件已删除)'}</pre></div>
-          </div>}{file.truncated && <p className="p-2 text-xs text-warning-foreground">此文件内容已截断。</p>}
+          <PackDiff file={file} />
         </details>)}</div></div>
       </div>}
     </div>}
       </section>
-      {['review', 'blocked'].includes(detail.latestAttempt.phase) && <section className="rounded-lg border border-input bg-card p-5">
+      <div id={`repair-release-${detail.taskId}`} className="scroll-mt-4"><RepairReleaseFlow detail={detail} selectedRevision={revision.revision} canEdit={canEdit} onRefresh={onRefresh} /></div>
+      {!alreadyPublished && ['review', 'blocked'].includes(detail.latestAttempt.phase) && <section className="rounded-lg border border-input bg-card p-5">
         <h3 className="text-sm font-semibold">不满意？把修改要求交给下一轮 AIS</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">基于上一成功 Pack，保留原始问题与证据；调整范围和反馈后生成新候选。</p>
         <button className={`${primary} mt-3`} disabled={!canGenerate || revision.revision !== detail.latestSuccessful?.revision} onClick={onFeedback}>反馈并生成下一版</button>
       </section>}
@@ -134,8 +146,8 @@ export default function RepairTaskPanel({ detail, canEdit, onFeedback, onCancel,
           <p className={`text-xs font-medium ${item.revision === revision.revision ? 'text-primary' : 'text-foreground'}`}>v{item.revision} · {phases[item.phase]}</p><p className="mt-1 truncate font-mono text-[10px] text-muted-foreground/70">{typeof item.draft?.candidateCommit === 'string' ? item.draft.candidateCommit : '未生成候选 commit'}</p>
         </button>)}</div>
       </section>
-      <section className="rounded-lg border border-input bg-card p-5"><h3 className="text-xs font-semibold">当前能力边界</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">生成结果仅供审阅，尚未应用到工作流或部署。当前不提供发布能力。</p></section>
-      {['drafting', 'review', 'blocked', 'failed'].includes(detail.latestAttempt.phase) && <button className="text-xs text-muted-foreground hover:text-destructive" disabled={!canEdit || busy} onClick={onCancel}>取消修复任务</button>}
+      <section className="rounded-lg border border-input bg-card p-5"><h3 className="text-xs font-semibold">安全边界</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">{detail.latestAttempt.phase === 'published' ? '候选部署事实已记录；后续运行按部署版本验证。' : '生成候选尚未应用到工作流或部署；只有明确确认部署才影响新运行。'}效果验证单独记录，不自动关闭问题，也不自动回滚。</p></section>
+      {!alreadyPublished && ['drafting', 'review', 'blocked', 'failed'].includes(detail.latestAttempt.phase) && <button className="text-xs text-muted-foreground hover:text-destructive" disabled={!canEdit || busy} onClick={onCancel}>取消修复任务</button>}
     </aside>
   </div>
 }

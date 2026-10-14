@@ -2,11 +2,24 @@ import { fetchJson } from '@avernet/clawweb-shared/web/api/client'
 import { readOnlyJson } from './read-only-json'
 import type { RepairCandidatesQuery, RepairCandidatesResponse, RepairDiff, RepairFeedbackRequest, RepairInboxItem, RepairSelectionRequest, RepairTaskDetail } from '../../server/contracts/repair-workbench'
 import type { RepairRevision, StoredRepairItem } from '../../server/contracts/repair-batch'
+import type { RepairConfirmRequest, RepairDeployRequest, RepairApproval, RepairDeployment, RepairReleaseTarget } from '../../server/contracts/repair-release'
+import type { RepairVerificationEvidence, RepairVerificationConclusion } from '../../server/contracts/repair-verification'
 
 const base = '/api/workflow-repairs'
 const segment = encodeURIComponent
 const post = <T,>(url: string, body: unknown) => fetchJson<T>(url, { method: 'POST', body: JSON.stringify(body) })
 export const repairBatches = {
+  deploymentTargets: (taskId: string) => readOnlyJson<{ targets: RepairReleaseTarget[] }>(`${base}/${segment(taskId)}/deployment-targets`),
+  confirm: (taskId: string, request: RepairConfirmRequest) => post<RepairApproval>(`${base}/${segment(taskId)}/confirm`, request),
+  revokeConfirmation: (taskId: string, request: RepairDeployRequest) => post<RepairApproval>(`${base}/${segment(taskId)}/revoke-confirmation`, request),
+  deploy: (taskId: string, request: RepairDeployRequest) => post<RepairDeployment>(`${base}/${segment(taskId)}/deployment`, request),
+  reconcileDeployment: (taskId: string, deploymentId: string) => post<RepairDeployment>(`${base}/${segment(taskId)}/deployment/${segment(deploymentId)}/reconcile`, {}),
+  resumeDeployment: (taskId: string, deploymentId: string, requestId: string) => post<RepairDeployment>(`${base}/${segment(taskId)}/deployment/${segment(deploymentId)}/resume`, { requestId }),
+  stopDeployment: (taskId: string, deploymentId: string, requestId: string) => post<RepairDeployment>(`${base}/${segment(taskId)}/deployment/${segment(deploymentId)}/stop`, { requestId }),
+  verification: (taskId: string, deploymentId: string) => readOnlyJson<{ evidence: RepairVerificationEvidence; conclusions: RepairVerificationConclusion[] }>(`${base}/${segment(taskId)}/deployment/${segment(deploymentId)}/verification`),
+  conclude: (taskId: string, deploymentId: string, request: { requestId: string; itemId: string; expectedStateVersion: number;
+    result: 'verified' | 'ineffective' | 'inconclusive'; reason: string; flowIds: string[] }) => post<RepairVerificationConclusion>(`${base}/${segment(taskId)}/deployment/${segment(deploymentId)}/verification`, request),
+  reopenItem: (taskId: string, deploymentId: string, request: { requestId: string; itemId: string; expectedStateVersion: number }) => post<unknown>(`${base}/${segment(taskId)}/deployment/${segment(deploymentId)}/reopen-item`, request),
   candidates: (workflowId: string, query: RepairCandidatesQuery = {}) => {
     if (query.previewSignatures !== undefined) return readOnlyJson<RepairCandidatesResponse>(
       `${base}/candidates/query`, undefined, { ...query, workflowId })
