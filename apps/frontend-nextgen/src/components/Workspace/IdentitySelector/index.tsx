@@ -92,9 +92,9 @@ export function WorkspaceIdentitySelector({
   ) : null;
   return (
     // sidebarChip：身份 chip 需占满侧栏行宽（w-full），否则按钮按内容收缩、气泡也随之变窄。
-    <div className={collapsedLayout ? undefined : sidebarChipLayout ? 'w-full' : 'space-y-1'}>
+    <div className={collapsedLayout ? undefined : sidebarChipLayout ? 'w-full' : layout === 'inline' ? 'flex min-w-0 items-center gap-2' : 'space-y-1'}>
       <Popover open={open} onOpenChange={handlePopoverOpenChange}>
-        {collapsedLayout || sidebarChipLayout ? null : (
+        {collapsedLayout || sidebarChipLayout || layout === 'inline' ? null : (
           <IdentitySectionHeader
             layout={layout}
             headerLabel={headerLabel}
