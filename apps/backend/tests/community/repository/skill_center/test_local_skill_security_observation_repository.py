@@ -58,7 +58,8 @@ def state() -> tuple[_Database, LocalSkillSecurityObservationRepository]:
 
 def _record(repo: LocalSkillSecurityObservationRepository, observation_id: str,
             *, actor: str = "creator-a", skill_id: int = 42,
-            incarnation: str = INCARNATION, digest: str = "sha256:" + "a" * 64):
+            incarnation: str = INCARNATION, digest: str = "sha256:" + "a" * 64,
+            new_asset: bool = False):
     facts = dict(
         env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=skill_id,
         incarnation_id=incarnation, observation_id=observation_id,
@@ -66,7 +67,7 @@ def _record(repo: LocalSkillSecurityObservationRepository, observation_id: str,
     )
     order = repo.reserve_handoff(
         **facts, actor_id=actor, cancelled=Event(), name="sample",
-        description="description", creator_id="creator-a",
+        description="description", creator_id="creator-a", new_asset=new_asset,
     )
     observation = repo.record_observation(
         **facts, modifier_id=actor,
@@ -423,6 +424,47 @@ def test_sqlite_reused_numeric_id_starts_a_new_formal_incarnation(state):
         old_identity.provider_skill_id
     ]
     assert [item.observation_id for item in recoverable_scans] == ["upload-new"]
+
+
+def test_created_upload_rebinds_when_delete_tombstone_was_lost(state):
+    db, repo = state
+    with avernet_tenant_scope("teamclaw"):
+        _record(repo, "upload-old")
+        with db.transactional_orm_session() as session:
+            session.query(Skill).filter_by(id=42).delete()
+        with db.transactional_orm_session() as session:
+            session.add(Skill(
+                id=42, name="new", git_path="local://bot-a/new",
+                user_id="owner-a", bolt_id="bot-a", env="pre",
+                avernet_tenant="teamclaw",
+            ))
+        assert repo.get_observed_incarnation_id(
+            env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=42,
+        ) == INCARNATION
+        new = _record(
+            repo, "upload-new", incarnation="fresh-incarnation", new_asset=True,
+        )
+        assert repo.get_observed_incarnation_id(
+            env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=42,
+        ) == "fresh-incarnation"
+        assert repo.get_current_for_asset(
+            env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=42,
+            incarnation_id=INCARNATION,
+        ) is None
+    assert new.provider_skill_id == "tc:fresh-incarnation"
+
+
+def test_scan_claim_rejects_the_previous_upload_after_replacement(state):
+    _, repo = state
+    with avernet_tenant_scope("teamclaw"):
+        _record(repo, "upload-old")
+        _record(repo, "upload-current", actor="replacer-b")
+        assert repo.claim_scan_submission(env="pre", observation_id="upload-old") is False
+        assert repo.claim_scan_submission(env="pre", observation_id="upload-current") is True
+        old = repo.get_by_observation_id(env="pre", observation_id="upload-old")
+        current = repo.get_by_observation_id(env="pre", observation_id="upload-current")
+    assert old is not None and old.processing_status == "PENDING"
+    assert current is not None and current.processing_status == "SUBMITTING"
 
 
 def test_asset_and_tenant_scope(state):

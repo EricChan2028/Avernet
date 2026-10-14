@@ -20,9 +20,9 @@ class LocalSkillSecurityUploadHook(Protocol):
         ...
 
     def current_incarnation_id(
-        self, *, bot_id: str, owner_id: str, skill_id: int
+        self, *, bot_id: str, owner_id: str, skill_id: int, operation: str
     ) -> str | None:
-        """Reuse the observed identity or propose one for the first scan."""
+        """Reuse on replacement; propose a new identity on creation."""
         ...
 
     def observe(

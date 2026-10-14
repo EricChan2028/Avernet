@@ -63,17 +63,17 @@ class LocalSkillSecurityObservationRepository(
 
     def _latest_row(self, session: Session, tenant: str, env: str,
                     bot_id: str, owner_id: str, skill_id: int,
-                    incarnation_id: str | None = None) -> ObservationRow | None:
+                    incarnation_id: str | None = None, *,
+                    for_update: bool = False) -> ObservationRow | None:
         query = self._asset_rows(session, tenant, env, bot_id, owner_id, skill_id)
         if incarnation_id is not None:
             query = query.filter(ObservationRow.incarnation_id == incarnation_id)
-        return query.order_by(
-            ObservationRow.upload_order.desc(), ObservationRow.id.desc()
-        ).first()
+        query = query.order_by(ObservationRow.upload_order.desc(), ObservationRow.id.desc())
+        return (query.with_for_update() if for_update else query).first()
 
     @staticmethod
     def _formal_matches(session: Session, tenant: str, env: str, bot_id: str,
-                        owner_id: str, skill_id: int) -> bool:
+                        owner_id: str, skill_id: int, *, for_update: bool = False) -> bool:
         query = session.query(Skill.id).filter(
             Skill.id == skill_id,
             Skill.avernet_tenant == tenant,
@@ -82,25 +82,48 @@ class LocalSkillSecurityObservationRepository(
             Skill.user_id == owner_id,
             Skill.git_path.like("local://%"),
         )
-        return query.first() is not None
+        return (query.with_for_update() if for_update else query).first() is not None
 
     def _assert_incarnation(self, session: Session, *, tenant: str, env: str,
                             bot_id: str, owner_id: str, skill_id: int,
-                            incarnation_id: str, allow_new: bool = False) -> None:
+                            incarnation_id: str) -> None:
         if not self._formal_matches(
-            session, tenant, env, bot_id, owner_id, skill_id
+            session, tenant, env, bot_id, owner_id, skill_id,
         ):
             raise AssetIncarnationMismatchError(
                 "formal Local Skill no longer matches the security identity"
             )
         latest = self._latest_row(session, tenant, env, bot_id, owner_id, skill_id)
-        if latest is None and allow_new:
-            return
-        if (latest is not None and latest.handoff_stage == "DELETED"
-                and latest.incarnation_id != incarnation_id and allow_new):
-            return
         if latest is None or latest.handoff_stage == "DELETED" or latest.incarnation_id != incarnation_id:
             raise AssetIncarnationMismatchError("security identity is no longer current")
+
+    def _assert_reservable_incarnation(
+        self, session: Session, *, tenant: str, env: str, bot_id: str,
+        owner_id: str, skill_id: int, incarnation_id: str, new_asset: bool,
+    ) -> None:
+        # The scan claim takes these locks in the same order.
+        if not self._formal_matches(
+            session, tenant, env, bot_id, owner_id, skill_id,
+            for_update=True,
+        ):
+            raise AssetIncarnationMismatchError(
+                "formal Local Skill no longer matches the security identity"
+            )
+        latest = self._latest_row(
+            session, tenant, env, bot_id, owner_id, skill_id,
+            for_update=True,
+        )
+        if latest is None:
+            return
+        if new_asset:
+            if latest.incarnation_id != incarnation_id:
+                return
+            raise AssetIncarnationMismatchError("new asset must have a fresh security identity")
+        if latest.handoff_stage == "DELETED" and latest.incarnation_id != incarnation_id:
+            return
+        if latest.handoff_stage != "DELETED" and latest.incarnation_id == incarnation_id:
+            return
+        raise AssetIncarnationMismatchError("security identity is no longer current")
 
     def get_observed_incarnation_id(
         self, *, env: str, bot_id: str, owner_id: str, skill_id: int
@@ -200,6 +223,7 @@ class LocalSkillSecurityObservationRepository(
         skill_id: int, observation_id: str, sha256: str, snapshot_ref: str,
         cancelled: Event, name: str, description: str,
         creator_id: str | None = None, incarnation_id: str,
+        new_asset: bool = False,
     ) -> int:
         for attempt in range(3):
             try:
@@ -210,6 +234,7 @@ class LocalSkillSecurityObservationRepository(
                     snapshot_ref=snapshot_ref, cancelled=cancelled,
                     name=name, description=description,
                     creator_id=creator_id, incarnation_id=incarnation_id,
+                    new_asset=new_asset,
                 )
             except IntegrityError as exc:
                 if attempt == 2 or not _upload_order_conflict(exc):
@@ -221,15 +246,16 @@ class LocalSkillSecurityObservationRepository(
         skill_id: int, observation_id: str, sha256: str, snapshot_ref: str,
         cancelled: Event, name: str, description: str,
         creator_id: str | None = None, incarnation_id: str,
+        new_asset: bool = False,
     ) -> int:
         tenant = get_current_avernet_tenant()
         with self._db.transactional_orm_session() as session:
             if cancelled.is_set():
                 raise ObservationHandoffCancelledError()
-            self._assert_incarnation(
+            self._assert_reservable_incarnation(
                 session, tenant=tenant, env=env, bot_id=bot_id,
                 owner_id=owner_id, skill_id=skill_id,
-                incarnation_id=incarnation_id, allow_new=True,
+                incarnation_id=incarnation_id, new_asset=new_asset,
             )
             # Device uploads use the Bot edit guard. Manifest deletion may
             # interleave, so the caller retries this table's unique-order race.
@@ -475,10 +501,25 @@ class LocalSkillSecurityObservationRepository(
             ).one_or_none()
             if row is None or row.skill_id is None:
                 return False
+            bot_id, owner_id, skill_id = row.bot_id, row.owner_id, int(row.skill_id)
+        # End the locating read before waiting on the formal row lock. Under
+        # REPEATABLE READ, retaining that read snapshot across a concurrent
+        # reservation can raise "record changed since last read" instead of
+        # seeing the replacement's committed observation.
+        with self._db.transactional_orm_session() as session:
+            # Reservation and claim lock the same formal row, then read the
+            # latest observation as a locking read. A replacement cannot
+            # insert its newer row between this check and the claim update.
+            if not self._formal_matches(
+                session, tenant, env, bot_id, owner_id, skill_id,
+                for_update=True,
+            ):
+                return False
             latest = self._latest_row(
-                session, tenant, env, row.bot_id, row.owner_id, int(row.skill_id),
+                session, tenant, env, bot_id, owner_id, skill_id,
+                for_update=True,
             )
-            if latest is None or latest.id != row.id:
+            if latest is None or latest.observation_id != observation_id:
                 return False
             updated = session.query(ObservationRow).filter_by(
                 avernet_tenant=tenant, env=env, observation_id=observation_id,

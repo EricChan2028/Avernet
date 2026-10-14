@@ -47,5 +47,5 @@ def test_public_noop_hook_accepts_exact_upload_and_timeout_facts(world):
 def test_disabled_observation_does_not_read_security_identity():
     hook = NoopLocalSkillSecurityUploadHook()
     assert hook.current_incarnation_id(
-        bot_id="bot", owner_id="owner", skill_id=9
+        bot_id="bot", owner_id="owner", skill_id=9, operation="created",
     ) is None

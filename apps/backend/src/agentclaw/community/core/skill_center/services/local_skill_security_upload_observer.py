@@ -33,7 +33,7 @@ class NoopLocalSkillSecurityUploadHook:
     """Skip observation without reading or writing security identity."""
 
     def current_incarnation_id(
-        self, *, bot_id: str, owner_id: str, skill_id: int
+        self, *, bot_id: str, owner_id: str, skill_id: int, operation: str
     ) -> str | None:
         return None
 
@@ -85,8 +85,10 @@ class LocalSkillSecurityUploadObserver:
         self._env_provider = env_provider
 
     def current_incarnation_id(
-        self, *, bot_id: str, owner_id: str, skill_id: int
+        self, *, bot_id: str, owner_id: str, skill_id: int, operation: str
     ) -> str | None:
+        if operation == "created":
+            return str(uuid4())
         env = self._env_provider()
         existing = self._repository.get_observed_incarnation_id(
             env=env, bot_id=bot_id, owner_id=owner_id, skill_id=skill_id,
@@ -184,6 +186,7 @@ class LocalSkillSecurityUploadObserver:
                 description=description,
                 creator_id=creator_id,
                 incarnation_id=incarnation_id,
+                new_asset=operation == "created",
             )
         except ObservationHandoffCancelledError:
             return

@@ -289,13 +289,14 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             try:
                 observer = self._security_observer_provider()
                 # Formal persistence has succeeded and the Bot edit lock is
-                # still held. A failed identity bind skips observation only.
+                # still held. A failed security identity lookup skips observation only.
                 incarnation_id = observer.current_incarnation_id(
                     bot_id=bot_id, owner_id=owner_id,
                     skill_id=int(result["skill"]["id"]),
+                    operation=result["operation"],
                 )
                 if incarnation_id is None:
-                    raise ValueError("formal Local Skill security UUID is unavailable")
+                    raise ValueError("Local Skill security identity is unavailable")
                 handoff = asyncio.create_task(
                     asyncio.to_thread(
                         observer.observe,

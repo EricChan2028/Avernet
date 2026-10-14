@@ -907,6 +907,31 @@ async def test_upload_saves_exact_snapshot_and_schedules_independent_security_wo
     )
 
 
+def test_created_upload_does_not_reuse_a_stale_observed_identity():
+    class _Repository:
+        def get_observed_incarnation_id(self, **_kwargs):
+            return "previous-asset-identity"
+
+    class _Objects:
+        def create_object_if_absent(self, *_args):
+            return ObjectCreateResult.CREATED
+
+        def read_object(self, *_args):
+            return ObjectReadResult(ObjectReadStatus.NOT_FOUND)
+
+    observer = LocalSkillSecurityUploadObserver(
+        repository=_Repository(), objects=_Objects(), queue=None,
+        env_provider=lambda: "pre",
+    )
+    scope = dict(bot_id="bot", owner_id="owner", skill_id=42)
+    assert observer.current_incarnation_id(
+        **scope, operation="updated",
+    ) == "previous-asset-identity"
+    assert observer.current_incarnation_id(
+        **scope, operation="created",
+    ) != "previous-asset-identity"
+
+
 @pytest.mark.asyncio
 async def test_security_handoff_failure_keeps_successful_skill_and_releases_guard(
     caplog,

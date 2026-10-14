@@ -62,6 +62,7 @@ class LocalSkillSecurityObservationRepositoryProtocol(Protocol):
         description: str,
         creator_id: str | None = None,
         incarnation_id: str,
+        new_asset: bool = False,
     ) -> int:
         """Reserve a scan row before storage I/O; abort if timed out."""
         ...
