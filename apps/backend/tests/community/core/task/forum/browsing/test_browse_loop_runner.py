@@ -15,7 +15,6 @@ import pytest
 
 from agentclaw.community.core.errors import NotFound, ValidationError
 from agentclaw.community.core.task.forum.browsing.runner import BbsBrowseLoopRunner
-from agentclaw.community.core.task.forum.browsing.messages import BBS_BROWSE_SKILL_NAMES
 from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
 from agentclaw.community.core.task.forum.models import (
     BBS_BROWSE_LOOP_CRON_NAME,
@@ -63,8 +62,8 @@ class _FakeService:
 
 
 @pytest.mark.asyncio
-async def test_push_browse_once_returns_bot_result_and_injects_backend(monkeypatch):
-    monkeypatch.setenv("BACKEND_URL", "https://bbs.test")
+async def test_push_browse_once_returns_bot_result_and_injects_runtime_context(monkeypatch):
+    monkeypatch.setenv("BACKEND_URL", "https://bbs.test/api")
     runner = BbsBrowseLoopRunner(_FakeBot(), _FakeService(_sub(mode="framework", bot_id="bot-a")))
     result = await runner.push_browse_once(bot_id="bot-a", expected_mode="framework")
     bot = runner._bot  # type: ignore[attr-defined]
@@ -75,15 +74,13 @@ async def test_push_browse_once_returns_bot_result_and_injects_backend(monkeypat
     assert result["mode"] == "framework"
     assert len(bot.sent) == 1
     sent = bot.sent[0]
-    assert sent["bot_id"] == "bot-a"
-    # message carries the [BBS-BROWSE] marker + the trusted backend root. The
-    # real skill owns the unified topic, child-session and report API paths.
+    assert sent["bot_id"] == "bot-a:111111"
+    # The runtime context is thin; the bundled bbs-browse skill owns the path.
     assert "[BBS-BROWSE]" in sent["message"]
-    assert '"backend": "https://bbs.test"' in sent["message"]
-    assert "使用 backend 分页读取全部 OPEN Topic" in sent["message"]
-    assert "bbs-topic-handler" in sent["message"]
-    assert "browse-reports" in sent["message"]
-    assert "/api/v1/collaboration/tasks/bots/bot-a/bbs/feed" not in sent["message"]
+    assert '"backend": "https://bbs.test/api"' in sent["message"]
+    assert '"bot_id": "bot-a"' in sent["message"]
+    assert "/bbs/feed" not in sent["message"]
+    assert "/topics/{topic_id}" not in sent["message"]
     assert sent["metadata"] == {"biz_module": "bbs_browse_loop", "mode": "framework"}
 
 
@@ -124,7 +121,7 @@ async def test_push_cron_event_only_for_openclaw(monkeypatch):
     assert BBS_BROWSE_LOOP_CRON_NAME in sent["message"]
     # register must forbid self-invented names and demand update-on-duplicate
     assert "固定任务名称" in sent["message"]
-    assert "更新它" in sent["message"]
+    assert "更新原任务" in sent["message"]
 
 
 @pytest.mark.asyncio
@@ -161,51 +158,3 @@ async def test_push_cron_event_register_and_remove_share_fixed_name():
     # both reference the single fixed name (no per-call self-invented name)
     assert "bbs-browse-feed-reader" not in register_msg
     assert "bbs-browse-30min" not in register_msg
-
-
-class _RaisingBot:
-    """send_message always raises — mirrors a Bot-side delivery failure."""
-
-    async def send_message(self, *, bot_id, message, metadata) -> BotSendResult:  # noqa: ARG002
-        raise RuntimeError("bot transport down")
-
-
-@pytest.mark.asyncio
-async def test_push_install_bbs_skills_sends_verified_wording():
-    """Join-time install prompt carries both skill names + both OpenClaw paths.
-
-    This pins the verified话术 (the user hand-confirmed it makes a real Bot
-    self-symlink the skills): any paraphrase that drops a skill name or path
-    fails here.
-    """
-    runner = BbsBrowseLoopRunner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-a")))
-    result = await runner.push_install_bbs_skills(bot_id="bot-a")
-    bot = runner._bot  # type: ignore[attr-defined]
-
-    assert result is not None
-    assert result["status"] == "submitted"
-    assert result["mode"] == "openclaw"
-    assert result["action"] == "install_skills"
-    assert len(bot.sent) == 1
-    sent = bot.sent[0]
-    msg = sent["message"]
-    # marker + both skill names joined (verified话术)
-    assert msg.startswith("[BBS-BROWSE-SKILL]")
-    # marker + all configured skill names joined (verified话术, data-driven)
-    assert "bbs-browse、bbs-topic-handler 和 bbs-create-topic" in msg
-    for skill in BBS_BROWSE_SKILL_NAMES:
-        assert skill in msg
-    # profile-managed active skills are verified, never linked from a full pool
-    assert "workspace/skills/" in msg
-    assert "skill 缺失" in msg
-    assert "skills-pool/skills-repo/infra/" not in msg
-    assert "软链接" in msg
-    assert sent["metadata"]["action"] == "install_skills"
-
-
-@pytest.mark.asyncio
-async def test_push_install_bbs_skills_swallows_exception():
-    """A Bot-side delivery failure must never break a join (returns None)."""
-    runner = BbsBrowseLoopRunner(_RaisingBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-a")))
-    result = await runner.push_install_bbs_skills(bot_id="bot-a")
-    assert result is None

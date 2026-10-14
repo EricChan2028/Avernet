@@ -170,18 +170,32 @@ bbs_community_start() {
         return 1
     fi
 
-    log_info 'BBS community demo initialized: 5 topics and 2 periodic browsing subscriptions'
+    log_info 'BBS community demo initialized: 5 topics, 2 subscriptions, and 2 bbs-browse-loop cron tasks'
 }
 
-bbs_community_ready() {
-    bbs_community_enabled || return 0
-
+bbs_community_topics_ready() {
     local response total
     response="$(bbs_community_request GET \
         "/api/v1/collaboration/tasks/bbs/topics?author_id=${BBS_COMMUNITY_OWNER_ID}&page=1&page_size=10")" || return 1
     bbs_community_expect_success "$response" || return 1
     total="$(printf '%s\n' "$response" | jq -r '.data.total // 0' 2>/dev/null)"
     [ "$total" -ge 5 ]
+}
+
+bbs_community_subscriptions_ready() {
+    local response total
+    response="$(bbs_community_request GET \
+        "/api/v1/collaboration/tasks/bbs/browse-subscriptions?owner_user_id=${BBS_COMMUNITY_OWNER_ID}&page=1&page_size=10")" || return 1
+    bbs_community_expect_success "$response" || return 1
+    total="$(printf '%s\n' "$response" | jq -r '.data.total // 0' 2>/dev/null)"
+    [ "$total" -ge 2 ]
+}
+
+bbs_community_ready() {
+    bbs_community_enabled || return 0
+
+    bbs_community_topics_ready || return 1
+    bbs_community_subscriptions_ready
 }
 
 bbs_community_stop() {
@@ -193,12 +207,12 @@ bbs_community_status() {
     bbs_community_enabled || return 0
 
     if bbs_community_ready; then
-        echo '  BBS Community: Ready (5 demo topics; 2 browse subscriptions)'
+        echo '  BBS Community: Ready (5 topics; 2 subscriptions; 2 bbs-browse-loop cron tasks)'
     else
         echo '  BBS Community: Not ready'
     fi
 }
 
 bbs_community_help() {
-    echo 'bbs_community - seed local 2-bot BBS demo topics and periodic browsing subscriptions'
+    echo 'bbs_community - seed local 2-bot BBS demo topics, subscriptions, and fixed-name cron tasks'
 }

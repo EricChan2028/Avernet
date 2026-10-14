@@ -80,11 +80,13 @@ class BbsBrowseCronManager:
     def __init__(self, cron_relay: CronRelayServiceProtocol) -> None:
         self._cron = cron_relay
 
-    async def ensure_cron(self, *, bot_id: str, owner_user_id: str) -> dict[str, Any] | None:
-        """Upsert the canonical bbs-browse cron for ``bot_id``.
+    async def ensure_cron(self, *, bot_id: str, owner_user_id: str) -> dict[str, Any]:
+        """Create or repair the canonical bbs-browse cron for ``bot_id``.
 
-        Returns the raw create/update result from the cron relay (or ``None``
-        on a best-effort failure that didn't reach create/update).
+        This operation is part of the subscription contract, not a best-effort
+        side effect. If the draft runtime cannot list, create, or update the
+        task, the caller must receive an error so startup cannot claim the
+        periodic loop is initialized.
         """
         existing = await self._list(bot_id, owner_user_id)
         canonical: dict[str, Any] | None = None
@@ -99,27 +101,33 @@ class BbsBrowseCronManager:
             await self._delete(bot_id, owner_user_id, cron.get("id"))
 
         body = bbs_browse_loop_cron_body()
-        try:
-            if canonical is not None:
-                return await self._cron.update_cron(
-                    bot_id=bot_id,
-                    user_id=owner_user_id,
-                    nick_name=owner_user_id,
-                    task_id=canonical.get("id"),
-                    body=body,
+        result: dict[str, Any]
+        if canonical is not None:
+            task_id = canonical.get("id")
+            if not task_id:
+                raise RuntimeError(
+                    f"BBS Browse-Loop task has no update id: bot={bot_id}"
                 )
-            return await self._cron.create_cron(
+            result = await self._cron.update_cron(
+                bot_id=bot_id,
+                user_id=owner_user_id,
+                nick_name=owner_user_id,
+                task_id=task_id,
+                body=body,
+            )
+        else:
+            result = await self._cron.create_cron(
                 bot_id=bot_id,
                 user_id=owner_user_id,
                 nick_name=owner_user_id,
                 body=body,
             )
-        except Exception as exc:  # noqa: BLE001 — never let cron wiring break a join
-            logger.warning(
-                "[bbs-browse-loop] ensure_cron failed bot=%s owner=%s: %s",
-                bot_id, owner_user_id, exc,
+        if not result.get("success"):
+            raise RuntimeError(
+                "BBS Browse-Loop runtime did not acknowledge cron setup: "
+                f"bot={bot_id} result={result}"
             )
-            return None
+        return result
 
     async def remove_cron(self, *, bot_id: str, owner_user_id: str) -> None:
         """Delete the canonical (and any legacy) bbs-browse cron for ``bot_id``."""
@@ -131,10 +139,29 @@ class BbsBrowseCronManager:
 
     async def _list(self, bot_id: str, owner_user_id: str) -> list[dict[str, Any]]:
         result = await self._cron.list_all_crons(
-            user_id=owner_user_id, nick_name=owner_user_id, bot_id=bot_id,
+            user_id=owner_user_id,
+            nick_name=owner_user_id,
+            bot_id=bot_id,
+            runtime_stage="draft",
         )
-        data = result.get("data") if isinstance(result, dict) else None
-        return list(data) if isinstance(data, list) else []
+        if not isinstance(result, dict) or not result.get("success"):
+            raise RuntimeError(
+                "BBS Browse-Loop draft runtime list failed: "
+                f"bot={bot_id} result={result}"
+            )
+        failed_targets = result.get("failed_targets")
+        if failed_targets:
+            raise RuntimeError(
+                "BBS Browse-Loop draft runtime has failed targets: "
+                f"bot={bot_id} failed_targets={failed_targets}"
+            )
+        data = result.get("data")
+        if not isinstance(data, list):
+            raise RuntimeError(
+                "BBS Browse-Loop draft runtime returned invalid task data: "
+                f"bot={bot_id} result={result}"
+            )
+        return data
 
     async def _delete(self, bot_id: str, owner_user_id: str, task_id: str | None) -> None:
         if not task_id:

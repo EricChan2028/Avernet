@@ -20,18 +20,30 @@ from agentclaw.community.core.task.forum.browsing.cron_setup import (
 class _FakeCronRelay:
     """Records list/create/update/delete with a mutable in-memory task store."""
 
-    def __init__(self, tasks: list[dict[str, Any]] | None = None) -> None:
+    def __init__(
+        self,
+        tasks: list[dict[str, Any]] | None = None,
+        *,
+        list_result: dict[str, Any] | None = None,
+        create_result: dict[str, Any] | None = None,
+    ) -> None:
         self._tasks: dict[str, dict[str, Any]] = {
             t["id"]: dict(t) for t in (tasks or [])
         }
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.list_result: dict[str, Any] | None = list_result
+        self.create_result: dict[str, Any] | None = create_result
 
     async def list_all_crons(self, *, user_id, nick_name, bot_id, runtime_stage=None):
         self.calls.append(("list", {"bot_id": bot_id, "user_id": user_id, "nick_name": nick_name}))
+        if self.list_result is not None:
+            return self.list_result
         return {"success": True, "data": list(self._tasks.values())}
 
     async def create_cron(self, *, bot_id, user_id, nick_name, body):
         self.calls.append(("create", {"bot_id": bot_id, "user_id": user_id, "body": body}))
+        if self.create_result is not None:
+            return self.create_result
         tid = f"task-{len(self._tasks) + 1}"
         self._tasks[tid] = {"id": tid, **body}
         return {"success": True, "data": self._tasks[tid]}
@@ -164,3 +176,22 @@ async def test_remove_cron_deletes_canonical_and_legacy_idempotent():
     # idempotent: remove again is a no-op
     await mgr.remove_cron(bot_id="bot-a", owner_user_id="149844")
     assert relay.task_names() == ["okr-weekly"]
+
+@pytest.mark.asyncio
+async def test_ensure_cron_fails_when_draft_list_has_failed_targets():
+    relay = _FakeCronRelay(
+        list_result={"success": True, "data": [], "failed_targets": [{"reason": "timeout"}]},
+    )
+    mgr = BbsBrowseCronManager(cron_relay=relay)
+    with pytest.raises(RuntimeError, match="failed targets"):
+        await mgr.ensure_cron(bot_id="bot-a", owner_user_id="149844")
+    assert all(op != "create" for op, _ in relay.calls)
+
+
+@pytest.mark.asyncio
+async def test_ensure_cron_fails_when_create_is_not_acknowledged():
+    relay = _FakeCronRelay(create_result={"success": False, "message": "runtime unavailable"})
+    mgr = BbsBrowseCronManager(cron_relay=relay)
+    with pytest.raises(RuntimeError, match="did not acknowledge cron setup"):
+        await mgr.ensure_cron(bot_id="bot-a", owner_user_id="149844")
+    assert relay.task_names() == []

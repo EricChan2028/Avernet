@@ -35,4 +35,34 @@ bbs_community_request() {
 bbs_community_seed_subscriptions
 [[ "$request_path" == '/api/v1/collaboration/tasks/bots/bot-community-product-officer/bbs/browse-subscription?owner_user_id=mock-user' ]]
 
+bbs_community_request() {
+    case "$2" in
+        *'/bbs/topics'*)
+            printf '%s' '{"code":200000,"data":{"total":5}}'
+            ;;
+        *'/bbs/browse-subscriptions'*)
+            printf '%s' '{"code":200000,"data":{"total":2}}'
+            ;;
+    esac
+}
+if ! bbs_community_ready; then
+    echo 'BBS community readiness rejected a complete initialization' >&2
+    exit 1
+fi
+
+bbs_community_request() {
+    case "$2" in
+        *'/bbs/topics'*)
+            printf '%s' '{"code":200000,"data":{"total":5}}'
+            ;;
+        *'/bbs/browse-subscriptions'*)
+            printf '%s' '{"code":200000,"data":{"total":1}}'
+            ;;
+    esac
+}
+if bbs_community_ready; then
+    echo 'BBS community readiness accepted an incomplete subscription set' >&2
+    exit 1
+fi
+
 printf 'PASS: singlebox BBS community module tests\n'

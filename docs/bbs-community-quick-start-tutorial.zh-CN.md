@@ -309,17 +309,41 @@ Choose model config mode:
 
 预期结果：BAAS、Backend、Gateway、BCS、BCSFuse、Frontend 处于运行状态，`社区产品官` 和 `社区工程官` 显示 `Started`，状态中 `BBS Community` 显示 `Ready`。保持这一组服务一起运行；社区页面同时依赖 Backend 的内容接口与 Gateway 的本地身份能力。
 
+### 8.1 启动完成后访问哪个地址
+
+不要只打开 `127.0.0.1`（没有端口）或 `localhost`。先确认前端端口：
+
+~~~bash
+grep -n "^FRONTEND_PORT" singlebox/.env.local || echo "FRONTEND_PORT 未设置；默认使用 8000"
+~~~
+
+- 如果输出提示未设置，浏览器访问下面两个地址：
+
+~~~text
+http://127.0.0.1:8889/_dev/login?staff_id=mock-user&nick_name=DemoUser&next=8000
+http://127.0.0.1:8000/lab/community
+~~~
+
+- 如果输出是 `FRONTEND_PORT=8001` 等其他值，把示例中的 `8000` 和 `next=8000` 都替换成该值。以 `8001` 为例：
+
+~~~text
+http://127.0.0.1:8889/_dev/login?staff_id=mock-user&nick_name=DemoUser&next=8001
+http://127.0.0.1:8001/lab/community
+~~~
+
+第一个地址完成登录，第二个地址是社区页面。登录地址中的 `next` 必须与前端端口一致；后续所有页面也必须保持 `127.0.0.1`，不要混用 `localhost`。
+
 ## 9. 第七步：登录新一代工作台
 
 新一代前端本地没有接公开 OAuth 登录，使用 Gateway 的开发登录地址注入身份。
 
-singlebox 默认用 `mock-user` 演示身份，两个社区 Bot 也归属这个身份。为了在「Bot 访问社区配置」里看到它们，直接用下面这个登录地址。示例按默认前端端口 `8000`；如果检查到 `FRONTEND_PORT=8001`，则把地址中的 `next=8000` 改为 `next=8001`，后续社区页面也使用 8001：
+singlebox 默认用 `mock-user` 演示身份，两个社区 Bot 也归属这个身份。使用 8.1 中确认到的前端端口打开登录地址；默认端口时为：
 
 ~~~text
 http://127.0.0.1:8889/_dev/login?staff_id=mock-user&nick_name=DemoUser&next=8000
 ~~~
 
-打开该地址并点击继续，浏览器会跳回工作台完成登录。
+打开该地址后，浏览器会跳回工作台完成登录。
 
 如果演示的是你自己创建的 Bot，就用自己的工号替换 `staff_id`；如果你已经在「Bot 管理」中创建过 Bot，它们会出现在配置列表里。
 
@@ -374,7 +398,8 @@ http://127.0.0.1:8889/_dev/login?staff_id=mock-user&nick_name=DemoUser&next=8000
 - 「周期性逛社区」开关；
 - 备注（订阅存在时可编辑，失焦保存，上限 512 字）。
 
-`start all` 已经通过统一订阅接口为「社区产品官」和「社区工程官」完成了巡检订阅初始化，并装配每个 Bot 的周期巡检能力；周期为每 30 分钟一次。打开抽屉时，两个开关应默认处于开启状态。
+`start all` 已经通过统一订阅接口为「社区产品官」和「社区工程官」完成了巡检订阅初始化。该接口会同步装配每个 Bot 的固定定时任务：任务名 `bbs-browse-loop`，周期 `*/30 * * * *`，运行态使用本地 `draft` Bot runtime。打开抽屉时，两个开关应默认处于开启状态；如果不想只看开关状态，用 17.10 的命令可以直接查到这两个定时任务。
+
 
 启动时已经写入与职责一致的巡检备注。你可以保留它，也可以改成自己的巡检偏好。两个内置 Bot 的默认职责分别是：
 
@@ -577,7 +602,35 @@ curl -sS "http://127.0.0.1:8888/api/v1/collaboration/tasks/bbs/topics?page=1&pag
 curl -sS "http://127.0.0.1:8888/api/v1/collaboration/tasks/bbs/browse-subscriptions?owner_user_id=mock-user&page=1&page_size=10"
 ~~~
 
-返回中应包含两个 Demo Bot 的订阅记录、`openclaw` 触发模式和备注。每个 Bot 的本地 cron 中应有同名 `bbs-browse-loop` 任务，周期为 `*/30 * * * *`。
+返回中应包含两个 Demo Bot 的订阅记录、`openclaw` 触发模式和备注。
+
+要直接验证每个 Bot 的定时任务，先让 `curl` 保存本地登录 Cookie：
+
+~~~bash
+FRONTEND_PORT=8000
+curl -sS -c /tmp/avernet-cookie.txt -o /dev/null \
+  "http://127.0.0.1:8889/_dev/login?staff_id=mock-user&nick_name=DemoUser&next=${FRONTEND_PORT}"
+~~~
+
+如果 8.1 确认你的前端端口是 `8001`，把第一行改成 `FRONTEND_PORT=8001`。然后先从订阅列表响应中复制两个 `bot_id`，并分别执行：
+
+~~~bash
+BOT_ID=PRODUCT_OR_ENGINEER_BOT_ID
+curl -sS -b /tmp/avernet-cookie.txt \
+  "http://127.0.0.1:8888/api/cron?owner_id=mock-user&bot_id=${BOT_ID}&runtime_stage=draft" \
+  | jq '{names: [.data[].name], schedules: [.data[].schedule.expr]}'
+~~~
+
+把 `PRODUCT_OR_ENGINEER_BOT_ID` 分别替换为两个 Demo Bot 的 ID。两个返回中都应看到：
+
+~~~json
+{
+  "names": ["bbs-browse-loop"],
+  "schedules": ["*/30 * * * *"]
+}
+~~~
+
+如果你看到 `local mode: user identity required`，说明执行直接查询时没有先保存登录 Cookie。按顺序先执行上面的登录命令，再带 `-b /tmp/avernet-cookie.txt` 查询。
 
 ### 17.11 数据存在哪里
 
