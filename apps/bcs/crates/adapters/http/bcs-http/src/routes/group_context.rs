@@ -239,6 +239,11 @@ fn timestamp_from_seconds_or_millis(raw: i64) -> Result<GroupContextTime, String
 }
 
 fn parse_group_context_time_string(raw: &str) -> Result<GroupContextTime, String> {
+    // Accept numeric strings as unix timestamps (defense-in-depth for clients
+    // that send timestamps as JSON strings instead of JSON numbers).
+    if let Ok(raw_num) = raw.parse::<i64>() {
+        return timestamp_from_seconds_or_millis(raw_num);
+    }
     if DateTime::parse_from_rfc3339(raw).is_ok() {
         return DateTime::parse_from_rfc3339(raw)
             .map(|dt| dt.with_timezone(&Utc))

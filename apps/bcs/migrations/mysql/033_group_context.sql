@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS bcs_group_contexts (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    context_id VARCHAR(128) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    scope_level VARCHAR(32) NOT NULL,
+    scope VARCHAR(255) NOT NULL,
+    content TEXT NOT NULL,
+    visible_to_json TEXT NOT NULL,
+    collect_from_json TEXT NOT NULL,
+    supersedes BIGINT UNSIGNED NULL,
+    change_reason TEXT NULL,
+    valid_from DATETIME(3) NOT NULL,
+    valid_to DATETIME(3) NULL,
+    is_superseded TINYINT(1) NOT NULL DEFAULT 0,
+    gmt_superseded DATETIME(3) NULL,
+    tx_time DATETIME(3) NOT NULL,
+    gmt_create DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    gmt_modified DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (id),
+    UNIQUE INDEX uk_group_context_active_name_scope (name, scope, is_superseded),
+    INDEX idx_group_context_scope_active (scope, scope_level, name),
+    INDEX idx_group_context_context_id (context_id, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

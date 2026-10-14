@@ -1360,10 +1360,13 @@ name = "bcs-group-context-store"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
+ "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-mysql",
  "bcs-domain",
  "chrono",
+ "mysql_async",
  "serde_json",
  "thiserror 2.0.20",
  "tokio",

@@ -277,6 +277,56 @@ async fn valid_time_fields_accept_required_wire_formats_and_reject_pure_date() {
 }
 
 #[tokio::test]
+async fn numeric_string_timestamps_roundtrip() {
+    let app = app().await;
+
+    // Send valid_from and valid_to as numeric JSON strings (simulating
+    // a legacy CLI client that encodes unix timestamps as strings).
+    let response = app
+        .clone()
+        .oneshot(authed_post(
+            "/groupcontext/add?groupId=game-room-7&sessionId=sess-num-str",
+            "judge-token",
+            json!({
+                "name": "time_numeric_str",
+                "scope_level": "session",
+                "content": "sent as numeric strings",
+                "visible_to": {"userIds": ["judge_bot"]},
+                "collect_from": {"userIds": ["judge_bot"]},
+                "valid_from": "1791797768",
+                "valid_to": "1791797768000"
+            }),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["status"], "ok");
+
+    // Read back — timestamps should have round-tripped.
+    let response = app
+        .oneshot(authed_post(
+            "/groupcontext/get?groupId=game-room-7&sessionId=sess-num-str",
+            "judge-token",
+            json!({"name": "time_numeric_str", "scope_levels": ["session"]}),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    let item = &body["items"].as_array().expect("items")[0];
+    assert_eq!(item["content"], "sent as numeric strings");
+    assert!(
+        item["valid_from"].as_str().is_some_and(|s| !s.is_empty()),
+        "valid_from should be a non-empty RFC3339 string"
+    );
+    assert!(
+        item["valid_to"].as_str().is_some_and(|s| !s.is_empty()),
+        "valid_to should be a non-empty RFC3339 string"
+    );
+}
+
+#[tokio::test]
 async fn systemset_list_and_get_follow_visibility_rules() {
     let app = app().await;
     for (name, visible_to, collect_from, content) in [

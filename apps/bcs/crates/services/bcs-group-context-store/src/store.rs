@@ -98,18 +98,43 @@ impl SqlGroupContextStore {
         Self { db, flavor }
     }
 
+    /// Generate a SQL expression that projects a `DATETIME`/`TIMESTAMP` column
+    /// into milliseconds-since-epoch as an integer, regardless of backend.
+    ///
+    /// MySQL: `CAST(UNIX_TIMESTAMP(col) * 1000 AS UNSIGNED)` — forces an
+    /// integer so the text-protocol parser produces `DbValue::U64` (or `I64`)
+    /// instead of `DbValue::F64` (which `db_get_column::<i64>` cannot decode).
+    ///
+    /// SQLite: seconds are recovered via `strftime('%s')` and
+    /// fractional seconds via `strftime('%f')` (format `SS.SSS`), with
+    /// `substr(…, 4, 3)` extracting the millis component.
+    fn timestamp_ms_expr(&self, column: &str, alias: &str) -> String {
+        match self.flavor {
+            DbSqlFlavor::Mysql => {
+                format!("CAST(UNIX_TIMESTAMP({column}) * 1000 AS UNSIGNED) AS {alias}")
+            }
+            DbSqlFlavor::Sqlite => {
+                format!(
+                    "(CAST(strftime('%s', {column}) AS INTEGER) * 1000 + \
+                     CAST(substr(strftime('%f', {column}), 4, 3) AS INTEGER)) AS {alias}"
+                )
+            }
+        }
+    }
+
     fn select_cols(&self) -> String {
+        let base = "id, context_id, name, scope_level, scope, content, visible_to_json, \
+                    collect_from_json, supersedes, change_reason, valid_from, valid_to, \
+                    is_superseded, gmt_superseded, tx_time, gmt_create, gmt_modified";
         format!(
-            "id, context_id, name, scope_level, scope, content, visible_to_json, collect_from_json, \
-             supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time, gmt_create, gmt_modified, \
-             ({})*1000 AS valid_from_ms, ({})*1000 AS valid_to_ms, ({})*1000 AS gmt_superseded_ms, \
-             ({})*1000 AS tx_time_ms, ({})*1000 AS gmt_create_ms, ({})*1000 AS gmt_modified_ms",
-            self.flavor.unix_ts("valid_from"),
-            self.flavor.unix_ts("valid_to"),
-            self.flavor.unix_ts("gmt_superseded"),
-            self.flavor.unix_ts("tx_time"),
-            self.flavor.unix_ts("gmt_create"),
-            self.flavor.unix_ts("gmt_modified")
+            "{base}, {vfm}, {vtm}, {gsm}, {ttm}, {gcm}, {gmm}",
+            base = base,
+            vfm = self.timestamp_ms_expr("valid_from", "valid_from_ms"),
+            vtm = self.timestamp_ms_expr("valid_to", "valid_to_ms"),
+            gsm = self.timestamp_ms_expr("gmt_superseded", "gmt_superseded_ms"),
+            ttm = self.timestamp_ms_expr("tx_time", "tx_time_ms"),
+            gcm = self.timestamp_ms_expr("gmt_create", "gmt_create_ms"),
+            gmm = self.timestamp_ms_expr("gmt_modified", "gmt_modified_ms"),
         )
     }
 
@@ -426,4 +451,76 @@ fn parse_db_time(raw: &str) -> StoreResult<GroupContextTime> {
     NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S%.f")
         .map(|naive| Utc.from_utc_datetime(&naive))
         .map_err(GroupContextStoreError::backend)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    fn dummy_plugin() -> Arc<dyn DbPlugin> {
+        Arc::new(bcs_db_local::LocalSqliteDbPlugin::new().expect("sqlite plugin for unit tests"))
+    }
+
+    #[test]
+    fn mysql_timestamp_ms_expr_is_cast_unsigned() {
+        let store = SqlGroupContextStore::with_flavor(dummy_plugin(), DbSqlFlavor::Mysql);
+        let sql = store.select_cols();
+        assert!(sql.contains("CAST(UNIX_TIMESTAMP(valid_from) * 1000 AS UNSIGNED) AS valid_from_ms"));
+        assert!(sql.contains("CAST(UNIX_TIMESTAMP(valid_to) * 1000 AS UNSIGNED) AS valid_to_ms"));
+        assert!(
+            sql.contains("CAST(UNIX_TIMESTAMP(gmt_superseded) * 1000 AS UNSIGNED) AS gmt_superseded_ms")
+        );
+        assert!(sql.contains("CAST(UNIX_TIMESTAMP(tx_time) * 1000 AS UNSIGNED) AS tx_time_ms"));
+        assert!(sql.contains("CAST(UNIX_TIMESTAMP(gmt_create) * 1000 AS UNSIGNED) AS gmt_create_ms"));
+        assert!(
+            sql.contains("CAST(UNIX_TIMESTAMP(gmt_modified) * 1000 AS UNSIGNED) AS gmt_modified_ms")
+        );
+        // The old bare `)*1000 AS` pattern must be absent.
+        assert!(!sql.contains(")*1000 AS"));
+    }
+
+    #[test]
+    fn sqlite_timestamp_ms_expr_preserves_millis() {
+        let store = SqlGroupContextStore::with_flavor(dummy_plugin(), DbSqlFlavor::Sqlite);
+        let sql = store.select_cols();
+        assert!(sql.contains("strftime('%s', valid_from)"));
+        assert!(sql.contains("strftime('%f', valid_from)"));
+        assert!(sql.contains("substr(strftime('%f', valid_from), 4, 3)"));
+        assert!(sql.contains("AS valid_from_ms"));
+        // The old bare `)*1000 AS` pattern must be absent for SQLite too.
+        assert!(!sql.contains(")*1000 AS"));
+    }
+
+    #[test]
+    fn base_columns_are_present() {
+        for flavor in [DbSqlFlavor::Mysql, DbSqlFlavor::Sqlite] {
+            let store = SqlGroupContextStore::with_flavor(dummy_plugin(), flavor);
+            let sql = store.select_cols();
+            for col in [
+                "id",
+                "context_id",
+                "name",
+                "scope_level",
+                "scope",
+                "content",
+                "visible_to_json",
+                "collect_from_json",
+                "supersedes",
+                "change_reason",
+                "valid_from",
+                "valid_to",
+                "is_superseded",
+                "gmt_superseded",
+                "tx_time",
+                "gmt_create",
+                "gmt_modified",
+            ] {
+                assert!(
+                    sql.contains(col),
+                    "missing base column {col} for {flavor:?}"
+                );
+            }
+        }
+    }
 }

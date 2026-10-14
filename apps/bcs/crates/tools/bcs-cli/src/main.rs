@@ -2298,6 +2298,23 @@ fn group_context_insert_optional_string(
     }
 }
 
+fn group_context_insert_optional_timestamp(
+    body: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: Option<String>,
+) {
+    if let Some(value) = value {
+        if let Ok(n) = value.parse::<i64>() {
+            body.insert(
+                key.to_string(),
+                serde_json::Value::Number(serde_json::value::Number::from(n)),
+            );
+        } else {
+            body.insert(key.to_string(), serde_json::Value::String(value));
+        }
+    }
+}
+
 fn resolve_group_context_scope_levels(
     scope_level: Vec<String>,
     scope_levels: Vec<String>,
@@ -2338,8 +2355,8 @@ fn group_context_add_body(
         "collect_from".to_string(),
         parse_group_context_policy(&collect_from, "collect-from")?,
     );
-    group_context_insert_optional_string(&mut body, "valid_from", valid_from);
-    group_context_insert_optional_string(&mut body, "valid_to", valid_to);
+    group_context_insert_optional_timestamp(&mut body, "valid_from", valid_from);
+    group_context_insert_optional_timestamp(&mut body, "valid_to", valid_to);
     Ok(serde_json::Value::Object(body))
 }
 
@@ -2372,8 +2389,8 @@ fn group_context_update_body(
             parse_group_context_policy(&collect_from, "collect-from")?,
         );
     }
-    group_context_insert_optional_string(&mut body, "valid_from", valid_from);
-    group_context_insert_optional_string(&mut body, "valid_to", valid_to);
+    group_context_insert_optional_timestamp(&mut body, "valid_from", valid_from);
+    group_context_insert_optional_timestamp(&mut body, "valid_to", valid_to);
     group_context_insert_optional_string(&mut body, "change_reason", change_reason);
     Ok(serde_json::Value::Object(body))
 }
@@ -5727,7 +5744,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(with_valid["valid_from"], "2026-10-12T14:56:08+08:00");
-        assert_eq!(with_valid["valid_to"], "1791797768000");
+        assert_eq!(with_valid["valid_to"], serde_json::json!(1791797768000i64));
 
         let without_valid = group_context_add_body(
             "game_rule".to_string(),
@@ -7853,5 +7870,44 @@ mod tests {
     fn test_parse_json_arg_rejects_bare_at_sign() {
         let err = parse_json_arg("@").unwrap_err();
         assert!(err.to_string().contains("must be followed by a file path"));
+    }
+
+    #[test]
+    fn group_context_insert_optional_timestamp_converts_numeric_strings() {
+        let mut body = serde_json::Map::new();
+        group_context_insert_optional_timestamp(&mut body, "valid_from", Some("1791797768".into()));
+        group_context_insert_optional_timestamp(
+            &mut body,
+            "valid_to",
+            Some("2026-10-12T14:56:08+08:00".into()),
+        );
+        group_context_insert_optional_timestamp(&mut body, "missing", None);
+
+        assert_eq!(body["valid_from"], serde_json::json!(1791797768i64));
+        assert_eq!(
+            body["valid_to"],
+            serde_json::json!("2026-10-12T14:56:08+08:00")
+        );
+        assert!(!body.contains_key("missing"));
+    }
+
+    #[test]
+    fn group_context_add_body_sends_timestamps_as_numbers() {
+        let body = group_context_add_body(
+            "test".into(),
+            "session".into(),
+            "content".into(),
+            r#"{"userIds":["bot1"]}"#.into(),
+            r#"{"userIds":["bot2"]}"#.into(),
+            Some("1791797768".into()),
+            Some("2026-10-12T14:56:08+08:00".into()),
+        )
+        .expect("build add body");
+
+        assert_eq!(body["valid_from"], serde_json::json!(1791797768i64));
+        assert_eq!(
+            body["valid_to"],
+            serde_json::json!("2026-10-12T14:56:08+08:00")
+        );
     }
 }
