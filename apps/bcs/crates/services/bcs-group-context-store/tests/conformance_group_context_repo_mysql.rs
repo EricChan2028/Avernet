@@ -21,6 +21,7 @@ async fn mysql_group_context_store_passes_conformance() {
     let database = opts
         .db_name()
         .expect("BCS_TEST_MYSQL_URL includes a database name");
+    let mysql_pass = opts.pass().map(str::to_string);
     let mut config = MysqlDbConfig::new()
         .with_database(database)
         .with_connection(MysqlConnectionConfig {
@@ -28,7 +29,7 @@ async fn mysql_group_context_store_passes_conformance() {
             host: Some(opts.ip_or_hostname().to_string()),
             port: Some(opts.tcp_port()),
             user: opts.user().map(str::to_string),
-            password: opts.pass().map(str::to_string),
+            password: mysql_pass,
             extra: BTreeMap::new(),
         })
         .with_statement_protocol(StatementProtocol::Text);
