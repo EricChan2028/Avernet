@@ -57,7 +57,7 @@ export interface HelpLink {
 /**
  * 版本发布说明数据（用户须知 + 新版本内容）。由 ReleaseNotesCapability.load 异步拉取，
  * 数据源为内部雨燕配置（teamclaw-release-note_*）。富文本 HTML 来自受信运营平台，UI 用
- * dangerouslySetInnerHTML 渲染。Open Core 无此数据源 → capability 返回 null（菜单不展示该项）。
+ * 受约束的富文本渲染器展示。Open Core 无此数据源 → capability 返回 null（菜单不展示该项）。
  */
 export interface ReleaseNotesData {
   version?: string;
