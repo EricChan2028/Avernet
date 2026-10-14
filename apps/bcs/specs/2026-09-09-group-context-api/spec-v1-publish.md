@@ -205,8 +205,8 @@ POST /groupcontext/get
 
 行为：
 1. 未传 `scope_levels` 时，只按 URL 已提供的最细层级查询：只有 `groupId` 查 group 层；有 `sessionId` 且无 `roundId` 查 session 层；有 `roundId` 查 round 层。显式传入 `scope_levels` 时按传入范围计算 `scope` 实例值列表，根据 `(name, scope)` 过滤条目
-2. 保留 `actor_id` 在 `visible_to.userIds` 中的条目
-3. 每个 `(name, scope)` 只返回当前版本（`is_superseded = false`），不根据 `valid_from` / `valid_to` 过滤
+2. 先按 `(name, scope)` 找到当前版本（`is_superseded = false`）；如果匹配到同名当前版本但 actor 对匹配项均不在 `visible_to.userIds` 中，则返回 `permission_denied`
+3. 只返回 `actor_id` 在 `visible_to.userIds` 中的条目；不根据 `valid_from` / `valid_to` 过滤
 4. 从细到粗排序（round → session → group）
 
 响应：
@@ -269,7 +269,7 @@ POST /groupcontext/get
 |------|----------|----------|------|
 | 200 | `ok` | 全部 | 成功 |
 | 400 | `invalid_param` | 全部 | 参数校验失败 |
-| 403 | `permission_denied` | add / update | 调用方不在 collect_from.userIds 中 |
+| 403 | `permission_denied` | add / update / get | add/update 调用方不在 collect_from.userIds 中；get 调用方没有匹配条目的读权限 |
 | 404 | `not_found` | update | 没有可以被更新的context |
 | 409 | `conflict` | add / update | add：同 (name, scope) 已有活跃版本；update：并发 update 抢败 |
 | 413 | `payload_too_large` | add / update / systemset | content 超上限（默认 4KB） |

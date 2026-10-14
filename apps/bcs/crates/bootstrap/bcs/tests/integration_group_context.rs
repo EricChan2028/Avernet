@@ -120,7 +120,8 @@ async fn who_is_spy_walkthrough_passes_through_direct_bcs_http_router() {
     let fx = fixture();
     let repo = Arc::new(MemoryGroupContextRepo::new());
     let app = app_with_repo(repo.clone()).await;
-    let system_uri = format!("/groupcontext/systemset?groupId={}", fx.group_id);
+    let group_add_uri = format!("/groupcontext/add?groupId={}", fx.group_id);
+    let group_update_uri = format!("/groupcontext/update?groupId={}", fx.group_id);
     let session_add_uri = format!(
         "/groupcontext/add?groupId={}&sessionId={}",
         fx.group_id, fx.session_id
@@ -132,7 +133,7 @@ async fn who_is_spy_walkthrough_passes_through_direct_bcs_http_router() {
 
     let (status, body) = post_json(
         &app,
-        &system_uri,
+        &group_add_uri,
         token_for(&fx.admin),
         json!({
             "name": "game_rule",
@@ -148,14 +149,12 @@ async fn who_is_spy_walkthrough_passes_through_direct_bcs_http_router() {
 
     let (status, body) = post_json(
         &app,
-        &system_uri,
+        &group_update_uri,
         token_for(&fx.admin),
         json!({
             "name": "game_rule",
             "scope_level": "group",
-            "content": "【谁是卧底游戏规则】每轮描述词语并投票，票数最高者出局。",
-            "visible_to": {"userIds": []},
-            "collect_from": {"userIds": [fx.admin.clone()]}
+            "content": "【谁是卧底游戏规则】每轮描述词语并投票，票数最高者出局。"
         }),
     )
     .await;
@@ -309,12 +308,10 @@ async fn who_is_spy_walkthrough_passes_through_direct_bcs_http_router() {
     assert!(!visible_names.contains(&"player_word_2".to_string()));
     assert!(!visible_names.contains(&"player_role".to_string()));
 
-    for (name, levels, expected_len) in [
-        ("game_rule", json!(["group"]), 1),
-        ("player_word_1", json!(["session"]), 1),
-        ("player_state", json!(["session"]), 1),
-        ("player_word_2", json!(["session"]), 0),
-        ("player_role", json!(["session"]), 0),
+    for (name, levels) in [
+        ("game_rule", json!(["group"])),
+        ("player_word_1", json!(["session"])),
+        ("player_state", json!(["session"])),
     ] {
         let (status, body) = post_json(
             &app,
@@ -329,7 +326,7 @@ async fn who_is_spy_walkthrough_passes_through_direct_bcs_http_router() {
         assert_eq!(status, StatusCode::OK, "张三 get {name}: {body}");
         assert_eq!(
             body["items"].as_array().expect("items").len(),
-            expected_len,
+            1,
             "张三 get {name}: {body}"
         );
         if name == "player_state" {
@@ -338,5 +335,20 @@ async fn who_is_spy_walkthrough_passes_through_direct_bcs_http_router() {
                 "张三出局、李四存活、王五存活、赵六存活、钱七存活"
             );
         }
+    }
+
+    for name in ["player_word_2", "player_role"] {
+        let (status, body) = post_json(
+            &app,
+            &format!(
+                "/groupcontext/get?groupId={}&sessionId={}",
+                fx.group_id, fx.session_id
+            ),
+            token_for(zhangsan),
+            json!({"name": name, "scope_levels": ["session"]}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "张三 get {name}: {body}");
+        assert_eq!(body["status"], "permission_denied");
     }
 }

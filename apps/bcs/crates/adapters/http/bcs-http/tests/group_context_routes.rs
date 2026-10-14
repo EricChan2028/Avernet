@@ -436,9 +436,9 @@ async fn add_list_and_get_follow_visibility_rules() {
         ))
         .await
         .expect("response");
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
     let body = response_json(response).await;
-    assert_eq!(body["items"].as_array().expect("items").len(), 0);
+    assert_eq!(body["status"], "permission_denied");
 }
 
 #[tokio::test]

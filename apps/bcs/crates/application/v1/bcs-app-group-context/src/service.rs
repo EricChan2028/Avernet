@@ -228,7 +228,14 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
             .list_active_by_scopes(&scopes)
             .await
             .map_err(map_store_error)?;
-        rows.retain(|entry| entry.name == query.name && actor_can_read(entry, &query.actor_id));
+        rows.retain(|entry| entry.name == query.name);
+        if !rows.is_empty() && !rows.iter().any(|entry| actor_can_read(entry, &query.actor_id)) {
+            return Err(permission_denied(format!(
+                "actor_id={} is not allowed to read {}",
+                query.actor_id, query.name
+            )));
+        }
+        rows.retain(|entry| actor_can_read(entry, &query.actor_id));
         rows.sort_by_key(|entry| specificity_rank(entry.scope_level));
         let items = rows
             .into_iter()

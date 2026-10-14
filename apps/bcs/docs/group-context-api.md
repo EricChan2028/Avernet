@@ -153,8 +153,10 @@ only → group scope, `groupId + sessionId` → session scope, and
 `groupId + sessionId + roundId` → round scope. Pass `scope_levels` explicitly
 when a caller intentionally wants multiple levels; those results are sorted
 finest-to-broadest (round → session → group). Each `(name, scope)` yields at
-most one current row; business validity does not filter results. If the name exists but the actor is not in `visible_to`, the `items`
-array is empty — the API does not leak "not found" vs. "not visible".
+most one current row; business validity does not filter results. If no matching
+current context exists in the requested scopes, `items` is empty. If a matching
+current context exists but the actor is not in `visible_to`, the request returns
+`permission_denied`.
 
 **Request body**
 
@@ -243,7 +245,7 @@ scope. A non-empty list means only listed actors can read it.
 |-------|-------------------|---------------------------------------|
 | 200   | `ok`              | Success                               |
 | 400   | `invalid_param`   | Bad request (missing/blank field, etc.)|
-| 403   | `permission_denied`| Actor not in collect_from.userIds      |
+| 403   | `permission_denied`| Actor lacks write or read permission   |
 | 404   | `not_found`       | No current version for update          |
 | 409   | `conflict`        | Current version already exists         |
 | 413   | `payload_too_large`| Content exceeds 4 KB               |
@@ -385,8 +387,8 @@ POST /groupcontext/get?groupId=game-room-7&sessionId=sess-001
 }
 ```
 
-张三 trying `player_role` silently returns `items: []` — the API never
-reveals "not found" vs. "not visible".
+张三 trying `player_role` returns `permission_denied` because a matching
+current context exists but 张三 is not in `visible_to`.
 
 ## Version chain semantics
 

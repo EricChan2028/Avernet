@@ -845,7 +845,7 @@ async fn get_filters_visible_only_sorts_fine_to_coarse_and_accepts_limit() {
         vec!["round", "session", "group"]
     );
 
-    let hidden = app
+    let error = app
         .get(GetGroupContext {
             actor_id: "张三".into(),
             request_context: ctx(),
@@ -854,6 +854,6 @@ async fn get_filters_visible_only_sorts_fine_to_coarse_and_accepts_limit() {
             limit: None,
         })
         .await
-        .expect("get succeeds");
-    assert!(hidden.items.is_empty());
+        .expect_err("unreadable context returns permission_denied");
+    assert_code(error, "permission_denied");
 }
