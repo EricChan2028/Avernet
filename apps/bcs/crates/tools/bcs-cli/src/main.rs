@@ -1613,29 +1613,6 @@ enum GroupContextCommands {
         #[arg(long, default_value_t = 3)]
         limit: u32,
     },
-    /// Set a system context without ordinary bot actor membership checks.
-    Systemset {
-        #[arg(long)]
-        group_id: String,
-        #[arg(long)]
-        session_id: Option<String>,
-        #[arg(long)]
-        round_id: Option<String>,
-        #[arg(long)]
-        name: String,
-        #[arg(long)]
-        scope_level: String,
-        #[arg(long)]
-        content: String,
-        #[arg(long, default_value = r#"{"userIds":[]}"#)]
-        visible_to: String,
-        #[arg(long)]
-        collect_from: String,
-        #[arg(long)]
-        valid_from: Option<String>,
-        #[arg(long)]
-        valid_to: Option<String>,
-    },
 }
 
 #[derive(Subcommand)]
@@ -2401,29 +2378,6 @@ fn group_context_update_body(
     Ok(serde_json::Value::Object(body))
 }
 
-fn group_context_systemset_body(
-    name: String,
-    scope_level: String,
-    content: String,
-    visible_to: String,
-    collect_from: String,
-    valid_from: Option<String>,
-    valid_to: Option<String>,
-) -> Result<serde_json::Value> {
-    let body = match group_context_add_body(
-        name,
-        scope_level,
-        content,
-        visible_to,
-        collect_from,
-        valid_from,
-        valid_to,
-    )? {
-        serde_json::Value::Object(body) => body,
-        _ => unreachable!("group_context_add_body always returns an object"),
-    };
-    Ok(serde_json::Value::Object(body))
-}
 
 /// Binary entry. Delegates to [`run`] so the internal overlay can reuse this
 /// module (`#[path]`) and call `run()` directly under its own runtime.
@@ -4459,32 +4413,6 @@ pub async fn run() -> Result<()> {
                         json!({"name": name, "scope_levels": if resolved_scope_levels.is_empty() { json!(null) } else { json!(resolved_scope_levels) }, "limit": limit}),
                     )
                 }
-                GroupContextCommands::Systemset {
-                    group_id,
-                    session_id,
-                    round_id,
-                    name,
-                    scope_level,
-                    content,
-                    visible_to,
-                    collect_from,
-                    valid_from,
-                    valid_to,
-                } => (
-                    "systemset",
-                    group_id,
-                    session_id,
-                    round_id,
-                    group_context_systemset_body(
-                        name,
-                        scope_level,
-                        content,
-                        visible_to,
-                        collect_from,
-                        valid_from,
-                        valid_to,
-                    )?,
-                ),
             };
             let query = group_context_query(&group_id, session_id.as_deref(), round_id.as_deref());
             let query_refs = query
@@ -5744,31 +5672,6 @@ mod tests {
     }
 
     #[test]
-    fn group_context_systemset_rejects_change_reason_flag() {
-        let err = match Cli::try_parse_from([
-            "bcs-cli",
-            "group-context",
-            "systemset",
-            "--group-id",
-            "game-room-7",
-            "--name",
-            "game_rule",
-            "--scope-level",
-            "group",
-            "--content",
-            "rules",
-            "--collect-from",
-            r#"{"userIds":["system_bot"]}"#,
-            "--change-reason",
-            "not allowed",
-        ]) {
-            Ok(_) => panic!("expected parse error"),
-            Err(err) => err,
-        };
-        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
-    }
-
-    #[test]
     fn group_context_list_parses_plural_scope_levels_flag() {
         let cli = Cli::try_parse_from([
             "bcs-cli",
@@ -5861,23 +5764,6 @@ mod tests {
         assert!(!object.contains_key("visible_to"));
         assert!(!object.contains_key("collect_from"));
         assert!(!object.contains_key("valid_to"));
-    }
-
-    #[test]
-    fn group_context_systemset_body_forwards_valid_fields_without_change_reason() {
-        let body = group_context_systemset_body(
-            "game_rule".to_string(),
-            "group".to_string(),
-            "rules".to_string(),
-            r#"{"userIds":[]}"#.to_string(),
-            r#"{"userIds":["system_bot"]}"#.to_string(),
-            Some("1791797768".to_string()),
-            Some("1791797768000".to_string()),
-        )
-        .unwrap();
-        assert_eq!(body["valid_from"], "1791797768");
-        assert_eq!(body["valid_to"], "1791797768000");
-        assert!(!body.as_object().unwrap().contains_key("change_reason"));
     }
 
     fn write_session_file(temp_dir: &TempDir, value: serde_json::Value) {

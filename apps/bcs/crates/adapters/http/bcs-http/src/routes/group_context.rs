@@ -14,7 +14,7 @@ use bcs_domain::{GroupContextPolicy, GroupContextTime, ScopeLevel};
 use bcs_service_api::application::v1::{
     AddGroupContext, ApplicationError, GetGroupContext, GroupContextAck, GroupContextGetResponse,
     GroupContextListResponse, GroupContextRequestContext, GroupContextStatus, ListGroupContexts,
-    SystemSetGroupContext, UpdateGroupContext,
+    UpdateGroupContext,
 };
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -85,19 +85,6 @@ pub(crate) struct GetRequest {
     scope_levels: Option<Vec<ScopeLevel>>,
     #[serde(default)]
     limit: Option<u32>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct SystemSetRequest {
-    name: String,
-    scope_level: ScopeLevel,
-    content: String,
-    visible_to: GroupContextPolicy,
-    collect_from: GroupContextPolicy,
-    #[serde(default, deserialize_with = "deserialize_optional_group_context_time")]
-    valid_from: Option<GroupContextTime>,
-    #[serde(default, deserialize_with = "deserialize_optional_group_context_time")]
-    valid_to: Option<GroupContextTime>,
 }
 
 #[derive(Debug, Serialize)]
@@ -204,36 +191,6 @@ pub(crate) async fn get(
             name: body.name,
             scope_levels: body.scope_levels,
             limit: body.limit,
-        })
-        .await?;
-    Ok(json_ok(result))
-}
-
-pub(crate) async fn systemset(
-    State(state): State<HttpAppState>,
-    headers: HeaderMap,
-    uri: Uri,
-    query: Result<Query<GroupContextQuery>, QueryRejection>,
-    body: Result<Json<SystemSetRequest>, JsonRejection>,
-) -> Result<Response, GroupContextHttpError> {
-    // Still require the same authenticated direct-BCS caller as bcs-cli chat,
-    // even though the application command intentionally bypasses ordinary
-    // collect_from membership checks.
-    let _caller = actor_id(&state, &headers, &uri).await?;
-    let Query(query) = query.map_err(GroupContextHttpError::from_query_rejection)?;
-    let Json(body) = body.map_err(GroupContextHttpError::from_json_rejection)?;
-    let result = state
-        .services
-        .group_context
-        .systemset(SystemSetGroupContext {
-            request_context: query.request_context(),
-            name: body.name,
-            scope_level: body.scope_level,
-            content: body.content,
-            visible_to: body.visible_to,
-            collect_from: body.collect_from,
-            valid_from: body.valid_from,
-            valid_to: body.valid_to,
         })
         .await?;
     Ok(json_ok(result))
