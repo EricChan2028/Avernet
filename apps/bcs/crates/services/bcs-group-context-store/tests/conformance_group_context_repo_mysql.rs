@@ -46,16 +46,19 @@ async fn mysql_group_context_store_passes_conformance() {
         .await
         .expect("set non-UTC MySQL session timezone");
     // Clean any leftover test data
-    plugin
-        .execute(DbStatement::new("DELETE FROM bcs_group_contexts"))
-        .await
-        .expect("clear test table");
-    let repo = SqlGroupContextStore::oceanbase(plugin);
+    clear_group_contexts(plugin.as_ref()).await;
+    let repo = SqlGroupContextStore::oceanbase(plugin.clone());
 
     common::create_duplicate_active_conflicts(&repo).await;
+    clear_group_contexts(plugin.as_ref()).await;
     common::supersede_preserves_history(&repo).await;
+    clear_group_contexts(plugin.as_ref()).await;
+    common::supersede_preserves_multiple_history_versions(&repo).await;
+    clear_group_contexts(plugin.as_ref()).await;
     common::supersede_stale_id_returns_conflict(&repo).await;
+    clear_group_contexts(plugin.as_ref()).await;
     common::list_active_by_multiple_scopes(&repo).await;
+    clear_group_contexts(plugin.as_ref()).await;
     common::current_row_with_expired_business_validity_still_blocks_and_is_returned(&repo).await;
 
     manager.close().await;
@@ -74,4 +77,9 @@ async fn apply_mysql_group_context_migration(db: &dyn DbPlugin) {
                 panic!("apply group_context migration statement: {error}\n{statement}")
             });
     }
+}
+async fn clear_group_contexts(db: &dyn DbPlugin) {
+    db.execute(DbStatement::new("DELETE FROM bcs_group_contexts"))
+        .await
+        .expect("clear test table");
 }

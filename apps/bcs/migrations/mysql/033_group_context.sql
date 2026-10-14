@@ -12,12 +12,13 @@ CREATE TABLE IF NOT EXISTS bcs_group_contexts (
     valid_from DATETIME(3) NOT NULL,
     valid_to DATETIME(3) NULL,
     is_superseded TINYINT(1) NOT NULL DEFAULT 0,
+    active_scope_key VARCHAR(255) GENERATED ALWAYS AS (CASE WHEN is_superseded = 0 THEN scope ELSE NULL END) STORED,
     gmt_superseded DATETIME(3) NULL,
     tx_time DATETIME(3) NOT NULL,
     gmt_create DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     gmt_modified DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
     PRIMARY KEY (id),
-    UNIQUE INDEX uk_group_context_active_name_scope (name, scope, is_superseded),
+    UNIQUE INDEX uk_group_context_active_name_scope (name, active_scope_key),
     INDEX idx_group_context_scope_active (scope, scope_level, name),
     INDEX idx_group_context_context_id (context_id, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

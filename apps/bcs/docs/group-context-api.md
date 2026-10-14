@@ -26,17 +26,21 @@ historical rows are retained in storage.
 
 ## API
 
-All endpoints are POST. `groupId` is always a required query parameter;
-`sessionId` and `roundId` are conditionally required. The current direct
-bcs-http path resolves the actor from the same trusted backend auth/header
-chain as `bcs-cli chat`; callers must not send actor id in the URL query or
-JSON body.
+The public HTTP/CLI surface exposes four POST endpoints: `add`, `update`,
+`list`, and `get`. `groupId` is always a required query parameter; `sessionId`
+and `roundId` are conditionally required. The current direct bcs-http path
+resolves the actor from the same trusted backend auth/header chain as
+`bcs-cli chat`; callers must not send actor id in the URL query or JSON body.
+
+`systemset` exists as an internal application/service operation for BCN system
+writes, but it is intentionally not mounted in the public HTTP router and is
+not exposed by bcs-cli in this release.
 
 ### auth note
 
-Every endpoint except `systemset` requires the calling actor to be present in
-`collect_from.userIds`. `systemset` intentionally bypasses that check because
-it is the BCN system/admin path.
+Public write endpoints require the calling actor to be present in
+`collect_from.userIds`. The internal `systemset` service operation bypasses
+that check because it is invoked only from trusted BCN system/admin code.
 
 ### POST /groupcontext/add
 
@@ -65,9 +69,11 @@ same `(name, scope)`.
 
 ### POST /groupcontext/update
 
-Supersede the current version. Omitted fields keep their old values, including
-`valid_from` / `valid_to`. Returns `not_found` when no current version exists
-for `(name, scope)`.
+Supersede the current version. This endpoint is only partially patch-style:
+omitted `content`, `visible_to`, and `collect_from` keep their old values;
+omitted `valid_from` defaults to the server current time and omitted `valid_to`
+defaults to null. Returns `not_found` when no current version exists for
+`(name, scope)`.
 
 **Request body**
 
@@ -176,11 +182,12 @@ array is empty — the API does not leak "not found" vs. "not visible".
 }
 ```
 
-### POST /groupcontext/systemset
+### Internal service operation: systemset
 
 Create or supersede (update-or-create). The BCN system always has write
-access regardless of `collect_from`. No actor id query parameter is
-expected.
+access regardless of `collect_from`. This operation is internal-only: it is not
+mounted under the public `/groupcontext/*` HTTP path and has no bcs-cli
+leaf command in this release. No actor id is expected.
 
 **Request body**
 
@@ -199,9 +206,11 @@ expected.
 ### time field input
 
 `valid_from` and `valid_to` are business validity fields. They are accepted on
-`add`, `update`, and `systemset`; `add` / create-style `systemset` default
-`valid_from` to the server current time and `valid_to` to null. `update` is
-patch-style: omitted validity fields inherit the previous current version.
+`add`, `update`, and the internal `systemset` service operation. `add`,
+`update`, and create/update-style `systemset` default omitted `valid_from` to
+the server current time and omitted `valid_to` to null. In contrast, omitted
+`content`, `visible_to`, and `collect_from` on public `update` retain the
+previous current version's values.
 
 Accepted input formats:
 

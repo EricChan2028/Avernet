@@ -24,7 +24,7 @@ Group Context 是 BCS 群组内 bot 共享的持久化 KV 存储。bot 可以在
 > 本节是 v4 相对当前已实现 v1 的增量需求，方便 coding session 直接读取。
 
 1. `list` 调整为只返回 meta 信息：`name`、`scope_level`、`scope`、`permission`、`gmt_create`、`gmt_modified`；不返回 `content`、`valid_from`、`valid_to`。
-2. `add` / `update` 支持业务有效期字段 `valid_from` / `valid_to`。`add` 未传 `valid_from` 时默认服务端当前时间，`valid_to` 默认 null；`update` 是 patch 语义，未传字段继承上一版本。
+2. `add` / `update` 支持业务有效期字段 `valid_from` / `valid_to`。`add` 未传 `valid_from` 时默认服务端当前时间，`valid_to` 默认 null；`update` 不是完整 patch 语义：`content`、`visible_to`、`collect_from` 未传时继承上一版本，`valid_from` 未传时默认服务端当前时间，`valid_to` 未传时默认 null。
 3. 存储与查询当前版本从 `valid_to IS NULL` 切换为 `is_superseded = false`；新增 `gmt_superseded` 表示旧版本被替代的系统时间。
 4. `content` / `valid_from` / `valid_to` 是业务信息，系统不按业务有效期过滤 `get` / `list`，supersede 时也不改写旧版本的 `valid_to`。
 5. 本期不提供 history API，只保留历史行；`get` / `list` / `update` 默认只处理当前版本。
@@ -43,7 +43,7 @@ Group Context 是 BCS 群组内 bot 共享的持久化 KV 存储。bot 可以在
 | `content` | string | 内容本体，业务字段 |
 | `visible_to` | object | 可见策略。当前仅支持 `{ "userIds": string[] }`，`userIds` 空数组 = 全员可见 |
 | `collect_from` | object | 可写策略。当前仅支持 `{ "userIds": string[] }`，`userIds` 不可为空 |
-| `valid_from` | timestamp \| null | 业务有效开始时间。add 不传时默认服务端当前时间；update 不传时继承上一版本 |
+| `valid_from` | timestamp \| null | 业务有效开始时间。add / update 不传时默认服务端当前时间 |
 | `valid_to` | timestamp \| null | 业务有效结束时间。null = 未声明结束时间；系统不据此过滤 get/list |
 | `is_superseded` | bool | 系统版本状态。false 表示当前版本；true 表示已被同 `(name, scope)` 的新版本取代 |
 | `gmt_create` | timestamp | 系统创建时间 |
@@ -78,11 +78,11 @@ Group Context 是 BCS 群组内 bot 共享的持久化 KV 存储。bot 可以在
 
 ## 3. API
 
-5 个端点，统一 POST。
+Public HTTP/CLI 暴露 4 个端点，统一 POST：`add`、`update`、`list`、`get`。另有内部 service operation `systemset` 供 BCN 系统代码调用，本期不挂载 HTTP router，也不提供 CLI 入口。
 
 `groupId`（必填）、`sessionId`（按场景选填）、`roundId`（按场景选填）固定在 URL query param 中。
 
-`actorId` 由 BCN/CLI 的统一 URL/request 机制提供：普通 bot API 必填，且不得放在 JSON body 中；`systemset` 不填。
+`actorId` 由 BCN/CLI 的统一 URL/request 机制提供：普通 bot API 必填，且不得放在 JSON body 中；内部 `systemset` 不填。
 
 以下每个请求示例省略这些框架注入字段，仅展示端点特有字段。
 
@@ -129,14 +129,14 @@ POST /groupcontext/update
 | `change_reason` | string | 否 | 取代原因 |
 | `visible_to` | object | 否 | 新可见策略。不传则沿用旧值。当前格式 `{ "userIds": string[] }`，空 `userIds` = 全员 |
 | `collect_from` | object | 否 | 新可写策略。不传则沿用旧值。当前格式 `{ "userIds": string[] }`，`userIds` 不可为空 |
-| `valid_from` | timestamp/string/int | 否 | 新业务有效开始时间；不传则沿用旧值 |
-| `valid_to` | timestamp/string/int \| null | 否 | 新业务有效结束时间；不传则沿用旧值 |
+| `valid_from` | timestamp/string/int | 否 | 新业务有效开始时间；不传默认为服务端当前时间 |
+| `valid_to` | timestamp/string/int \| null | 否 | 新业务有效结束时间；不传默认为 null |
 
 行为：
 1. 根据 `scope_level` 计算出 `scope`
 2. 按 `(name, scope, is_superseded=false)` 查当前版本 → 不存在则 `not_found`
 3. 校验 `actor_id` 是否在旧条目当前版本的 `collect_from.userIds` 中 → 否则 `permission_denied`
-4. 按 patch 语义生成新版本：`content` / `valid_from` / `valid_to` / `visible_to` / `collect_from` 传了就更新，没传则继承旧版本
+4. 生成新版本：`content` / `visible_to` / `collect_from` 传了就更新，没传则继承旧版本；`valid_from` 未传时默认服务端当前时间，`valid_to` 未传时默认 null
 5. 原子操作：旧条目标记 `is_superseded = true` 并写入 `gmt_superseded = now` → 写入新条目（`is_superseded = false`，`supersedes` 指向旧版本物理 `id`，记录 change_reason）
 6. 返回成功
 
@@ -224,11 +224,9 @@ POST /groupcontext/get
 }
 ```
 
-### 3.5 systemset — 写入/更新 group 的 context，仅bcn系统调用，bot不可调用
+### 3.5 systemset — 内部写入/更新 context，仅 BCN 系统代码调用，bot 不可调用
 
-```
-POST /groupcontext/systemset
-```
+`systemset` 是 application/service 层内部操作，本期不挂载为 HTTP endpoint，也不提供 bcs-cli 入口；文档中的参数说明仅约束内部调用语义。
 
 
 | 参数 | 类型 | 必填 | 含义 |

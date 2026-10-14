@@ -1,7 +1,7 @@
 mod common;
 
-use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_db_api::{DbPlugin, DbStatement};
+use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_group_context_store::{MemoryGroupContextRepo, SqlGroupContextStore};
 use std::sync::Arc;
 
@@ -15,7 +15,8 @@ async fn apply_sqlite_group_context_migration(db: &dyn DbPlugin) {
     for sql in include_str!("../../../../migrations/sqlite/034_group_context.sql")
         .split(';')
         .map(str::trim)
-        .filter(|sql| !sql.is_empty()) {
+        .filter(|sql| !sql.is_empty())
+    {
         db.execute(DbStatement::new(sql))
             .await
             .expect("migration sql");
@@ -30,6 +31,11 @@ async fn memory_duplicate_active_conflicts() {
 #[tokio::test]
 async fn memory_supersede_preserves_history() {
     common::supersede_preserves_history(&MemoryGroupContextRepo::new()).await;
+}
+
+#[tokio::test]
+async fn memory_supersede_preserves_multiple_history_versions() {
+    common::supersede_preserves_multiple_history_versions(&MemoryGroupContextRepo::new()).await;
 }
 
 #[tokio::test]
@@ -52,6 +58,12 @@ async fn sqlite_duplicate_active_conflicts_from_partial_unique_index() {
 async fn sqlite_supersede_preserves_history() {
     let repo = sqlite_repo().await;
     common::supersede_preserves_history(&repo).await;
+}
+
+#[tokio::test]
+async fn sqlite_supersede_preserves_multiple_history_versions() {
+    let repo = sqlite_repo().await;
+    common::supersede_preserves_multiple_history_versions(&repo).await;
 }
 
 #[tokio::test]

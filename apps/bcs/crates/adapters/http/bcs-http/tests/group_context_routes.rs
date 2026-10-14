@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use axum::body::{Body, to_bytes};
+use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
 use bcs_bot::BotCore;
 use bcs_http::{router::build_router, state::HttpAppState};
 use bcs_service_api::{BotCapabilities, BotRegistryCoreService};
 use bcs_services_container::Services;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tempfile::TempDir;
 use tower::ServiceExt;
 
@@ -166,7 +166,7 @@ async fn route_errors_match_spec_statuses() {
     assert_eq!(body["status"], "not_found");
 
     let (status, body) = post_json(
-        "/groupcontext/systemset?groupId=game-room-7",
+        "/groupcontext/add?groupId=game-room-7",
         "admin-token",
         json!({
             "name": "too_big",
@@ -224,7 +224,7 @@ async fn valid_time_fields_accept_required_wire_formats_and_reject_pure_date() {
     let response = app
         .clone()
         .oneshot(authed_post(
-            "/groupcontext/systemset?groupId=game-room-7",
+            "/groupcontext/add?groupId=game-room-7",
             "admin-token",
             json!({
                 "name": "time_system",
@@ -327,29 +327,37 @@ async fn numeric_string_timestamps_roundtrip() {
 }
 
 #[tokio::test]
-async fn systemset_list_and_get_follow_visibility_rules() {
+async fn add_list_and_get_follow_visibility_rules() {
     let app = app().await;
-    for (name, visible_to, collect_from, content) in [
-        ("game_rule", json!([]), json!(["admin"]), "规则"),
+    for (name, visible_to, collect_from, content, token) in [
+        ("game_rule", json!([]), json!(["admin"]), "规则", "admin-token"),
         (
             "player_word_1",
             json!(["张三", "judge_bot"]),
             json!(["judge_bot"]),
             "香蕉",
+            "judge-token",
         ),
         (
             "player_role",
             json!(["judge_bot"]),
             json!(["judge_bot"]),
             "卧底名单",
+            "judge-token",
         ),
-        ("write_only", json!(["李四"]), json!(["张三"]), "只能写"),
+        (
+            "write_only",
+            json!(["李四"]),
+            json!(["张三"]),
+            "只能写",
+            "zhangsan-token",
+        ),
     ] {
         let response = app
             .clone()
             .oneshot(authed_post(
-                "/groupcontext/systemset?groupId=game-room-7&sessionId=sess-001",
-                "admin-token",
+                "/groupcontext/add?groupId=game-room-7&sessionId=sess-001",
+                token,
                 json!({
                     "name": name,
                     "scope_level": if name == "game_rule" { "group" } else { "session" },

@@ -94,11 +94,98 @@ pub async fn supersede_preserves_history(repo: &dyn GroupContextRepo) {
         && row.is_superseded
         && row.gmt_superseded == Some(second.tx_time)
         && row.valid_to.is_none()));
-    assert!(
-        versions
-            .iter()
-            .any(|row| row.id == second.id && !row.is_superseded && row.gmt_superseded.is_none())
-    );
+    assert!(versions
+        .iter()
+        .any(|row| row.id == second.id && !row.is_superseded && row.gmt_superseded.is_none()));
+}
+
+pub async fn supersede_preserves_multiple_history_versions(repo: &dyn GroupContextRepo) {
+    let first = repo
+        .create_active(entry("ctx-chain", "version_chain", "sess-chain", "v1"))
+        .await
+        .expect("create v1");
+
+    let second = repo
+        .supersede_active(
+            "version_chain",
+            "sess-chain",
+            first.id,
+            NewGroupContextEntry {
+                context_id: first.context_id.clone(),
+                name: "version_chain".into(),
+                scope_level: ScopeLevel::Session,
+                scope: "sess-chain".into(),
+                content: "v2".into(),
+                visible_to: GroupContextPolicy::users(["judge_bot"]),
+                collect_from: GroupContextPolicy::users(["judge_bot"]),
+                supersedes: Some(first.id),
+                change_reason: Some("first update".into()),
+                valid_from: Utc
+                    .timestamp_millis_opt(1_728_374_460_000)
+                    .single()
+                    .unwrap(),
+                valid_to: None,
+                tx_time: Utc
+                    .timestamp_millis_opt(1_728_374_460_000)
+                    .single()
+                    .unwrap(),
+            },
+        )
+        .await
+        .expect("supersede v1 -> v2 succeeds");
+
+    let third = repo
+        .supersede_active(
+            "version_chain",
+            "sess-chain",
+            second.id,
+            NewGroupContextEntry {
+                context_id: first.context_id.clone(),
+                name: "version_chain".into(),
+                scope_level: ScopeLevel::Session,
+                scope: "sess-chain".into(),
+                content: "v3".into(),
+                visible_to: GroupContextPolicy::users(["judge_bot"]),
+                collect_from: GroupContextPolicy::users(["judge_bot"]),
+                supersedes: Some(second.id),
+                change_reason: Some("second update".into()),
+                valid_from: Utc
+                    .timestamp_millis_opt(1_728_374_520_000)
+                    .single()
+                    .unwrap(),
+                valid_to: None,
+                tx_time: Utc
+                    .timestamp_millis_opt(1_728_374_520_000)
+                    .single()
+                    .unwrap(),
+            },
+        )
+        .await
+        .expect("supersede v2 -> v3 succeeds");
+
+    let active = repo
+        .get_active("version_chain", "sess-chain")
+        .await
+        .expect("get active")
+        .expect("active row");
+    assert_eq!(active.id, third.id);
+    assert_eq!(active.content, "v3");
+    assert!(!active.is_superseded);
+
+    let versions = repo
+        .list_versions(&first.context_id)
+        .await
+        .expect("list versions");
+    assert_eq!(versions.len(), 3);
+    assert!(versions
+        .iter()
+        .any(|row| row.id == first.id && row.is_superseded && row.supersedes.is_none()));
+    assert!(versions
+        .iter()
+        .any(|row| row.id == second.id && row.is_superseded && row.supersedes == Some(first.id)));
+    assert!(versions
+        .iter()
+        .any(|row| row.id == third.id && !row.is_superseded && row.supersedes == Some(second.id)));
 }
 
 pub async fn supersede_stale_id_returns_conflict(repo: &dyn GroupContextRepo) {
@@ -163,10 +250,7 @@ pub async fn supersede_stale_id_returns_conflict(repo: &dyn GroupContextRepo) {
         .supersede_active("cas_test", "sess-001", first.id, stale_entry)
         .await
         .expect_err("stale CAS token must return Conflict");
-    assert!(matches!(
-        err,
-        GroupContextStoreError::Conflict { .. }
-    ));
+    assert!(matches!(err, GroupContextStoreError::Conflict { .. }));
 
     // Active row should still be v2, not overwritten by stale data.
     let active = repo
