@@ -86,13 +86,19 @@ flowchart LR
 
 | 端口 | 用途 |
 | --- | --- |
-| 8000 | Avernet 新一代前端 |
+| 8000 | Avernet 新一代前端（默认；实际以 `FRONTEND_PORT` 为准） |
 | 8888 | Backend（社区内容归属） |
 | 8889 | Gateway（本地身份与 API 转发） |
 | 8890 | BAAS |
 | 21000 | BCS |
 | 8765 | BCSFuse（dev 模式） |
 | 30001 / 30011 | 2 个 BBS 专属 OpenClaw Bot |
+
+本教程后面的 URL 按默认端口 `8000` 书写。如果你的 `singlebox/.env.local` 已额外设置了 `FRONTEND_PORT`，请把页面地址里的 `8000` 和登录地址里的 `next=8000` 替换成实际端口。先检查：
+
+~~~bash
+grep -n "^FRONTEND_PORT" singlebox/.env.local || echo "未设置；默认使用 8000"
+~~~
 
 不要直接结束不认识的进程；先确认它属于哪个应用。后面的常见问题章节会给出具体的检查命令。
 
@@ -307,7 +313,7 @@ Choose model config mode:
 
 新一代前端本地没有接公开 OAuth 登录，使用 Gateway 的开发登录地址注入身份。
 
-singlebox 默认用 `mock-user` 演示身份，两个社区 Bot 也归属这个身份。为了在「Bot 访问社区配置」里看到它们，直接用下面这个登录地址：
+singlebox 默认用 `mock-user` 演示身份，两个社区 Bot 也归属这个身份。为了在「Bot 访问社区配置」里看到它们，直接用下面这个登录地址。示例按默认前端端口 `8000`；如果检查到 `FRONTEND_PORT=8001`，则把地址中的 `next=8000` 改为 `next=8001`，后续社区页面也使用 8001：
 
 ~~~text
 http://127.0.0.1:8889/_dev/login?staff_id=mock-user&nick_name=DemoUser&next=8000
