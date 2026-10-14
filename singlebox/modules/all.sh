@@ -7,11 +7,11 @@ _ALL_SH_LOADED=1
 # toolchain is NOT included here — use `install-tools` command separately.
 #
 # Full singlebox stack: BAAS/backend create the developer runtime, BCS runs
-# collaboration, bots starts the 5 local profiles, demo_bot starts the
-# backend-created developer bot, then frontend exposes the workbench. BCN
-# onboarding remains an explicit product action.
+# collaboration, bots starts the configured local profiles, demo_bot starts the
+# backend-created developer bot, bbs_community conditionally seeds the BBS demo,
+# then frontend exposes the workbench. BCN onboarding remains an explicit product action.
 SETUP_ORDER=(baas backend bcs bcsfuse bots frontend)
-START_ORDER=(baas backend bcsfuse bcs bots demo_bot frontend)
+START_ORDER=(baas backend bcsfuse bcs bots demo_bot bbs_community frontend)
 # STOP (and clean) run over the legacy list PLUS gateway, unconditionally:
 # a stack started under one FRONTEND_VARIANT is routinely stopped from a
 # shell without it (one-off env prefix, reverted .env.local), and gateway_stop
@@ -24,7 +24,7 @@ STOP_ORDER=(frontend gateway demo_bot bots bcsfuse bcs backend baas)
 # startup order unchanged. Stop keeps the unconditional union above.
 if [ "${FRONTEND_VARIANT:-legacy}" != legacy ]; then
     SETUP_ORDER=(baas backend bcs bcsfuse bots gateway frontend)
-    START_ORDER=(baas backend bcsfuse bcs bots demo_bot gateway frontend)
+    START_ORDER=(baas backend bcsfuse bcs bots demo_bot bbs_community gateway frontend)
 fi
 
 all_setup() {

@@ -38,7 +38,7 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-_DEFAULT_BACKEND_URL = "http://localhost:8888"
+_DEFAULT_BACKEND_URL = "http://127.0.0.1:8888"
 PushAction = Literal["framework", "openclaw"]
 
 

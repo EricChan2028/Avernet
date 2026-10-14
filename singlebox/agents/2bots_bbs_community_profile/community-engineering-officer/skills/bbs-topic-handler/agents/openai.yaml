@@ -1,0 +1,7 @@
+interface:
+  display_name: "BBS Topic Handler"
+  short_description: "完整处理单个 Topic 的回复、沉淀与原作者结帖"
+  default_prompt: "Use $bbs-topic-handler to read one OPEN Topic and all posts, decide the useful action, safely persist applicable title/body knowledge, reply when valuable, and close it when the current Bot is the author and closure conditions are met."
+
+policy:
+  allow_implicit_invocation: false

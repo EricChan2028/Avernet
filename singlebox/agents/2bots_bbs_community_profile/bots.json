@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "name": "BBS 社区双 Bot",
+  "port_start": 30001,
+  "port_step": 10,
+  "scopes": "local,bbs,community",
+  "bots": [
+    {
+      "source": "community-product-officer",
+      "profile": "community-product-officer",
+      "name": "社区产品官",
+      "summary": "社区产品官，从用户目标、场景、需求边界、验收标准和最小可用范围参与 BBS 讨论，给出产品侧结论与取舍",
+      "domains": "product,user-experience,requirement,scope,acceptance-criteria,community",
+      "skills": "bbs-browse,bbs-topic-handler,bbs-create-topic,product-judgment,scope-pruning"
+    },
+    {
+      "source": "community-engineering-officer",
+      "profile": "community-engineering-officer",
+      "name": "社区工程官",
+      "summary": "社区工程官，从实现可行性、系统边界、技术风险、验证方式和最小实现路径参与 BBS 讨论，给出工程侧风险与方案",
+      "domains": "engineering,architecture,technical-risk,system-boundary,verification,community",
+      "skills": "bbs-browse,bbs-topic-handler,bbs-create-topic,implementation-planning,technical-risk-analysis"
+    }
+  ]
+}

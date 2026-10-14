@@ -1,14 +1,15 @@
 """Message templates pushed to the Bot for the BBS Browse Loop.
 
-Two message kinds:
-* ``browse_once`` — "go run the bbs-browse skill now". Used by both the
-  framework cron (A) on each tick and the self-trigger endpoint (B).
-* ``cron_event``  — instruct the OpenClaw bot to register or remove a local
-  ``*/30 * * * *`` cron job that on fire runs the bbs-browse flow. Used by the
-  subscribe/unsubscribe flow for ``mode=openclaw`` so the Bot owns its cron.
+Runtime message kinds:
 
-``backend_base_url`` is injected at runtime; the templates never hard-code it.
+* ``browse_once`` — ask the Bot to execute one real ``bbs-browse`` Browse Run
+  using the trusted Avernet service root supplied by the runtime.
+* ``cron_event`` — ask an OpenClaw Bot to register or remove its fixed-name local
+  ``*/30 * * * *`` cron task.
+* ``skill_install`` — verify that the explicitly configured BBS skills are
+  visible in the active Bot workspace; it never links a full skills store.
 """
+
 
 from __future__ import annotations
 
@@ -23,26 +24,18 @@ from agentclaw.community.core.task.forum.models import (
 def browse_once_message(*, bot_id: str, backend_base_url: str, subscription: BrowseSubscriptionRecord) -> str:
     """Compose a one-shot "run bbs-browse skill now" message for a Bot.
 
-    Mirrors the bbs-relay-single-task message style: inlines the immediate
-    action plus the API paths the skill must hit. ``backend_base_url`` is the
-    Avernet backend URL the Bot resolves from the runtime, never hard-coded.
+    The real BBS skill receives only the trusted service root and dispatch
+    identity. It reads all OPEN Topics with the unified internal list API,
+    delegates each Topic to ``bbs-topic-handler`` in a child session, and
+    reports the run through ``browse-reports``. The runtime message deliberately
+    does not carry per-bot feed or reply URLs because those paths belong to the
+    skill contract.
     """
-    feed_path = f"{backend_base_url.rstrip('/')}/api/v1/collaboration/tasks/bots/{bot_id}/bbs/feed?status=OPEN"
-    topic_path = backend_base_url.rstrip("/") + "/api/v1/collaboration/tasks/bbs/topics/{topic_id}"
-    posts_path = backend_base_url.rstrip("/") + "/api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts"
-    # Unified reply write: author declared in the body, not the path, so the
-    # route is the same tenant-wide /api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts the
-    # skill POSTs to. The skill supplies author_type=BOT + author_id=bot_id
-    # in the body (see bbs-browse SKILL.md); this template only names the path.
-    reply_path = backend_base_url.rstrip("/") + "/api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts"
     plan = {
         "kind": "bbs-browse",
         "subscription_mode": subscription.mode,
         "bot_id": bot_id,
-        "feed": feed_path,
-        "topic": topic_path,
-        "posts": posts_path,
-        "reply": reply_path,
+        "backend": backend_base_url.rstrip("/"),
     }
     body_lines = [
         "[BBS-BROWSE] 立即执行一次 bbs-browse 逛论坛流程,完成后退出本次对话。",
@@ -50,18 +43,9 @@ def browse_once_message(*, bot_id: str, backend_base_url: str, subscription: Bro
         f"bot_id={bot_id}",
         f"订阅 mode={subscription.mode}",
         "按规定顺序执行:",
-        "  1) GET feed 列出我待处理的 Topic(POLL/NOTICE 我已回复过的不会出现)",
-        "  2) 必要时 GET topic/posts 读取上下文",
-        "  3) 按 topic_type 决策,统一走 reply 接口写回复,必带 client_request_id",
-        "回帖示例(POST,带幂等键):",
-        json.dumps(
-            {
-                "client_request_id": f"{bot_id}-{{topic_id}}-{{run_id}}",
-                "body": "回复正文",
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
+        "  1) 使用 backend 分页读取全部 OPEN Topic,不得使用 actor-aware feed 替代统一列表",
+        "  2) 对通过初筛的 Topic 派发 bbs-topic-handler 子 Session,由子 Session 读取全文楼层并决定回复/采纳/结帖",
+        "  3) 汇总可信终态,并按要求上报 browse-reports",
         "短期上下文信息(运行时使用):",
         json.dumps(plan, ensure_ascii=False, indent=2),
     ]
@@ -80,7 +64,7 @@ def cron_event_message(*, bot_id: str, action: Literal["register", "remove"]) ->
             "用 OpenClaw 内置 cron 工具注册一个本地定时任务:",
             f"  - 固定任务名称: {BBS_BROWSE_LOOP_CRON_NAME!r} (必须完全一致,不要自创名称)",
             "  - 表达式: '*/30 * * * *' (每 30 分钟一次)",
-            "  - 触发动作: 运行一次 bbs-browse 流程(读 feed→决策→reply)",
+            "  - 触发动作: 运行一次 bbs-browse 流程(统一读取 OPEN Topic→派发子 Session→汇总上报)",
             f"  - 若已存在同名任务({BBS_BROWSE_LOOP_CRON_NAME!r}),更新它即可(不要新建第二个)",
             "  - 失败/离线: 跳过本次,下一 tick 自然恢复",
             "  - 持久化: 依赖 OpenClaw cron 工具自身持久化策略",
@@ -116,24 +100,20 @@ def _cn_listing(names: tuple[str, ...]) -> str:
 
 
 def bbs_skill_install_message(*, bot_id: str) -> str:
-    """Compose an instruction for the Bot to make the configured BBS OpenClaw
-    skills (``BBS_BROWSE_SKILL_NAMES``) available by idempotent self-symlink
-    into the active pool (``workspace/skills/`` <- ``skills-pool/.../infra/``).
+    """Compose a verification-only message for profile-preinstalled BBS skills.
 
-    Sent once on subscribe/join as the fix for "the Bot never loaded the BBS
-    skills". Independent of cron registration (cron goes through the cron
-    relay API). Fire-and-forget: the Bot's install outcome is observed out of
-    band, not echoed back here.
+    Singlebox installs active skills by copying explicitly configured profile
+    skill directories into the Bot workspace. Subscription wiring never creates
+    a bridge from the active directory to a full content store, so this message
+    verifies availability and reports missing skills instead of symlinking from
+    a pool.
     """
     listing = _cn_listing(BBS_BROWSE_SKILL_NAMES)
     return (
-        f"[BBS-BROWSE-SKILL] 请确保 {listing} 已成为 OpenClaw 的可用技能。bot_id={bot_id}\n"
+        f"[BBS-BROWSE-SKILL] 请验证 {listing} 已在当前 OpenClaw 工作区可用。bot_id={bot_id}\n"
         "检查路径优先级：\n"
-        f"1) 检查 /home/admin/.openclaw/workspace/skills/ 目录，确认是否存在 {listing}（文件或软链接）。\n"
-        "2) 已存在 → 报告\"已可用\"，无需操作。\n"
-        "3) 不存在 → 继续在 /home/admin/.openclaw/workspace/skills-pool/skills-repo/infra/ 下查找这些 skill 的 SKILL.md，确认源文件存在。\n"
-        "4) 源文件存在 → 在 workspace/skills/ 下创建软链接指向它们。\n"
-        "5) 源文件不存在 → 报告\"skill 源文件未找到\"。\n"
-        "操作完成后列出 workspace/skills/ 目录确认结果，逐条回报（已可用 / 已通过软链接加入 / 源文件未找到）。\n"
-        "该操作幂等：若 skill 均已可用，直接报告无需重复创建。"
+        f"1) 检查当前工作区 workspace/skills/ 目录，确认是否存在 {listing}（目录及其 SKILL.md）。\n"
+        "2) 已存在 → 报告「已可用」。\n"
+        "3) 任一 skill 缺失 → 只报告「skill 缺失」，不要从完整内容库创建软链接或修改技能内容。\n"
+        "操作完成后逐条回报（已可用 / skill 缺失）。该检查幂等。"
     )

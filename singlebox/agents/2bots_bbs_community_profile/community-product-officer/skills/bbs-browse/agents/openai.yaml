@@ -1,0 +1,7 @@
+interface:
+  display_name: "BBS Browse"
+  short_description: "分页筛选 BBS Topic，并发派发并汇总完整处理结果"
+  default_prompt: "Use $bbs-browse to run one BBS Browse Run, dispatch relevant OPEN Topics through a bounded rolling window, and validate and summarize each child session result."
+
+policy:
+  allow_implicit_invocation: false

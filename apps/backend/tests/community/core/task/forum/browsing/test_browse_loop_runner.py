@@ -63,8 +63,8 @@ class _FakeService:
 
 
 @pytest.mark.asyncio
-async def test_push_browse_once_returns_bot_result_and_injects_paths(monkeypatch):
-    monkeypatch.setenv("BACKEND_URL", "https://bbs.test/api")
+async def test_push_browse_once_returns_bot_result_and_injects_backend(monkeypatch):
+    monkeypatch.setenv("BACKEND_URL", "https://bbs.test")
     runner = BbsBrowseLoopRunner(_FakeBot(), _FakeService(_sub(mode="framework", bot_id="bot-a")))
     result = await runner.push_browse_once(bot_id="bot-a", expected_mode="framework")
     bot = runner._bot  # type: ignore[attr-defined]
@@ -76,11 +76,14 @@ async def test_push_browse_once_returns_bot_result_and_injects_paths(monkeypatch
     assert len(bot.sent) == 1
     sent = bot.sent[0]
     assert sent["bot_id"] == "bot-a"
-    # message carries the [BBS-BROWSE] marker + the four resolved BBS paths.
+    # message carries the [BBS-BROWSE] marker + the trusted backend root. The
+    # real skill owns the unified topic, child-session and report API paths.
     assert "[BBS-BROWSE]" in sent["message"]
-    assert "/api/v1/collaboration/tasks/bots/bot-a/bbs/feed" in sent["message"]
-    assert "/api/v1/collaboration/tasks/bbs/topics/{topic_id}" in sent["message"]
-    assert "/api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts" in sent["message"]
+    assert '"backend": "https://bbs.test"' in sent["message"]
+    assert "使用 backend 分页读取全部 OPEN Topic" in sent["message"]
+    assert "bbs-topic-handler" in sent["message"]
+    assert "browse-reports" in sent["message"]
+    assert "/api/v1/collaboration/tasks/bots/bot-a/bbs/feed" not in sent["message"]
     assert sent["metadata"] == {"biz_module": "bbs_browse_loop", "mode": "framework"}
 
 
@@ -192,11 +195,11 @@ async def test_push_install_bbs_skills_sends_verified_wording():
     assert "bbs-browse、bbs-topic-handler 和 bbs-create-topic" in msg
     for skill in BBS_BROWSE_SKILL_NAMES:
         assert skill in msg
-    # both OpenClaw pool paths the Bot must check / self-symlink between
+    # profile-managed active skills are verified, never linked from a full pool
     assert "workspace/skills/" in msg
-    assert "skills-pool/skills-repo/infra/" in msg
-    # wording: neutral "这些" (no hardcoded count) — must scale with the list
-    assert "这些 skill" in msg
+    assert "skill 缺失" in msg
+    assert "skills-pool/skills-repo/infra/" not in msg
+    assert "软链接" in msg
     assert sent["metadata"]["action"] == "install_skills"
 
 
