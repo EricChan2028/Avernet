@@ -339,8 +339,9 @@ export interface AppCapabilities {
   getTaskClaimGrantStrategy: () => CapabilityResult<TaskClaimGrantStrategy>;
   /**
    * 内部专属侧栏一级导航项（Open Core 不应展示的内部入口）。
-   * 返回项 MUST 携带 `section`（'collab' | 'bot' | 'legacy'），合并点按同名分组末尾追加
-   * （`getMergedNavigationItems`，refactor-global-nav-shell）。
+   * 返回项 MUST 携带 `section`（'collab' | 'bot'），合并点按同名产品分组末尾追加
+   * （`getMergedNavigationItems`，refactor-global-nav-shell）。存量页面只保留直接 URL 访问，
+   * 不得借由该 capability 重新进入产品侧栏。
    * Open Core 默认 `[]`（不渲染任何内部导航项，符合 open-core-export-plan §5.2
    * 「导航中的内部入口」必须按开源模式分隔的强约束）；
    * internal overlay 经 `src/extensions/internal.ts` 注入「能力管理」「能力市场」两项（section: 'bot'），
