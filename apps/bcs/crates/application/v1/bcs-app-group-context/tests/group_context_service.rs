@@ -48,6 +48,7 @@ impl GroupContextRepo for ConflictOnSupersedeRepo {
         &self,
         name: &str,
         scope: &str,
+        _expected_active_id: i64,
         _params: NewGroupContextEntry,
     ) -> StoreResult<GroupContextEntry> {
         Err(GroupContextStoreError::Conflict {

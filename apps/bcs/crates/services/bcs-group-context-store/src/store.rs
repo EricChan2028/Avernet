@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_db_api::{
-    DbError, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbTransactionParam, DbTransactionStep,
-    DbTransactionStepResult, DbValue, db_get_column, db_get_column_opt,
+    DbError, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbTransactionStep, DbTransactionStepResult, DbValue, db_get_column, db_get_column_opt,
 };
 use bcs_domain::{GroupContextEntry, GroupContextPolicy, GroupContextTime, ScopeLevel};
 use chrono::{NaiveDateTime, TimeZone, Utc};
@@ -48,10 +47,27 @@ pub struct NewGroupContextEntry {
 pub trait GroupContextRepo: Send + Sync {
     async fn create_active(&self, params: NewGroupContextEntry) -> StoreResult<GroupContextEntry>;
 
+    /// Atomically supersede the currently active row (matched by `name`, `scope`,
+    /// and `expected_active_id`) and insert a new version row.
+    ///
+    /// The `expected_active_id` is the id of the row read at the service layer
+    /// during permission checking. It is used as a CAS guard: the UPDATE only
+    /// succeeds if the active row has not been superseded by another
+    /// concurrent transaction. If `affected_rows == 0`, the whole transaction
+    /// is rolled back and `GroupContextStoreError::Conflict` is returned.
+    ///
+    /// # How it works (one atomic transaction)
+    ///
+    /// 1. `UPDATE … SET is_superseded = TRUE WHERE id = expected_active_id AND is_superseded = FALSE`
+    ///    — if another Tx already superseded this row, `affected_rows == 0` → Conflict
+    /// 2. `INSERT INTO …` the new row with `supersedes = expected_active_id`
+    ///    — preserves the version chain regardless of which row we read first
+    /// 3. Return the newly inserted row (loaded by `last_insert_id`)
     async fn supersede_active(
         &self,
         name: &str,
         scope: &str,
+        expected_active_id: i64,
         params: NewGroupContextEntry,
     ) -> StoreResult<GroupContextEntry>;
 
@@ -222,6 +238,7 @@ impl GroupContextRepo for SqlGroupContextStore {
         &self,
         name: &str,
         scope: &str,
+        expected_active_id: i64,
         params: NewGroupContextEntry,
     ) -> StoreResult<GroupContextEntry> {
         let visible =
@@ -239,46 +256,49 @@ impl GroupContextRepo for SqlGroupContextStore {
             .valid_to
             .map(|time| self.timestamp_param(time))
             .unwrap_or(DbValue::Null);
-        let select_sql = format!(
-            "SELECT {} FROM bcs_group_contexts WHERE name = ? AND scope = ? AND is_superseded = FALSE LIMIT 1",
-            self.select_cols()
-        );
         let insert_sql = "INSERT INTO bcs_group_contexts \
             (context_id, name, scope_level, scope, content, visible_to_json, collect_from_json, \
              supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time) \
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, NULL, ?)";
+
+        // CAS (Compare-And-Swap) transaction — two steps, one row must be affected at each step:
+        //
+        // Step 1: Mark the old active row as superseded.  The WHERE clause uses
+        //         `expected_active_id` as the CAS token.  If another transaction
+        //         already superseded this row (step 1 matching 0 rows), the
+        //         ExecuteChecked will fail with ConditionFailed → Conflict.
+        //
+        // Step 2: Insert the new version row, linking it back to
+        //         `expected_active_id` via the `supersedes` column.
         let steps = vec![
-            DbTransactionStep::Query(DbStatement::with_params(
-                select_sql,
-                vec![DbValue::from(name), DbValue::from(scope)],
-            )),
             DbTransactionStep::ExecuteChecked {
-                statement: DbStatement::with_transaction_params(
-                    "UPDATE bcs_group_contexts SET is_superseded = TRUE, gmt_superseded = ?, gmt_modified = ? \
+                statement: DbStatement::with_params(
+                    "UPDATE bcs_group_contexts \
+                     SET is_superseded = TRUE, gmt_superseded = ?, gmt_modified = ? \
                      WHERE id = ? AND is_superseded = FALSE",
                     vec![
-                        DbTransactionParam::Value(tx_time.clone()),
-                        DbTransactionParam::Value(tx_time.clone()),
-                        DbTransactionParam::query_result(0, 0, "id"),
+                        tx_time.clone(),
+                        tx_time.clone(),
+                        DbValue::from(expected_active_id),
                     ],
                 ),
                 expected_affected_rows: 1,
             },
-            DbTransactionStep::Execute(DbStatement::with_transaction_params(
+            DbTransactionStep::Execute(DbStatement::with_params(
                 insert_sql,
                 vec![
-                    DbTransactionParam::query_result(0, 0, "context_id"),
-                    DbTransactionParam::Value(DbValue::from(params.name.as_str())),
-                    DbTransactionParam::Value(DbValue::from(scope_level.as_str())),
-                    DbTransactionParam::Value(DbValue::from(params.scope.as_str())),
-                    DbTransactionParam::Value(DbValue::from(params.content.as_str())),
-                    DbTransactionParam::Value(DbValue::from(visible.as_str())),
-                    DbTransactionParam::Value(DbValue::from(collect.as_str())),
-                    DbTransactionParam::query_result(0, 0, "id"),
-                    DbTransactionParam::Value(DbValue::from(params.change_reason.as_deref())),
-                    DbTransactionParam::Value(valid_from),
-                    DbTransactionParam::Value(valid_to),
-                    DbTransactionParam::Value(tx_time.clone()),
+                    DbValue::from(params.context_id.as_str()),
+                    DbValue::from(params.name.as_str()),
+                    DbValue::from(scope_level.as_str()),
+                    DbValue::from(params.scope.as_str()),
+                    DbValue::from(params.content.as_str()),
+                    DbValue::from(visible.as_str()),
+                    DbValue::from(collect.as_str()),
+                    DbValue::from(expected_active_id),
+                    DbValue::from(params.change_reason.as_deref()),
+                    valid_from,
+                    valid_to,
+                    tx_time.clone(),
                 ],
             )),
         ];
@@ -299,28 +319,26 @@ impl GroupContextRepo for SqlGroupContextStore {
                 }
                 other => GroupContextStoreError::backend(other),
             })?;
-        let old_context_id = match results.first() {
-            Some(DbTransactionStepResult::Rows(rows)) => rows
-                .first()
-                .ok_or_else(|| GroupContextStoreError::NotFound {
-                    name: name.to_string(),
-                    scope: scope.to_string(),
-                })
-                .and_then(|row| {
-                    db_get_column::<String>(row, "context_id")
-                        .map_err(GroupContextStoreError::backend)
-                })?,
-            _ => {
-                return Err(GroupContextStoreError::Backend(
-                    "missing supersede query result".into(),
-                ));
-            }
-        };
-        let mut versions = self.list_versions(&old_context_id).await?;
-        versions.sort_by(|a, b| b.id.cmp(&a.id));
-        versions.into_iter().next().ok_or_else(|| {
-            GroupContextStoreError::Backend("superseded replacement row missing".into())
-        })
+
+        // Transaction committed: step 1 CAS UPDATE (affected_rows=1) and step 2
+        // INSERT both succeeded. Extract the new row id to return the fresh
+        // active entry.
+        //
+        // MySQL drivers return last_insert_id, but SQLite always returns None
+        // (connection-scope issue: UPDATE/DELETE/stale values). Fall back to
+        // get_active, which works because the INSERT just made this row the
+        // active one for (name, scope).
+        if let Some(id) = results.get(1).and_then(|result| match result {
+            DbTransactionStepResult::Executed(executed) => executed.last_insert_id,
+            DbTransactionStepResult::Rows(_) => None,
+        }).and_then(|id| i64::try_from(id).ok()) {
+            return self.load_by_id(id).await;
+        }
+        // Fallback for backends that don't surface last_insert_id inside
+        // transactions (SQLite): the newly inserted row is the active one.
+        self.get_active(name, scope)
+            .await?
+            .ok_or_else(|| GroupContextStoreError::Backend("superseded replacement row missing".into()))
     }
 
     async fn get_active(&self, name: &str, scope: &str) -> StoreResult<Option<GroupContextEntry>> {

@@ -45,22 +45,28 @@ impl GroupContextRepo for MemoryGroupContextRepo {
 
     async fn supersede_active(
         &self,
-        name: &str,
-        scope: &str,
+        _name: &str,
+        _scope: &str,
+        expected_active_id: i64,
         params: NewGroupContextEntry,
     ) -> StoreResult<GroupContextEntry> {
         let mut state = self.state.write().await;
+
+        // CAS guard: verify the expected active row is still active
         let old_index = state
             .rows
             .iter()
-            .position(|row| row.name == name && row.scope == scope && !row.is_superseded)
-            .ok_or_else(|| GroupContextStoreError::NotFound {
-                name: name.to_string(),
-                scope: scope.to_string(),
+            .position(|row| row.id == expected_active_id && !row.is_superseded)
+            .ok_or_else(|| GroupContextStoreError::Conflict {
+                name: _name.to_string(),
+                scope: _scope.to_string(),
             })?;
-        let old_id = state.rows[old_index].id;
-        let context_id = state.rows[old_index].context_id.clone();
+
+        let old = &state.rows[old_index];
+        let context_id = old.context_id.clone();
         let tx_time = params.tx_time;
+
+        // Mark old row as superseded
         state.rows[old_index].is_superseded = true;
         state.rows[old_index].gmt_superseded = Some(tx_time);
         state.rows[old_index].gmt_modified = tx_time;
@@ -68,7 +74,7 @@ impl GroupContextRepo for MemoryGroupContextRepo {
         state.next_id += 1;
         let mut new_row = row_from_new(state.next_id, params);
         new_row.context_id = context_id;
-        new_row.supersedes = Some(old_id);
+        new_row.supersedes = Some(expected_active_id);
         state.rows.push(new_row.clone());
         Ok(new_row)
     }

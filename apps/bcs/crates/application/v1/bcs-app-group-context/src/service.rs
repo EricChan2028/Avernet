@@ -67,6 +67,7 @@ impl GroupContextApplicationServiceImpl {
 
     async fn supersede(
         &self,
+        expected_active_id: i64,
         old: &GroupContextEntry,
         scope: ResolvedScope,
         name: String,
@@ -84,6 +85,7 @@ impl GroupContextApplicationServiceImpl {
             .supersede_active(
                 &old.name,
                 &old.scope,
+                expected_active_id,
                 NewGroupContextEntry {
                     context_id: old.context_id.clone(),
                     name,
@@ -162,7 +164,10 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
             .unwrap_or_else(|| old.collect_from.clone());
         let valid_from = command.valid_from.unwrap_or_else(Utc::now);
         let valid_to = command.valid_to;
+        // Pass old.id as the CAS token: if the row has been superseded by
+        // another concurrent transaction, supersede_active will return Conflict.
         self.supersede(
+            old.id,
             &old,
             scope,
             command.name,
@@ -250,31 +255,36 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
             .get_active(&command.name, &scope.scope)
             .await
             .map_err(map_store_error)?;
-        if let Some(old) = existing {
-            self.supersede(
-                &old,
-                scope,
-                command.name,
-                command.content,
-                command.visible_to,
-                command.collect_from,
-                None,
-                command.valid_from.unwrap_or_else(Utc::now),
-                command.valid_to,
-            )
-            .await?;
-        } else {
-            self.create(
-                scope,
-                command.name,
-                command.content,
-                command.visible_to,
-                command.collect_from,
-                None,
-                command.valid_from,
-                command.valid_to,
-            )
-            .await?;
+        match existing {
+            Some(old) => {
+                // CAS guard: if old.id was already superseded, this returns Conflict.
+                self.supersede(
+                    old.id,
+                    &old,
+                    scope,
+                    command.name,
+                    command.content,
+                    command.visible_to,
+                    command.collect_from,
+                    None,
+                    command.valid_from.unwrap_or_else(Utc::now),
+                    command.valid_to,
+                )
+                .await?;
+            }
+            None => {
+                self.create(
+                    scope,
+                    command.name,
+                    command.content,
+                    command.visible_to,
+                    command.collect_from,
+                    None,
+                    command.valid_from,
+                    command.valid_to,
+                )
+                .await?;
+            }
         }
         Ok(GroupContextAck::ok())
     }

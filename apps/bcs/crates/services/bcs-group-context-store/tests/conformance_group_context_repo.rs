@@ -30,27 +30,6 @@ fn entry(context_id: &str, name: &str, scope: &str, content: &str) -> NewGroupCo
     }
 }
 
-fn replacement(name: &str, scope: &str, content: &str) -> NewGroupContextEntry {
-    let now = Utc
-        .timestamp_millis_opt(1_728_374_460_000)
-        .single()
-        .unwrap();
-    NewGroupContextEntry {
-        context_id: "ignored-by-supersede".into(),
-        name: name.into(),
-        scope_level: ScopeLevel::Session,
-        scope: scope.into(),
-        content: content.into(),
-        visible_to: GroupContextPolicy::users(Vec::<String>::new()),
-        collect_from: GroupContextPolicy::users(["judge_bot"]),
-        supersedes: None,
-        change_reason: Some("第一轮投票".into()),
-        valid_from: now,
-        valid_to: None,
-        tx_time: now,
-    }
-}
-
 async fn sqlite_repo() -> SqlGroupContextStore {
     let db = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
     apply_sqlite_group_context_migration(db.as_ref()).await;
@@ -61,8 +40,7 @@ async fn apply_sqlite_group_context_migration(db: &dyn DbPlugin) {
     for sql in include_str!("../../../../migrations/sqlite/034_group_context.sql")
         .split(';')
         .map(str::trim)
-        .filter(|sql| !sql.is_empty())
-    {
+        .filter(|sql| !sql.is_empty()) {
         db.execute(DbStatement::new(sql))
             .await
             .expect("migration sql");
@@ -92,7 +70,27 @@ async fn supersede_preserves_history(repo: &dyn GroupContextRepo) {
         .supersede_active(
             "player_state",
             "sess-001",
-            replacement("player_state", "sess-001", "张三出局"),
+            first.id, // CAS token: must match the active row's id
+            NewGroupContextEntry {
+                context_id: first.context_id.clone(), // preserve context_id across versions
+                name: "player_state".into(),
+                scope_level: ScopeLevel::Session,
+                scope: "sess-001".into(),
+                content: "张三出局".into(),
+                visible_to: GroupContextPolicy::users(Vec::<String>::new()),
+                collect_from: GroupContextPolicy::users(["judge_bot"]),
+                supersedes: Some(first.id),
+                change_reason: Some("第一轮投票".into()),
+                valid_from: Utc
+                    .timestamp_millis_opt(1_728_374_460_000)
+                    .single()
+                    .unwrap(),
+                valid_to: None,
+                tx_time: Utc
+                    .timestamp_millis_opt(1_728_374_460_000)
+                    .single()
+                    .unwrap(),
+            },
         )
         .await
         .expect("supersede active");
@@ -125,6 +123,82 @@ async fn supersede_preserves_history(repo: &dyn GroupContextRepo) {
             .iter()
             .any(|row| row.id == second.id && !row.is_superseded && row.gmt_superseded.is_none())
     );
+}
+
+async fn supersede_stale_id_returns_conflict(repo: &dyn GroupContextRepo) {
+    // Simulates F2 race condition: two concurrent writers read the same active row.
+    // Writer A's CAS succeeds, Writer B's CAS fails because the expected id is stale.
+    let first = repo
+        .create_active(entry("ctx-cas", "cas_test", "sess-001", "v1"))
+        .await
+        .expect("create v1");
+
+    let v2_entry = NewGroupContextEntry {
+        context_id: first.context_id.clone(),
+        name: "cas_test".into(),
+        scope_level: ScopeLevel::Session,
+        scope: "sess-001".into(),
+        content: "v2".into(),
+        visible_to: GroupContextPolicy::users(["judge_bot"]),
+        collect_from: GroupContextPolicy::users(["judge_bot"]),
+        supersedes: Some(first.id),
+        change_reason: Some("CAS v2".into()),
+        valid_from: Utc
+            .timestamp_millis_opt(1_728_374_460_000)
+            .single()
+            .unwrap(),
+        valid_to: None,
+        tx_time: Utc
+            .timestamp_millis_opt(1_728_374_460_000)
+            .single()
+            .unwrap(),
+    };
+
+    // Writer A: CAS with first.id succeeds
+    let _v2 = repo
+        .supersede_active("cas_test", "sess-001", first.id, v2_entry)
+        .await
+        .expect("supersede v1 -> v2 succeeds");
+
+    // Now v2 is the active row. Writer B tries to supersede using stale first.id.
+    // The CAS UPDATE WHERE id=first.id AND is_superseded=FALSE affects 0 rows -> Conflict.
+    let stale_entry = NewGroupContextEntry {
+        context_id: first.context_id.clone(),
+        name: "cas_test".into(),
+        scope_level: ScopeLevel::Session,
+        scope: "sess-001".into(),
+        content: "stale-v3".into(),
+        visible_to: GroupContextPolicy::users(["judge_bot"]),
+        collect_from: GroupContextPolicy::users(["judge_bot"]),
+        supersedes: Some(first.id),
+        change_reason: Some("stale CAS".into()),
+        valid_from: Utc
+            .timestamp_millis_opt(1_728_374_520_000)
+            .single()
+            .unwrap(),
+        valid_to: None,
+        tx_time: Utc
+            .timestamp_millis_opt(1_728_374_520_000)
+            .single()
+            .unwrap(),
+    };
+
+    let err = repo
+        .supersede_active("cas_test", "sess-001", first.id, stale_entry)
+        .await
+        .expect_err("stale CAS token must return Conflict");
+    assert!(matches!(
+        err,
+        GroupContextStoreError::Conflict { .. }
+    ));
+
+    // Active row should still be v2, not overwritten by stale data.
+    let active = repo
+        .get_active("cas_test", "sess-001")
+        .await
+        .expect("get active")
+        .expect("active row");
+    assert_eq!(active.content, "v2");
 }
 
 async fn list_active_by_multiple_scopes(repo: &dyn GroupContextRepo) {
@@ -211,6 +285,11 @@ async fn memory_supersede_preserves_history() {
 }
 
 #[tokio::test]
+async fn memory_supersede_stale_id_returns_conflict() {
+    supersede_stale_id_returns_conflict(&MemoryGroupContextRepo::new()).await;
+}
+
+#[tokio::test]
 async fn memory_lists_active_by_multiple_scopes() {
     list_active_by_multiple_scopes(&MemoryGroupContextRepo::new()).await;
 }
@@ -225,6 +304,12 @@ async fn sqlite_duplicate_active_conflicts_from_partial_unique_index() {
 async fn sqlite_supersede_preserves_history() {
     let repo = sqlite_repo().await;
     supersede_preserves_history(&repo).await;
+}
+
+#[tokio::test]
+async fn sqlite_supersede_stale_id_returns_conflict() {
+    let repo = sqlite_repo().await;
+    supersede_stale_id_returns_conflict(&repo).await;
 }
 
 #[tokio::test]
