@@ -15,7 +15,7 @@ repo**替真。
 
 step 字段映射(旧 ``{step,status,detail}`` → 新七字段,映射约定注记在常量旁):
 ``action_input = 原始 step 名 + detail 压缩 JSON``、``action_result = 原 status``、
-``action_type`` 按 step 阶段取枚举值(plan/dispatch/execute/verify)。
+``action_type`` = step 码本身(S1_CONTEXT 等,2026-10-15 起为轨迹主事件标识)。
 """
 from __future__ import annotations
 
@@ -86,7 +86,7 @@ PLAN_EVENT_ID = "fa239f79-e8f8-4fa6-b437-da3e8650d73f"
 #   S4A=execute(实际执行)、S4B=verify(执行回投就绪)。
 EXECUTION_STEPS = [
     {
-        "action_type": "plan",
+        "action_type": "S1_CONTEXT",
         "action_result": "completed",
         "action_input": '{"step": "S1_CONTEXT", "recovery_stage": "fresh", '
                         '"smoke_gate": "checked"}',
@@ -94,7 +94,7 @@ EXECUTION_STEPS = [
         "boost_reason": "上下文与恢复阶段确认,烟测门通过", "error_msg": None,
     },
     {
-        "action_type": "plan",
+        "action_type": "S2_GAPS",
         "action_result": "completed",
         "action_input": '{"step": "S2_GAPS", "gaps": ["ac3_remaining", "ac2", '
                         '"ac1_remaining", "ac4"]}',
@@ -102,7 +102,7 @@ EXECUTION_STEPS = [
         "boost_reason": "识别 4 条剩余缺口", "error_msg": None,
     },
     {
-        "action_type": "dispatch",
+        "action_type": "S3_CAPABILITY",
         "action_result": "completed",
         "action_input": '{"step": "S3_CAPABILITY", "decision": "accepted", '
                         '"matched_gaps": ["ac3_remaining", "ac2", '
@@ -111,7 +111,7 @@ EXECUTION_STEPS = [
         "boost_reason": "能力全量匹配缺口,承接执行", "error_msg": None,
     },
     {
-        "action_type": "execute",
+        "action_type": "S4A_EXECUTION",
         "action_result": "completed",
         "action_input": '{"step": "S4A_EXECUTION", "output_summary": '
                         '"完成竞争格局+客户需求两大维度分析,产出阶段二报告"}',
@@ -119,7 +119,7 @@ EXECUTION_STEPS = [
         "boost_reason": "阶段二执行完成,正文见 output_patch", "error_msg": None,
     },
     {
-        "action_type": "verify",
+        "action_type": "S4B_REPORT",
         "action_result": "ready",
         "action_input": '{"step": "S4B_REPORT", "event_type": "EXECUTION_RESULT"}',
         "status_from": "RUNNING", "status_to": "RUNNING",
@@ -131,35 +131,35 @@ EXECUTION_STEPS = [
 #   S5A/S5B/S5E=plan、S5C/S5D=dispatch(无下一棒,not_applicable)。
 PLAN_STEPS = [
     {
-        "action_type": "plan",
+        "action_type": "S5A_REFRESH_GAPS",
         "action_result": "completed",
         "action_input": '{"step": "S5A_REFRESH_GAPS", "refresh_task_gaps": []}',
         "status_from": "RUNNING", "status_to": "RUNNING",
         "boost_reason": "缺口收敛复核,无残留", "error_msg": None,
     },
     {
-        "action_type": "plan",
+        "action_type": "S5B_PLAN_NEXT_NODE",
         "action_result": "completed",
         "action_input": '{"step": "S5B_PLAN_NEXT_NODE", "relay_node": null}',
         "status_from": "RUNNING", "status_to": "RUNNING",
         "boost_reason": "无下一棒,走任务收敛分支", "error_msg": None,
     },
     {
-        "action_type": "dispatch",
+        "action_type": "S5C_SEARCH_CANDIDATES",
         "action_result": "not_applicable",
         "action_input": '{"step": "S5C_SEARCH_CANDIDATES"}',
         "status_from": "RUNNING", "status_to": "RUNNING",
         "boost_reason": "收敛分支无需搜推", "error_msg": None,
     },
     {
-        "action_type": "dispatch",
+        "action_type": "S5D_SELECT_EXECUTOR",
         "action_result": "not_applicable",
         "action_input": '{"step": "S5D_SELECT_EXECUTOR"}',
         "status_from": "RUNNING", "status_to": "RUNNING",
         "boost_reason": "收敛分支无需选执行者", "error_msg": None,
     },
     {
-        "action_type": "plan",
+        "action_type": "S5E_REPORT_PLAN",
         "action_result": "ready",
         "action_input": '{"step": "S5E_REPORT_PLAN", "event_type": '
                         '"PLAN_RESULT", "branch": "closure"}',
@@ -602,6 +602,17 @@ async def test_two_subtask_relay_chain_projects_step_timeline(monkeypatch) -> No
     )
     child_id, child_token = dispatched
 
+    # ── 注入一条系统侧事件(模拟 harness reset):按验收规则应嵌挂到棒1 id 最近
+    #    的前一主事件(S5E)的 system_logs,顶层数量不变。注:发射偏移不推进假时钟,
+    #    须先把时钟推过棒1全部步骤区间,注入时刻才落在 S5E 之后 ──
+    clock.advance_ms(10)
+    service._task_context_service.emit_trajectory_event(
+        TASK_ID, NODE_ID, "reset",
+        action_result="sla_timeout",
+        boost_reason="harness 巡检复位(注入演示)",
+        now_ms=clock.ms,
+    )
+
     # ── 棒2:执行 → 收敛(任务完成)──
     _report_cycle(
         client, clock, graph, child_id, child_token,
@@ -615,11 +626,20 @@ async def test_two_subtask_relay_chain_projects_step_timeline(monkeypatch) -> No
     timeline = resp.json()["data"]["timeline"]
     _assert_step_timeline(timeline, _chain_expected([NODE_ID, child_id]))
 
-    # 棒间归属核验:1 号棒 10 条、2 号棒 10 条
+    # 棒间归属核验:1 号棒 10 条、2 号棒 10 条(reset 已嵌挂,不占顶层)
     per_node = {}
     for ev in timeline:
         per_node[ev["node_id"]] = per_node.get(ev["node_id"], 0) + 1
     assert per_node == {NODE_ID: 10, child_id: 10}
+
+    # 系统事件嵌挂:reset(id 在棒1 S5E 之后)挂最近前主事件 S5E 的 system_logs
+    host = next(ev for ev in timeline
+                if ev["node_id"] == NODE_ID and ev["action_type"] == "S5E_REPORT_PLAN")
+    assert host["system_logs"] is not None
+    assert [sub["action_type"] for sub in host["system_logs"]] == ["reset"]
+    assert host["system_logs"][0]["action_result"] == "sla_timeout"
+    # 其余主事件无嵌挂
+    assert all(ev.get("system_logs") is None for ev in timeline if ev is not host)
 
     # W1:4 次上报各一条审计行
     assert len(service.callback.ingested) == 4

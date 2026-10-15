@@ -500,13 +500,13 @@ class TestRouter:
         msg2 = r2.json()["message"]
         assert "boost_reason" in msg2 and "steps[0]" in msg2, msg2
 
-        # ③ action_type 非枚举 → 点名 action_type + 合法词表
-        bad_type = {**full_step, "action_type": "S5C_SEARCH_CANDIDATES"}
+        # ③ 空 action_type → 点名 action_type(S 码主事件标识合法值,不再限枚举)
+        bad_type = {**full_step, "action_type": ""}
         r3 = client.post("/api/v1/collaboration/tasks/callback/report",
                         json={**base, "trace": {"steps": [bad_type]}})
         assert r3.status_code == 422
         msg3 = r3.json()["message"]
-        assert "action_type" in msg3 and "dispatch" in msg3 and "relay" in msg3, msg3
+        assert "action_type" in msg3, msg3
 
     def test_new_relay_report_persists_callback_audit_on_success(self, task_client):
         """成功上报:落一条 task_callback 审计行(invoker=relay,run_id=event_id+node_id

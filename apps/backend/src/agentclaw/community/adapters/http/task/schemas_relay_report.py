@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from agentclaw.community.adapters.http.task.schemas import (
     AcceptanceResultDTO,
@@ -25,9 +25,6 @@ from agentclaw.community.core.task.domain.models import (
     TaskReportTraceStep,
     TaskReportEventType,
     TaskReportResult,
-)
-from agentclaw.community.core.task.task_context.task_trajectory.models import (
-    TrajectoryActionType,
 )
 
 
@@ -64,12 +61,12 @@ class PlannedNodeDTO(BaseModel):
 
 
 class TaskReportTraceStepDTO(BaseModel):
-    """单条 trace step——七字段**全键必填**(2026-10-15 收紧契约):
+    """单条 trace step——七字段**全键必填**(2026-10-15 契约):
 
     ``action_type|action_input|action_result|status_from|status_to|boost_reason|
-    error_msg`` 一键不可缺(值可为 None);``action_type`` 必须为轨迹动作枚举值
-    (``submit|plan|dispatch|execute|verify|reset|transition|relay``)——读侧
-    枚举强校验会丢弃未知值,入口先拦并点名。
+    error_msg`` 一键不可缺(值可为 None)。``action_type`` 即 Bot 侧 step 码
+    (S 后带数字+其它,如 S1_CONTEXT)——2026-10-15 起其即轨迹主事件的
+    action_type,读侧按 ``^S\\d+`` 识别主序列,不再限定枚举词表。
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -81,18 +78,6 @@ class TaskReportTraceStepDTO(BaseModel):
     status_to: str | None
     boost_reason: str | None
     error_msg: str | None
-
-    @field_validator("action_type")
-    @classmethod
-    def _action_type_in_trajectory_vocab(cls, value: str) -> str:
-        allowed = "|".join(member.value for member in TrajectoryActionType)
-        try:
-            TrajectoryActionType(value)
-        except ValueError:
-            raise ValueError(
-                f"action_type 必须为轨迹动作枚举值之一: {allowed}"
-            ) from None
-        return value
 
 
 class TaskReportTraceDTO(BaseModel):

@@ -66,6 +66,12 @@ class TrajectoryEventDTO(BaseModel):
                     "actual_run_mode 优先,缺失回退 run_mode;仅该 node 在 timeline "
                     "中的最后一条事件携带,无模态为 None)",
     )
+    system_logs: "list[TrajectoryEventDTO] | None" = Field(
+        None,
+        description="主事件(S 码)嵌挂的系统子事件列表(读时嵌套,不落库):本子任务"
+                    "内非 S 码 action_type、且 id 落在〔本主事件,下一主事件〕区间"
+                    "的系统侧事件,按 id 正序;无嵌挂为 None",
+    )
 
 
 class TaskTrajectoryDTO(BaseModel):
@@ -93,40 +99,48 @@ def _enum_value(v: object) -> str | None:
     return v.value if hasattr(v, "value") else str(v)
 
 
+def _event_to_dto(ev) -> TrajectoryEventDTO:
+    """单事件领域→DTO 翻译(顶层与 system_logs 嵌挂复用;嵌挂层不含再嵌挂)。"""
+    return TrajectoryEventDTO(
+        task_id=ev.task_id,
+        node_id=ev.node_id,
+        action_type=_enum_value(ev.action_type) or "",
+        action_result=ev.action_result,
+        attempt=ev.attempt,
+        gmt_create=ev.gmt_create,
+        gmt_modified=ev.gmt_modified,
+        action_input=ev.action_input,
+        status_from=_enum_value(ev.status_from),
+        status_to=_enum_value(ev.status_to),
+        error_type=_enum_value(ev.error_type),
+        error_msg=ev.error_msg,
+        boost_reason=ev.boost_reason,
+        holder_id=ev.holder_id,
+        analysis=ev.analysis,
+        output=ev.output,
+        session_msgs=ev.session_msgs,
+        search_probe=ev.search_probe,
+        actual_run_mode=ev.actual_run_mode,
+        system_logs=(
+            [_event_to_dto(sub) for sub in ev.system_logs]
+            if ev.system_logs
+            else None
+        ),
+    )
+
+
 def trajectory_to_dto(trajectory: "TaskTrajectory") -> TaskTrajectoryDTO:
     """``TaskTrajectory``(领域)→ ``TaskTrajectoryDTO``(边界 DTO;Rule 22)。
 
-    扁平翻译:事件枚举(``action_type``/``status_from``/``status_to``/``error_type``)取 ``.value`` 字符串;
+    扁平翻译:事件枚举(``action_type``/``status_from``/``status_to``/``error_type``)取 ``.value`` 字符串
+    (S 码主事件的 action_type 为自由字符串,``_enum_value`` 兜底透传);
     ``analysis`` 透传 JSON 字符串(客户端解析,不在边界反序列化为对象——执行者多源 + 保持 P0 扁平);
     ``ext_info`` 不整体进入领域对象/DTO(REQ-1),仅透出定向投影的 ``holder_id``。
-    两模式(do_analysis 真/假)返回同形态。
+    两模式(do_analysis 真/假)返回同形态;S 码主事件的 ``system_logs`` 递归透出。
     """
     return TaskTrajectoryDTO(
         task_id=trajectory.task_id,
-        timeline=[
-            TrajectoryEventDTO(
-                task_id=ev.task_id,
-                node_id=ev.node_id,
-                action_type=_enum_value(ev.action_type) or "",
-                action_result=ev.action_result,
-                attempt=ev.attempt,
-                gmt_create=ev.gmt_create,
-                gmt_modified=ev.gmt_modified,
-                action_input=ev.action_input,
-                status_from=_enum_value(ev.status_from),
-                status_to=_enum_value(ev.status_to),
-                error_type=_enum_value(ev.error_type),
-                error_msg=ev.error_msg,
-                boost_reason=ev.boost_reason,
-                holder_id=ev.holder_id,
-                analysis=ev.analysis,
-                output=ev.output,
-                session_msgs=ev.session_msgs,
-                search_probe=ev.search_probe,
-                actual_run_mode=ev.actual_run_mode,
-            )
-            for ev in trajectory.timeline
-        ],
+        timeline=[_event_to_dto(ev) for ev in trajectory.timeline],
         analysis=trajectory.analysis,
         gmt_create=trajectory.gmt_create,
         gmt_modified=trajectory.gmt_modified,

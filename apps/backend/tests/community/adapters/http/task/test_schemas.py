@@ -1,3 +1,4 @@
+import copy
 import types as _types
 
 import pytest
@@ -151,7 +152,7 @@ def test_plan_report_dto_builds_one_unpersisted_node() -> None:
                 },
                 "run_info": {"run_mode": "single_bot", "assignee": "bot-2"},
             },
-            "trace": _TRACE,
+            "trace": copy.deepcopy(_TRACE),
         }
     ).to_domain()
     assert command.event_id == "e1" and command.relay_token == "generation-1"
@@ -207,7 +208,7 @@ def test_plan_report_dto_rejects_client_generated_node_id() -> None:
                 "event_id": "e1",
                 "relay_token": "generation-1",
                 "event_type": "PLAN_RESULT",
-                "trace": _TRACE,
+                "trace": copy.deepcopy(_TRACE),
                 "event": {
                     "node_id": "client-node",
                     "task_spec": {
@@ -228,7 +229,7 @@ def _command_body() -> dict:
         "relay_token": "generation-1",
         "event_type": "PLAN_RESULT",
         "event": None,
-        "trace": _TRACE,
+        "trace": copy.deepcopy(_TRACE),
     }
 
 
@@ -273,16 +274,24 @@ def test_report_dto_step_requires_all_seven_fields(missing_field) -> None:
     ), f"{missing_field} 缺失未被点名: {excinfo.value.errors()}"
 
 
-def test_report_dto_step_requires_known_action_type() -> None:
-    """action_type 必须为轨迹动作枚举值(submit|plan|dispatch|execute|verify|
-    reset|transition|relay)——否则读侧枚举强校验会丢行,入口先拦并点名。"""
+def test_report_dto_accepts_step_code_action_type() -> None:
+    """action_type 为 Bot 侧 step 码(S 后带数字+其它,如 S5C_SEARCH_CANDIDATES)——
+    2026-10-15 起即轨迹主事件的 action_type(S 码主序列),原样透传。"""
     body = _command_body()
     body["trace"]["steps"][0]["action_type"] = "S5C_SEARCH_CANDIDATES"
+    command = TaskReportCommandDTO.model_validate(body).to_domain()
+    assert command.trace.steps[0].action_type == "S5C_SEARCH_CANDIDATES"
+
+
+def test_report_dto_rejects_empty_action_type() -> None:
+    """空字符串 action_type → 校验失败并点名。"""
+    body = _command_body()
+    body["trace"]["steps"][0]["action_type"] = ""
     with pytest.raises(ValidationError) as excinfo:
         TaskReportCommandDTO.model_validate(body)
-    errors = excinfo.value.errors()
-    assert any("action_type" in str(err["loc"]) for err in errors), errors
-    assert any("submit" in err["msg"] and "relay" in err["msg"] for err in errors)
+    assert any(
+        "action_type" in str(err["loc"]) for err in excinfo.value.errors()
+    ), excinfo.value.errors()
 
 
 def test_task_settings_dtos_accept_relay_execution() -> None:

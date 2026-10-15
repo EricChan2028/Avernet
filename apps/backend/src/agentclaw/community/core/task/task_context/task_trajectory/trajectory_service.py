@@ -145,6 +145,52 @@ def _is_engine_session_id(session_id: str) -> bool:
     return bool(session_id) and _ENGINE_SESSION_KEY_RE.match(session_id) is not None
 
 
+# 主事件判别(2026-10-15 验收语义):relay 轨迹的主序列 = Bot 上报的 trace step,
+# 其 action_type 直接采用 step 码——"S 后带数字再带其它"(如 S1_CONTEXT、
+# S4A_EXECUTION、S5A_REFRESH_GAPS);组装序即 id 正序(仓储 ORDER BY gmt_create,id)。
+_MAIN_EVENT_RE = re.compile(r"^S\d+")
+
+
+def _is_main_event(action_type: object) -> bool:
+    """``action_type`` 是否 S 码主事件(``^S\\d+``,如 S1_CONTEXT)。"""
+    value = getattr(action_type, "value", action_type)
+    return bool(value) and _MAIN_EVENT_RE.match(str(value)) is not None
+
+
+def _nest_system_logs(trajectory: TaskTrajectory) -> None:
+    """读时把 timeline 整理为"主事件序列 + 嵌套系统事件"两态(不落库)。
+
+    规则(2026-10-15 验收):
+    * 主事件 = action_type 匹配 ``^S\\d+`` 的 trace step 行,留在顶层时间线;
+    * 各子任务(task_id+node_id)的**其它 action_type 事件**(system 侧:submit /
+      reset / dispatch 投递 / transition 等)挂到**距离最近的前一个主事件**的
+      ``system_logs`` 列表——子事件 id 必须小于下一主事件 id(组装序即 id 序,
+      逐个 append 天然按 id 正序);
+    * 子事件的 id 早于该子任务首个主事件的(如任务提交 submit)无前置主,
+      **保持平级**;所在子任务没有任何主事件的,该子任务的事件整体保持平级
+      (中心化任务的常规形态不受影响——无 S 码即无变换,零重排)。
+    """
+    if not trajectory.timeline:
+        return
+    if not any(_is_main_event(e.action_type) for e in trajectory.timeline):
+        return  # 无主事件(中心化常规/relay 未上报):零变换
+    flat: list[TrajectoryEvent] = []
+    last_main_by_node: dict[str, TrajectoryEvent] = {}
+    for event in trajectory.timeline:
+        if _is_main_event(event.action_type):
+            flat.append(event)
+            last_main_by_node[event.node_id] = event
+            continue
+        host = last_main_by_node.get(event.node_id)
+        if host is None:
+            flat.append(event)  # 无前置主:保持平级,不丢数据
+            continue
+        if host.system_logs is None:
+            host.system_logs = []
+        host.system_logs.append(event)
+    trajectory.timeline = flat
+
+
 # ---------------------------------------------------------------------------
 # ext_info_lookup — re-query the ``ext_info`` JSON the assembler dropped (REQ-1)
 # ---------------------------------------------------------------------------
@@ -477,6 +523,8 @@ class TaskTrajectoryService(
                 self._attach_session_msgs(trajectory, records, fresh)
             # session_detail 与 do_analysis 完全独立:分析路径内部的会话物化/
             # 研判/返回态富化不受该参数影响(见 _do_analysis)。
+            # 最后一步读时嵌套:S 码主序列 + 子事件挂 system_logs(不落库)。
+            _nest_system_logs(trajectory)
             return trajectory
         return await self._do_analysis(task_id, force_analysis=force_analysis)
 
@@ -538,6 +586,7 @@ class TaskTrajectoryService(
                 "(idempotent do_analysis) task=%s head_analysis_len=%d",
                 task_id, len(trajectory.analysis),
             )
+            _nest_system_logs(trajectory)
             return trajectory
 
         # 3. Build ext_info_lookup from the same records (the assembler DROPPED
@@ -613,6 +662,7 @@ class TaskTrajectoryService(
         #    reflects the backfill moment.
         trajectory.analysis = analysis_json
         trajectory.gmt_modified = int(time.time() * 1000)
+        _nest_system_logs(trajectory)
         return trajectory
 
     # ------------------------------------------------------------------

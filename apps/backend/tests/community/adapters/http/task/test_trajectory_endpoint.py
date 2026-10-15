@@ -628,6 +628,74 @@ def test_trajectory_display_html_shows_actual_run_mode_per_subtask_block():
 
 
 @pytest.mark.unit
+def test_trajectory_dto_passes_through_system_logs():
+    """读时嵌套的 system_logs 经 DTO 递归透传:主事件携带、无嵌挂为 null、
+    嵌挂子事件自身不再嵌套。"""
+    ev = TrajectoryEvent(
+        task_id="t1", node_id="n1", action_type="S1_CONTEXT",
+        action_result="completed", attempt=0, gmt_create=1000, gmt_modified=1000,
+        system_logs=[
+            TrajectoryEvent(
+                task_id="t1", node_id="n1", action_type="execute",
+                action_result="success", attempt=0,
+                gmt_create=1100, gmt_modified=1100,
+            ),
+            TrajectoryEvent(
+                task_id="t1", node_id="n1", action_type="reset",
+                action_result="sla_timeout", attempt=0,
+                gmt_create=1200, gmt_modified=1200,
+            ),
+        ],
+    )
+    ev_plain = TrajectoryEvent(
+        task_id="t1", node_id="n1", action_type="S4A_EXECUTION",
+        action_result="completed", attempt=0, gmt_create=2000, gmt_modified=2000,
+    )
+    traj = TaskTrajectory(task_id="t1", gmt_create=2000, gmt_modified=2000,
+                         timeline=[ev, ev_plain], analysis=None)
+    c = _build_client(_StubTrajectoryService(trajectory=traj))
+    r = c.get("/openapi/v1/collaboration/tasks/trajectory", params={"task_id": "t1"})
+    assert r.status_code == 200
+    timeline = r.json()["data"]["timeline"]
+    # 主事件携带嵌挂子事件(按 id 正序),子事件不再嵌套
+    assert [s["action_type"] for s in timeline[0]["system_logs"]] == [
+        "execute", "reset",
+    ]
+    assert timeline[0]["system_logs"][0]["system_logs"] is None
+    assert timeline[1]["system_logs"] is None
+
+
+@pytest.mark.unit
+def test_trajectory_display_html_renders_system_logs():
+    """HTML 页在携带嵌挂的主事件下渲染可折叠「系统事件」块,子事件逐行可见。"""
+    ev = TrajectoryEvent(
+        task_id="t1", node_id="n1", action_type="S1_CONTEXT",
+        action_result="completed", attempt=0, gmt_create=1000, gmt_modified=1000,
+        system_logs=[
+            TrajectoryEvent(
+                task_id="t1", node_id="n1", action_type="reset",
+                action_result="sla_timeout", attempt=0,
+                gmt_create=1200, gmt_modified=1200,
+                boost_reason="harness 巡检复位",
+            ),
+        ],
+    )
+    traj = TaskTrajectory(
+        task_id="t1", gmt_create=1000, gmt_modified=1000,
+        timeline=[ev], analysis=None,
+    )
+    c = _build_client(_StubTrajectoryService(trajectory=traj))
+    r = c.get(
+        "/openapi/v1/collaboration/tasks/trajectory",
+        params={"task_id": "t1", "display": "html"},
+    )
+    assert r.status_code == 200
+    assert "系统事件" in r.text
+    assert "reset" in r.text and "sla_timeout" in r.text
+    assert "harness 巡检复位" in r.text
+
+
+@pytest.mark.unit
 def test_trajectory_display_html_renders_enriched_node_output():
     """HTML 页在携带产出的最后一条事件下渲染可折叠的「节点产出」块。"""
     ev = TrajectoryEvent(

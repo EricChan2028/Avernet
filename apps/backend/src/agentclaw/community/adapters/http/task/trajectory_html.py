@@ -204,6 +204,28 @@ def _render_event(ev: "object") -> str:
         parts.append(f"<pre>{html.escape(lines)}</pre>")
         parts.append("</details>")
 
+    # 系统事件(读时嵌套;S 码主事件携带,可折叠;逐条 id 正序 = append 序):
+    # 主序列之外该子任务的系统侧事实(submit/reset/投递/transition 等)。
+    sub_logs = getattr(ev, "system_logs", None)
+    if sub_logs:
+        sub_rows = "\n".join(
+            "[{}] {} | {}{}".format(
+                idx,
+                getattr(sub, "action_type", "?"),
+                getattr(sub, "action_result", ""),
+                (
+                    " | " + str(getattr(sub, "boost_reason"))
+                    if getattr(sub, "boost_reason", None)
+                    else ""
+                ),
+            )
+            for idx, sub in enumerate(sub_logs, start=1)
+        )
+        parts.append('<details class="ev-input">')
+        parts.append(f"<summary>系统事件 · system_logs {len(sub_logs)} 条</summary>")
+        parts.append(f"<pre>{html.escape(sub_rows)}</pre>")
+        parts.append("</details>")
+
     # 搜推明细(读时定向投影;dispatch / relay search 事件携带,可折叠)——结构化呈现:
     # 整体搜索词 / 分词关键词 / 每个关键词的命中 bot 列表 / 候选打分评估
     # (score + score_reason + 选中决策/reject_reason) / 最终匹配结果。

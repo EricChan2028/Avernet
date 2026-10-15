@@ -127,6 +127,7 @@ class TrajectoryEvent:
     session_msgs: list[dict[str, Any]] | None = None  # 读时富化:子任务会话消息(BCS 键或引擎键分通道实拉/缓存;源自末位事件 ext_info.session_msgs 快照或本回合实拉;展示/DTO 用,不落库——纯读不写库,持久化仅分析路径 merge)
     search_probe: dict[str, Any] | None = None  # 读时定向投影:派发搜推三问采样摘要(源自本事件 ext_info;不落库,详见类 docstring)
     actual_run_mode: str | None = None        # 读时富化:节点真实执行模态(single_bot|coop_group|bbs;经 effective_run_mode 定——extend_props.actual_run_mode 优先,缺失回退 run_mode;仅该节点最后一条事件携带;不落库,缺字段=无信号)
+    system_logs: "list[TrajectoryEvent] | None" = None  # 读时嵌套(不落库):本主事件的系统子事件列表——子任务内非 S 码主事件(action_type 不匹配 ^S\\d+)、且 id 落在〔本主事件 id, 下一主事件 id〕区间者,按 id 正序挂此;主事件自身无嵌套时为 None
 
 
 @dataclass

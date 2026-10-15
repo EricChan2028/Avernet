@@ -175,6 +175,72 @@ def _make_event(
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_get_trajectory_nests_system_logs_under_nearest_main():
+    """读时嵌套:S 码主事件(+数字开头的 action_type)构成顶层主序列;各子任务的
+    其它 action_type 事件按 id 序挂到**距离最近的前一个主事件**的 ``system_logs``
+    (按 id 正序,即组装序);主事件之前出现的子事件(无前置主)保持平级,不丢数据;
+    无任何主事件的子任务,其事件整体保持平级。"""
+    timeline = [
+        _make_event(node_id="n1", action_type="submit", gmt_create=100),
+        _make_event(node_id="n1", action_type="S1_CONTEXT", gmt_create=200),
+        _make_event(node_id="n1", action_type="execute", gmt_create=300),
+        _make_event(node_id="n1", action_type="reset", gmt_create=400),
+        _make_event(node_id="n1", action_type="S4A_EXECUTION", gmt_create=500),
+        _make_event(node_id="n1", action_type="transition", gmt_create=600),
+        _make_event(node_id="n2", action_type="S5A_REFRESH_GAPS", gmt_create=700),
+        _make_event(node_id="n2", action_type="verify", gmt_create=800),
+        _make_event(node_id="n3", action_type="plan", gmt_create=900),  # 无主节点 → 平级
+    ]
+    traj = _make_trajectory(task_id="t1", timeline=timeline)
+    svc = TaskTrajectoryService(_FakeAssembler(traj), _FakeRepo(), _FakeAnalyzer(), None)
+
+    result = await svc.get_trajectory("t1")
+
+    def _value(action_type):
+        return getattr(action_type, "value", action_type)
+
+    top = [_value(e.action_type) for e in result.timeline]
+    assert top == [
+        "submit",            # 首主之前:无前置主,保持平级
+        "S1_CONTEXT",
+        "S4A_EXECUTION",
+        "S5A_REFRESH_GAPS",
+        "plan",              # n3 无主事件:整体平级
+    ]
+    assert result.timeline[1].system_logs[0] is not None
+    nested_s1 = result.timeline[1].system_logs
+    assert [_value(e.action_type) for e in nested_s1] == ["execute", "reset"], (
+        "id 在 S1 与 S4A 之间的子事件挂 S1,按 id 正序"
+    )
+    assert [_value(e.action_type) for e in result.timeline[2].system_logs] == [
+        "transition"
+    ]
+    assert [_value(e.action_type) for e in result.timeline[3].system_logs] == [
+        "verify"
+    ]
+    assert result.timeline[0].system_logs is None, "无前置主:不挂"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_get_trajectory_keeps_flat_when_no_main_events():
+    """无任何 S 码主事件(中心化任务的常规形态)→ timeline 原样平级,零变换。"""
+    timeline = [
+        _make_event(node_id="n1", action_type=TrajectoryActionType.SUBMIT, gmt_create=100),
+        _make_event(node_id="n1", action_type=TrajectoryActionType.PLAN, gmt_create=200),
+        _make_event(node_id="n1", action_type=TrajectoryActionType.EXECUTE, gmt_create=300),
+    ]
+    traj = _make_trajectory(task_id="t1", timeline=timeline)
+    svc = TaskTrajectoryService(_FakeAssembler(traj), _FakeRepo(), _FakeAnalyzer(), None)
+
+    result = await svc.get_trajectory("t1")
+
+    assert len(result.timeline) == 3
+    assert all(e.system_logs is None for e in result.timeline)
+
+
 def _make_trajectory(*, task_id: str = "t1", timeline=None, analysis=None) -> TaskTrajectory:
     return TaskTrajectory(
         task_id=task_id,
