@@ -2,6 +2,7 @@ import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { getBotEntryAvailability, type BotActionAvailability, type BotDomain } from '@/services/botWorkshop';
 import React from 'react';
 import BotDescriptionCell from './BotDescriptionCell';
+import { BotContainerInfo } from './BotContainerInfo';
 import BotInfoCell from './BotInfoCell';
 import { BotManagementMenu } from './BotManagementMenu';
 import BotPrimaryActionsCell from './BotPrimaryActionsCell';
@@ -29,6 +30,7 @@ export interface BotTableProps {
   onOpenLogs?: (bot: BotDomain) => void;
   onOpenTaskInstances?: (bot: BotDomain) => void;
   canOpenTaskInstances?: (bot: BotDomain) => boolean;
+  onOpenContainers?: (bot: BotDomain) => void;
   onHealthCheck?: (bot: BotDomain) => void;
   onChangeSpace?: (bot: BotDomain) => void;
   onAuthorize?: (bot: BotDomain) => void;
@@ -59,6 +61,7 @@ const BotTable: React.FC<BotTableProps> = ({
   onOpenLogs,
   onOpenTaskInstances,
   canOpenTaskInstances,
+  onOpenContainers,
   onHealthCheck,
   onChangeSpace,
   onAuthorize,
@@ -118,8 +121,14 @@ const BotTable: React.FC<BotTableProps> = ({
       {
         id: 'tags',
         header: 'bot 标签',
-        width: 'w-[220px]',
+        width: 'w-[210px]',
         cell: (bot) => <BotTagsCell bot={bot} />,
+      },
+      {
+        id: 'containers',
+        header: '容器信息',
+        width: 'w-[148px]',
+        cell: (bot) => (onOpenContainers ? <BotContainerInfo bot={bot} onOpen={onOpenContainers} /> : <span>—</span>),
       },
       ...(showOwner
         ? [
@@ -195,6 +204,7 @@ const BotTable: React.FC<BotTableProps> = ({
       onOpenLogs,
       onOpenTaskInstances,
       canOpenTaskInstances,
+      onOpenContainers,
       onHealthCheck,
       onChangeSpace,
       onAuthorize,

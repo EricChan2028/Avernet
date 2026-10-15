@@ -129,6 +129,7 @@ function sidebarProps(over: Partial<ConversationSidebarProps> = {}): Conversatio
     others: othersModel(),
     onOpenSession: jest.fn(),
     onOpenPublicBots: jest.fn(),
+    onOpenBotWorkshop: jest.fn(),
     onOpenAgentCodingBot: jest.fn(),
     ...over,
   };
@@ -262,16 +263,19 @@ describe('ConversationSidebar', () => {
 
     rerender(<ConversationSidebar {...sidebarProps()} />);
     fireEvent.click(screen.getByRole('button', { name: '发起归属与会话范围' }));
-    fireEvent.click(screen.getByRole('button', { name: '已收藏' }));
+    // 管理/好友两行弹层常驻挂载同名「已收藏」按钮:按 DOM 序取管理行(先渲染)。
+    fireEvent.click(screen.getAllByRole('button', { name: '已收藏' })[0]);
     expect(useConversationStore.getState().scopeByManagedBotId['bot-a:2088']).toBe('favorite');
   });
 
-  it('shows scope filter only on managed rows and keeps friend rows plain', () => {
+  it('renders the origin filter on managed rows and the scope-only filter on friend rows', () => {
     render(<ConversationSidebar {...sidebarProps()} />);
-    expect(screen.getByRole('button', { name: '发起归属与会话范围' })).toBeInTheDocument();
-    expect(screen.getByText('已收藏')).toBeInTheDocument();
-    // 仅一个管理 Bot 行有筛选入口；好友 Bot 行没有。
+    // 管理 Bot 行:「发起归属与会话范围」(发起人 + 会话);好友 Bot 行:仅「会话」范围(无发起人)。
     expect(screen.getAllByRole('button', { name: '发起归属与会话范围' })).toHaveLength(1);
+    expect(screen.getByRole('button', { name: '会话范围' })).toBeInTheDocument();
+    expect(screen.getByText('发起人')).toBeInTheDocument();
+    // 管理/好友两行弹层常驻挂载,各带一份「已收藏」选项。
+    expect(screen.getAllByRole('button', { name: '已收藏' })).toHaveLength(2);
   });
 
   it('selects mine sessions through the sessions model with create actions', () => {
@@ -354,8 +358,9 @@ describe('ConversationSidebar', () => {
     expect(directory.retryManaged).toHaveBeenCalledTimes(1);
   });
 
-  it('shows empty managed and friend states with the public Bots action', () => {
+  it('shows empty managed and friend states with inline route links', () => {
     const onOpenPublicBots = jest.fn();
+    const onOpenBotWorkshop = jest.fn();
     render(
       <ConversationSidebar
         {...sidebarProps({
@@ -363,13 +368,29 @@ describe('ConversationSidebar', () => {
           friendBots: [],
           directory: directoryModel({ managedBots: [], friendBots: [] }),
           onOpenPublicBots,
+          onOpenBotWorkshop,
         })}
       />,
     );
     expect(screen.getByText('暂无管理的 Bot')).toBeInTheDocument();
     expect(screen.getByText('暂无好友 Bot')).toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole('button', { name: '前往公开 Bot' })[0]);
+    // 我的 Bot 空态引导去 Bot 管理创建(2026-10-14 体验修复);好友 Bot 空态引导去公开 Bot 发现。
+    fireEvent.click(screen.getByRole('button', { name: '「Bot 管理」' }));
+    expect(onOpenBotWorkshop).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: '「公开 Bot」' }));
     expect(onOpenPublicBots).toHaveBeenCalledTimes(1);
+  });
+
+  it('不再渲染分组标题行的「+」添加入口', () => {
+    render(
+      <ConversationSidebar
+        {...sidebarProps({
+          teamBots: [teamBot],
+          directory: directoryModel({ teamBots: [teamBot] }),
+        })}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: '添加 Bot' })).not.toBeInTheDocument();
   });
 
   it('renders read-only others sessions without interactive actions and opens via onOpenSession', () => {
@@ -914,6 +935,18 @@ it('团队 settle 后空桶不渲染死分组;独立加载失败展示并可单�
   expect(within(teamGroup).getByText('团队加载失败')).toBeInTheDocument();
   fireEvent.click(within(teamGroup).getByRole('button', { name: '重试' }));
   expect(retry).toHaveBeenCalledTimes(1);
+});
+
+it('搜索中团队组无匹配时同样隐藏空分组', () => {
+  render(
+    <ConversationSidebar
+      {...sidebarProps({ teamBots: [teamBot], directory: directoryModel({ teamBots: [teamBot] }) })}
+    />,
+  );
+  expect(screen.getByRole('group', { name: '团队 Bot' })).toBeInTheDocument();
+  // 关键字只命中我的 Bot,团队组过滤为空:空分组连同标题一并隐藏(2026-10-14 体验修复)。
+  fireEvent.change(screen.getByRole('textbox', { name: '搜索 Bot' }), { target: { value: '管理' } });
+  expect(screen.queryByRole('group', { name: '团队 Bot' })).not.toBeInTheDocument();
 });
 
 it('仅团队筛选禁用他人来源，管理 Bot 保持原有可用项', () => {

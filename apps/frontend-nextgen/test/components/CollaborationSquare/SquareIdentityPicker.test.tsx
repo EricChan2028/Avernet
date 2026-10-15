@@ -43,7 +43,7 @@ describe('SquareIdentityPicker', () => {
     mockedSelector.mockClear();
   });
 
-  it('默认渲染身份选择器，选中项为登录用户身份，头部标签定制为「为 Ta 加好友：」', () => {
+  it('默认渲染身份选择器，选中项为登录用户身份，不展示头部标签', () => {
     render(<SquareIdentityPicker />);
 
     expect(screen.getByTestId('identity-selector')).toBeInTheDocument();
@@ -51,9 +51,9 @@ describe('SquareIdentityPicker', () => {
     expect(props.identities).toHaveLength(2);
     expect(props.activeId).toBe('human_900003');
     expect(props.identityStatus).toBe('ready');
-    expect(props.headerLabel).toBe('为 Ta 加好友：');
-    expect(props.headerTooltip).toBe('每个身份（用户或 Bot）都拥有各自独立的好友关系。');
-    expect(props.layout).toBe('collaboration');
+    expect(props.headerLabel).toBeUndefined();
+    expect(props.headerTooltip).toBeUndefined();
+    expect(props.layout).toBe('inline');
     expect(props.triggerClassName).toContain('bg-background');
   });
 
