@@ -314,8 +314,8 @@ describe('RepairTaskDialog', () => {
     await userEvent.click(screen.getByRole('button', { name: '选择建议', exact: true }));
     expect(screen.getByRole('textbox', { name: '修复要求' })).toHaveValue('保留原分支');
     expect(screen.getByRole('checkbox', { name: '选择修订项 修复建议 2' })).not.toBeChecked();
-    expect(screen.getByRole('button', { name: '发布与灰度', exact: true })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '效果与复发', exact: true })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '部署候选', exact: true })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '效果验证', exact: true })).toBeDisabled();
     expect(repairApi.revise).not.toHaveBeenCalled();
   });
 

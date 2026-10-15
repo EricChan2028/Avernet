@@ -16,6 +16,8 @@ const runFile = promisify(execFile);
 const objectId = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 const safeBranch = /^repair\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+$/;
 const MAX_GIT_OUTPUT = 2 * 1024 * 1024;
+const MAX_FILE_PATCH = 128 * 1024;
+const MAX_PATCH_TOTAL = 1024 * 1024;
 
 export class RepairGitStore {
   constructor(private readonly gitDir: string) {}
@@ -161,14 +163,31 @@ export class RepairGitStore {
     if (fields.length % 2 !== 0) throw new Error('Invalid repair Git diff listing');
     const truncated = fields.length / 2 > 20;
     const files = [];
+    let patchBytes = 0;
     for (let index = 0; index < Math.min(fields.length, 40); index += 2) {
       const status = fields[index]; const path = fields[index + 1];
       if (!path || path.startsWith('/') || path.split('/').some(part => !part || part === '.' || part === '..')) throw new Error('Unsafe repair diff path');
       const before = status === 'A' ? null : await this.blob(input.baseCommit, path);
       const after = status === 'D' ? null : await this.blob(input.candidateCommit, path);
+      const stats = await this.git(['diff', '--no-ext-diff', '--no-textconv', '--numstat', input.baseCommit, input.candidateCommit, '--', path], 4096);
+      const binary = !!before?.binary || !!after?.binary || stats.startsWith('-\t-\t');
+      let patch: string | undefined;
+      let patchTruncated = false;
+      if (!binary) {
+        try {
+          const { stdout } = await runFile('git', ['-C', this.gitDir, 'diff', '--no-ext-diff', '--no-textconv',
+            '--no-renames', '--no-color', '--unified=3', input.baseCommit, input.candidateCommit, '--', path],
+          { encoding: 'utf8', timeout: 45_000, maxBuffer: MAX_FILE_PATCH });
+          const size = Buffer.byteLength(stdout, 'utf8');
+          if (size + patchBytes > MAX_PATCH_TOTAL) patchTruncated = true;
+          else { patch = stdout; patchBytes += size; }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') patchTruncated = true;
+          else throw new Error('Repair Git diff failed');
+        }
+      }
       files.push({ path, status, before: before?.text ?? null, after: after?.text ?? null,
-        binary: !!before?.binary || !!after?.binary,
-        truncated: !!before?.truncated || !!after?.truncated });
+        patch, binary, truncated: patchTruncated });
     }
     return { baseCommit: input.baseCommit, candidateCommit: input.candidateCommit, files, truncated };
   }

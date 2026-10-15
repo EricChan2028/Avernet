@@ -194,6 +194,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       const revisions = await repairStage('revisions', () => new RepairBatchRepository(this.db).listRevisions(workflowId));
       const heads = new Map<string, RepairRevision>();
       for (const revision of revisions) if (!heads.has(revision.taskId)) heads.set(revision.taskId, revision);
+      for (const revision of revisions) if (revision.phase === 'published') heads.set(revision.taskId, revision);
       const counts = Object.fromEntries((['pending', 'processing', 'awaiting_verification', 'closed', 'no_action', 'all'] as RepairInboxFilter[])
         .map(key => [key, scopedItems.filter(item => inboxMatch(item, key)).length])) as Record<RepairInboxFilter, number>;
       const filtered = scopedItems.filter(item => inboxMatch(item, state));
@@ -354,6 +355,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     this.actor(actorId);
     if (!this.execution) fail('CAPABILITY_UNAVAILABLE', 'Repair generation provider is unavailable');
     const task = await this.task(taskId);
+    if (task.revisions.some(revision => revision.phase === 'published')) fail('STATE_CONFLICT', '此任务已有部署，请先验证效果；需要继续修复时创建新基线任务');
     if (!safeInteger(expectedRevision, 1) || task.latestAttempt.revision !== expectedRevision) fail('STATE_CONFLICT', 'Result is no longer current');
     if (task.latestAttempt.draft) return;
     const run = task.execution;
@@ -403,6 +405,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     if (!this.execution) fail('CAPABILITY_UNAVAILABLE', 'Repair generation provider is unavailable');
     if (!safeInteger(request.expectedRevision, 1) || !requiredText(request.requestId, 128)) fail('INVALID_INPUT', 'Invalid retry request');
     const task = await this.task(taskId);
+    if (task.revisions.some(revision => revision.phase === 'published')) fail('STATE_CONFLICT', '此任务已有部署，请先验证效果；需要继续修复时创建新基线任务');
     if (task.latestAttempt.revision === request.expectedRevision && task.latestAttempt.draft
       && ['AIS_FAILED', 'AIS_STOPPED', 'AIS_TIMEOUT'].includes(String(task.latestAttempt.error?.code))) return task.latestAttempt;
     const digest = digestRepairJson({ actorId, taskId, retry: request });
@@ -517,6 +520,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     const before = await this.task(taskId);
     await this.tx(async tx => {
       const task = await this.readTask(tx, taskId);
+      if (task.revisions.some(revision => revision.phase === 'published')) fail('STATE_CONFLICT', '已部署任务不能取消或隐式回滚，请在效果验证中记录结论');
       if (task.latestAttempt.revision === expectedRevision && task.latestAttempt.phase === 'cancelled') return;
       await new RepairBatchRepository(tx).cancelTask(tx, { workflowId: task.workflowId, taskId, expectedAttemptRevision: expectedRevision, expectedStateVersion: task.latestAttempt.stateVersion });
       await new RepairTaskRepository(tx).cancel(taskId);

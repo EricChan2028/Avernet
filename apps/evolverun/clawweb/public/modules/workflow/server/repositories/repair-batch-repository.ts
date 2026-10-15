@@ -185,9 +185,11 @@ export class RepairBatchRepository {
     }
     const active = await tx.query<Row>(`SELECT r.task_id, r.phase FROM workflow_repair_revisions r WHERE r.workflow_id = ?
       AND r.revision = (SELECT MAX(r2.revision) FROM workflow_repair_revisions r2 WHERE r2.task_id = r.task_id)
-      AND r.phase NOT IN ('published', 'no_change', 'cancelled')`, [workflowId]);
+      AND r.phase NOT IN ('published', 'no_change', 'cancelled')
+      AND NOT EXISTS (SELECT 1 FROM workflow_repair_revisions published WHERE published.task_id = r.task_id AND published.phase = 'published')`, [workflowId]);
     if (active.some(row => row.task_id !== input.taskId)) conflict('ACTIVE_TASK_CONFLICT', 'Workflow already has an editable repair task');
     const previous = await this.latest(tx, workflowId, input.taskId);
+    if ((await tx.query('SELECT 1 FROM workflow_repair_revisions WHERE task_id = ? AND phase = ? LIMIT 1', [input.taskId, 'published'])).length) conflict('STATE_CONFLICT', '已部署任务不能再生成候选；请依据效果结论创建新基线任务');
     if (request.expectedAttemptRevision !== (previous?.revision ?? 0) || input.revision !== (previous?.revision ?? 0) + 1
       || (previous && !['review', 'blocked', 'failed'].includes(previous.phase))) conflict('STATE_CONFLICT', 'Revision is not editable or latest attempt changed');
     if (previous && canonicalRepairJson(previous.input.baseline) !== canonicalRepairJson(input.baseline)) conflict('CONTENT_MISMATCH', 'A task cannot change its frozen baseline');

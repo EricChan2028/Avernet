@@ -242,7 +242,12 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     <button type="button" className={`${primary} mt-4`} disabled={busy} onClick={() => void cancel()}>{busy ? '取消中…' : '确认取消任务'}</button>
   </RepairDialog>
 
-  return <RepairWorkspace stage={2} title="审核 Pack，不满意就继续优化" subtitle={`${workflowId} · 同一任务，多轮候选 · 当前仅生成与审阅`} onBack={() => { if (!busy) onClose() }} onSelect={detail ? openSelection : undefined} onReview={() => setMode('detail')} busy={busy}>
+  const deployment = detail?.release?.deployments[0]
+  const published = deployment?.status === 'succeeded'
+  const deploying = detail?.release?.approval?.status === 'approved' || !!deployment
+  const navigateRelease = () => document.getElementById(`repair-release-${taskId}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  return <RepairWorkspace stage={published ? 4 : deploying ? 3 : 2} title={published ? '验证新版本效果，逐项记录结论' : deploying ? '部署已确认的候选 Pack' : '审阅差异与检查报告，确认候选'} subtitle={`${workflowId} · 审阅 → 确认候选 → 明确部署 → 验证效果`} onBack={() => { if (!busy) onClose() }} onSelect={detail && !deploying ? openSelection : undefined} onReview={() => setMode('detail')}
+    onDeploy={detail?.capabilities.publication || deploying ? navigateRelease : undefined} onVerify={published ? navigateRelease : undefined} busy={busy}>
     {loading && <p role="status" className="text-xs text-muted-foreground">加载修复任务…</p>}
     {taskError && <p role="alert" className="text-xs text-destructive">{taskError} <button type="button" className={button} disabled={busy} onClick={reload}>重试读取任务</button></p>}
     {(error || notice || recoveryAction) && <div className="flex flex-wrap items-center gap-3 rounded-lg border border-input bg-card p-4"><p role={error ? 'alert' : 'status'} className="text-xs text-muted-foreground">{error || notice || dispatchError}</p>{recoveryButton}</div>}
