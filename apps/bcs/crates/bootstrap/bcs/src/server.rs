@@ -1563,11 +1563,16 @@ fn build_invite_code_service(
         },
         _ => Arc::new(MemoryInviteCodeRepo::with_data_dir(config.bots_base_dir.clone())),
     };
-    Arc::new(InviteCodeServiceImpl::new(
-        repo,
-        invite_token_secret,
-        config.invite.public_claim_max_count,
-    ))
+    Arc::new(
+        InviteCodeServiceImpl::new(
+            repo,
+            invite_token_secret,
+            config.invite.public_claim_max_count,
+        )
+        // 与 invite-code gate 中间件同源接线：开关关闭时 /me 合成"已绑定"，
+        // 客户端提示行为完全由该后端开关控制。
+        .with_gate_enabled(config.invite.invite_code_gate_enabled),
+    )
 }
 
 async fn resolve_secret_value(
