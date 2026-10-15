@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, React, React Query, Express, SQLite/MySQL/OB, Git, Vitest and existing ClawMind node tests.
 
-**Spec:** ../specs/2026-10-14-workflow-repair-release-flow.md
+**Spec:** [Workflow Repair release flow](../specs/2026-10-14-workflow-repair-release-flow.md)
 
 ## Global constraints
 
