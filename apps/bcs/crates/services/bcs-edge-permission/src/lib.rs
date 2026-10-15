@@ -494,9 +494,25 @@ impl ConnectService for DbConnectService {
         // Only pending requests can be approved.
         if req.status == RequestStatus::Approved {
             // Idempotent: return existing edge ids (if any). Also backfill the
-            // legacy friendship row — pairs approved before the reverse-sync
-            // shipped have no bcs_friendships mirror (INSERT is idempotent).
-            self.writeback_add_friendship(&req.from_id, &req.to_id).await;
+            // legacy friendship row for pairs approved before the reverse-sync
+            // shipped. Gate it on this Connect request's grant still being
+            // active: `revoke_friend` revokes the edges but leaves the request
+            // row Approved, and re-accepting that stale request must not
+            // resurrect a revoked pair in the legacy store (which the
+            // collaboration group gate reads).
+            if req.request_kind == RequestKind::Connect {
+                if let Some(edge_id) = req.edge_id {
+                    let grant_active = self
+                        .edge_grants
+                        .list_active_grants(&req.from_id, &req.to_id, &self.env)
+                        .await
+                        .iter()
+                        .any(|grant| grant.edge_id == edge_id);
+                    if grant_active {
+                        self.writeback_add_friendship(&req.from_id, &req.to_id).await;
+                    }
+                }
+            }
             return Ok(req.edge_id.into_iter().collect());
         }
         if req.status != RequestStatus::Pending {
@@ -4006,6 +4022,65 @@ mod tests {
             vec!["add:bot_82ce3565:20260525_tzgcxt13:195302".to_string()],
             "idempotent approve must backfill the legacy row"
         );
+    }
+
+    #[tokio::test]
+    async fn stale_approved_request_after_revoke_does_not_backfill() {
+        // revoke_friend 只撤销 edge grants 与 legacy 镜像，request 行仍留 Approved；
+        // 重放这个旧 request 的 accept 不得把已解除的好友在 legacy 侧复活。
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:st1", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        seed_bot(&db, "x:st2", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        let recorder = Arc::new(RecordingWriteback::default());
+        let svc = service_with_writeback(&eg, &pp, &rq, &bc, recorder.clone());
+
+        let result = svc
+            .create_connect("x:st1", "x:st2", None, None)
+            .await
+            .expect("pending connect");
+        assert_eq!(result.status, ConnectStatus::Pending);
+        let request_id = result.request_ids.first().expect("pending request id").clone();
+        svc.approve(&request_id, "human_1", None)
+            .await
+            .expect("manual approve");
+
+        svc.revoke_friend("x:st1", "x:st2", None)
+            .await
+            .expect("revoke");
+        assert_eq!(recorder.calls(), vec![
+            "add:x:st1:x:st2".to_string(),
+            "remove:x:st1:x:st2".to_string(),
+        ]);
+        assert!(!eg.has_friend_edge("x:st1", "x:st2", "dev").await);
+        recorder.calls.lock().expect("clear").clear();
+
+        // 旧 Approved request 重放 accept：幂等分支不得回写（grant 已撤销）。
+        svc.approve(&request_id, "human_1", None)
+            .await
+            .expect("idempotent approve on revoked pair");
+        assert!(
+            recorder.calls().is_empty(),
+            "re-accepting a stale approved request must not resurrect the revoked pair"
+        );
+        assert!(!eg.has_friend_edge("x:st1", "x:st2", "dev").await);
+
+        // 反向 request（x:st2→x:st1）同样属于已撤销对，重放也不得复活。
+        let reverse_pending = svc.find_pending_connect("x:st2", "x:st1").await;
+        let reverse_id = match reverse_pending.first() {
+            Some(r) => r.request_id.clone(),
+            // approve 已把反向请求一并置 Approved；取不到 pending 直接重放正
+            // 向请求已覆盖该语义，此处仅需断言反向确无 active friend edge。
+            None => String::new(),
+        };
+        if !reverse_id.is_empty() {
+            svc.approve(&reverse_id, "human_1", None)
+                .await
+                .expect("idempotent approve on reverse request");
+            assert!(
+                recorder.calls().is_empty(),
+                "reverse request re-accept must not resurrect the revoked pair"
+            );
+        }
     }
 
     #[tokio::test]
