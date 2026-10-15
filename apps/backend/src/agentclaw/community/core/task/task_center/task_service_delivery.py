@@ -157,6 +157,26 @@ class TaskServiceDeliveryMixin:
         if not graph.is_relay:
             raise TaskStateError("node dispatch requires relay orchestration")
         node = next((item for item in graph.tasks if item.node_id == node_id), None)
+        if (
+            node is not None
+            and node.run_info.run_mode == "bbs"
+            and node.status not in {Status.PENDING, Status.RUNNING}
+        ):
+            # A terminal BBS baton cannot accept a new instruction, even when a
+            # legacy completion path cleared its owner or missed the graph-save
+            # settlement. Retire the stale row here; redispatching would fail
+            # "not runnable" forever and keep the redriver noisy.
+            stale_token = node.run_info.extend_props.get("relay_token")
+            if stale_token and intents.settle_delivery_intent(
+                task_id, node_id, stale_token
+            ):
+                logger.warning(
+                    "settled stale BBS delivery intent task=%s node=%s status=%s",
+                    task_id,
+                    node_id,
+                    node.status.value,
+                )
+                return node
         if node is None or node.status not in {Status.PENDING, Status.RUNNING}:
             raise TaskStateError("relay delivery target is not runnable")
         initial_status = node.status
