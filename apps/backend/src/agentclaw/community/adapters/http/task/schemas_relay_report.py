@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agentclaw.community.adapters.http.task.schemas import (
     AcceptanceResultDTO,
@@ -79,6 +79,22 @@ class TaskReportTraceStepDTO(BaseModel):
     boost_reason: str | None
     error_msg: str | None
 
+    @field_validator(
+        "action_type",
+        "action_input",
+        "action_result",
+        "status_from",
+        "status_to",
+        "boost_reason",
+        "error_msg",
+        mode="after",
+    )
+    @classmethod
+    def _reject_blank(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("must be a non-empty string when present")
+        return value
+
 
 class TaskReportTraceDTO(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -86,7 +102,49 @@ class TaskReportTraceDTO(BaseModel):
     steps: list[TaskReportTraceStepDTO]
 
 
+_TRACE_ACTION_TYPES: dict[TaskReportEventType, tuple[str, ...]] = {
+    TaskReportEventType.EXECUTION_RESULT: (
+        "S1_CONTEXT",
+        "S2_GAPS",
+        "S3_CAPABILITY",
+        "S4A_EXECUTION",
+        "S4B_REPORT",
+    ),
+    TaskReportEventType.PLAN_RESULT: (
+        "S5A_REFRESH_GAPS",
+        "S5B_PLAN_NEXT_NODE",
+        "S5C_SEARCH_CANDIDATES",
+        "S5D_SELECT_EXECUTOR",
+        "S5E_REPORT_PLAN",
+    ),
+}
+
+
+def _step_contains_relay_token(step: TaskReportTraceStepDTO, relay_token: str) -> bool:
+    values = (
+        step.action_type,
+        step.action_input,
+        step.action_result,
+        step.status_from,
+        step.status_to,
+        step.boost_reason,
+        step.error_msg,
+    )
+    return any(
+        isinstance(value, str)
+        and ("relay_token" in value or relay_token in value)
+        for value in values
+    )
+
+
 class TaskReportCommandDTO(BaseModel):
+    """Two-event Relay report command; ``trace`` is optional on the wire.
+
+    When ``trace`` is provided, ``trace.steps`` must be present, every step
+    must carry the seven fixed fields, and the step sequence must match the
+    report event type.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     task_id: str = Field(min_length=1)
@@ -98,7 +156,32 @@ class TaskReportCommandDTO(BaseModel):
     progress_reason: str = ""
     failure_reason: str | None = None
     task_acceptance_result: AcceptanceResultDTO | None = None
-    trace: TaskReportTraceDTO
+    trace: TaskReportTraceDTO | None = None
+
+    @field_validator("task_id", "node_id", "event_id", "relay_token", mode="after")
+    @classmethod
+    def _reject_blank_identity(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must be a non-empty string")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_trace_contract(self) -> "TaskReportCommandDTO":
+        if self.trace is None:
+            return self
+        expected = _TRACE_ACTION_TYPES[self.event_type]
+        actual = tuple(step.action_type for step in self.trace.steps)
+        if actual != expected:
+            raise ValueError(
+                "trace.steps must cover action types in order: "
+                + ", ".join(expected)
+            )
+        if any(
+            _step_contains_relay_token(step, self.relay_token)
+            for step in self.trace.steps
+        ):
+            raise ValueError("trace step must not contain relay_token")
+        return self
 
     def to_domain(self) -> TaskReportCommand:
         if self.event_type == TaskReportEventType.EXECUTION_RESULT:

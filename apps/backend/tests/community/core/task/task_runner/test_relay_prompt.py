@@ -117,6 +117,8 @@ def test_relay_prompt_requires_structured_diagnostic_trace() -> None:
     )
 
     assert "每次 report 请求都必须带顶层 trace={steps:[...]}" in prompt
+    assert "HTTP 契约允许省略 trace" in prompt
+    assert "本 Runtime 不得省略" in prompt
     assert "EXECUTION_RESULT.trace.steps 必须按顺序恰好 5 条" in prompt
     assert "S1_CONTEXT、S2_GAPS、S3_CAPABILITY、S4A_EXECUTION、S4B_REPORT" in prompt
     assert "PLAN_RESULT.trace.steps 必须按顺序恰好 5 条" in prompt
@@ -128,6 +130,8 @@ def test_relay_prompt_requires_structured_diagnostic_trace() -> None:
     assert "action_type、action_input、action_result、status_from、status_to、boost_reason、error_msg" in prompt
     assert "允许为 null 的键也必须显式传 null" in prompt
     assert "action_type 和 action_result 必须是非空字符串" in prompt
+    assert "action_input 必须是字符串或 null" in prompt
+    assert "结构化内容先序列化为紧凑 JSON 文本" in prompt
     assert "禁止 step/status/detail 或下挂 detail 的旧结构" in prompt
     assert "step.detail" not in prompt
     assert "action_type=execute" not in prompt
@@ -158,6 +162,8 @@ def test_relay_delivery_prompt_uses_required_trace_contract() -> None:
     )
 
     assert "每次 report 请求都必须带顶层 trace={steps:[...]}" in prompt
+    assert "HTTP 契约允许省略 trace" in prompt
+    assert "本 Runtime 不得省略" in prompt
     assert "EXECUTION_RESULT.trace.steps" in prompt
     assert "PLAN_RESULT.trace.steps" in prompt
     assert "禁止 step/status/detail 或下挂 detail 的旧结构" in prompt
