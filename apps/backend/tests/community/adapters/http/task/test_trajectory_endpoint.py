@@ -667,11 +667,21 @@ def test_trajectory_dto_passes_through_system_logs():
 
 @pytest.mark.unit
 def test_trajectory_display_html_renders_system_logs():
-    """HTML 页在携带嵌挂的主事件下渲染可折叠「系统事件」块,子事件逐行可见。"""
+    """HTML 页在携带嵌挂的主事件下渲染可折叠「系统事件」块:
+    默认收起(details 无 open 属性)、点 summary 展开、子事件逐条可见
+    (类型/结果/墙钟时间/原因,按 id 正序)。"""
+    import re as _re
+
     ev = TrajectoryEvent(
         task_id="t1", node_id="n1", action_type="S1_CONTEXT",
         action_result="completed", attempt=0, gmt_create=1000, gmt_modified=1000,
         system_logs=[
+            TrajectoryEvent(
+                task_id="t1", node_id="n1", action_type="execute",
+                action_result="success", attempt=0,
+                gmt_create=1100, gmt_modified=1100,
+                boost_reason="回投执行",
+            ),
             TrajectoryEvent(
                 task_id="t1", node_id="n1", action_type="reset",
                 action_result="sla_timeout", attempt=0,
@@ -690,9 +700,22 @@ def test_trajectory_display_html_renders_system_logs():
         params={"task_id": "t1", "display": "html"},
     )
     assert r.status_code == 200
-    assert "系统事件" in r.text
-    assert "reset" in r.text and "sla_timeout" in r.text
-    assert "harness 巡检复位" in r.text
+    page = r.text
+    # ① 找到 details 块:存在且默认收起(无 open 属性),summary 为点击展开控件
+    m = _re.search(r"<details class=\"ev-slog\">(.*?)</details>", page, _re.S)
+    assert m, "系统事件应为 <details class=ev-slog> 块"
+    block = m.group(0)
+    assert ' open' not in block, "默认必须收起(无 open 属性)"
+    assert "<summary>系统事件 · system_logs 2 条</summary>" in block, (
+        "summary 应作为展开控件并显示条数"
+    )
+    # ② 子事件逐条呈现:按 id 正序,含类型/结果/原因
+    assert "execute" in block and "reset" in block
+    assert block.index("execute") < block.index("reset"), "按 id 正序"
+    assert "sla_timeout" in block and "harness 巡检复位" in block
+    # ③ 每条携带墙钟时间(_fmt_time 换算自 1100/1200ms epoch)
+    from agentclaw.community.adapters.http.task.trajectory_html import _fmt_time
+    assert _fmt_time(1200) in block
 
 
 @pytest.mark.unit

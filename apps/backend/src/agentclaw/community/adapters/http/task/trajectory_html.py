@@ -204,15 +204,20 @@ def _render_event(ev: "object") -> str:
         parts.append(f"<pre>{html.escape(lines)}</pre>")
         parts.append("</details>")
 
-    # 系统事件(读时嵌套;S 码主事件携带,可折叠;逐条 id 正序 = append 序):
-    # 主序列之外该子任务的系统侧事实(submit/reset/投递/transition 等)。
+    # 系统事件(读时嵌套;S 码主事件携带,S 码主事件下可下拉展开):原生 <details>
+    # 默认收起、点 <summary> 展开;子事件逐条按 id 正序,含类型/结果/墙钟时间/原因。
     sub_logs = getattr(ev, "system_logs", None)
     if sub_logs:
         sub_rows = "\n".join(
-            "[{}] {} | {}{}".format(
+            "[{}] {} | {}{}{}".format(
                 idx,
                 getattr(sub, "action_type", "?"),
                 getattr(sub, "action_result", ""),
+                (
+                    " | " + _fmt_time(getattr(sub, "gmt_create", None))
+                    if getattr(sub, "gmt_create", None) is not None
+                    else ""
+                ),
                 (
                     " | " + str(getattr(sub, "boost_reason"))
                     if getattr(sub, "boost_reason", None)
@@ -221,8 +226,10 @@ def _render_event(ev: "object") -> str:
             )
             for idx, sub in enumerate(sub_logs, start=1)
         )
-        parts.append('<details class="ev-input">')
-        parts.append(f"<summary>系统事件 · system_logs {len(sub_logs)} 条</summary>")
+        parts.append('<details class="ev-slog">')
+        parts.append(
+            f"<summary>系统事件 · system_logs {len(sub_logs)} 条</summary>"
+        )
         parts.append(f"<pre>{html.escape(sub_rows)}</pre>")
         parts.append("</details>")
 
@@ -498,6 +505,10 @@ def render_trajectory_html(dto: "TaskTrajectoryDTO", *, do_analysis: bool = Fals
   .err-type {{ font-weight: 600; color: #991b1b; margin-right: 8px; }}
   .err-msg {{ color: #7f1d1d; word-break: break-word; }}
   details.ev-input {{ margin-top: 8px; font-size: 12px; color: #475569; }}
+  details.ev-slog {{ margin-top: 8px; font-size: 12px; color: #64748b;
+                     border-top: 1px dashed #e2e8f0; padding-top: 6px; }}
+  details.ev-slog > summary {{ cursor: pointer; font-weight: 600;
+                               color: #475569; list-style: revert; }}
   details.ev-input summary {{ cursor: pointer; }}
   details.ev-input summary code {{ font-family: ui-monospace, monospace; color: #64748b; }}
   details.ev-input pre {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;
