@@ -1594,7 +1594,7 @@ async def test_pure_read_live_fetches_session_msgs_and_never_persists():
 
     result = await svc.get_trajectory("t1", do_analysis=False, session_detail=True)
 
-    assert bcs.calls == [("sess-1", 50, None)]   # 实拉,默认 limit 50
+    assert bcs.calls == [("sess-1", 60, None)]   # 实拉,默认 limit 60
     assert result.timeline[0].session_msgs == _LIVE_MSGS
     assert repo.merge_calls == []                  # 纯读不写库
     assert repo.backfill_calls == []
@@ -1678,7 +1678,7 @@ async def test_do_analysis_engine_session_id_dispatches_to_baas_channel():
 
     await svc.get_trajectory("t1", do_analysis=True)
 
-    assert openapi.calls == [(_ENGINE_SID, 50, "20260920_hzzaxnzf:35983")]
+    assert openapi.calls == [(_ENGINE_SID, 60, "20260920_hzzaxnzf:35983")]
     assert bcs.calls == []
     briefs = analyzer.last_running_sessions
     assert briefs and briefs[0]["session_id"] == _ENGINE_SID
@@ -1709,7 +1709,7 @@ async def test_pure_read_engine_session_id_dispatches_to_baas_channel_no_persist
 
     result = await svc.get_trajectory("t1", do_analysis=False, session_detail=True)
 
-    assert openapi.calls == [(_ENGINE_SID, 50, "20260920_hzzaxnzf:35983")]
+    assert openapi.calls == [(_ENGINE_SID, 60, "20260920_hzzaxnzf:35983")]
     assert bcs.calls == []
     assert result.timeline[0].session_msgs == _LIVE_MSGS
     assert repo.merge_calls == []
@@ -1770,8 +1770,8 @@ async def test_mixed_bcs_and_engine_channels_probed_independently():
 
     await svc.get_trajectory("t1", do_analysis=True)
 
-    assert bcs.calls == [("sess-group", 50, "tok-holder")]
-    assert openapi.calls == [(_ENGINE_SID, 50, "20260920_hzzaxnzf:35983")]
+    assert bcs.calls == [("sess-group", 60, "tok-holder")]
+    assert openapi.calls == [(_ENGINE_SID, 60, "20260920_hzzaxnzf:35983")]
     assert {m[1] for m in repo.merge_calls} == {"n-bcs", "n-eng"}
     assert {b["node_id"] for b in analyzer.last_running_sessions} == {"n-bcs", "n-eng"}
 

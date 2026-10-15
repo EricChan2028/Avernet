@@ -14,7 +14,7 @@ from agentclaw.community.core.task.task_context.task_trajectory.models import (
 )
 
 logger = logging.getLogger("task.trajectory")
-_RUNNING_SESSION_DEFAULT_MSG_LIMIT = 50
+_RUNNING_SESSION_DEFAULT_MSG_LIMIT = 60
 _ENGINE_SESSION_KEY_RE = re.compile(
     r"^(?:(?:agent:[^:]+:)?session:[^:]+:user:[^:]+"
     r"|user:[^:]+:session:[^:]+:agent:[^:]+)$",
@@ -57,7 +57,7 @@ class TrajectorySessionSupport:
         两段式(需求 2026-09-22):
 
         ① **物化(全节点,不管有没有完成)**:对每个带 ``session_id`` 的
-           (task_id,node_id) 子任务,取最近 ``limit``(默认 50,内容**不截断**)
+           (task_id,node_id) 子任务,取最近 ``limit``(默认 60,内容**不截断**)
            条 session msgs:末位事件 ``ext_info`` 已带 ``session_msgs`` →
            **缓存命中,不再实际拉取**;否则按 session_id 形态分派读通道实拉
            (BCS 会话键 → BCS;引擎 key ``agent:main:session:*`` 等 → BaaS
@@ -167,7 +167,7 @@ class TrajectorySessionSupport:
 
     def _resolve_msg_limit(self) -> int:
         """每 session 最大消息条数(TrajectoryAnalysisConfig.
-        running_session_message_limit,默认 50;解析失败/未配置回落默认)。"""
+        running_session_message_limit,默认 60;解析失败/未配置回落默认)。"""
         try:
             return int(
                 getattr(self._config, "running_session_message_limit",
