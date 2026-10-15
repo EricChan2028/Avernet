@@ -4,6 +4,11 @@ Use this only when a full upstream dump cannot pass the compatibility gate due
 to independently tracked changes. The selected operation and every referenced
 component are copied from that dump; existing operations/components are never
 replaced. The resulting artifact still passes the standard compatibility gate.
+
+A path that serves several methods is published whole: name every method it
+carries, comma-separated (``GET,PUT,DELETE``), since a path item is one
+generated unit and copying part of it would describe a surface the upstream
+does not serve.
 """
 
 from __future__ import annotations
@@ -43,19 +48,37 @@ def _component(candidate: dict[str, Any], ref: str) -> tuple[str, str, Any]:
     return section, name, item
 
 
+def _parse_methods(method: str) -> frozenset[str]:
+    """``GET`` or ``GET,PUT,DELETE`` -> the lower-cased set of methods named."""
+    methods = frozenset(part.strip().lower() for part in method.split(","))
+    if not methods or "" in methods:
+        raise ValueError(f"malformed HTTP method list: {method!r}")
+    unsupported = methods - _METHODS
+    if unsupported:
+        raise ValueError(f"unsupported HTTP method: {','.join(sorted(unsupported))}")
+    return methods
+
+
 def additive_document(
     published: dict[str, Any], candidate: dict[str, Any], method: str, path: str
 ) -> dict[str, Any]:
-    """Copy exactly one new path and its transitive refs from a generated dump."""
-    method = method.lower()
-    if method not in _METHODS:
-        raise ValueError(f"unsupported HTTP method: {method}")
+    """Copy exactly one new path and its transitive refs from a generated dump.
+
+    ``method`` names every method the path item carries, comma-separated when
+    there are several; the whole item is copied, never a slice of it.
+    """
+    methods = _parse_methods(method)
     if published.get("openapi") != candidate.get("openapi"):
         raise ValueError("upstream OpenAPI version differs from the published artifact")
     source = (candidate.get("paths") or {}).get(path)
-    if not isinstance(source, dict) or method not in source:
+    if not isinstance(source, dict):
         raise ValueError(f"upstream dump has no {method.upper()} {path}")
-    other_methods = _METHODS.intersection(source) - {method}
+    missing = methods - _METHODS.intersection(source)
+    if missing:
+        raise ValueError(
+            f"upstream dump has no {','.join(sorted(m.upper() for m in missing))} {path}"
+        )
+    other_methods = _METHODS.intersection(source) - methods
     if other_methods:
         raise ValueError(
             f"upstream path contains other methods: {sorted(other_methods)}"
@@ -117,7 +140,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("published", type=Path)
     parser.add_argument("candidate", type=Path, help="fresh upstream dump")
-    parser.add_argument("method", help="HTTP method to publish")
+    parser.add_argument(
+        "method",
+        help="HTTP method to publish; comma-separated (GET,PUT,DELETE) when "
+        "the path serves several — every method the path carries must be named",
+    )
     parser.add_argument("path", help="exact upstream OpenAPI path to publish")
     args = parser.parse_args(argv)
     try:

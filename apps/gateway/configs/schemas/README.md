@@ -23,6 +23,15 @@ uv run python scripts/publish_additive_openapi_operation.py \
   '/openapi/v1/bots/{bot_id}/skills/{skill_id}/security-observations'
 ```
 
+A path that serves several methods is published whole — name every method it
+carries, comma-separated:
+
+```bash
+uv run python scripts/publish_additive_openapi_operation.py \
+  configs/schemas/bots.openapi.json /tmp/backend.openapi.json GET,PUT,DELETE \
+  '/openapi/v1/bots/{bot_id}/config-manifest'
+```
+
 The selective publisher copies only the named upstream path and its transitive
 components. It rejects conflicting existing definitions and runs the regular
 compatibility gate before replacing the artifact. Resolve the broader Backend
@@ -39,8 +48,12 @@ catalog drift separately; the selective publish does not approve those changes.
   `/openapi/v1/bots`, `/openapi/v1/org/user`, `/openapi/v1/org/dept`,`/openapi/v1/org`, `/openapi/v1/bots/spaces`,
   `/openapi/v1/bots/work-orders`, and `/openapi/v1/bots/work-order-notifications`
   surfaces, plus `/openapi/v1/bots/source-credentials/**` (W3, #1471:
-  tenant source credentials — app-operated, owner-app guarded), narrowed
-  to public paths and the components they reference)
+  tenant source credentials — app-operated, owner-app guarded), the bot
+  configuration manifest (#1469: `/openapi/v1/bots/with-manifest`,
+  `/openapi/v1/bots/{bot_id}/with-manifest/status`,
+  `/openapi/v1/bots/{bot_id}/config-manifest/**`) and the manifest's CLI
+  tool door (`/openapi/v1/bots/{bot_id}/cli-tools/**`), narrowed to public
+  paths and the components they reference)
 
 ## Future: build-time generation
 

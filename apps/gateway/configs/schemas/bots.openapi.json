@@ -24891,6 +24891,1332 @@
         ],
         "title": "SkillSecurityObservation",
         "type": "object"
+      },
+      "Envelope_BotCreateWithManifestAccepted_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BotCreateWithManifestAccepted"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[BotCreateWithManifestAccepted]",
+        "type": "object"
+      },
+      "BotCreateWithManifestAccepted": {
+        "description": "What submission answers with: an id, and where to send the user.\n\n**No state field, and that is structural rather than stylistic.** The state\nvocabulary lives on the poll's response only, so no terminal value can ever\nbe returned by submission — a caller that has just submitted is, by\nconstruction, awaiting authorization.",
+        "example": {
+          "bot_id": "20260813_a7k2m9p1",
+          "iframe_url": "https://auth.example.com/passport/consent?flow=f-1",
+          "redirect_url": ""
+        },
+        "properties": {
+          "bot_id": {
+            "description": "The allocated bot id. Poll the status endpoint with it.",
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "iframe_url": {
+            "description": "Embeddable authorization URL, or empty. Passport returns this or `redirect_url`, and which one is not predictable — use whichever is non-empty.",
+            "title": "Iframe Url",
+            "type": "string"
+          },
+          "redirect_url": {
+            "description": "Full-page authorization URL, or empty. See `iframe_url`.",
+            "title": "Redirect Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bot_id",
+          "iframe_url",
+          "redirect_url"
+        ],
+        "title": "BotCreateWithManifestAccepted",
+        "type": "object"
+      },
+      "BotCreateWithManifest": {
+        "additionalProperties": false,
+        "description": "Create a bot, with its configuration, in one request.\n\nEvery field of the ordinary create body, plus the manifest. Inheriting rather\nthan restating them is deliberate: a field added to creation must not silently\nbe missing here, and two hand-maintained copies would drift.",
+        "example": {
+          "bot_desc": "Summarizes weekly industry news.",
+          "bot_name": "research-assistant",
+          "bot_type": "personal",
+          "cluster_name": "ACRA",
+          "config_manifest": "schema_version: 1\nscript:\n  body: \"echo provisioned\"\n",
+          "engine": "openclaw"
+        },
+        "properties": {
+          "bot_desc": {
+            "description": "Description of what the bot is for.",
+            "title": "Bot Desc",
+            "type": "string"
+          },
+          "bot_name": {
+            "description": "Display name. Must be non-blank, must not contain '@', and must be unused within the tenant (409 on a duplicate); leading and trailing whitespace is trimmed.",
+            "title": "Bot Name",
+            "type": "string"
+          },
+          "bot_type": {
+            "description": "Kind of bot to create: 'personal' — a bot for the named user's own use, with a single draft runtime; 'service' — a bot built to be published, gaining verify/online runtimes through its publish lifecycle.",
+            "enum": [
+              "personal",
+              "service"
+            ],
+            "title": "Bot Type",
+            "type": "string"
+          },
+          "cluster_name": {
+            "description": "Deployment cluster, in strict 1:1 correspondence with the engine: 'ANDC' for engine 'teclaw', 'ACRA' for every other engine. On create the engine/cluster pair is validated against this rule (400 on mismatch).",
+            "enum": [
+              "ACRA",
+              "ANDC"
+            ],
+            "title": "Cluster Name",
+            "type": "string"
+          },
+          "config_manifest": {
+            "description": "The manifest document (YAML), exactly as `PUT /bots/{bot_id}/config-manifest` accepts it — with one difference: a category no materializer can apply yet is **refused here** rather than stored inert, because accepting it would mean authorizing, creating the bot, and only then failing to configure it.\n\nSubmit it once. The poll never accepts it again, so the manifest that was validated is always the manifest that gets applied.\n\nIteration 1 rule: a manifest's `script` must not depend on anything else the same manifest declares. On a first boot the script is baked into the start command and runs before any other category has been delivered.",
+            "title": "Config Manifest",
+            "type": "string"
+          },
+          "engine": {
+            "description": "Engine that powers the bot, fixed at creation. The valid set is deployment-configured — read it from the engine group's available-engines endpoint; an unlisted engine is refused (400). Internal implementation engines (e.g. 'aicoding', the internal runtime behind 'claude_code') are not accepted; runtime forms travel on the template, not the engine.",
+            "title": "Engine",
+            "type": "string"
+          },
+          "engine_properties": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BotCreateEngineProperties"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional engine-specific properties. Omit for a plain bot; provide template_config (hand-written application-coding or a template-factory snapshot) for a template-backed bot."
+          },
+          "space_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Business space to associate with the bot, when applicable.",
+            "title": "Space Id"
+          }
+        },
+        "required": [
+          "bot_name",
+          "bot_desc",
+          "engine",
+          "cluster_name",
+          "bot_type",
+          "config_manifest"
+        ],
+        "title": "BotCreateWithManifest",
+        "type": "object"
+      },
+      "Envelope_BotCreateWithManifestStatus_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BotCreateWithManifestStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[BotCreateWithManifestStatus]",
+        "type": "object"
+      },
+      "BotCreateWithManifestStatus": {
+        "description": "Where a creation stands, and everything a caller needs at the end.\n\nThe terminal states carry **both** the report and the bot. The bot matters\nmost on `APPLY_FAILED`: a caller must be able to see that it exists and is\nrunning, rather than infer it from a word.",
+        "example": {
+          "bot_id": "20260813_a7k2m9p1",
+          "iframe_url": "",
+          "message": "",
+          "redirect_url": "",
+          "state": "READY"
+        },
+        "properties": {
+          "apply": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfigManifestApply"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The apply report, at both terminal states. Names every entry that did and did not land, across both phases — the pre-container phase's `script` is carried into it, so nothing looks as though it vanished."
+          },
+          "bot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bot"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The created bot, once it exists. Present at `READY` **and at `APPLY_FAILED`** — the manifest failing never touches the bot record, and the response says so rather than leaving it to be inferred."
+          },
+          "bot_id": {
+            "description": "The bot this creation is for.",
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "iframe_url": {
+            "default": "",
+            "description": "Authorization URL while `AWAITING_AUTHORIZATION`; empty afterwards.",
+            "title": "Iframe Url",
+            "type": "string"
+          },
+          "message": {
+            "default": "",
+            "description": "Why, when a state needs saying more than naming — a provisioning failure, or an authorization the user declined.",
+            "title": "Message",
+            "type": "string"
+          },
+          "redirect_url": {
+            "default": "",
+            "description": "See `iframe_url`.",
+            "title": "Redirect Url",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/CreationState",
+            "description": "Where the creation stands."
+          }
+        },
+        "required": [
+          "state",
+          "bot_id"
+        ],
+        "title": "BotCreateWithManifestStatus",
+        "type": "object"
+      },
+      "ConfigManifestApply": {
+        "description": "One apply's report — what was delivered, and what was not.",
+        "example": {
+          "apply_id": "9c1f4ae2b83d4f6a9e1c7d5b2a8f0e34",
+          "bot_id": "20260813_a7k2m9p1",
+          "categories": [
+            {
+              "aborted": false,
+              "category": "mcp",
+              "removed": [
+                "mcp.old"
+              ]
+            }
+          ],
+          "entries": [
+            {
+              "action": "created",
+              "category": "mcp",
+              "name": "mcp.ant.homistudio.meetmcp"
+            }
+          ],
+          "finished_at": "2026-08-31T09:12:06+00:00",
+          "notes": [],
+          "result": "SUCCEEDED",
+          "sources": [],
+          "started_at": "2026-08-31T09:12:04+00:00",
+          "trigger": "explicit"
+        },
+        "properties": {
+          "apply_id": {
+            "description": "Empty when the bot has never been applied.",
+            "title": "Apply Id",
+            "type": "string"
+          },
+          "bot_id": {
+            "description": "The bot this apply targeted.",
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "categories": {
+            "description": "One summary per category the document declared. A category the document did not mention does not appear, because it was not touched.",
+            "items": {
+              "$ref": "#/components/schemas/ConfigManifestApplyCategory"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "entries": {
+            "description": "One row per declared entry, across every category. Removals are not here — they have no declared entry, so they are reported under the category's `removed`.",
+            "items": {
+              "$ref": "#/components/schemas/ConfigManifestApplyEntry"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null exactly while `result` is `RUNNING`.",
+            "title": "Finished At"
+          },
+          "notes": {
+            "description": "Apply-level notes that belong to no entry. Today only the delivery strategy's closing step writes one: on teclaw, a whole-artifact redeliver that failed after every category was written is recorded here rather than failing the apply. Empty on ARCA.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "result": {
+            "description": "`RUNNING` while the work is in flight, then `SUCCEEDED` / `PARTIAL` / `FAILED`, derived from the entries below.",
+            "title": "Result",
+            "type": "string"
+          },
+          "sources": {
+            "description": "Provenance for the manifest's git sources: what each declaration actually resolved to, including the exact `resolved_sha`, since a moving `ref` like `main` means something different next week. One row per declaration; empty when the document names no git source. A credential appears by name only, never by value.",
+            "items": {
+              "$ref": "#/components/schemas/ConfigManifestApplySource"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the apply began. Null when the bot has never been applied.",
+            "title": "Started At"
+          },
+          "trigger": {
+            "description": "What started it; `explicit` for this API.",
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "apply_id",
+          "bot_id",
+          "trigger",
+          "result"
+        ],
+        "title": "ConfigManifestApply",
+        "type": "object"
+      },
+      "ConfigManifestApplySource": {
+        "description": "One git source this apply resolved — one row per declaration.\n\nNamed per declaration, keyed on the repository: two `from` names pointing at\nthe same `(url, ref, mode)` are two rows carrying the same `resolved_sha`,\nand two inline declarations of one repository at two refs are two rows too.",
+        "properties": {
+          "auth": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The credential's name, never its value. Null for an anonymous fetch.",
+            "title": "Auth"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`strict` or `non_strict`, as the source declared it. Part of the baseline key, so a `non_strict` declaration of a repository never advances the baseline a `strict` declaration of the same repository is pinned against.",
+            "title": "Mode"
+          },
+          "name": {
+            "description": "The `from` name, or `<url>@<ref>` for a source written inline on an entry.",
+            "title": "Name",
+            "type": "string"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ref as declared: a tag, a branch, or a commit SHA. `HEAD` when the source declared none.",
+            "title": "Ref"
+          },
+          "resolved_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The commit that ref actually resolved to in this apply — what tells you which version of the content this bot is running.",
+            "title": "Resolved Sha"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The repository URL, with any `${BOT_*}` placeholder already substituted. Together with `ref` and `mode` it is what strict mode compares the next apply against — so re-pointing url or ref is a re-pin, not a moved ref.",
+            "title": "Url"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ConfigManifestApplySource",
+        "type": "object"
+      },
+      "ConfigManifestApplyCategory": {
+        "description": "One category's summary, including what overwriting it removed.",
+        "properties": {
+          "aborted": {
+            "description": "True when the category did not converge, because at least one declared entry could not be materialized. Read it together with `partially_written`: on its own it does not promise the area is untouched.",
+            "title": "Aborted",
+            "type": "boolean"
+          },
+          "category": {
+            "description": "The category or section.",
+            "title": "Category",
+            "type": "string"
+          },
+          "partially_written": {
+            "default": false,
+            "description": "True when the failure happened partway through writing, so part of the category's area may already have changed. `aborted` with this false means nothing was written and there is nothing to undo; with this true, re-apply to converge the area.",
+            "title": "Partially Written",
+            "type": "boolean"
+          },
+          "removed": {
+            "description": "Entries that existed in this category's area and are no longer declared, so overwriting removed them. Reported separately from `entries` because a removal has no declared entry.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Removed",
+            "type": "array"
+          }
+        },
+        "required": [
+          "category",
+          "aborted"
+        ],
+        "title": "ConfigManifestApplyCategory",
+        "type": "object"
+      },
+      "CreationState": {
+        "description": "Where a creation stands. Reported by the status endpoint, and only there.",
+        "enum": [
+          "AWAITING_AUTHORIZATION",
+          "AUTHORIZATION_REJECTED",
+          "AUTHORIZATION_EXPIRED",
+          "CREATING",
+          "CREATE_FAILED",
+          "APPLYING",
+          "READY",
+          "APPLY_FAILED"
+        ],
+        "title": "CreationState",
+        "type": "string",
+        "x-enum-descriptions": [
+          "Waiting for the user to open the authorization link. Nothing has been created yet.",
+          "Terminal. The user declined, and no bot was created. The submitted manifest is deleted with the creation.",
+          "Terminal. Nobody responded within the authorization window, and no bot was created. Distinct from a rejection: nothing was decided.",
+          "Authorized. The bot record exists and its container is being provisioned.",
+          "Terminal. There is no usable bot — it could not be created, or no container ever came up. Nothing to do with the manifest.",
+          "The bot is up and the post-container part of the manifest is being applied.",
+          "Terminal. The bot is up and the whole manifest landed. The response carries the bot and the apply report.",
+          "Terminal. The bot is up and running, and part of its configuration did not land. The response carries the bot as well as the report, so this is visibly not the same as CREATE_FAILED. Fix the manifest and apply it again; nothing needs recreating."
+        ],
+        "x-enum-varnames": [
+          "AWAITING_AUTHORIZATION",
+          "AUTHORIZATION_REJECTED",
+          "AUTHORIZATION_EXPIRED",
+          "CREATING",
+          "CREATE_FAILED",
+          "APPLYING",
+          "READY",
+          "APPLY_FAILED"
+        ],
+        "x-enumNames": [
+          "AWAITING_AUTHORIZATION",
+          "AUTHORIZATION_REJECTED",
+          "AUTHORIZATION_EXPIRED",
+          "CREATING",
+          "CREATE_FAILED",
+          "APPLYING",
+          "READY",
+          "APPLY_FAILED"
+        ]
+      },
+      "ConfigManifestApplyEntry": {
+        "description": "What happened to one declared entry.",
+        "properties": {
+          "action": {
+            "description": "`created` / `updated` / `unchanged` / `skipped` / `failed`. `skipped` means the entry was not written because its category was aborted — never that it was optional.",
+            "title": "Action",
+            "type": "string"
+          },
+          "category": {
+            "description": "The category or section this entry is in.",
+            "title": "Category",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why, when `action` is `failed` or `skipped`.",
+            "title": "Error"
+          },
+          "name": {
+            "description": "How the entry names itself — a skill `name`, an identity `type`, a resource `path`, an mcp `server_code`.",
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Something true of a successful entry a caller would otherwise have to infer — today, when a `script` actually executes.",
+            "title": "Note"
+          }
+        },
+        "required": [
+          "category",
+          "name",
+          "action"
+        ],
+        "title": "ConfigManifestApplyEntry",
+        "type": "object"
+      },
+      "ConfigManifestWrite": {
+        "additionalProperties": false,
+        "description": "A configuration manifest submitted for storage.",
+        "properties": {
+          "document": {
+            "description": "The manifest document (YAML). Stored and returned byte for byte — the `script` body's quoting and whitespace are preserved exactly.",
+            "title": "Document",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document"
+        ],
+        "title": "ConfigManifestWrite",
+        "type": "object"
+      },
+      "Envelope_ConfigManifest_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfigManifest"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[ConfigManifest]",
+        "type": "object"
+      },
+      "ConfigManifest": {
+        "description": "A bot's stored configuration manifest. Every field but the document is\nserver-derived.",
+        "example": {
+          "bot_id": "20260813_a7k2m9p1",
+          "document": "schema_version: 1\nmanifest:\n  identity:\n    - type: SOUL.md\n      content: |\n        # Who I am\n",
+          "schema_version": 1,
+          "size_bytes": 84,
+          "updated_at": "2026-08-31T09:12:04+00:00",
+          "updated_by": "u_165137",
+          "warnings": []
+        },
+        "properties": {
+          "apply": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfigManifestApplyStarted"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The apply a write started (W8): `PUT` stores the document and then starts an apply of it. Absent on a read."
+          },
+          "bot_id": {
+            "description": "The bot this manifest belongs to.",
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "document": {
+            "description": "Empty when the bot has no stored manifest.",
+            "title": "Document",
+            "type": "string"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null only when the bot has no stored manifest.",
+            "title": "Schema Version"
+          },
+          "size_bytes": {
+            "description": "Size of the stored document in bytes; 0 when none is stored.",
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null only when the bot has no stored manifest.",
+            "title": "Updated At"
+          },
+          "updated_by": {
+            "description": "Empty when the bot has no stored manifest.",
+            "title": "Updated By",
+            "type": "string"
+          },
+          "warnings": {
+            "description": "Non-fatal notes about the document just written — for example a source declared under `sources` that nothing references, a startup script that takes effect on the next start, or container-bound categories on a bot that is not ACTIVE. Always empty on a read.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "bot_id",
+          "document",
+          "size_bytes",
+          "updated_by"
+        ],
+        "title": "ConfigManifest",
+        "type": "object"
+      },
+      "ConfigManifestApplyStarted": {
+        "description": "What `PUT …/config-manifest` did after storing the document (W8, §2.6).\n\nA write starts an apply of the stored document; this says whether it\nstarted. `RUNNING` carries the id to poll; `NOT_STARTED` carries why —\n`apply_in_progress` when another apply holds the bot, `not_started` when\nthe apply could not be started for another reason. The document is stored\nin every case.",
+        "properties": {
+          "apply_id": {
+            "description": "The apply to poll (`GET .../config-manifest/applies/{apply_id}`); empty when nothing started.",
+            "title": "Apply Id",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why nothing started: `apply_in_progress` or `not_started`.",
+            "title": "Reason"
+          },
+          "result": {
+            "description": "`RUNNING` or `NOT_STARTED`.",
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "apply_id",
+          "result"
+        ],
+        "title": "ConfigManifestApplyStarted",
+        "type": "object"
+      },
+      "Envelope_ConfigManifestCapabilities_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfigManifestCapabilities"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[ConfigManifestCapabilities]",
+        "type": "object"
+      },
+      "ConfigManifestCapabilities": {
+        "description": "Which manifest constructs a bot accepts.\n\nAnswered from the same resolver the write path refuses with, so this can\nnever claim support for something a `PUT` then rejects.",
+        "example": {
+          "bot_id": "20260813_a7k2m9p1",
+          "bot_type": "personal",
+          "constructs": [
+            {
+              "kind": "category",
+              "name": "identity",
+              "reason": "",
+              "supported": true
+            },
+            {
+              "kind": "section",
+              "name": "script",
+              "reason": "teclaw bots are provisioned without a start sequence, so a script would never execute",
+              "supported": false
+            }
+          ],
+          "engine_type": "openclaw",
+          "schema_versions": [
+            1
+          ],
+          "source_matrix": [
+            {
+              "category": "resources",
+              "protocol": "git",
+              "reason": "",
+              "supported": true
+            },
+            {
+              "category": "skills",
+              "protocol": "content",
+              "reason": "a skills entry is a package (SKILL.md + the files it names) — inline content cannot be one; declare a source with 'protocol: git' or 'protocol: oss'",
+              "supported": false
+            }
+          ]
+        },
+        "properties": {
+          "bot_id": {
+            "description": "The bot these capabilities describe.",
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "bot_type": {
+            "description": "The bot type the answer was computed for.",
+            "title": "Bot Type",
+            "type": "string"
+          },
+          "constructs": {
+            "description": "Every construct, supported or not, with its reason.",
+            "items": {
+              "$ref": "#/components/schemas/ManifestConstruct"
+            },
+            "title": "Constructs",
+            "type": "array"
+          },
+          "engine_type": {
+            "description": "The engine the answer was computed for.",
+            "title": "Engine Type",
+            "type": "string"
+          },
+          "schema_versions": {
+            "description": "The `schema_version` values this deployment accepts.",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Schema Versions",
+            "type": "array"
+          },
+          "source_matrix": {
+            "description": "Every (category, protocol) combination, supported or not. Additive alongside `constructs`, which keeps its exact shape and meaning: a construct row says whether a *form* can be resolved at all, and a matrix cell says whether a *combination* is delivered.",
+            "items": {
+              "$ref": "#/components/schemas/ManifestSourceCell"
+            },
+            "title": "Source Matrix",
+            "type": "array"
+          }
+        },
+        "required": [
+          "bot_id",
+          "engine_type",
+          "bot_type",
+          "schema_versions",
+          "constructs"
+        ],
+        "title": "ConfigManifestCapabilities",
+        "type": "object"
+      },
+      "ManifestSourceCell": {
+        "description": "One (category, protocol) combination, and whether this bot accepts it.\n\nThe cartesian view `constructs` structurally cannot express: its rows carry\none verdict per construct, so \"which categories work with which sources\" had\nno representation at all and callers discovered the answer from a 422 — or,\nworse, from a failed apply. Read this to decide what to write before writing\nit.",
+        "properties": {
+          "category": {
+            "description": "One of the six categories under `manifest`.",
+            "title": "Category",
+            "type": "string"
+          },
+          "protocol": {
+            "description": "How the content travels: `content` (inline in the document), `oss` (an object over https, signed or plain) or `git` (a repository resolved to one commit). Reaching a source **by name** (`from`) is not a fourth value — a named source declares one of these, and that protocol's row is the one that governs.",
+            "title": "Protocol",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Empty when supported; otherwise the refusal a `PUT` gives.",
+            "title": "Reason",
+            "type": "string"
+          },
+          "supported": {
+            "description": "False when a document using this combination is refused.",
+            "title": "Supported",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "category",
+          "protocol",
+          "supported",
+          "reason"
+        ],
+        "title": "ManifestSourceCell",
+        "type": "object"
+      },
+      "ManifestConstruct": {
+        "description": "One thing a manifest can declare, and whether this bot accepts it.",
+        "properties": {
+          "kind": {
+            "description": "`category` (one of the six under `manifest`), `section` (a top-level section such as `script`), or `source` (how an entry names its content).",
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "description": "The construct's name within its kind.",
+            "title": "Name",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Empty when supported; otherwise names the cause.",
+            "title": "Reason",
+            "type": "string"
+          },
+          "supported": {
+            "description": "False when a document using this construct is refused.",
+            "title": "Supported",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "supported",
+          "reason"
+        ],
+        "title": "ManifestConstruct",
+        "type": "object"
+      },
+      "Envelope_ConfigManifestApplyAccepted_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfigManifestApplyAccepted"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[ConfigManifestApplyAccepted]",
+        "type": "object"
+      },
+      "Envelope_ConfigManifestApply_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfigManifestApply"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[ConfigManifestApply]",
+        "type": "object"
+      },
+      "ConfigManifestApplyAccepted": {
+        "description": "The 202 body: a handle, and the state the apply starts in.\n\nDeliberately not a report. The work has not happened yet — that is the point\nof the shape — so returning anything report-shaped would invite a caller to\nread outcomes that do not exist.",
+        "example": {
+          "apply_id": "9c1f4ae2b83d4f6a9e1c7d5b2a8f0e34",
+          "result": "RUNNING"
+        },
+        "properties": {
+          "apply_id": {
+            "description": "Poll this apply with `GET .../config-manifest/applies/{apply_id}`.",
+            "title": "Apply Id",
+            "type": "string"
+          },
+          "result": {
+            "description": "Always `RUNNING` here.",
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "apply_id",
+          "result"
+        ],
+        "title": "ConfigManifestApplyAccepted",
+        "type": "object"
+      },
+      "CliToolUpload": {
+        "description": "The tool's bytes, and what the platform should make of them.",
+        "example": {
+          "digest": "sha256:3e7a1f9c2b8d4e6a0f5c7b9d1e3a5c7b9d1e3a5c7b9d1e3a5c7b9d1e3a5c7b9d",
+          "file": "<the tool's bytes: mycli-1.4.2-linux-amd64.tar.gz>",
+          "name": "mycli",
+          "subpath": "mycli-1.4.2/bin/mycli",
+          "unpack": "tar.gz",
+          "version": "1.4.2"
+        },
+        "properties": {
+          "digest": {
+            "description": "`sha256:<64 hex>` over the uploaded bytes, and **mandatory**. The platform is distributing an executable on your behalf, so the supply chain is pinned or the request is refused: the digest is your statement of what you meant to send, and a truncated or swapped upload fails it instead of being installed. It covers the uploaded object — the binary itself, or the whole archive — with `subpath` selecting the file inside.",
+            "title": "Digest",
+            "type": "string"
+          },
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "description": "The tool's bytes: the executable itself, or the `zip` / `tar.gz` archive it is packed in. Up to 200 MiB — a larger body is refused while it is still being read, not after.",
+            "title": "File",
+            "type": "string"
+          },
+          "name": {
+            "description": "The command the agent will run. A bare identifier — it carries no position, because where the tool lands is the engine's decision, not the caller's.",
+            "maxLength": 128,
+            "title": "Name",
+            "type": "string"
+          },
+          "subpath": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which file inside the archive is the command. Required with `unpack`, and refused without it — one entry is one command is one file.",
+            "title": "Subpath"
+          },
+          "unpack": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`zip` or `tar.gz` when the uploaded file is an archive. Omit it and the uploaded file is the executable itself.",
+            "title": "Unpack"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Metadata only. It never decides whether a reinstall happens: two installs of the same bytes under different version strings are the same tool.",
+            "title": "Version"
+          }
+        },
+        "required": [
+          "file",
+          "name",
+          "digest"
+        ],
+        "title": "CliToolUpload",
+        "type": "object"
+      },
+      "Envelope_CliToolList_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CliToolList"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[CliToolList]",
+        "type": "object"
+      },
+      "Envelope_CliTool_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CliTool"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[CliTool]",
+        "type": "object"
+      },
+      "CliToolList": {
+        "description": "Every tool the platform records for a bot, in name order.",
+        "properties": {
+          "tools": {
+            "description": "The bot's installed CLI tools, ordered by name. Empty for a bot that has none.",
+            "items": {
+              "$ref": "#/components/schemas/CliTool"
+            },
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "title": "CliToolList",
+        "type": "object"
+      },
+      "CliTool": {
+        "description": "One installed tool, as the platform records it.",
+        "example": {
+          "digest": "sha256:3e7a1f9c2b8d4e6a0f5c7b9d1e3a5c7b9d1e3a5c7b9d1e3a5c7b9d1e3a5c7b9d",
+          "gmt_modified": "2026-09-03T12:00:00Z",
+          "installed_by": "u1",
+          "md5": "9f2c4a1b6d8e0f3a5c7b9d1e3a5c7b9d",
+          "name": "mycli",
+          "size_bytes": 8123456,
+          "subpath": "mycli-1.4.2/bin/mycli",
+          "version": "1.4.2"
+        },
+        "properties": {
+          "digest": {
+            "description": "The pinned digest of what the platform was given — the uploaded object on this road, the fetched one when a manifest apply installed the tool.",
+            "title": "Digest",
+            "type": "string"
+          },
+          "gmt_modified": {
+            "description": "When the record last changed.",
+            "format": "date-time",
+            "title": "Gmt Modified",
+            "type": "string"
+          },
+          "installed_by": {
+            "description": "`manifest` when a manifest apply put it there, otherwise the user id that did. A manifest apply is a full override and will remove a tool installed here that it does not declare.",
+            "title": "Installed By",
+            "type": "string"
+          },
+          "md5": {
+            "description": "Of the delivered file, computed by the platform after unpacking and selection — so it is the executable's, not the archive's.",
+            "title": "Md5",
+            "type": "string"
+          },
+          "name": {
+            "description": "The command.",
+            "title": "Name",
+            "type": "string"
+          },
+          "size_bytes": {
+            "description": "Of the delivered file.",
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "subpath": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The archive member that became the command.",
+            "title": "Subpath"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "As declared. Metadata only.",
+            "title": "Version"
+          }
+        },
+        "required": [
+          "name",
+          "digest",
+          "md5",
+          "size_bytes",
+          "installed_by",
+          "gmt_modified"
+        ],
+        "title": "CliTool",
+        "type": "object"
       }
     }
   },
@@ -91269,6 +92595,2687 @@
         "summary": "Get Skill Security Observations",
         "tags": [
           "skills"
+        ]
+      }
+    },
+    "/openapi/v1/bots/with-manifest": {
+      "post": {
+        "description": "Create a bot and its configuration in one request. Always `202`.\n\n**Submit the manifest once.** The status endpoint never accepts it again, so\nthe document that was validated here is necessarily the document that gets\napplied — there is no second copy for a caller to change underneath the one\nthat passed.\n\n**The manifest is validated before anything is spent.** An invalid document\nis a `422` naming every violation at once, with no `bot_id` minted, no\nPassport application made and nothing stored. You never authorize a bot only\nto be told your configuration was wrong.\n\nOne rule beyond what `PUT .../config-manifest` enforces: a category no\nmaterializer in this build can apply is **refused here** rather than stored\ninert. Accepting it would mean authorizing, creating and only then failing to\nconfigure. Refusal names the category; create the bot first and `PUT` the\nmanifest once the materializer has landed.\n\n**Iteration 1: a `script` must not depend on anything else the manifest\ndeclares.** On a first boot the script is baked into the start command and\nruns before any other category has been delivered — a script that expects an\nMCP server or a skill from the same document will not find it. Tracked by\n#1508, which delivers every category before the container starts.\n\nThen send the user to `iframe_url` or `redirect_url` (whichever is non-empty)\nand poll `GET /openapi/v1/bots/{bot_id}/with-manifest/status`. Nothing is\ncreated until they authorize, and nothing here waits for them.\n\nThis endpoint is ARCA-only. A teclaw bot is configured by the artifact\ncomposed when its container is provisioned, which is a different mechanism\nfrom this pre/post-container delivery; it is refused, naming W8 (#1476).\n\nAn application calling with its own credential and no end user is\nadmitted only if the named user has authorized it at the account level\n(`POST /openapi/v1/bots/authorized-apps`), and is then granted the bot it\ncreates, so the status poll and every later operation on the bot find an\nordinary bot grant in place.",
+        "operationId": "create_bot_with_manifest",
+        "parameters": [
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotCreateWithManifest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_BotCreateWithManifestAccepted_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_BotQuotaExceededData_"
+                }
+              }
+            },
+            "description": "The target Space has no capacity for another Bot."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Create Bot With Manifest",
+        "tags": [
+          "bots"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/with-manifest/status": {
+      "get": {
+        "description": "Where a creation stands. Takes a `bot_id` and nothing else.\n\n**A pure read.** No manifest, no creation attributes, no query parameters —\nthe server already holds everything the creation was for. It calls no\nexternal service, starts no work and writes nothing, so polling it faster\nchanges nothing and a caller that stops polling loses nothing: the creation\nruns to its own end either way.\n\nThe states, and what each one promises about the bot:\n\n- `AWAITING_AUTHORIZATION` — nothing exists yet. Send the user to the URL.\n- `AUTHORIZATION_REJECTED` / `AUTHORIZATION_EXPIRED` — terminal, and **no\n  bot was created**. The stored manifest is deleted with the creation, so\n  nothing is left behind to find later.\n- `CREATING` — authorized; the bot record exists and its container is being\n  provisioned.\n- `CREATE_FAILED` — terminal, and there is **no usable bot**. Nothing to do\n  with the manifest.\n- `APPLYING` — the bot is up and the post-container phase is running.\n- `READY` — terminal; the bot is up and the whole manifest landed.\n- `APPLY_FAILED` — terminal; **the bot is up and running**, and part of its\n  configuration did not land. The `apply` report names every entry, and the\n  response carries the `bot` so this is visibly not the same as\n  `CREATE_FAILED`. Fix the manifest and `POST .../config-manifest/apply`;\n  nothing needs recreating.\n\nA `PARTIAL` apply reports `APPLY_FAILED`, not `READY`: under the manifest's\ncategory overwrite a partial category can have *removed* entries it then\nfailed to replace, so it is a state to act on rather than a success with a\nfootnote.\n\nThe report at `READY` and `APPLY_FAILED` covers **both** phases — the\npre-container `script` is carried into it, so nothing that was applied looks\nas though it vanished.\n\n`404` when no create-with-manifest was submitted for this `bot_id`, which\nincludes a bot created through the ordinary endpoint.",
+        "operationId": "get_bot_create_with_manifest_status",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_BotCreateWithManifestStatus_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Get Bot Create With Manifest Status",
+        "tags": [
+          "bots"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/config-manifest": {
+      "delete": {
+        "description": "Clear a bot's configuration manifest. Idempotent.\n\nEntities a previous apply produced are **not** removed: this clears the\ndeclaration, not the assets it named.",
+        "operationId": "delete_bot_config_manifest",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "entity_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Entity Id"
+            }
+          },
+          {
+            "deprecated": true,
+            "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "deprecated": true,
+              "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
+              "title": "Owner Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Deleted_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Delete Bot Config Manifest",
+        "tags": [
+          "bots"
+        ]
+      },
+      "get": {
+        "description": "Read a bot's configuration manifest.\n\nA bot that has never had one reads as an **empty document**, not an error —\na 404 here would make \"has none\" indistinguishable from \"no such bot\".\n\nThe document is returned exactly as it was written, byte for byte, including\nthe `script` body's quoting and whitespace.",
+        "operationId": "get_bot_config_manifest",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "entity_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Entity Id"
+            }
+          },
+          {
+            "deprecated": true,
+            "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "deprecated": true,
+              "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
+              "title": "Owner Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ConfigManifest_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Get Bot Config Manifest",
+        "tags": [
+          "bots"
+        ]
+      },
+      "put": {
+        "description": "Set or replace a bot's configuration manifest, and apply it.\n\n**All-or-nothing.** A document is stored only if every part of it is valid\nand supported for this bot: one unsupported category refuses the whole\ndocument, nothing is written, and the `422` carries the full list of reasons\nwith the offending entry named in each. Fixing a document is one pass, not a\nqueue.\n\nDeclaring a category this bot's engine cannot be given — or a\n(category, protocol) pair the platform cannot yet resolve — is refused\nrather than stored, because a stored declaration nothing can act on is a\nsilent no-op the caller would reasonably read as success. `GET …/config-manifest/capabilities` answers\nfrom the same rules, so it can never promise what this refuses.\n\n**Storing starts an apply.** Once the document is stored, an apply of it is\nstarted — the same apply `POST …/config-manifest/apply` starts — and the\nresponse's `apply` says whether it started: `RUNNING` with the id to poll,\nor `NOT_STARTED` with `apply_in_progress` (another apply holds the bot;\npoll it, then apply) or `not_started`. The document is stored either way,\nand the response is `200` either way.\n\n`warnings` carries two notes this surface adds: a declared `script` is\nrecorded now but takes effect on the bot's next start; and on a bot that\nis not `ACTIVE`, the categories that need a running container will be\nrecorded as failed — re-apply once it is up. A teclaw bot on the\nplatform-managed path needs no container, so it gets no such note.",
+        "operationId": "update_bot_config_manifest",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "entity_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Entity Id"
+            }
+          },
+          {
+            "deprecated": true,
+            "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "deprecated": true,
+              "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
+              "title": "Owner Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigManifestWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ConfigManifest_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 413000,
+                  "message": "Config manifest exceeds the 65536-byte limit",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Manifest document exceeds the size limit."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Config manifest is invalid",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The document was refused; `data.violations` names every reason, each with the entry it applies to."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Update Bot Config Manifest",
+        "tags": [
+          "bots"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/config-manifest/capabilities": {
+      "get": {
+        "description": "Which manifest constructs this bot accepts, and why not when it does not.\n\nAnswered by the same resolver `PUT` refuses with, so this can never claim\nsupport for something the next write rejects. A construct is a category or\na top-level section (`script`). Which (category, protocol) pairs are open\nis the separate `source_matrix` field: a pair with no resolver fails the\nway an unsupported category does, and the matrix is where a\ncategory-aware reason can live.\n\nAn unrecognised engine supports nothing.",
+        "operationId": "get_bot_config_manifest_capabilities",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "entity_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Entity Id"
+            }
+          },
+          {
+            "deprecated": true,
+            "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "deprecated": true,
+              "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
+              "title": "Owner Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ConfigManifestCapabilities_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Get Bot Config Manifest Capabilities",
+        "tags": [
+          "bots"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/config-manifest/apply": {
+      "post": {
+        "description": "Apply this bot's stored manifest. Returns immediately with an id to poll.\n\n**This does not wait for the apply.** Applying writes to a bot's device and,\nin later releases, fetches over the network; the response is a `202` carrying\nan `apply_id`, and the work continues in the background. Poll it with\n`GET .../config-manifest/applies/{apply_id}`, or read the newest with\n`GET .../config-manifest/last-apply`.\n\nWhat can be answered immediately is answered immediately, **before** an id\nexists: a `409` if another apply is already running for this bot, and a `422`\nif the stored document no longer validates for it. You never hold an id for\nan apply that did not start.\n\n**A declared category is overwritten to equal the declaration.** Anything in\nthat category's area that the manifest does not declare is **removed** —\nincluding MCP servers enabled by hand through the console. A category the\nmanifest does not mention is not touched at all, and deleting a manifest\ntherefore deletes nothing.\n\n**A category is written all-or-nothing.** Permission and platform-default\nownership are checked before the first write, so if a declared entry fails\neither, that whole category is left exactly as it was and its other entries\nreport `skipped` — a momentary failure never deletes something that was\nworking. Categories do not affect each other.\n\nA write can still fail for a reason not checked up front — the underlying\nservice is down, a concurrent change lands, or the server is owned by one of\nthe bot's SkillSets, which is refused at write time and not yet preflighted.\nThere is no transaction spanning those calls to roll back, so such a\ncategory reports `partially_written` and re-applying converges it. That flag\nis the one case where `aborted` does not mean \"nothing changed\".\n\nA bot with no stored manifest applies nothing and reports nothing applied.\nThat is not an error.",
+        "operationId": "apply_bot_config_manifest",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Return the plan without performing it. Synchronous; it applies no part of your manifest and writes no apply record, so it mints no `apply_id` and appears in no history. Two caveats, both by design: a declared source MAY really be fetched (a preview that cannot tell you whether your sources are reachable and your digests match is a weak preview), bounded by the same per-apply fetch ledger a real apply uses — and the bytes acquired are kept as the platform's own copy, because that audit trail records acquisition, not delivery; and reading a bot's installed MCP set reconciles platform-managed installation rows against SkillSet membership, which any read of that state does. Nothing your manifest declares is applied to the bot.",
+            "in": "query",
+            "name": "dry_run",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Return the plan without performing it. Synchronous; it applies no part of your manifest and writes no apply record, so it mints no `apply_id` and appears in no history. Two caveats, both by design: a declared source MAY really be fetched (a preview that cannot tell you whether your sources are reachable and your digests match is a weak preview), bounded by the same per-apply fetch ledger a real apply uses — and the bytes acquired are kept as the platform's own copy, because that audit trail records acquisition, not delivery; and reading a bot's installed MCP set reconciles platform-managed installation rows against SkillSet membership, which any read of that state does. Nothing your manifest declares is applied to the bot.",
+              "title": "Dry Run",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "entity_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Entity Id"
+            }
+          },
+          {
+            "deprecated": true,
+            "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "deprecated": true,
+              "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
+              "title": "Owner Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ConfigManifestApply_"
+                }
+              }
+            },
+            "description": "A dry run's plan, computed without performing it."
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ConfigManifestApplyAccepted_"
+                }
+              }
+            },
+            "description": "The apply has started; poll it with the returned id."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "423": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 423000,
+                  "message": "Edit lock required",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "A Bot with collaborators requires the caller to hold its edit lock."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Apply Bot Config Manifest",
+        "tags": [
+          "bots"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/config-manifest/applies/{apply_id}": {
+      "get": {
+        "description": "Read one apply's report, whether it is still running or finished.\n\n`result` is `RUNNING` until the work ends, then `SUCCEEDED`, `PARTIAL` or\n`FAILED` — derived from the per-entry outcomes, which say exactly what was\ndelivered and what was not.\n\nAn `apply_id` that belongs to a different bot is not found here: the id is a\nhandle for polling, not something that grants access.",
+        "operationId": "get_bot_config_manifest_apply",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The id returned by `POST .../config-manifest/apply`.",
+            "in": "path",
+            "name": "apply_id",
+            "required": true,
+            "schema": {
+              "description": "The id returned by `POST .../config-manifest/apply`.",
+              "title": "Apply Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "entity_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Entity Id"
+            }
+          },
+          {
+            "deprecated": true,
+            "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "deprecated": true,
+              "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
+              "title": "Owner Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ConfigManifestApply_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Get Bot Config Manifest Apply",
+        "tags": [
+          "bots"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/config-manifest/last-apply": {
+      "get": {
+        "description": "The most recent apply for this bot.\n\nThis is the authoritative answer to \"did my manifest take effect?\".\n\nA bot that has never been applied reads as an **empty report**, not an error\n— the same rule that makes a bot with no manifest read as an empty document.",
+        "operationId": "get_bot_config_manifest_last_apply",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "entity_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Entity Id"
+            }
+          },
+          {
+            "deprecated": true,
+            "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "deprecated": true,
+              "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
+              "title": "Owner Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ConfigManifestApply_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Get Bot Config Manifest Last Apply",
+        "tags": [
+          "bots"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/cli-tools": {
+      "get": {
+        "description": "Every CLI tool the platform records for a bot, in name order.\n\nThis is the platform's own record, not a reading of the container. It is\nwhat a manifest apply computes removals from, so it is also the answer to\n\"what would a full override replace\".",
+        "operationId": "list_bot_cli_tools",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "entity_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Entity Id"
+            }
+          },
+          {
+            "deprecated": true,
+            "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "deprecated": true,
+              "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
+              "title": "Owner Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_CliToolList_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "List Bot Cli Tools",
+        "tags": [
+          "bots"
+        ]
+      },
+      "post": {
+        "description": "Upload one command-line tool and install it on a bot.\n\nThe body is `multipart/form-data`: the tool's bytes as the `file` part,\nplus the fields that say what to make of them. The platform checks the\nbytes against the mandatory `digest`, selects `subpath` out of an archive\nwhen `unpack` says there is one, verifies that the result is an **x86-64\nELF executable**, keeps its own copy, and asks the bot's engine to install\nit. Nothing is recorded for a step that failed, so a 200 means the bot has\nthe tool.\n\nAnswers **422** when the uploaded bytes are not what `digest` says they\nare, when `subpath` names nothing in the archive, or when the file is not\nan x86-64 ELF executable; **409** when the bot already has a tool by that\nname — a single install does not replace one you did not mention. Replacing\na tool means deleting it first, or declaring the whole set in the bot's\nmanifest, whose apply is a full override. **413** when the upload is over\n200 MiB, refused while it is still arriving.\n\nA manifest apply that no longer declares this tool **will remove it**. The\nrecord's `installed_by` is what lets a report say so.",
+        "operationId": "install_bot_cli_tool",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "entity_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Entity Id"
+            }
+          },
+          {
+            "deprecated": true,
+            "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "deprecated": true,
+              "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
+              "title": "Owner Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/CliToolUpload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_CliTool_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "The bot already has a CLI tool with this name",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The bot already has a CLI tool by that name."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 413000,
+                  "message": "The uploaded CLI tool is too large",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The uploaded tool is past the 200 MiB a CLI tool may be. Refused while the body is still arriving."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "The CLI tool could not be installed",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The uploaded bytes or the engine refused the install — bytes that do not match the declared digest, an archive member that is not there, a binary built for another architecture, or an engine that would not take it."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Install Bot Cli Tool",
+        "tags": [
+          "bots"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/cli-tools/{name}": {
+      "delete": {
+        "description": "Remove one CLI tool from a bot.\n\nRemoves it from the bot, drops the platform's record and deletes the copy of\nits bytes. Answers **404** when the bot has no tool by that name — unlike\nclearing a manifest, this is not idempotent, because \"the tool is gone\" and\n\"you named the wrong tool\" are worth telling apart.",
+        "operationId": "delete_bot_cli_tool",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The command to remove, as it was installed.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The command to remove, as it was installed.",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "entity_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Entity Id"
+            }
+          },
+          {
+            "deprecated": true,
+            "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "deprecated": true,
+              "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
+              "title": "Owner Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Deleted_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Delete Bot Cli Tool",
+        "tags": [
+          "bots"
         ]
       }
     }

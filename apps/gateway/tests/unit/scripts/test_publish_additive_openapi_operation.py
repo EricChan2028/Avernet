@@ -121,6 +121,42 @@ def test_refuses_missing_or_unsupported_component_reference() -> None:
         additive_document(_published(), candidate, "GET", _PATH)
 
 
+_MULTI_PATH = "/openapi/v1/bots/{bot_id}/config-manifest"
+
+
+def _multi_method_candidate() -> dict:
+    candidate = _candidate()
+    candidate["paths"][_MULTI_PATH] = {
+        "get": {"operationId": "read_manifest"},
+        "put": {
+            "operationId": "write_manifest",
+            "responses": {"200": {"$ref": "#/components/schemas/Observation"}},
+        },
+        "delete": {"operationId": "delete_manifest"},
+    }
+    return candidate
+
+
+def test_publishes_a_multi_method_path_whole() -> None:
+    """A path item is one generated unit: every method it carries is named."""
+    candidate = _multi_method_candidate()
+    result = additive_document(_published(), candidate, "get,PUT, Delete", _MULTI_PATH)
+    assert result["paths"][_MULTI_PATH] == candidate["paths"][_MULTI_PATH]
+    assert set(result["components"]["schemas"]) == {"Shared", "Observation"}
+
+
+def test_refuses_a_slice_of_a_multi_method_path() -> None:
+    candidate = _multi_method_candidate()
+    with pytest.raises(ValueError, match=r"other methods: \['delete'\]"):
+        additive_document(_published(), candidate, "GET,PUT", _MULTI_PATH)
+    with pytest.raises(ValueError, match="no POST " + _MULTI_PATH.replace("{", "\\{")):
+        additive_document(_published(), candidate, "GET,PUT,DELETE,POST", _MULTI_PATH)
+    with pytest.raises(ValueError, match="unsupported HTTP method: fetch"):
+        additive_document(_published(), candidate, "GET,FETCH", _MULTI_PATH)
+    with pytest.raises(ValueError, match="malformed HTTP method list"):
+        additive_document(_published(), candidate, "GET,", _MULTI_PATH)
+
+
 def test_refuses_missing_operation_other_methods_and_version_mismatch() -> None:
     with pytest.raises(ValueError, match="no GET"):
         additive_document(_published(), _candidate(), "GET", "/absent")
