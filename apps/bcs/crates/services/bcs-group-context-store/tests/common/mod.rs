@@ -273,7 +273,7 @@ pub async fn list_active_by_multiple_scopes(repo: &dyn GroupContextRepo) {
         .unwrap();
 
     let scopes = vec!["game-room-7".to_string(), "sess-001".to_string()];
-    let rows = repo.list_active_by_scopes(&scopes).await.unwrap();
+    let rows = repo.list_active_meta_by_scopes(&scopes).await.unwrap();
     let names = rows.into_iter().map(|row| row.name).collect::<Vec<_>>();
     assert_eq!(names.len(), 2);
     assert!(names.iter().any(|name| name == "game_rule"));
@@ -328,8 +328,8 @@ pub async fn current_row_with_expired_business_validity_still_blocks_and_is_retu
     assert_eq!(active.valid_to, Some(expired));
 
     let rows = repo
-        .list_active_by_scopes(&["sess-001".to_string()])
+        .list_active_meta_by_scopes(&["sess-001".to_string()])
         .await
         .expect("list active");
-    assert!(rows.iter().any(|row| row.id == created.id));
+    assert!(rows.iter().any(|row| row.name == created.name));
 }

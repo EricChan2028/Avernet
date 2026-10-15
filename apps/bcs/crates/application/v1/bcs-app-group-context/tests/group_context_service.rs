@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_app_group_context::GroupContextApplicationServiceImpl;
-use bcs_domain::{GroupContextEntry, GroupContextPermission, GroupContextPolicy, ScopeLevel};
+use bcs_domain::{GroupContextEntry, GroupContextEntryMeta, GroupContextPermission, GroupContextPolicy, ScopeLevel};
 use bcs_group_context_store::{
     GroupContextRepo, GroupContextStoreError, MemoryGroupContextRepo, NewGroupContextEntry,
     StoreResult,
@@ -61,11 +61,19 @@ impl GroupContextRepo for ConflictOnSupersedeRepo {
         self.inner.get_active(name, scope).await
     }
 
-    async fn list_active_by_scopes(
+    async fn get_active_by_name_and_scopes(
         &self,
+        name: &str,
         scopes: &[String],
     ) -> StoreResult<Vec<GroupContextEntry>> {
-        self.inner.list_active_by_scopes(scopes).await
+        self.inner.get_active_by_name_and_scopes(name, scopes).await
+    }
+
+    async fn list_active_meta_by_scopes(
+        &self,
+        scopes: &[String],
+    ) -> StoreResult<Vec<GroupContextEntryMeta>> {
+        self.inner.list_active_meta_by_scopes(scopes).await
     }
 
     async fn list_versions(&self, context_id: &str) -> StoreResult<Vec<GroupContextEntry>> {

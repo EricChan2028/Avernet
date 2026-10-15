@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS bcs_group_contexts (
     gmt_create DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     gmt_modified DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
     PRIMARY KEY (id),
-    KEY idx_group_context_scope_active (scope, scope_level, name),
+    KEY idx_group_context_name_scope_active (name, scope, is_superseded),
+    KEY idx_group_context_scope_active (scope, is_superseded),
     KEY idx_group_context_context_id (context_id, id)
 );
 

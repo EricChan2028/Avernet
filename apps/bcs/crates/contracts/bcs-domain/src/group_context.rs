@@ -79,6 +79,20 @@ impl GroupContextPermission {
     }
 }
 
+/// Lightweight projection used by list operations. This intentionally omits
+/// the payload and validity fields because list responses only need metadata
+/// plus the policy columns used by permission filtering.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GroupContextEntryMeta {
+    pub name: String,
+    pub scope_level: ScopeLevel,
+    pub scope: String,
+    pub visible_to: GroupContextPolicy,
+    pub collect_from: GroupContextPolicy,
+    pub gmt_create: GroupContextTime,
+    pub gmt_modified: GroupContextTime,
+}
+
 /// Persisted version row. `id` is the physical row id; `context_id` is stable
 /// across versions in the same supersede chain.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

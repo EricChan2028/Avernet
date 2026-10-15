@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS bcs_group_contexts (
     gmt_modified TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
     PRIMARY KEY (id),
     UNIQUE INDEX uk_name_scope_active (active_name_key, active_scope_key),
-    INDEX idx_group_context_scope_active (scope, scope_level, name),
+    INDEX idx_group_context_name_scope_active (name, scope, is_superseded),
+    INDEX idx_group_context_scope_active (scope, is_superseded),
     INDEX idx_group_context_context_id (context_id, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

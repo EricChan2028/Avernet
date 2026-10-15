@@ -22,8 +22,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_group_context_active_name_scope
     ON bcs_group_contexts(name, scope)
     WHERE is_superseded = 0;
 
+CREATE INDEX IF NOT EXISTS idx_group_context_name_scope_active
+    ON bcs_group_contexts(name, scope, is_superseded)
+    WHERE is_superseded = 0;
+
 CREATE INDEX IF NOT EXISTS idx_group_context_scope_active
-    ON bcs_group_contexts(scope, scope_level, name)
+    ON bcs_group_contexts(scope, is_superseded)
     WHERE is_superseded = 0;
 
 CREATE INDEX IF NOT EXISTS idx_group_context_context_id

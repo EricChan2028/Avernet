@@ -68,7 +68,7 @@ pub use fusion::{
     ContextFusionResponse, ContextParticipantPerspective,
 };
 pub use group_context::{
-    GroupContextEntry, GroupContextPermission, GroupContextPolicy, GroupContextTime, ScopeLevel,
+    GroupContextEntry, GroupContextEntryMeta, GroupContextPermission, GroupContextPolicy, GroupContextTime, ScopeLevel,
 };
 pub use group::{
     DefaultDelivery, Group, GroupKind, GroupStatus, GroupStrategy, HumanMentionNotifyMode,

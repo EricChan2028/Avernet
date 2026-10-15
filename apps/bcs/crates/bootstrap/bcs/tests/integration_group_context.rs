@@ -230,13 +230,10 @@ async fn who_is_spy_walkthrough_passes_through_direct_bcs_http_router() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body, json!({"status": "ok", "error_msg": null}));
 
-    let active_rows = repo
-        .list_active_by_scopes(&[fx.session_id.clone()])
+    let active_player_state = repo
+        .get_active("player_state", &fx.session_id)
         .await
-        .expect("active rows");
-    let active_player_state = active_rows
-        .iter()
-        .find(|entry| entry.name == "player_state")
+        .expect("active row")
         .expect("active player_state");
     assert_eq!(
         active_player_state.content,

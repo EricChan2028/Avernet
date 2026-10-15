@@ -60,6 +60,8 @@ async fn sqlite_group_context_supersede_columns_are_repaired_idempotently() -> D
     assert!(columns.iter().any(|column| column == "is_superseded"));
     assert!(columns.iter().any(|column| column == "gmt_superseded"));
     assert!(index_exists(&db, "uk_group_context_active_name_scope").await?);
+    assert!(index_exists(&db, "idx_group_context_name_scope_active").await?);
+    assert!(index_exists(&db, "idx_group_context_scope_active").await?);
 
     ensure_sqlite_group_context_supersede_columns(&db).await?;
     Ok(())

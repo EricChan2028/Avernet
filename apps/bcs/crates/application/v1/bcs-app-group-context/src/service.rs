@@ -203,7 +203,7 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
             .collect::<Vec<_>>();
         let rows = self
             .repo
-            .list_active_by_scopes(&scopes)
+            .list_active_meta_by_scopes(&scopes)
             .await
             .map_err(map_store_error)?;
         let contexts = rows
@@ -234,10 +234,9 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
             .collect::<Vec<_>>();
         let mut rows = self
             .repo
-            .list_active_by_scopes(&scopes)
+            .get_active_by_name_and_scopes(&query.name, &scopes)
             .await
             .map_err(map_store_error)?;
-        rows.retain(|entry| entry.name == query.name);
         if !rows.is_empty() && !rows.iter().any(|entry| actor_can_read(entry, &query.actor_id)) {
             return Err(permission_denied(format!(
                 "actor_id={} is not allowed to read {}",

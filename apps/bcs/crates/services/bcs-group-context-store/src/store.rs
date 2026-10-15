@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use bcs_db_api::{
     DbError, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbTransactionStep, DbTransactionStepResult, DbValue, db_get_column, db_get_column_opt,
 };
-use bcs_domain::{GroupContextEntry, GroupContextPolicy, GroupContextTime, ScopeLevel};
+use bcs_domain::{GroupContextEntry, GroupContextEntryMeta, GroupContextPolicy, GroupContextTime, ScopeLevel};
 use chrono::{NaiveDateTime, TimeZone, Utc};
 
 const TIMESTAMP_PARAM_MARKER: &str = "__bcs_group_context_timestamp_ms__";
@@ -75,8 +75,14 @@ pub trait GroupContextRepo: Send + Sync {
 
     async fn get_active(&self, name: &str, scope: &str) -> StoreResult<Option<GroupContextEntry>>;
 
-    async fn list_active_by_scopes(&self, scopes: &[String])
-    -> StoreResult<Vec<GroupContextEntry>>;
+    async fn get_active_by_name_and_scopes(
+        &self,
+        name: &str,
+        scopes: &[String],
+    ) -> StoreResult<Vec<GroupContextEntry>>;
+
+    async fn list_active_meta_by_scopes(&self, scopes: &[String])
+    -> StoreResult<Vec<GroupContextEntryMeta>>;
 
     async fn list_versions(&self, context_id: &str) -> StoreResult<Vec<GroupContextEntry>>;
 }
@@ -135,6 +141,16 @@ impl SqlGroupContextStore {
             vtm = self.timestamp_ms_expr("valid_to", "valid_to_ms"),
             gsm = self.timestamp_ms_expr("gmt_superseded", "gmt_superseded_ms"),
             ttm = self.timestamp_ms_expr("tx_time", "tx_time_ms"),
+            gcm = self.timestamp_ms_expr("gmt_create", "gmt_create_ms"),
+            gmm = self.timestamp_ms_expr("gmt_modified", "gmt_modified_ms"),
+        )
+    }
+
+    fn select_meta_cols(&self) -> String {
+        let base = "name, scope_level, scope, visible_to_json, collect_from_json";
+        format!(
+            "{base}, {gcm}, {gmm}",
+            base = base,
             gcm = self.timestamp_ms_expr("gmt_create", "gmt_create_ms"),
             gmm = self.timestamp_ms_expr("gmt_modified", "gmt_modified_ms"),
         )
@@ -209,6 +225,28 @@ impl SqlGroupContextStore {
                 .map_err(GroupContextStoreError::backend)?,
             gmt_superseded: gmt_superseded_ms.map(time_from_millis).transpose()?,
             tx_time: millis_column(row, "tx_time_ms")?,
+            gmt_create: millis_column(row, "gmt_create_ms")?,
+            gmt_modified: millis_column(row, "gmt_modified_ms")?,
+        })
+    }
+
+    fn row_to_meta(&self, row: &DbRow) -> StoreResult<GroupContextEntryMeta> {
+        let scope_level_raw: String =
+            db_get_column(row, "scope_level").map_err(GroupContextStoreError::backend)?;
+        let scope_level = serde_json::from_value(serde_json::Value::String(scope_level_raw))
+            .map_err(GroupContextStoreError::backend)?;
+        let visible_raw: String =
+            db_get_column(row, "visible_to_json").map_err(GroupContextStoreError::backend)?;
+        let collect_raw: String =
+            db_get_column(row, "collect_from_json").map_err(GroupContextStoreError::backend)?;
+        Ok(GroupContextEntryMeta {
+            name: db_get_column(row, "name").map_err(GroupContextStoreError::backend)?,
+            scope_level,
+            scope: db_get_column(row, "scope").map_err(GroupContextStoreError::backend)?,
+            visible_to: serde_json::from_str(&visible_raw)
+                .map_err(GroupContextStoreError::backend)?,
+            collect_from: serde_json::from_str(&collect_raw)
+                .map_err(GroupContextStoreError::backend)?,
             gmt_create: millis_column(row, "gmt_create_ms")?,
             gmt_modified: millis_column(row, "gmt_modified_ms")?,
         })
@@ -411,8 +449,9 @@ impl GroupContextRepo for SqlGroupContextStore {
             .transpose()
     }
 
-    async fn list_active_by_scopes(
+    async fn get_active_by_name_and_scopes(
         &self,
+        name: &str,
         scopes: &[String],
     ) -> StoreResult<Vec<GroupContextEntry>> {
         if scopes.is_empty() {
@@ -423,11 +462,13 @@ impl GroupContextRepo for SqlGroupContextStore {
             .collect::<Vec<_>>()
             .join(", ");
         let sql = format!(
-            "SELECT {} FROM bcs_group_contexts WHERE is_superseded = FALSE AND scope IN ({}) ORDER BY id ASC",
+            "SELECT {} FROM bcs_group_contexts \
+             WHERE name = ? AND scope IN ({}) AND is_superseded = FALSE ORDER BY id ASC",
             self.select_cols(),
             placeholders
         );
-        let params = scopes.iter().map(|s| DbValue::from(s.as_str())).collect();
+        let mut params = vec![DbValue::from(name)];
+        params.extend(scopes.iter().map(|scope| DbValue::from(scope.as_str())));
         let rows = self
             .db
             .query(DbStatement::with_params(&sql, params))
@@ -435,6 +476,34 @@ impl GroupContextRepo for SqlGroupContextStore {
             .map_err(GroupContextStoreError::backend)?;
         rows.into_iter()
             .map(|row| self.row_to_entry(&row))
+            .collect()
+    }
+
+    async fn list_active_meta_by_scopes(
+        &self,
+        scopes: &[String],
+    ) -> StoreResult<Vec<GroupContextEntryMeta>> {
+        if scopes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = std::iter::repeat("?")
+            .take(scopes.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT {} FROM bcs_group_contexts \
+             WHERE scope IN ({}) AND is_superseded = FALSE ORDER BY id ASC",
+            self.select_meta_cols(),
+            placeholders
+        );
+        let params = scopes.iter().map(|scope| DbValue::from(scope.as_str())).collect();
+        let rows = self
+            .db
+            .query(DbStatement::with_params(&sql, params))
+            .await
+            .map_err(GroupContextStoreError::backend)?;
+        rows.into_iter()
+            .map(|row| self.row_to_meta(&row))
             .collect()
     }
 
@@ -553,6 +622,28 @@ mod tests {
     }
 
     #[test]
+    fn meta_columns_exclude_payload_and_validity_fields() {
+        for flavor in [DbSqlFlavor::Mysql, DbSqlFlavor::Sqlite] {
+            let store = SqlGroupContextStore::with_flavor(dummy_plugin(), flavor);
+            let sql = store.select_meta_cols();
+            for column in [
+                "name",
+                "scope_level",
+                "scope",
+                "visible_to_json",
+                "collect_from_json",
+                "gmt_create_ms",
+                "gmt_modified_ms",
+            ] {
+                assert!(sql.contains(column), "missing meta column {column} for {flavor:?}");
+            }
+            assert!(!sql.contains("content"), "meta projection must not read content");
+            assert!(!sql.contains("valid_from"), "meta projection must not read valid_from");
+            assert!(!sql.contains("valid_to"), "meta projection must not read valid_to");
+        }
+    }
+
+    #[test]
     fn base_columns_are_present() {
         for flavor in [DbSqlFlavor::Mysql, DbSqlFlavor::Sqlite] {
             let store = SqlGroupContextStore::with_flavor(dummy_plugin(), flavor);
@@ -640,6 +731,63 @@ mod tests {
 
         let loaded = store.load_by_id(created.id).await.expect("load by id");
         assert_eq!(loaded, created);
+    }
+
+    #[tokio::test]
+    async fn sqlite_get_active_by_name_and_scopes_matches_exact_name_and_requested_scopes() {
+        let db = dummy_plugin();
+        for sql in include_str!("../../../../migrations/sqlite/034_group_context.sql")
+            .split(';')
+            .map(str::trim)
+            .filter(|sql| !sql.is_empty())
+        {
+            db.execute(DbStatement::new(sql)).await.expect("migration sql");
+        }
+        let store = SqlGroupContextStore::sqlite(db);
+        let now = Utc
+            .timestamp_millis_opt(1_728_374_400_000)
+            .single()
+            .expect("timestamp");
+
+        for (context_id, name, scope_level, scope) in [
+            ("ctx-target-s1", "player_state", ScopeLevel::Session, "sess-001"),
+            ("ctx-other-s1", "other_state", ScopeLevel::Session, "sess-001"),
+            ("ctx-target-s2", "player_state", ScopeLevel::Group, "group-001"),
+        ] {
+            store
+                .create_active(NewGroupContextEntry {
+                    context_id: context_id.into(),
+                    name: name.into(),
+                    scope_level,
+                    scope: scope.into(),
+                    content: name.into(),
+                    visible_to: GroupContextPolicy::users(["judge_bot"]),
+                    collect_from: GroupContextPolicy::users(["judge_bot"]),
+                    supersedes: None,
+                    change_reason: None,
+                    valid_from: now,
+                    valid_to: None,
+                    tx_time: now,
+                })
+                .await
+                .expect("create active row");
+        }
+
+        let rows = store
+            .get_active_by_name_and_scopes(
+                "player_state",
+                &["sess-001".to_string(), "group-001".to_string()],
+            )
+            .await
+            .expect("get active rows by name and scopes");
+        assert_eq!(rows.len(), 2);
+        assert!(rows
+            .iter()
+            .any(|row| row.scope == "sess-001" && row.name == "player_state"));
+        assert!(rows
+            .iter()
+            .any(|row| row.scope == "group-001" && row.name == "player_state"));
+        assert!(!rows.iter().any(|row| row.name == "other_state"));
     }
 
     #[test]

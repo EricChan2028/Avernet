@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bcs_domain::GroupContextEntry;
+use bcs_domain::{GroupContextEntry, GroupContextEntryMeta};
 use tokio::sync::RwLock;
 
 use crate::store::{GroupContextRepo, GroupContextStoreError, NewGroupContextEntry, StoreResult};
@@ -90,8 +90,9 @@ impl GroupContextRepo for MemoryGroupContextRepo {
             .cloned())
     }
 
-    async fn list_active_by_scopes(
+    async fn get_active_by_name_and_scopes(
         &self,
+        name: &str,
         scopes: &[String],
     ) -> StoreResult<Vec<GroupContextEntry>> {
         Ok(self
@@ -100,8 +101,27 @@ impl GroupContextRepo for MemoryGroupContextRepo {
             .await
             .rows
             .iter()
-            .filter(|row| !row.is_superseded && scopes.iter().any(|scope| scope == &row.scope))
+            .filter(|row| {
+                !row.is_superseded
+                    && row.name == name
+                    && scopes.iter().any(|scope| scope == &row.scope)
+            })
             .cloned()
+            .collect())
+    }
+
+    async fn list_active_meta_by_scopes(
+        &self,
+        scopes: &[String],
+    ) -> StoreResult<Vec<GroupContextEntryMeta>> {
+        Ok(self
+            .state
+            .read()
+            .await
+            .rows
+            .iter()
+            .filter(|row| !row.is_superseded && scopes.iter().any(|scope| scope == &row.scope))
+            .map(meta_from_entry)
             .collect())
     }
 
@@ -137,5 +157,17 @@ fn row_from_new(id: i64, params: NewGroupContextEntry) -> GroupContextEntry {
         tx_time: params.tx_time,
         gmt_create: params.tx_time,
         gmt_modified: params.tx_time,
+    }
+}
+
+fn meta_from_entry(entry: &GroupContextEntry) -> GroupContextEntryMeta {
+    GroupContextEntryMeta {
+        name: entry.name.clone(),
+        scope_level: entry.scope_level,
+        scope: entry.scope.clone(),
+        visible_to: entry.visible_to.clone(),
+        collect_from: entry.collect_from.clone(),
+        gmt_create: entry.gmt_create,
+        gmt_modified: entry.gmt_modified,
     }
 }

@@ -130,8 +130,14 @@ pub(super) async fn ensure_sqlite_group_context_supersede_columns(
     ))
     .await?;
     db.execute(DbStatement::new(
+        "CREATE INDEX IF NOT EXISTS idx_group_context_name_scope_active \
+         ON bcs_group_contexts(name, scope, is_superseded) \
+         WHERE is_superseded = 0",
+    ))
+    .await?;
+    db.execute(DbStatement::new(
         "CREATE INDEX IF NOT EXISTS idx_group_context_scope_active \
-         ON bcs_group_contexts(scope, scope_level, name) \
+         ON bcs_group_contexts(scope, is_superseded) \
          WHERE is_superseded = 0",
     ))
     .await?;
