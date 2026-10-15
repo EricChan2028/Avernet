@@ -7,6 +7,8 @@ use bcs_db_api::{
 use bcs_domain::{GroupContextEntry, GroupContextPolicy, GroupContextTime, ScopeLevel};
 use chrono::{NaiveDateTime, TimeZone, Utc};
 
+const TIMESTAMP_PARAM_MARKER: &str = "__bcs_group_context_timestamp_ms__";
+
 pub type StoreResult<T> = Result<T, GroupContextStoreError>;
 
 #[derive(Debug, thiserror::Error)]
@@ -138,8 +140,22 @@ impl SqlGroupContextStore {
         )
     }
 
+    fn sql_with_timestamp_params(&self, sql: &str) -> String {
+        let expression = match self.flavor {
+            DbSqlFlavor::Mysql => "FROM_UNIXTIME(? / 1000.0)",
+            DbSqlFlavor::Sqlite => "?",
+        };
+        sql.replace(TIMESTAMP_PARAM_MARKER, expression)
+    }
+
     fn timestamp_param(&self, time: GroupContextTime) -> DbValue {
-        DbValue::from(format_db_time(time))
+        match self.flavor {
+            // Bind the epoch rather than a timezone-free UTC string. FROM_UNIXTIME
+            // renders the epoch in the current MySQL session timezone, and TIMESTAMP
+            // stores the same instant regardless of that session timezone.
+            DbSqlFlavor::Mysql => DbValue::from(time.timestamp_millis()),
+            DbSqlFlavor::Sqlite => DbValue::from(format_db_time(time)),
+        }
     }
 
     async fn load_by_id(&self, id: i64) -> StoreResult<GroupContextEntry> {
@@ -211,10 +227,13 @@ impl GroupContextRepo for SqlGroupContextStore {
             .as_str()
             .unwrap_or("group")
             .to_string();
-        let sql = "INSERT INTO bcs_group_contexts \
-            (context_id, name, scope_level, scope, content, visible_to_json, collect_from_json, \
-             supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time) \
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, NULL, ?)";
+        let sql = self.sql_with_timestamp_params(
+            "INSERT INTO bcs_group_contexts \
+             (context_id, name, scope_level, scope, content, visible_to_json, collect_from_json, \
+              supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, __bcs_group_context_timestamp_ms__, \
+                     __bcs_group_context_timestamp_ms__, FALSE, NULL, __bcs_group_context_timestamp_ms__)",
+        );
         let result = self
             .db
             .execute(DbStatement::with_params(
@@ -281,10 +300,13 @@ impl GroupContextRepo for SqlGroupContextStore {
             .valid_to
             .map(|time| self.timestamp_param(time))
             .unwrap_or(DbValue::Null);
-        let insert_sql = "INSERT INTO bcs_group_contexts \
-            (context_id, name, scope_level, scope, content, visible_to_json, collect_from_json, \
-             supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time) \
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, NULL, ?)";
+        let insert_sql = self.sql_with_timestamp_params(
+            "INSERT INTO bcs_group_contexts \
+             (context_id, name, scope_level, scope, content, visible_to_json, collect_from_json, \
+              supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, __bcs_group_context_timestamp_ms__, \
+                     __bcs_group_context_timestamp_ms__, FALSE, NULL, __bcs_group_context_timestamp_ms__)",
+        );
 
         // CAS (Compare-And-Swap) transaction — two steps, one row must be affected at each step:
         //
@@ -298,9 +320,13 @@ impl GroupContextRepo for SqlGroupContextStore {
         let steps = vec![
             DbTransactionStep::ExecuteChecked {
                 statement: DbStatement::with_params(
-                    "UPDATE bcs_group_contexts \
-                     SET is_superseded = TRUE, gmt_superseded = ?, gmt_modified = ? \
-                     WHERE id = ? AND is_superseded = FALSE",
+                    &self.sql_with_timestamp_params(
+                        "UPDATE bcs_group_contexts \
+                         SET is_superseded = TRUE, \
+                             gmt_superseded = __bcs_group_context_timestamp_ms__, \
+                             gmt_modified = __bcs_group_context_timestamp_ms__ \
+                         WHERE id = ? AND is_superseded = FALSE",
+                    ),
                     vec![
                         tx_time.clone(),
                         tx_time.clone(),
@@ -460,6 +486,40 @@ mod tests {
 
     fn dummy_plugin() -> Arc<dyn DbPlugin> {
         Arc::new(bcs_db_local::LocalSqliteDbPlugin::new().expect("sqlite plugin for unit tests"))
+    }
+
+    #[test]
+    fn mysql_binds_epoch_inside_from_unixtime() {
+        let store = SqlGroupContextStore::with_flavor(dummy_plugin(), DbSqlFlavor::Mysql);
+        let sql = store.sql_with_timestamp_params(
+            "VALUES (__bcs_group_context_timestamp_ms__, __bcs_group_context_timestamp_ms__)",
+        );
+        assert_eq!(
+            sql,
+            "VALUES (FROM_UNIXTIME(? / 1000.0), FROM_UNIXTIME(? / 1000.0))"
+        );
+
+        let time = Utc
+            .timestamp_millis_opt(1_728_374_400_123)
+            .single()
+            .expect("timestamp");
+        assert_eq!(store.timestamp_param(time), DbValue::from(1_728_374_400_123_i64));
+    }
+
+    #[test]
+    fn sqlite_keeps_canonical_utc_text() {
+        let store = SqlGroupContextStore::with_flavor(dummy_plugin(), DbSqlFlavor::Sqlite);
+        let sql = store.sql_with_timestamp_params("VALUES (__bcs_group_context_timestamp_ms__)");
+        assert_eq!(sql, "VALUES (?)");
+
+        let time = Utc
+            .timestamp_millis_opt(1_728_374_400_123)
+            .single()
+            .expect("timestamp");
+        assert_eq!(
+            store.timestamp_param(time),
+            DbValue::from("2024-10-08 08:00:00.123")
+        );
     }
 
     #[test]
