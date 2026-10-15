@@ -16,6 +16,8 @@ use crate::permissions::{actor_can_read, actor_can_write, permission_for};
 use crate::scope::{ResolvedScope, resolve_scope, resolve_scopes};
 
 pub const MAX_CONTENT_BYTES: usize = 4 * 1024;
+pub const MAX_NAME_CHARS: usize = 255;
+pub const MAX_POLICY_BYTES: usize = 4096;
 
 const INVALID_PARAM: &str = "invalid_param";
 const PERMISSION_DENIED: &str = "permission_denied";
@@ -43,8 +45,9 @@ impl GroupContextApplicationServiceImpl {
         valid_from: Option<bcs_domain::GroupContextTime>,
         valid_to: Option<bcs_domain::GroupContextTime>,
     ) -> Result<GroupContextEntry, ApplicationError> {
+        validate_name(&name)?;
         validate_content(&content)?;
-        validate_collect_from(&collect_from)?;
+        validate_policies(&visible_to, &collect_from)?;
         let now = Utc::now();
         self.repo
             .create_active(NewGroupContextEntry {
@@ -78,8 +81,9 @@ impl GroupContextApplicationServiceImpl {
         valid_from: bcs_domain::GroupContextTime,
         valid_to: Option<bcs_domain::GroupContextTime>,
     ) -> Result<GroupContextEntry, ApplicationError> {
+        validate_name(&name)?;
         validate_content(&content)?;
-        validate_collect_from(&collect_from)?;
+        validate_policies(&visible_to, &collect_from)?;
         let now = Utc::now();
         self.repo
             .supersede_active(
@@ -111,8 +115,9 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
     async fn add(&self, command: AddGroupContext) -> Result<GroupContextAck, ApplicationError> {
         let scope = resolve_scope(&command.request_context, command.scope_level)?;
         validate_actor(&command.actor_id)?;
+        validate_name(&command.name)?;
         validate_content(&command.content)?;
-        validate_collect_from(&command.collect_from)?;
+        validate_policies(&command.visible_to, &command.collect_from)?;
         if !command.collect_from.contains_user(&command.actor_id) {
             return Err(permission_denied(format!(
                 "actor_id={} is not allowed to write {} in {}",
@@ -139,8 +144,12 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
     ) -> Result<GroupContextAck, ApplicationError> {
         let scope = resolve_scope(&command.request_context, command.scope_level)?;
         validate_actor(&command.actor_id)?;
+        validate_name(&command.name)?;
         if let Some(content) = command.content.as_ref() {
             validate_content(content)?;
+        }
+        if let Some(visible_to) = command.visible_to.as_ref() {
+            validate_policy("visible_to", visible_to)?;
         }
         if let Some(collect_from) = command.collect_from.as_ref() {
             validate_collect_from(collect_from)?;
@@ -255,8 +264,9 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
         command: SystemSetGroupContext,
     ) -> Result<GroupContextAck, ApplicationError> {
         let scope = resolve_scope(&command.request_context, command.scope_level)?;
+        validate_name(&command.name)?;
         validate_content(&command.content)?;
-        validate_collect_from(&command.collect_from)?;
+        validate_policies(&command.visible_to, &command.collect_from)?;
         let existing = self
             .repo
             .get_active(&command.name, &scope.scope)
@@ -308,6 +318,44 @@ fn validate_actor(actor_id: &str) -> Result<(), ApplicationError> {
     }
 }
 
+fn validate_name(name: &str) -> Result<(), ApplicationError> {
+    if name.trim().is_empty() {
+        return Err(ApplicationError::invalid(
+            INVALID_PARAM,
+            "name is required",
+        ));
+    }
+    if name.chars().count() > MAX_NAME_CHARS {
+        return Err(ApplicationError::payload_too_large(
+            PAYLOAD_TOO_LARGE,
+            format!("name exceeds {MAX_NAME_CHARS} characters"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_policies(
+    visible_to: &GroupContextPolicy,
+    collect_from: &GroupContextPolicy,
+) -> Result<(), ApplicationError> {
+    validate_policy("visible_to", visible_to)?;
+    validate_collect_from(collect_from)
+}
+
+fn validate_policy(field: &str, policy: &GroupContextPolicy) -> Result<(), ApplicationError> {
+    let encoded = serde_json::to_vec(policy)
+        .map_err(|error| ApplicationError::internal(error.to_string()))?;
+    if encoded.len() > MAX_POLICY_BYTES {
+        return Err(ApplicationError::payload_too_large(
+            PAYLOAD_TOO_LARGE,
+            format!(
+                "{field} serialized JSON exceeds {MAX_POLICY_BYTES} bytes"
+            ),
+        ));
+    }
+    Ok(())
+}
+
 fn validate_content(content: &str) -> Result<(), ApplicationError> {
     if content.as_bytes().len() > MAX_CONTENT_BYTES {
         Err(ApplicationError::payload_too_large(
@@ -320,6 +368,7 @@ fn validate_content(content: &str) -> Result<(), ApplicationError> {
 }
 
 fn validate_collect_from(policy: &GroupContextPolicy) -> Result<(), ApplicationError> {
+    validate_policy("collect_from", policy)?;
     if policy.user_ids.is_empty() {
         Err(ApplicationError::invalid(
             INVALID_PARAM,

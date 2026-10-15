@@ -38,6 +38,11 @@ not exposed by bcs-cli in this release.
 
 ### auth note
 
+V1 validates persisted-field shapes at the application boundary: `name` and the
+resolved raw `scope` are limited to 255 characters, serialized policy JSON is
+limited to 4096 bytes, and `content` is limited to 4 KiB. Oversized values
+return `payload_too_large` before storage.
+
 Public write endpoints require the calling actor to be present in
 `collect_from.userIds`. The internal `systemset` service operation bypasses
 that check because it is invoked only from trusted BCN system/admin code.
@@ -157,6 +162,11 @@ most one current row; business validity does not filter results. If no matching
 current context exists in the requested scopes, `items` is empty. If a matching
 current context exists but the actor is not in `visible_to`, the request returns
 `permission_denied`.
+
+`limit` is accepted for forward compatibility but is not applied in V1. The
+current exact-name operation can return at most one active row per selected
+scope, so it does not need `limit`; a future multiple-context query syntax will
+define when `limit` is applied.
 
 **Request body**
 

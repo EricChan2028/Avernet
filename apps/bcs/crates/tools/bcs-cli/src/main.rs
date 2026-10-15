@@ -49,8 +49,8 @@
 // `agentpass` is a bin-local module (dead code here: `AUTH_VIA_AGENT_PASS = false`).
 // It stays as `src/agentpass.rs` so the internal `#[path]` reuse of this file
 // resolves it identically.
-mod agentpass;
 mod collaboration_output;
+mod agentpass;
 // `oauth` is now a `pub mod` on the `bcs_cli` library (public extension point,
 // resolved via `inventory`). Public builds link no provider and fall back to a
 // stub; internal builds link an Ant provider that performs the real flow.

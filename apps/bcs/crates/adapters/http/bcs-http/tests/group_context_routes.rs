@@ -442,6 +442,26 @@ async fn add_list_and_get_follow_visibility_rules() {
 }
 
 #[tokio::test]
+async fn systemset_route_is_not_mounted() {
+    let app = app().await;
+    let response = app
+        .oneshot(authed_post(
+            "/groupcontext/systemset?groupId=game-room-7",
+            "judge-token",
+            json!({
+                "name": "game_rule",
+                "scope_level": "group",
+                "content": "state",
+                "visible_to": {"userIds": []},
+                "collect_from": {"userIds": ["judge_bot"]}
+            }),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn unauthenticated_request_returns_401() {
     let response = app()
         .await

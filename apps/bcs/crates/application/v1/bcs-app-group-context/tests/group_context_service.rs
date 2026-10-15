@@ -190,6 +190,122 @@ async fn add_validates_content_collect_from_actor_and_required_scope_params() {
     assert_code(error, "invalid_param");
 }
 
+fn add_for_validation(
+    name: &str,
+    group_id: &str,
+    visible_to: GroupContextPolicy,
+    collect_from: GroupContextPolicy,
+) -> AddGroupContext {
+    AddGroupContext {
+        actor_id: "judge_bot".into(),
+        request_context: GroupContextRequestContext {
+            group_id: group_id.into(),
+            session_id: Some("sess-001".into()),
+            round_id: Some("round-003".into()),
+        },
+        name: name.into(),
+        scope_level: ScopeLevel::Group,
+        content: "ok".into(),
+        visible_to,
+        collect_from,
+        valid_from: None,
+        valid_to: None,
+    }
+}
+
+fn oversized_policy() -> GroupContextPolicy {
+    GroupContextPolicy::users((0..240).map(|index| format!("user-{index:03}-99999999")))
+}
+
+#[tokio::test]
+async fn add_and_update_reject_values_larger_than_storage_columns() {
+    let repo = Arc::new(MemoryGroupContextRepo::new());
+    let app = service(repo.clone());
+
+    let error = app
+        .add(add_for_validation(
+            &"n".repeat(256),
+            "game-room-7",
+            policy(&[]),
+            policy(&["judge_bot"]),
+        ))
+        .await
+        .expect_err("oversized name rejected");
+    assert_code(error, "payload_too_large");
+
+    let error = app
+        .add(add_for_validation(
+            "oversized_scope",
+            &"g".repeat(256),
+            policy(&[]),
+            policy(&["judge_bot"]),
+        ))
+        .await
+        .expect_err("oversized scope rejected");
+    assert_code(error, "payload_too_large");
+
+    let error = app
+        .add(add_for_validation(
+            "oversized_visible_to",
+            "game-room-7",
+            oversized_policy(),
+            policy(&["judge_bot"]),
+        ))
+        .await
+        .expect_err("oversized visible_to rejected");
+    assert_code(error, "payload_too_large");
+
+    app.add(add_for_validation(
+        "oversized_collect_from",
+        "game-room-7",
+        policy(&[]),
+        policy(&["judge_bot"]),
+    ))
+    .await
+    .expect("valid context added");
+
+    let error = app
+        .update(UpdateGroupContext {
+            actor_id: "judge_bot".into(),
+            request_context: ctx(),
+            name: "oversized_collect_from".into(),
+            scope_level: ScopeLevel::Group,
+            content: Some("new".into()),
+            change_reason: None,
+            visible_to: Some(oversized_policy()),
+            collect_from: Some(policy(&["judge_bot"])),
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect_err("oversized update visible_to rejected");
+    assert_code(error, "payload_too_large");
+
+    let error = app
+        .update(UpdateGroupContext {
+            actor_id: "judge_bot".into(),
+            request_context: ctx(),
+            name: "oversized_collect_from".into(),
+            scope_level: ScopeLevel::Group,
+            content: Some("new".into()),
+            change_reason: None,
+            visible_to: None,
+            collect_from: Some(oversized_policy()),
+            valid_from: None,
+            valid_to: None,
+        })
+        .await
+        .expect_err("oversized update collect_from rejected");
+    assert_code(error, "payload_too_large");
+
+    let active = repo
+        .get_active("oversized_collect_from", "game-room-7")
+        .await
+        .expect("store ok")
+        .expect("active row");
+    assert_eq!(active.content, "ok");
+}
+
 #[tokio::test]
 async fn update_supersedes_preserves_omitted_fields_and_uses_old_writer_policy() {
     let repo = Arc::new(MemoryGroupContextRepo::new());

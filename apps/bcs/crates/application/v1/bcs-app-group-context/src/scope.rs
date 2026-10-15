@@ -2,6 +2,8 @@ use bcs_domain::ScopeLevel;
 use bcs_service_api::application::v1::{ApplicationError, GroupContextRequestContext};
 
 const INVALID_PARAM: &str = "invalid_param";
+const PAYLOAD_TOO_LARGE: &str = "payload_too_large";
+const MAX_SCOPE_CHARS: usize = 255;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedScope {
@@ -49,10 +51,15 @@ fn require_non_empty(field: &str, value: &str) -> Result<(), ApplicationError> {
 
 fn non_empty_value<'a>(field: &str, value: &'a str) -> Result<&'a str, ApplicationError> {
     if value.trim().is_empty() {
-        Err(missing(field))
-    } else {
-        Ok(value)
+        return Err(missing(field));
     }
+    if value.chars().count() > MAX_SCOPE_CHARS {
+        return Err(ApplicationError::payload_too_large(
+            PAYLOAD_TOO_LARGE,
+            format!("{field} exceeds {MAX_SCOPE_CHARS} characters"),
+        ));
+    }
+    Ok(value)
 }
 
 fn missing(field: &str) -> ApplicationError {

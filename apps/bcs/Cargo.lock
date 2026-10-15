@@ -527,6 +527,7 @@ dependencies = [
  "bcs-group-context-store",
  "bcs-service-api",
  "chrono",
+ "serde_json",
  "tokio",
  "ulid",
 ]

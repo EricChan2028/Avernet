@@ -569,7 +569,7 @@ story_cli_operator_validates_channel_management() {
 #   - Get/list expose the active entry after mutation.
 story_cli_operator_manages_group_context() {
     info "Story: an operator manages Group Context through bcs-cli"
-    local group_id session_id ctx_name content updated session_content round_content list_has_item get_has_updated
+    local group_id session_id ctx_name content updated session_content round_content list_has_item get_has_content get_has_updated
 
     _cli_story_create_pm_group "CLI group-context workspace" || return
     group_id="$CLI_STORY_GROUP_ID"
@@ -632,8 +632,8 @@ story_cli_operator_manages_group_context() {
         api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
         return
     }
-    get_has_updated=$(_cli_json_array_has_object "$BCS_CLI_STDOUT" "items" "name" "$ctx_name" "content" "$content")
-    assert_eq "CLI group-context get returns the added content" "$get_has_updated" "1"
+    get_has_content=$(_cli_json_array_has_object "$BCS_CLI_STDOUT" "items" "name" "$ctx_name" "content" "$content")
+    assert_eq "CLI group-context get returns the added content" "$get_has_content" "1"
 
     _cli_story_run "operator updates the group context entry" PM group-context update \
         --group-id "$group_id" \
@@ -655,8 +655,18 @@ story_cli_operator_manages_group_context() {
         api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
         return
     }
-    list_has_item=$(_cli_json_array_has_object "$BCS_CLI_STDOUT" "items" "name" "$ctx_name" "content" "$updated")
-    assert_eq "CLI group-context list returns the updated content" "$list_has_item" "1"
+    list_has_item=$(_cli_json_array_has_object "$BCS_CLI_STDOUT" "contexts" "name" "$ctx_name" "permission" "WR")
+    assert_eq "CLI group-context list returns the updated metadata" "$list_has_item" "1"
+
+    _cli_story_run "operator gets the updated group context entry" PM group-context get \
+        --group-id "$group_id" \
+        --name "$ctx_name" \
+        --scope-level group || {
+        api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
+        return
+    }
+    get_has_updated=$(_cli_json_array_has_object "$BCS_CLI_STDOUT" "items" "name" "$ctx_name" "content" "$updated")
+    assert_eq "CLI group-context get returns the updated content" "$get_has_updated" "1"
 
     api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
     require_status "CLI group-context group is cleaned up" "200" || return
