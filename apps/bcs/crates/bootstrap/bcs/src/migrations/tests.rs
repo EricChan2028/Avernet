@@ -32,6 +32,39 @@ async fn index_exists(db: &dyn DbPlugin, index: &str) -> DbResult<bool> {
     Ok(!rows.is_empty())
 }
 
+#[tokio::test]
+async fn sqlite_group_context_supersede_columns_are_repaired_idempotently() -> DbResult<()> {
+    let db = LocalSqliteDbPlugin::new()?;
+    db.execute(DbStatement::new(
+        "CREATE TABLE bcs_group_contexts (
+            id INTEGER PRIMARY KEY,
+            name TEXT,
+            scope_level TEXT,
+            scope TEXT,
+            content TEXT,
+            visible_to_json TEXT,
+            collect_from_json TEXT,
+            supersedes INTEGER,
+            change_reason TEXT,
+            valid_from TEXT,
+            valid_to TEXT,
+            tx_time TEXT,
+            gmt_create TEXT,
+            gmt_modified TEXT
+        )",
+    ))
+    .await?;
+
+    ensure_sqlite_group_context_supersede_columns(&db).await?;
+    let columns = column_names(&db, "bcs_group_contexts").await?;
+    assert!(columns.iter().any(|column| column == "is_superseded"));
+    assert!(columns.iter().any(|column| column == "gmt_superseded"));
+    assert!(index_exists(&db, "uk_group_context_active_name_scope").await?);
+
+    ensure_sqlite_group_context_supersede_columns(&db).await?;
+    Ok(())
+}
+
 #[test]
 fn mysql_queue_tables_preserve_business_keys_with_audit_columns() {
     let deliveries = include_str!("../../../../../migrations/mysql/021_message_deliveries.sql");

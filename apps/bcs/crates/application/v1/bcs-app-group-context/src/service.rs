@@ -415,3 +415,19 @@ fn specificity_rank(scope_level: ScopeLevel) -> u8 {
 fn new_context_id() -> String {
     Ulid::new().to_string()
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn store_not_found_and_backend_errors_map_to_application_errors() {
+        let not_found = map_store_error(GroupContextStoreError::NotFound {
+            name: "player_state".into(),
+            scope: "sess-001".into(),
+        });
+        assert_eq!(not_found.code(), NOT_FOUND);
+
+        let internal = map_store_error(GroupContextStoreError::Backend("storage failed".into()));
+        assert_eq!(internal.code(), "internal_error");
+    }
+}

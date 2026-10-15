@@ -373,3 +373,41 @@ fn _assert_response_shapes(
     _: GroupContextGetResponse,
 ) {
 }
+
+#[cfg(test)]
+mod group_context_error_tests {
+    use super::*;
+    use axum::body::to_bytes;
+
+    #[tokio::test]
+    async fn application_errors_map_to_http_status_and_response_body() {
+        for (error, status, expected_message) in [
+            (
+                ApplicationError::forbidden("actor may not update"),
+                StatusCode::FORBIDDEN,
+                "actor may not update",
+            ),
+            (
+                ApplicationError::internal("storage failed"),
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ),
+            (
+                ApplicationError::Gone {
+                    code: "gone".into(),
+                    message: "context was retired".into(),
+                },
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "gone: context was retired",
+            ),
+        ] {
+            let response = GroupContextHttpError::from_application(error).into_response();
+            assert_eq!(response.status(), status);
+            let bytes = to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("response body");
+            let body: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON error body");
+            assert_eq!(body["error_msg"], expected_message);
+        }
+    }
+}

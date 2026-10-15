@@ -523,4 +523,71 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn oceanbase_constructor_uses_mysql_projection() {
+        let store = SqlGroupContextStore::oceanbase(dummy_plugin());
+        assert!(store
+            .select_cols()
+            .contains("CAST(UNIX_TIMESTAMP(valid_from) * 1000 AS UNSIGNED) AS valid_from_ms"));
+    }
+
+    #[test]
+    fn backend_errors_and_out_of_range_timestamps_are_wrapped() {
+        let backend = GroupContextStoreError::backend("boom");
+        assert!(matches!(backend, GroupContextStoreError::Backend(message) if message == "boom"));
+
+        let invalid_time = time_from_millis(i64::MAX)
+            .expect_err("out-of-range timestamp must be a backend error");
+        assert!(matches!(
+            invalid_time,
+            GroupContextStoreError::Backend(message) if message.contains("invalid timestamp millis")
+        ));
+    }
+
+    #[tokio::test]
+    async fn sqlite_load_by_id_returns_the_created_active_row() {
+        let db = dummy_plugin();
+        for sql in include_str!("../../../../migrations/sqlite/034_group_context.sql")
+            .split(';')
+            .map(str::trim)
+            .filter(|sql| !sql.is_empty())
+        {
+            db.execute(DbStatement::new(sql)).await.expect("migration sql");
+        }
+        let store = SqlGroupContextStore::sqlite(db);
+        let now = Utc
+            .timestamp_millis_opt(1_728_374_400_000)
+            .single()
+            .expect("timestamp");
+        let created = store
+            .create_active(NewGroupContextEntry {
+                context_id: "ctx-load-by-id".into(),
+                name: "player_state".into(),
+                scope_level: ScopeLevel::Session,
+                scope: "sess-001".into(),
+                content: "张三出局".into(),
+                visible_to: GroupContextPolicy::users(["judge_bot"]),
+                collect_from: GroupContextPolicy::users(["judge_bot"]),
+                supersedes: None,
+                change_reason: None,
+                valid_from: now,
+                valid_to: None,
+                tx_time: now,
+            })
+            .await
+            .expect("create active");
+
+        let loaded = store.load_by_id(created.id).await.expect("load by id");
+        assert_eq!(loaded, created);
+    }
+
+    #[test]
+    fn parse_db_time_converts_database_timestamps() {
+        let parsed = parse_db_time("2026-10-12 14:56:08.123").expect("valid database time");
+        assert_eq!(parsed.timestamp_millis(), 1_791_816_968_123);
+
+        let invalid = parse_db_time("not-a-time").expect_err("invalid database time");
+        assert!(matches!(invalid, GroupContextStoreError::Backend(_)));
+    }
 }

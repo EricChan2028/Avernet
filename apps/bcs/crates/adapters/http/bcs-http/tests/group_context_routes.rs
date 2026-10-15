@@ -63,6 +63,27 @@ async fn post_json(uri: &str, token: &str, body: Value) -> (StatusCode, Value) {
     (status, body)
 }
 
+fn authed_raw_post(uri: &str, token: &str, body: &str) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::from(body.to_string()))
+        .expect("request")
+}
+
+async fn post_raw(uri: &str, token: &str, body: &str) -> (StatusCode, Value) {
+    let response = app()
+        .await
+        .oneshot(authed_raw_post(uri, token, body))
+        .await
+        .expect("response");
+    let status = response.status();
+    let body = response_json(response).await;
+    (status, body)
+}
+
 #[tokio::test]
 async fn add_uses_authenticated_bot_actor_and_rejects_duplicate() {
     let app = app().await;
@@ -324,6 +345,62 @@ async fn numeric_string_timestamps_roundtrip() {
         item["valid_to"].as_str().is_some_and(|s| !s.is_empty()),
         "valid_to should be a non-empty RFC3339 string"
     );
+}
+
+#[tokio::test]
+async fn malformed_query_and_json_bodies_map_to_invalid_param() {
+    let (status, body) = post_raw(
+        "/groupcontext/get?groupId=game-room-7&groupId=game-room-8",
+        "judge-token",
+        r#"{"name":"game_rule"}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["status"], "invalid_param");
+
+    let (status, body) = post_raw(
+        "/groupcontext/get?groupId=game-room-7",
+        "judge-token",
+        "{not-json",
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["status"], "invalid_param");
+}
+
+#[tokio::test]
+async fn invalid_time_wire_types_are_rejected() {
+    let (status, body) = post_json(
+        "/groupcontext/add?groupId=game-room-7&sessionId=sess-001",
+        "judge-token",
+        json!({
+            "name": "invalid_time_type",
+            "scope_level": "session",
+            "content": "state",
+            "visible_to": {"userIds": []},
+            "collect_from": {"userIds": ["judge_bot"]},
+            "valid_from": true
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["status"], "invalid_param");
+
+    let (status, body) = post_json(
+        "/groupcontext/add?groupId=game-room-7&sessionId=sess-002",
+        "judge-token",
+        json!({
+            "name": "invalid_time_text",
+            "scope_level": "session",
+            "content": "state",
+            "visible_to": {"userIds": []},
+            "collect_from": {"userIds": ["judge_bot"]},
+            "valid_from": "not-a-time"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["status"], "invalid_param");
 }
 
 #[tokio::test]

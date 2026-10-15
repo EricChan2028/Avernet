@@ -191,18 +191,15 @@ async fn add_validates_content_collect_from_actor_and_required_scope_params() {
 }
 
 fn add_for_validation(
+    actor_id: &str,
     name: &str,
     group_id: &str,
     visible_to: GroupContextPolicy,
     collect_from: GroupContextPolicy,
 ) -> AddGroupContext {
     AddGroupContext {
-        actor_id: "judge_bot".into(),
-        request_context: GroupContextRequestContext {
-            group_id: group_id.into(),
-            session_id: Some("sess-001".into()),
-            round_id: Some("round-003".into()),
-        },
+        actor_id: actor_id.into(),
+        request_context: GroupContextRequestContext { group_id: group_id.into(), session_id: Some("sess-001".into()), round_id: Some("round-003".into()) },
         name: name.into(),
         scope_level: ScopeLevel::Group,
         content: "ok".into(),
@@ -210,6 +207,29 @@ fn add_for_validation(
         collect_from,
         valid_from: None,
         valid_to: None,
+    }
+}
+
+#[tokio::test]
+async fn add_rejects_blank_actor_name_and_group_scope() {
+    let app = service(Arc::new(MemoryGroupContextRepo::new()));
+
+    for (actor_id, name, group_id) in [
+        ("  ", "player_state", "game-room-7"),
+        ("judge_bot", "   ", "game-room-7"),
+        ("judge_bot", "player_state", "   "),
+    ] {
+        let error = app
+            .add(add_for_validation(
+                actor_id,
+                name,
+                group_id,
+                policy(&[]),
+                policy(&["judge_bot"]),
+            ))
+            .await
+            .expect_err("blank request fields must be rejected");
+        assert_code(error, "invalid_param");
     }
 }
 
@@ -224,6 +244,7 @@ async fn add_and_update_reject_values_larger_than_storage_columns() {
 
     let error = app
         .add(add_for_validation(
+            "judge_bot",
             &"n".repeat(256),
             "game-room-7",
             policy(&[]),
@@ -235,6 +256,7 @@ async fn add_and_update_reject_values_larger_than_storage_columns() {
 
     let error = app
         .add(add_for_validation(
+            "judge_bot",
             "oversized_scope",
             &"g".repeat(256),
             policy(&[]),
@@ -246,6 +268,7 @@ async fn add_and_update_reject_values_larger_than_storage_columns() {
 
     let error = app
         .add(add_for_validation(
+            "judge_bot",
             "oversized_visible_to",
             "game-room-7",
             oversized_policy(),
@@ -256,6 +279,7 @@ async fn add_and_update_reject_values_larger_than_storage_columns() {
     assert_code(error, "payload_too_large");
 
     app.add(add_for_validation(
+        "judge_bot",
         "oversized_collect_from",
         "game-room-7",
         policy(&[]),
