@@ -179,6 +179,30 @@ OceanBase/MySQL 建表与兼容变更的完整参考 SQL 位于
 [`workflow-repair-ob-ddl.sql`](./workflow-repair-ob-ddl.sql)。生产仍应由版本化迁移执行；手工执行前必须先核对
 `workflow_healing_outcomes` 是否已经包含其中的扩展列和索引，避免重复 ALTER。
 
+### 迁移 142：审核发布两张表（OB 手工补建）
+
+可直接在 **OceanBase MySQL 兼容模式**执行的独立增量 DDL：
+[`workflow-repair-release-ob-ddl.sql`](./workflow-repair-release-ob-ddl.sql)。
+该文件与 Shared `schema-repair-release.ts` 经 MySQL/ZDAS 方言渲染后的两条建表语句一致：
+`workflow_id` 为 `VARCHAR(190)`，版本字段为 `BIGINT`，时间字段为 `TIMESTAMP`，不使用 SQLite `unixepoch()`。
+
+执行顺序：
+
+1. 确认连接的是目标环境和数据库；本次预发报错的库为 `agentclawdb`。用 `SELECT DATABASE()` 核对当前库。
+2. 在具备 DDL 权限的发布/数据库变更流程中执行独立 SQL 文件，创建
+   `workflow_repair_release_records` 与 `workflow_repair_publication_claims`，不要重跑旧文件中的 ALTER。
+3. 分别执行下面两条检查，确认字段、主键及索引均创建成功，再刷新原修复任务详情。
+
+```sql
+SHOW CREATE TABLE workflow_repair_release_records;
+SHOW CREATE TABLE workflow_repair_publication_claims;
+```
+
+`CREATE TABLE IF NOT EXISTS` 可重复执行，但不会校正已有表的错误结构；若表已存在，应先核对结构而不是删表重建。
+此补建不写 `schema_version`，也不修改既有任务或生成新的 AIS Job；正式迁移登记沿用宿主已有版本化流程。
+两表是本次代码启用前的数据库前置条件；缺失第一张表会使任务详情读取返回 `ER_NO_SUCH_TABLE`，
+缺失第二张表会阻止后续发布授权。当前仅验证 SQL 与方言输出一致，不代表已在目标 OB 实例执行。
+
 既有分析/证据表（`workflow_evolution_analysis_runs`、`workflow_run_evidence_events`）与建议扩展列由原部署流程提供，
 不在 Shared 122–124 中。新建数据库只运行 Shared 迁移并不足以启动该来源 API；缺表显式失败，不能当作“没有问题”。
 
