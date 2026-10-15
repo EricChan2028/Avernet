@@ -12,8 +12,8 @@ import { createRepairBatchesRouter } from '../../routes/repair-batches.js';
 describe('reviewed candidate publication', () => {
   const fixtures: Awaited<ReturnType<typeof repairFixture>>[] = [];
   afterEach(async () => { for (const f of fixtures.splice(0)) await f.db.close(); });
-  async function setup() {
-    const f = await repairFixture(1); fixtures.push(f);
+  async function setup(count = 1) {
+    const f = await repairFixture(count); fixtures.push(f);
     for (const migration of repairReleaseMigrations) for (const sql of migration.sql) await f.db.exec(f.db.dialect.renderDdl(sql));
     const baseline = { ...await f.executionPort.resolveBaseline('wf-1'), activeDeployNumber: 7, releaseRevision: 7 };
     f.executionPort.resolveBaseline = async () => baseline;
@@ -21,14 +21,14 @@ describe('reviewed candidate publication', () => {
       before: 'old\n', after: 'new\n', patch: '@@ -1 +1 @@\n-old\n+new\n', binary: false, truncated: false }], truncated: false });
     const workbench = createRepairWorkbenchService(f.db, f.sourcePort, f.executionPort);
     const inbox = await workbench.candidates('wf-1');
-    const revision = await workbench.create('reviewer', { workflowId: 'wf-1', itemIds: ['item-0'],
+    const revision = await workbench.create('reviewer', { workflowId: 'wf-1', itemIds: f.items.map(item => item.itemId),
       inputDigest: inbox.inputDigest, requestId: 'generate', instructions: '' });
     const draft = { candidateCommit: 'd'.repeat(40), parentCandidateCommit: baseline.packCommit, packDigest: 'e'.repeat(40),
-      itemResults: [{ itemId: 'item-0', status: 'changed', reason: 'fixed' }] };
+      itemResults: f.items.map(item => ({ itemId: item.itemId, status: 'changed', reason: 'fixed' })) };
     await workbench.report({ workflowId: 'wf-1', taskId: revision.taskId, revision: 1, expectedStateVersion: 0,
       status: 'succeeded', draft, checks: { schemaVersion: 'workflow-repair-checks/v1', candidateCommit: draft.candidateCommit,
         packDigest: draft.packDigest, candidateDigest: digestRepairJson(draft), static: { status: 'passed' },
-        mock: { status: 'not_covered' }, coverage: [{ itemId: 'item-0', mode: 'not_covered' }], uncoveredChecks: ['business_effect'] } });
+        mock: { status: 'not_covered' }, coverage: f.items.map(item => ({ itemId: item.itemId, mode: 'not_covered' })), uncoveredChecks: ['business_effect'] } });
     const dispatches: unknown[] = [];
     let uncertain = false;
     const publisher: RepairPublicationPort = {
@@ -122,6 +122,46 @@ describe('reviewed candidate publication', () => {
     await expect(f.workbench.retryGeneration('reviewer', f.revision.taskId, { expectedRevision: 2, requestId: 'regen-after-publish' })).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
     expect((await f.workbench.candidates('wf-1')).tasks[0].phase).toBe('published');
   });
+  it('reserves items released by failed feedback before publishing an older candidate', async () => {
+    const f = await setup(2);
+    const inbox = await f.workbench.candidates('wf-1');
+    await f.workbench.revise('reviewer', f.revision.taskId, { workflowId: 'wf-1', itemIds: ['item-0'],
+      inputDigest: inbox.inputDigest, requestId: 'feedback-subset', instructions: '', expectedAttemptRevision: 1,
+      parentCandidateCommit: 'd'.repeat(40), feedback: 'only item zero' });
+    await f.workbench.report({ workflowId: 'wf-1', taskId: f.revision.taskId, revision: 2,
+      expectedStateVersion: 0, status: 'failed', error: { code: 'AIS_FAILED' } });
+    expect(await f.workbench.item('wf-1', 'item-1')).toMatchObject({ state: 'pending', activeTaskId: null });
+    const approved = await f.service.confirm('reviewer', f.revision.taskId, f.request);
+    f.publisher.dispatch = async () => {
+      const reserved = await f.workbench.item('wf-1', 'item-1');
+      expect(reserved).toMatchObject({ state: 'processing', activeTaskId: f.revision.taskId, activeRevision: 1 });
+      const current = await f.workbench.candidates('wf-1');
+      await expect(f.workbench.disposition('reviewer', { workflowId: 'wf-1', itemId: reserved.itemId,
+        inputDigest: current.inputDigest, contentRevision: reserved.contentRevision, expectedStateVersion: reserved.stateVersion,
+        requestId: 'disposition-during-publish', action: 'no_action', reason: 'skip' })).rejects.toMatchObject({ code: 'ITEM_BUSY' });
+      return { status: 'running' };
+    };
+    const deployment = await f.service.deploy('reviewer', f.revision.taskId, { revision: 1,
+      expectedApprovalVersion: approved.stateVersion, requestId: 'deploy-older' });
+    expect(deployment.status).toBe('running');
+    await f.service.reconcile('reviewer', f.revision.taskId, deployment.id);
+    expect(await f.workbench.item('wf-1', 'item-1')).toMatchObject({ state: 'awaiting_verification', activeRevision: 1 });
+  });
+
+  it('reauthorizes the target before reconciling and never calls the adapter after permission loss', async () => {
+    const f = await setup();
+    const approved = await f.service.confirm('reviewer', f.revision.taskId, f.request);
+    const deployment = await f.service.deploy('reviewer', f.revision.taskId, { revision: 1,
+      expectedApprovalVersion: approved.stateVersion, requestId: 'deploy' });
+    let reconciles = 0;
+    const original = f.publisher.reconcile;
+    f.publisher.reconcile = async value => { reconciles++; return original(value); };
+    f.publisher.targets = async () => [];
+    await expect(f.service.reconcile('reviewer', f.revision.taskId, deployment.id)).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
+    expect(reconciles).toBe(0);
+    expect((await f.service.detail(f.revision.taskId)).deployments[0].status).toBe('running');
+  });
+
   it('reauthorizes the frozen target before stopping, including idempotent retries', async () => {
     const f = await setup();
     const approved = await f.service.confirm('reviewer', f.revision.taskId, f.request);

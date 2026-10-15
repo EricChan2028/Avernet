@@ -73,9 +73,12 @@ export function createRepairReleaseService(input: {
           WHERE task_id = ? AND revision = ?`, [Date.now(), latest.taskId, latest.revision]);
         const outcomes = revision.draft?.itemResults;
         if (Array.isArray(outcomes)) for (const outcome of outcomes) {
-          if (outcome?.status === 'changed') await tx.exec(`UPDATE workflow_repair_items SET state = 'awaiting_verification', active_task_id = ?, active_revision = ?,
+          if (outcome?.status === 'changed') {
+            const updated = await tx.exec(`UPDATE workflow_repair_items SET state = 'awaiting_verification', active_task_id = ?, active_revision = ?,
             state_version = state_version + 1, updated_at_ms = ? WHERE item_id = ? AND workflow_id = ?
             AND ((state = 'processing' AND active_task_id = ?) OR (state = 'pending' AND active_task_id IS NULL))`, [latest.taskId, latest.revision, Date.now(), outcome.itemId, latest.workflowId, latest.taskId]);
+            if (updated.affectedRows !== 1) conflict('部署已回执，但处理项状态冲突；保留发布请求，请核对后恢复验证关联', 'DEPLOY_ITEM_CONFLICT');
+          }
         }
         await tx.exec(`UPDATE workflow_repair_items SET state = 'pending', active_task_id = NULL, active_revision = NULL,
           state_version = state_version + 1, updated_at_ms = ? WHERE workflow_id = ? AND active_task_id = ? AND state = 'processing'`,
@@ -181,6 +184,13 @@ export function createRepairReleaseService(input: {
           if (!Array.isArray(selected.draft?.itemResults) || !selected.draft.itemResults.some(outcome => outcome.itemId === item.itemId && outcome.status === 'changed')) continue;
           const current = await new RepairBatchRepository(tx).getItem(approval.workflowId, item.itemId);
           if (!current || !(current.state === 'processing' && current.activeTaskId === taskId || current.state === 'pending' && current.activeTaskId === null)) conflict('此候选的处理项已被移出、处置或占用，请重新核对修复范围');
+          // Reserve the full reviewed scope before any external publication.
+          // A later failed revision may have released items from this candidate.
+          const reserved = await tx.exec(`UPDATE workflow_repair_items SET state = 'processing', active_task_id = ?, active_revision = ?,
+            state_version = state_version + 1, updated_at_ms = ? WHERE workflow_id = ? AND item_id = ? AND state_version = ?
+            AND ((state = 'pending' AND active_task_id IS NULL) OR (state = 'processing' AND active_task_id = ?))`,
+          [taskId, request.revision, Date.now(), approval.workflowId, item.itemId, current.stateVersion, taskId]);
+          if (reserved.affectedRows !== 1) conflict('部署前处理项占用失败，请重新核对修复范围');
         }
         const inFlight = (await records.list<RepairDeployment>(taskId, 'deployment')).find(d => d.status !== 'failed');
         if (inFlight) conflict('已有部署请求，请先核对其状态，不能重复发布');
@@ -204,6 +214,7 @@ export function createRepairReleaseService(input: {
       const deployment = (await repo.list<RepairDeployment>(taskId, 'deployment')).find(d => d.id === deploymentId);
       if (!deployment) conflict('部署记录不存在');
       if (!actor?.trim()) throw new RepairBatchError('INVALID_INPUT', '缺少核对身份');
+      await authorized(actor, deployment.workflowId, deployment.target.id);
       if (deployment.status === 'succeeded') return deployment;
       return settle(deployment, await publisher().reconcile(deployment));
     },
