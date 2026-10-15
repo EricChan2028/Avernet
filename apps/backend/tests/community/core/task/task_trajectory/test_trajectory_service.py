@@ -50,7 +50,6 @@ from agentclaw.community.core.task.task_context.task_trajectory.trajectory_servi
     _build_ext_info_lookup,
     _event_key,
     _is_engine_session_id,
-    _persisted_timeline_version,
     _timeline_fingerprint,
 )
 from agentclaw.community.di.task_trajectory_config import TrajectoryAnalysisConfig
@@ -343,7 +342,7 @@ async def test_do_analysis_true_backfills_and_returns_fresh_analysis():
     config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
     svc = TaskTrajectoryService(assembler, repo, analyzer, config)
 
-    result = await svc.get_trajectory("t1", do_analysis=True)
+    result = await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
 
     assert analyzer.calls == 1
     assert analyzer.last_analysis_type == AnalysisType.TC_BOT
@@ -365,36 +364,6 @@ async def test_do_analysis_true_backfills_and_returns_fresh_analysis():
 
 
 @pytest.mark.asyncio
-@pytest.mark.unit
-async def test_do_analysis_true_returns_existing_analysis_without_recalling_bot():
-    """``do_analysis=true`` is INCREMENTALLY idempotent: the persisted analysis
-    carries a ``timeline_version`` stamp; when the re-computed fingerprint of the
-    task's current event rows EQUALS that stamp (timeline unchanged since the
-    last backfill), return the persisted analysis directly WITHOUT calling the
-    bot / no backfill (省一次 bot 调用 / 504 风险). 决策 #13's "every
-    do_analysis=true OVERWRITES" is revised to "re-analyze only when the
-    timeline moved". 决策 #13's no-merge (when it DOES run) still holds."""
-    records = [
-        _make_record(node_id="n1", action_type="dispatch", attempt=0, gmt_create_ms=1000),
-        _make_record(node_id="n1", action_type="execute", attempt=0, gmt_create_ms=2000, rec_id=2),
-    ]
-    stamp = _timeline_fingerprint(records)
-    persisted = json.dumps({"analysis_type": "tc_bot", "timeline_version": stamp}, ensure_ascii=False)
-    traj = _make_trajectory(analysis=persisted)
-    assembler = _FakeAssembler(traj)
-    analyzer = _FakeAnalyzer(analysis=_make_analysis())  # would run only if NOT short-circuited
-    repo = _FakeRepo(events=records)
-    config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
-    svc = TaskTrajectoryService(assembler, repo, analyzer, config)
-
-    result = await svc.get_trajectory("t1", do_analysis=True)
-
-    # version-matched analysis returned verbatim; bot NOT called; no backfill
-    assert result.analysis == persisted
-    assert analyzer.calls == 0
-    assert repo.backfill_calls == []
-
-
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_do_analysis_reruns_when_new_event_appended_after_persist():
@@ -416,7 +385,7 @@ async def test_do_analysis_reruns_when_new_event_appended_after_persist():
     config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
     svc = TaskTrajectoryService(assembler, repo, analyzer, config)
 
-    result = await svc.get_trajectory("t1", do_analysis=True)
+    result = await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
 
     # stale stamp did NOT short-circuit: bot re-ran and re-stamped
     assert analyzer.calls == 1
@@ -427,50 +396,7 @@ async def test_do_analysis_reruns_when_new_event_appended_after_persist():
 
 
 @pytest.mark.asyncio
-@pytest.mark.unit
-async def test_do_analysis_reruns_legacy_analysis_without_timeline_version():
-    """A legacy persisted analysis (pre-versioning) carries no stamp → mismatch
-    → re-analyzes exactly once; the backfill then carries the stamp."""
-    traj = _make_trajectory(analysis='{"old": true}')
-    assembler = _FakeAssembler(traj)
-    analyzer = _FakeAnalyzer(analysis=_make_analysis())
-    repo = _FakeRepo()
-    config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
-    svc = TaskTrajectoryService(assembler, repo, analyzer, config)
-
-    result = await svc.get_trajectory("t1", do_analysis=True)
-
-    assert analyzer.calls == 1
-    assert len(repo.backfill_calls) == 1
-    assert json.loads(repo.backfill_calls[0][1])["timeline_version"] is not None
-    assert result.analysis == repo.backfill_calls[0][1]
-
-
 @pytest.mark.asyncio
-@pytest.mark.unit
-async def test_force_analysis_overrides_version_match_fast_path():
-    """force_analysis=true:即使重算指纹与持久戳**完全一致**(默认会跳过 bot 的快路径),
-    也强制重跑 bot 并重新回填盖戳——"不管 do_analysis 内部的版本判断逻辑"。"""
-    records = [_make_record(node_id="n1", action_type="dispatch", attempt=0, gmt_create_ms=1000)]
-    stamp = _timeline_fingerprint(records)
-    persisted = json.dumps({"timeline_version": stamp}, ensure_ascii=False)
-    analysis = _make_analysis()
-    analyzer = _FakeAnalyzer(analysis=analysis)
-    repo = _FakeRepo(events=records)
-    config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
-    svc = TaskTrajectoryService(
-        _FakeAssembler(_make_trajectory(analysis=persisted)), repo, analyzer, config,
-    )
-
-    result = await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
-
-    # 版本一致也被强跑:bot 调了、重新回填、返回新分析
-    assert analyzer.calls == 1
-    assert len(repo.backfill_calls) == 1
-    assert result.analysis == repo.backfill_calls[0][1]
-    assert json.loads(repo.backfill_calls[0][1])["timeline_version"] == stamp
-
-
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_force_analysis_true_implies_do_analysis():
@@ -522,19 +448,6 @@ def test_timeline_fingerprint_unit():
     assert _timeline_fingerprint([]) == _timeline_fingerprint([])
 
 
-@pytest.mark.unit
-def test_persisted_timeline_version_defensive_parse():
-    """``_persisted_timeline_version`` degrades to None on every legacy/corrupt
-    shape (the never-matches sentinel) and reads the stamp from valid JSON."""
-    assert _persisted_timeline_version(None) is None
-    assert _persisted_timeline_version("") is None
-    assert _persisted_timeline_version("{broken") is None
-    assert _persisted_timeline_version('["array-not-dict"]') is None
-    assert _persisted_timeline_version('{"old": true}') is None
-    assert _persisted_timeline_version('{"timeline_version": ""}') is None
-    assert _persisted_timeline_version('{"timeline_version": "abc"}') == "abc"
-
-
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_do_analysis_records_read_failure_treats_as_mismatch():
@@ -557,7 +470,7 @@ async def test_do_analysis_records_read_failure_treats_as_mismatch():
     config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
     svc = TaskTrajectoryService(assembler, repo, analyzer, config)
 
-    result = await svc.get_trajectory("t1", do_analysis=True)
+    result = await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
 
     assert analyzer.calls == 1
     # backfilled stamp is None (records unreadable → no fingerprint claimed)
@@ -566,6 +479,41 @@ async def test_do_analysis_records_read_failure_treats_as_mismatch():
 
 
 # ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_do_analysis_without_force_never_calls_bot():
+    """2026-10-15 语义收紧:大模型调用的**唯一触发 = force_analysis=True**;
+    do_analysis=true 单独出现退化为纯读——ct 不调、不回填,返回已持久化 analysis。"""
+    traj = _make_trajectory(task_id="t1", analysis=None)
+    analysis = _make_analysis()
+    analyzer = _FakeAnalyzer(analysis=analysis)
+    repo = _FakeRepo()
+    config = TrajectoryAnalysisConfig(analysis_bot_id="bot-analyst")
+    svc = TaskTrajectoryService(_FakeAssembler(traj), repo, analyzer, config)
+
+    result = await svc.get_trajectory("t1", do_analysis=True)
+
+    assert analyzer.calls == 0, "do_analysis 无 force:绝不调 bot"
+    assert repo.backfill_calls == []
+    assert repo.merge_calls == []
+    assert result is traj and result.analysis is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_do_analysis_without_force_needs_no_bot_config():
+    """do_analysis=true(无 force)在分析 bot 未配置时也**正常纯读**(503 只属于
+    force 路径)。"""
+    traj = _make_trajectory(task_id="t1", analysis=None)
+    analyzer = _FakeAnalyzer()
+    svc = TaskTrajectoryService(_FakeAssembler(traj), _FakeRepo(), analyzer, None)
+
+    result = await svc.get_trajectory("t1", do_analysis=True)  # 无 503
+
+    assert analyzer.calls == 0
+    assert result is traj
+
+
 # do_analysis=True bot failure → 504, no backfill
 # ---------------------------------------------------------------------------
 
@@ -582,7 +530,7 @@ async def test_do_analysis_true_bot_failure_raises_and_does_not_backfill():
     svc = TaskTrajectoryService(assembler, repo, analyzer, config)
 
     with pytest.raises(TrajectoryAnalysisError):
-        await svc.get_trajectory("t1", do_analysis=True)
+        await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
 
     # MUST NOT backfill on the failure path
     assert repo.backfill_calls == []
@@ -606,7 +554,7 @@ async def test_do_analysis_true_not_configured_raises_and_no_backfill():
     svc = TaskTrajectoryService(assembler, repo, analyzer, config)
 
     with pytest.raises(TrajectoryAnalysisNotConfiguredError):
-        await svc.get_trajectory("t1", do_analysis=True)
+        await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
 
     assert repo.backfill_calls == []
     # analyzer is never reached (config check happens before)
@@ -624,7 +572,7 @@ async def test_do_analysis_true_not_configured_when_config_is_none():
     svc = TaskTrajectoryService(assembler, repo, analyzer, config=None)
 
     with pytest.raises(TrajectoryAnalysisNotConfiguredError):
-        await svc.get_trajectory("t1", do_analysis=True)
+        await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
 
     assert repo.backfill_calls == []
 
@@ -789,7 +737,7 @@ async def test_do_analysis_true_passes_ext_info_lookup_to_analyzer():
     config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
     svc = TaskTrajectoryService(assembler, repo, analyzer, config)
 
-    await svc.get_trajectory("t1", do_analysis=True)
+    await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
 
     # analyzer got the closure and it resolves the dispatched event's rationale
     assert analyzer.last_ext_info_lookup is not None
@@ -925,7 +873,7 @@ async def test_do_analysis_probes_running_sessions_and_passes_to_analyzer():
     PENDING node is never probed."""
     svc, analyzer, bcs, graph = _running_probe_setup()
 
-    await svc.get_trajectory("t1", do_analysis=True)
+    await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
 
     assert analyzer.calls == 1
     briefs = analyzer.last_running_sessions
@@ -959,7 +907,7 @@ async def test_do_analysis_probe_skips_node_without_session_id():
         graph=graph, bcs=bcs,
     )
 
-    await svc.get_trajectory("t1", do_analysis=True)
+    await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
 
     assert analyzer.calls == 1  # main analysis unaffected
     assert analyzer.last_running_sessions is None
@@ -984,7 +932,7 @@ async def test_do_analysis_probe_survives_bcs_failure():
         graph=graph, bcs=bcs,
     )
 
-    result = await svc.get_trajectory("t1", do_analysis=True)
+    result = await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
 
     assert analyzer.calls == 1
     assert analyzer.last_running_sessions is None
@@ -1001,39 +949,12 @@ async def test_do_analysis_probe_disabled_when_graph_or_bcs_none():
     config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
     svc = TaskTrajectoryService(_FakeAssembler(_make_trajectory()), repo, analyzer, config)
 
-    await svc.get_trajectory("t1", do_analysis=True)
+    await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
 
     assert analyzer.last_running_sessions is None
 
 
 @pytest.mark.asyncio
-@pytest.mark.unit
-async def test_do_analysis_fast_path_skips_probe():
-    """Timeline-version match (fast path) short-circuits BEFORE the probe —
-    neither the graph nor the BCS session read is touched."""
-    records: list = []
-    stamp = _timeline_fingerprint(records)
-    persisted = json.dumps({"timeline_version": stamp}, ensure_ascii=False)
-    graph = _FakeGraph([
-        _FakeNode(node_id="n-run", status=Status.RUNNING,
-                  extend_props={"session_id": "sess-1"}),
-    ])
-    bcs = _FakeBcs(messages_by_session={"sess-1": [{"role": "user", "content": "hi"}]})
-    analyzer = _FakeAnalyzer(analysis=_make_analysis())
-    repo = _FakeRepo(events=records)
-    config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
-    svc = TaskTrajectoryService(
-        _FakeAssembler(_make_trajectory(analysis=persisted)), repo, analyzer, config,
-        graph=graph, bcs=bcs,
-    )
-
-    await svc.get_trajectory("t1", do_analysis=True)
-
-    assert analyzer.calls == 0
-    assert graph.query_calls == 0
-    assert bcs.calls == []
-
-
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_do_analysis_probe_passes_holder_bearer_token():
@@ -1070,7 +991,7 @@ async def test_do_analysis_probe_passes_holder_bearer_token():
         graph=graph, bcs=bcs, bcs_bot_tokens=tokens,
     )
 
-    await svc.get_trajectory("t1", do_analysis=True)
+    await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
 
     by_sid = {c[0]: c[2] for c in bcs.calls}
     assert by_sid["sess-relay"] == "tok-holder"   # driver_bot_id
@@ -1106,7 +1027,7 @@ async def test_do_analysis_probe_omniauth_fallback_without_token():
         _FakeAssembler(_make_trajectory()), repo, analyzer, config,
         graph=graph, bcs=bcs, bcs_bot_tokens=exploding,
     )
-    await svc.get_trajectory("t1", do_analysis=True)
+    await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
     assert all(c[2] is None for c in bcs.calls), "provider 抛错 → 回退匿名"
     assert analyzer.last_running_sessions is not None  # 探测整体不受影响
 
@@ -1122,7 +1043,7 @@ async def test_do_analysis_probe_omniauth_fallback_without_token():
         ]),
         bcs=bcs2,
     )
-    await svc2.get_trajectory("t1", do_analysis=True)
+    await svc2.get_trajectory("t1", do_analysis=True, force_analysis=True)
     assert bcs2.calls[0][2] is None
 
 
@@ -1147,7 +1068,7 @@ async def test_do_analysis_probe_keeps_full_message_content():
         graph=graph, bcs=bcs,
     )
 
-    await svc.get_trajectory("t1", do_analysis=True)
+    await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
 
     briefs = analyzer.last_running_sessions
     assert briefs[0]["messages"][0]["content"] == long, "原文不截断"
@@ -1193,43 +1114,6 @@ async def test_force_analysis_repulls_cached_session_msgs():
 
 
 @pytest.mark.asyncio
-@pytest.mark.unit
-async def test_do_analysis_session_msgs_cached_skips_bcs_query():
-    """缓存命中:该子任务末位事件 ext_info 已有 session_msgs → 不再实际查 BCS,
-    brief 直接用缓存内容(带 node_status),repo 不再有 merge 调用。"""
-    cached_msgs = [{"role": "user", "content": "cached-1"},
-                   {"role": "assistant", "content": "cached-2"}]
-    records = [
-        _make_record(node_id="n1", action_type="dispatch", attempt=0, gmt_create_ms=1000,
-                     rec_id=1, ext_info=None),
-        # 末位事件(mtime 更大)带 session_msgs 缓存
-        _make_record(node_id="n1", action_type="execute", attempt=0, gmt_create_ms=2000,
-                     rec_id=2, ext_info=json.dumps({"schema_v": 1, "session_msgs": cached_msgs},
-                                                    ensure_ascii=False)),
-    ]
-    graph = _FakeGraph([
-        _FakeNode(node_id="n1", status=Status.RUNNING,
-                  extend_props={"session_id": "sess-1"}, start_time=500),
-    ])
-    bcs = _FakeBcs(messages_by_session={"sess-1": [{"role": "user", "content": "fresh"}]})
-    analyzer = _FakeAnalyzer(analysis=_make_analysis())
-    repo = _FakeRepo(events=records)
-    config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
-    svc = TaskTrajectoryService(
-        _FakeAssembler(_make_trajectory()), repo, analyzer, config,
-        graph=graph, bcs=bcs,
-    )
-
-    await svc.get_trajectory("t1", do_analysis=True)
-
-    assert bcs.calls == [], "缓存命中就不应实际查询 BCS"
-    assert repo.merge_calls == [], "缓存内容不再重复写库"
-    briefs = analyzer.last_running_sessions
-    assert len(briefs) == 1
-    assert briefs[0]["node_status"] == "RUNNING"
-    assert briefs[0]["messages"] == cached_msgs
-
-
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_do_analysis_materializes_msgs_for_finished_node_too():
@@ -1253,7 +1137,7 @@ async def test_do_analysis_materializes_msgs_for_finished_node_too():
         graph=graph, bcs=bcs,
     )
 
-    await svc.get_trajectory("t1", do_analysis=True)
+    await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
 
     # 两个子任务都实际查询了(不管有没有完成)
     assert {c[0] for c in bcs.calls} == {"sess-done", "sess-hung"}
@@ -1291,7 +1175,7 @@ async def test_do_analysis_merge_failure_never_breaks_analysis():
         graph=graph, bcs=bcs,
     )
 
-    result = await svc.get_trajectory("t1", do_analysis=True)
+    result = await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
 
     assert analyzer.calls == 1
     assert result.analysis is not None
@@ -1676,7 +1560,7 @@ async def test_do_analysis_engine_session_id_dispatches_to_baas_channel():
         graph=graph, bcs=bcs, openapi_bot=openapi,
     )
 
-    await svc.get_trajectory("t1", do_analysis=True)
+    await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
 
     assert openapi.calls == [(_ENGINE_SID, 60, "20260920_hzzaxnzf:35983")]
     assert bcs.calls == []
@@ -1735,7 +1619,7 @@ async def test_claude_code_session_key_dispatches_to_baas():
         graph=graph, bcs=bcs, openapi_bot=openapi,
     )
 
-    await svc.get_trajectory("t1", do_analysis=True)
+    await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
 
     assert [c[0] for c in openapi.calls] == [_CC_SID]
     assert [c[2] for c in openapi.calls] == ["bot9:123"]
@@ -1768,7 +1652,7 @@ async def test_mixed_bcs_and_engine_channels_probed_independently():
         graph=graph, bcs=bcs, bcs_bot_tokens=tokens, openapi_bot=openapi,
     )
 
-    await svc.get_trajectory("t1", do_analysis=True)
+    await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
 
     assert bcs.calls == [("sess-group", 60, "tok-holder")]
     assert openapi.calls == [(_ENGINE_SID, 60, "20260920_hzzaxnzf:35983")]
@@ -1797,7 +1681,7 @@ async def test_probe_gate_enabled_with_only_openapi_bot():
         graph=graph, openapi_bot=openapi,
     )
 
-    result = await svc.get_trajectory("t1", do_analysis=True)  # bcs=None
+    result = await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)  # bcs=None
 
     assert [c[0] for c in openapi.calls] == [_ENGINE_SID]
     assert {b["node_id"] for b in analyzer.last_running_sessions} == {"n-eng"}  # BCS 键节点被跳过

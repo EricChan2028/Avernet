@@ -903,7 +903,7 @@ class TestDoAnalysisTrueServicePath:
         )
 
         # do_analysis=True → assemble + call bot + backfill + return fresh analysis
-        result = _run(svc.get_trajectory(task_id, do_analysis=True))
+        result = _run(svc.get_trajectory(task_id, force_analysis=True))
 
         # the bot was called with the configured bot_id + the trajectory summary
         assert bot.last_call is not None
@@ -992,71 +992,26 @@ class TestDoAnalysisTrueServicePath:
         # prod env (default) → analysis_bot_id
         monkeypatch.setenv("SERVER_ENV", "prod")
         svc, bot = _fresh_svc_and_bot(TrajectoryAnalysisConfig(analysis_bot_id="botA", analysis_bot_id_pre="botB"))
-        _run(svc.get_trajectory(task_id, do_analysis=True))
+        _run(svc.get_trajectory(task_id, force_analysis=True))
         assert bot.last_call["bot_id"] == "botA"
 
         # pre env → analysis_bot_id_pre
         monkeypatch.setenv("SERVER_ENV", "pre")
         svc, bot = _fresh_svc_and_bot(TrajectoryAnalysisConfig(analysis_bot_id="botA", analysis_bot_id_pre="botB"))
-        _run(svc.get_trajectory(task_id, do_analysis=True))
+        _run(svc.get_trajectory(task_id, force_analysis=True))
         assert bot.last_call["bot_id"] == "botB"
 
         # pre env but _pre unset → None → 503 (strict, mirrors base_url_pre empty)
         monkeypatch.setenv("SERVER_ENV", "pre")
         svc, _bot = _fresh_svc_and_bot(TrajectoryAnalysisConfig(analysis_bot_id="botA"))
         with pytest.raises(TrajectoryAnalysisNotConfiguredError):
-            _run(svc.get_trajectory(task_id, do_analysis=True))
+            _run(svc.get_trajectory(task_id, force_analysis=True))
 
         # prod env but prod id unset → None → 503
         monkeypatch.setenv("SERVER_ENV", "prod")
         svc, _bot = _fresh_svc_and_bot(TrajectoryAnalysisConfig(analysis_bot_id_pre="botB"))
         with pytest.raises(TrajectoryAnalysisNotConfiguredError):
-            _run(svc.get_trajectory(task_id, do_analysis=True))
-
-    def test_do_analysis_idempotent_returns_persisted_without_bot_call(self, monkeypatch):
-        """``do_analysis=true`` is INCREMENTALLY idempotent, keyed to the
-        ``timeline_version`` fingerprint (NOT mere analysis presence): a first
-        run backfills a stamped analysis; a second call with an UNCHANGED
-        event set returns the persisted analysis WITHOUT calling the bot
-        (省一次 bot 调用 / 超时 / 504); appending a NEW trajectory event makes
-        the third call re-run the bot and re-stamp the fingerprint."""
-        db = _make_db()
-        repo = TaskTrajectoryRepository(db)
-        task_id = "e2e-idem"
-        graph_svc = TaskGraphService()
-        _drive_submit(repo, graph_svc, task_id=task_id)   # SUBMIT event row
-
-        bot = _FakeBot(content=json.dumps({"analysis_output": "first conclusion"}, ensure_ascii=False))
-        assembler = TaskTrajectoryAssembler(repo)
-        svc = TaskTrajectoryService(
-            assembler, repo, TaskTrajectoryAnalyzer(bot=bot),
-            TrajectoryAnalysisConfig(analysis_bot_id="botA"),
-        )
-        monkeypatch.setenv("SERVER_ENV", "prod")
-
-        # run 1 — fresh: bot called; the backfilled analysis carries the
-        # timeline_version stamp computed from the current event rows.
-        result1 = _run(svc.get_trajectory(task_id, do_analysis=True))
-        assert bot.last_call is not None
-        parsed1 = json.loads(result1.analysis)
-        assert parsed1.get("timeline_version"), "backfilled analysis must carry the fingerprint stamp"
-
-        # run 2 — UNCHANGED timeline → fingerprint match → persisted analysis
-        # returned directly WITHOUT calling the bot.
-        bot.last_call = None
-        result2 = _run(svc.get_trajectory(task_id, do_analysis=True))
-        assert result2.analysis == result1.analysis
-        assert bot.last_call is None, "version match must short-circuit the bot"
-
-        # run 3 — a NEW trajectory event arrives → fingerprint mismatch →
-        # the bot re-runs and the fresh backfill carries the NEW stamp.
-        _drive_plan(repo, graph_svc, task_id=task_id, child_node_id="c9")
-        bot.last_call = None
-        result3 = _run(svc.get_trajectory(task_id, do_analysis=True))
-        assert bot.last_call is not None, "appended event must invalidate the stamp"
-        parsed3 = json.loads(result3.analysis)
-        assert parsed3["timeline_version"] != parsed1["timeline_version"]
-
+            _run(svc.get_trajectory(task_id, force_analysis=True))
 
 # ---------------------------------------------------------------------------
 # B — cross-restart readability (spec §验收 line 251: "实例重启后轨迹/分析接口仍可读")
