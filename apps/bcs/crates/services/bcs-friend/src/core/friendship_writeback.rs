@@ -12,6 +12,12 @@
 //!   the collaboration group gate reads, a missing relation mirror is
 //!   reconcilable later.
 //!
+//! The `remove_friendship` relation cleanup is gated on `removed` (unlike
+//! `FriendCore`, which mirrors unconditionally to heal prior mirror
+//! failures): this store only owns relation edges it wrote itself, and the
+//! caller treats remove as idempotent, so nothing is lost by not clobbering
+//! edges this path never owned.
+//!
 //! Env: the repo resolves its own env (`resolve_env()`), the same resolution
 //! the group gate (`bcs-group` `ensure_v1_reachable` → `DbFriendStore`) uses,
 //! so a row written here is always readable by the gate. Do NOT pass
