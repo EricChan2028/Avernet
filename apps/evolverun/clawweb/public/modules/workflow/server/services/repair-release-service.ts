@@ -232,6 +232,7 @@ export function createRepairReleaseService(input: {
       if (!p.stop) throw new RepairBatchError('CAPABILITY_UNAVAILABLE', '宿主未接入安全停止未激活发布的能力');
       const d = (await repo.list<RepairDeployment>(taskId, 'deployment')).find(row => row.id === deploymentId);
       if (!d || d.status === 'succeeded') conflict('此候选已部署或记录不存在，不能停止或隐式回滚');
+      await authorized(actor, d.workflowId, d.target.id);
       if (d.status === 'failed') return d;
       const payload = { actor, deploymentId, requestId };
       const first = await db.transaction(async tx => {

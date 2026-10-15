@@ -80,6 +80,20 @@ AIS Snapshot 必须运行 TaskGuard 的 Workflow Repair 入口，并具备 ClawF
 
 ## HTTP 与服务边界
 
+### 发布适配器归属与配套部署
+
+`createWorkflowRepairRuntime` 的 `execution`（AIS 生成）与 `publication`（目标 Bot 发布）是独立宿主能力。
+公共 `public-bootstrap.ts` 只装配 AIS/Git 生成，未提供目标 Bot 认证与执行适配器时，发布能力明确关闭；不能据此将生成成功视为可部署。
+内部预发/生产由 OCB Host 启动，不使用公共 bootstrap。OCB 的 `server/index.ts` 调用
+`createInternalRepairPublication` 并向共享 runtime 注入 `publication.port`，同时安装签名 claim/report 路由和部署历史 `reviewedPublicationGuard`。
+这部分依赖 OCB 配套分支 `codex/workflow-repair-release-flow` 和 ClawMind 配套发布入口；只部署 Avernet 不会自动获得内部发布能力。
+
+公共 claim 服务的 `authorizeHistory` 只验证凭证与冻结部署身份，不是完整内容授权器。
+内部 Host 的 `reviewedPublicationGuard` 必须在身份检查后，从冻结候选 Git 对象验证完整 Pack tree 与 specDigest，
+重读 YAML 生成 `specJson`，并从同一 Pack manifest 派生 `facadeCommands`，覆盖工作进程上报内容。
+不得直接把仅凭证/元数据检查作为内容授权器；无完整 guard 时，带 expectedActiveDeployNumber 的发布请求拒绝执行。
+OCB 已实现以上内容重建；部署历史事务激活前还会再次调用该 guard，防止停止后旧授权继续激活。
+
 ### 请求诊断
 
 每次修复接口请求生成独立 `X-Repair-Request-Id`，403/500 响应正文也包含 `requestId`，便于浏览器与服务日志关联。

@@ -122,6 +122,20 @@ describe('reviewed candidate publication', () => {
     await expect(f.workbench.retryGeneration('reviewer', f.revision.taskId, { expectedRevision: 2, requestId: 'regen-after-publish' })).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
     expect((await f.workbench.candidates('wf-1')).tasks[0].phase).toBe('published');
   });
+  it('reauthorizes the frozen target before stopping, including idempotent retries', async () => {
+    const f = await setup();
+    const approved = await f.service.confirm('reviewer', f.revision.taskId, f.request);
+    const deployment = await f.service.deploy('reviewer', f.revision.taskId, { revision: 1,
+      expectedApprovalVersion: approved.stateVersion, requestId: 'publish' });
+    const stop = async () => ({ status: 'failed' as const });
+    f.publisher.stop = stop;
+    await expect(f.service.stop('stranger', f.revision.taskId, deployment.id, 'stop')).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
+    expect((await f.service.detail(f.revision.taskId)).deployments[0].status).toBe('running');
+    expect((await f.service.stop('reviewer', f.revision.taskId, deployment.id, 'stop')).status).toBe('failed');
+    f.publisher.targets = async () => [];
+    await expect(f.service.stop('reviewer', f.revision.taskId, deployment.id, 'stop')).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
+  });
+
   it('authorizes HTTP approval and deployment separately from read-only review', async () => {
     const f = await setup();
     const app = express(); app.use(express.json());
