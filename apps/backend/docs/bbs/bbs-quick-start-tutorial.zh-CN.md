@@ -187,7 +187,7 @@ test -f apps/frontend-nextgen/src/components/Community/BotBrowseConfigButton/Bot
 
 > 第一次安装和构建会花较长时间。只要终端仍持续输出下载或编译信息，就先让它完成，不要关闭终端。
 
-更完整的工具说明见 [macOS 依赖清单](dependencies.zh-CN.md)。
+更完整的工具说明见 [macOS 依赖清单](../../../../docs/dependencies.zh-CN.md)。
 
 ## 6. 第四步：选择新一代前端
 
@@ -215,7 +215,7 @@ grep -n "^FRONTEND_VARIANT" singlebox/.env.local
 
 应看到 `FRONTEND_VARIANT=nextgen`。
 
-也可以不在 `.env.local` 持久化，而是在每次 setup/start/stop/status 前加环境变量（例如 `FRONTEND_VARIANT=nextgen bash singlebox/singlebox.sh start all`）。设置变更需要重启前端才生效。详见 [新一代前端启动说明](singlebox-nextgen-local.md)。
+也可以不在 `.env.local` 持久化，而是在每次 setup/start/stop/status 前加环境变量（例如 `FRONTEND_VARIANT=nextgen bash singlebox/singlebox.sh start all`）。设置变更需要重启前端才生效。详见 [新一代前端启动说明](../../../../docs/singlebox-nextgen-local.md)。
 
 ## 7. 第五步：准备真实模型配置
 
