@@ -7,7 +7,7 @@ BCS WebSocket channel plugin for OpenClaw.
 - Registers a `bcs` channel in OpenClaw
 - Connects to a configured BCS WebSocket endpoint with auto reconnect and heartbeat
 - Accepts `chat.send`, `chat.inject`, `chat.abort`, and `chat.history`
-- Routes inbound group messages into the OpenClaw runtime and sends replies back to BCS
+- Runs BCS messages as OpenClaw direct chats and sends replies back to BCS
 - Persists BCS session state for reconnecting
 - Provides BCS group routing and manager-worker task tools:
   - `bcs_route`
@@ -24,6 +24,35 @@ exact `(session_key, run_id)` requested by BCS. Repeated aborts of an already
 terminal run succeed with an empty `aborted_run_ids`; unknown or cross-session
 run IDs are rejected. The plugin requires protocol V3, so the key is the
 canonical BCS Session ID from the original `chat.send`.
+
+`session.delete` requires the canonical `bcs_session_id`; optional
+`bcs_group_id` must match it. Group-only requests are rejected. The plugin
+resolves and deletes only that Session for the current account, including after
+a restart; it never deletes every Session in a Group. See the
+[deletion contract](../../../docs/session-delete-protocol.md).
+
+## 1.0.26 patch: OpenClaw direct-chat sessions
+
+BCS owns group participation, routing and turn selection. The plugin uses
+OpenClaw `direct` peers and `ChatType: direct` for both `chat.send` and
+observe-only `chat.inject`; OpenClaw group activation and mention policies no
+longer decide whether a BCS-dispatched turn should run. The BCS GroupContext
+header remains in the message body, including participants, sender and routing
+instructions, and BCS group/task tools retain their existing Session scope.
+An intentionally silent or empty agent run can still produce `NO_REPLY`.
+
+Each canonical BCS Session ID becomes a synthetic direct peer. The plugin
+locally enforces `session.dmScope: per-account-channel-peer` for BCS processing
+in both the default scope and BCS route-binding overrides without changing the
+host configuration, so accounts and BCS Sessions do not
+share OpenClaw's default main DM history. Send, inject and uncached history
+lookups use the same direct routing rules; reply destinations remain BCS IDs.
+
+Existing OpenClaw `group` transcripts are retained but are not copied into the
+new direct sessions. After upgrading, each BCS Session starts a new OpenClaw
+history. Peer-specific OpenClaw bindings for BCS must use `kind: direct`;
+channel/account bindings continue to apply. Rolling back selects the previous
+group histories again. BCS protocol V3 and persisted BCS history are unchanged.
 
 ## 1.0.25 patch
 
@@ -80,7 +109,7 @@ Select with the flag or env var (flag wins):
 BCN_PLUGIN_SOURCE=npm ./singlebox/singlebox.sh
 
 # pin a version in npm mode (default: latest)
-BCN_PLUGIN_SOURCE=npm BCN_PLUGIN_VERSION=1.0.25 ./singlebox/singlebox.sh
+BCN_PLUGIN_SOURCE=npm BCN_PLUGIN_VERSION=1.0.26 ./singlebox/singlebox.sh
 ```
 
 ## Configure
