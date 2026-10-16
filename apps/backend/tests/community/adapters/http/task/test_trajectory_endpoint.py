@@ -666,6 +666,40 @@ def test_trajectory_dto_passes_through_system_logs():
 
 
 @pytest.mark.unit
+def test_trajectory_display_html_places_action_result_below_action_input():
+    """action_result 展示位置(2026-10-16):不再在卡片头部,而是放在
+    action_input 折叠块的**下方**,带 ev-label 标签 + 红/绿语义 chip。"""
+    ev = TrajectoryEvent(
+        task_id="t1", node_id="n1", action_type="S1_CONTEXT",
+        action_result="completed", attempt=0, gmt_create=1000, gmt_modified=1000,
+        action_input="读取上下文原文",
+    )
+    traj = TaskTrajectory(
+        task_id="t1", gmt_create=1000, gmt_modified=1000,
+        timeline=[ev], analysis=None,
+    )
+    c = _build_client(_StubTrajectoryService(trajectory=traj))
+    r = c.get(
+        "/openapi/v1/collaboration/tasks/trajectory",
+        params={"task_id": "t1", "display": "html"},
+    )
+    assert r.status_code == 200
+    page = r.text
+
+    # ① action_result 的标签行出现在 action_input 折叠块之后
+    input_start = page.index("读取上下文原文")
+    result_line = page.index('<span class="ev-label">action_result</span>')
+    assert input_start < result_line, "action_result 应在 action_input 之下"
+
+    # ② 头部不再有结果 chip 以外的 action_result 出现(ev-head 内不含 chip)
+    head_start = page.index('<div class="ev-head">')
+    head_end = page.index("</div>", head_start)
+    head_html = page[head_start:head_end]
+    assert "completed" not in head_html, "头部不再展示 action_result"
+    assert 'class="chip' not in head_html
+
+
+@pytest.mark.unit
 def test_trajectory_display_html_renders_system_logs():
     """HTML 页在携带嵌挂的主事件下渲染可折叠「系统事件」块:
     默认收起(details 无 open 属性)、点 summary 展开、子事件逐条可见

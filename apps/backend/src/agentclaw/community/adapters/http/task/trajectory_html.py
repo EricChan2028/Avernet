@@ -125,10 +125,10 @@ def _render_event(ev: "object") -> str:
 
     parts: list[str] = [f'<div class="event"{bar}>']
 
-    # 头部:徽章 + 结果 chip + 节点 + 重试序号 + 时间
+    # 头部:徽章 + 节点 + 重试序号 + 时间(2026-10-16 起 action_result 移出头部,
+    # 迁至 action_input 折叠块下方,带字段名标签——见下文 ev-meta 行)
     parts.append('<div class="ev-head">')
     parts.append(_badge_class(action_type, action_result))
-    parts.append(_result_chip(action_result, error_type))
     if node_id:
         parts.append(f'<span class="node" title="node_id">{html.escape(node_id)}</span>')
     if attempt:
@@ -182,6 +182,14 @@ def _render_event(ev: "object") -> str:
         parts.append(f'<summary>{label} · <code>{html.escape(preview)}</code></summary>')
         parts.append(f'<pre>{html.escape(str(action_input))}</pre>')
         parts.append("</details>")
+
+    # action_result(2026-10-16 迁自卡片头部):置于 action_input 折叠块下方,
+    # 带字段名标签;红/绿语义保留(失败词表/错误类型 → 红)。
+    parts.append(
+        '<div class="ev-meta"><span class="ev-label">action_result</span>'
+        + _result_chip(action_result, error_type)
+        + "</div>"
+    )
 
     # 节点产出(读时富化;仅每个 node 的最后一条事件携带,可折叠)
     output = getattr(ev, "output", None)
