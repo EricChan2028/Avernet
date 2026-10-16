@@ -88,6 +88,7 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
         ? createRepairAisExecution(db, new AistudioService(aisConfig), repairConfig.gitStore, repairConfig.snapshotId)
         : undefined;
       const repairRuntime = createWorkflowRepairRuntime(db, {
+        environment: context.environment,
         principal: async request => {
           const identity = resolveAuthMeIdentity(request, { environment: context.environment });
           if (!identity) return null;
@@ -121,7 +122,7 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       }));
       app.use("/api/approval-cards", createInternalApprovalCardsRouter(approvalCardRepo));
 
-      // AutoHeal composition
+      // AutoHeal fallbacks only; the router resolves DB overrides on each save/deploy.
       const autoHealConfig = resolveAutoHealConfig();
       const autoHealGitConfig = {
         remoteUrl: autoHealConfig.clawflowsRemoteUrl,

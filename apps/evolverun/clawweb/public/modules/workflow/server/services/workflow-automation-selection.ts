@@ -2,7 +2,7 @@ import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { MAX_ITEMS, MAX_MODEL_INPUT_BYTES, type RepairItem } from '../contracts/repair-batch.js';
 import { validateWorkflowPatchProposal } from '@avernet/clawevolve/server/services/evolution/contracts';
 import type { IssueAggregationRepository } from '@avernet/clawevolve/server/repositories/issue-aggregation-repository';
-import { selectionConflicts } from '../contracts/repair-selection.js';
+import { proposalMembers, expandProposalCards, proposalConflicts, proposalPending } from '../contracts/repair-proposal.js';
 import { digestRepairJson } from '../contracts/repair-batch.js';
 import type { RepairBaseline } from '../contracts/repair-batch.js';
 import type { AutomationWorkbench } from '../contracts/workflow-automation.js';
@@ -17,8 +17,9 @@ async function legacyAutomaticScope(workbench: AutomationWorkbench, issues: Issu
     if (!page.capabilities.generation) return null;
     if (inputDigest && inputDigest !== page.inputDigest) return null;
     inputDigest = page.inputDigest;
-    for (const item of page.items) {
-      if (item.state !== 'pending' || !item.sourceAvailable || (!Array.isArray(item.context?.diagnoses) || !item.context.diagnoses.length) || JSON.stringify(item).length > 32000) continue;
+    for (const item of expandProposalCards(page.items)) {
+      const { aggregation: _projection, ...raw } = item;
+      if (item.state !== 'pending' || !item.sourceAvailable || (!Array.isArray(item.context?.diagnoses) || !item.context.diagnoses.length) || Buffer.byteLength(JSON.stringify(raw)) > 32000) continue;
       try {
         const proposal = validateWorkflowPatchProposal(item.proposal);
         if (proposal.workflowId !== workflowId || proposal.baseSpecDigest !== baseline.specDigest) continue;
@@ -28,15 +29,23 @@ async function legacyAutomaticScope(workbench: AutomationWorkbench, issues: Issu
     if (candidates.length >= 100) break;
   }
   const shortlist = [...new Map(candidates.slice(0, 100).map(item => [item.itemId, item])).values()];
-  const ambiguous = new Set(selectionConflicts(shortlist).flatMap(conflict => conflict.itemIds));
+  const ambiguous = new Set(proposalConflicts(shortlist).flatMap(conflict => conflict.itemIds));
   const items: RepairInboxItem[] = [];
-  let bytes = 0;
+  const units = new Map<string, RepairInboxItem[]>();
   for (const item of shortlist) {
-    if (ambiguous.has(item.itemId)) continue;
-    const size = Buffer.byteLength(JSON.stringify(item));
-    if (bytes + size > 100000) continue;
-    items.push(item); bytes += size;
-    if (items.length === 5) break;
+    const key = item.aggregation?.id ?? item.itemId;
+    const unit = units.get(key) ?? []; unit.push(item); units.set(key, unit);
+  }
+  let bytes = 0, selectedUnits = 0;
+  for (const unit of units.values()) {
+    const ids = new Set(unit.map(item => item.itemId));
+    if (unit.some(item => ambiguous.has(item.itemId) || item.aggregation?.itemIds.some(id => !ids.has(id))) || proposalPending(unit)) continue;
+    const size = unit.reduce((sum,item) => { const {aggregation:_projection,...raw}=item; return sum + Buffer.byteLength(JSON.stringify(raw)); },0);
+    if (bytes + size > 100000 || items.length + unit.length > MAX_ITEMS) continue;
+    items.push(...unit); bytes += size; selectedUnits++;
+    // Legacy scope selects up to five displayed choices; their original members
+    // remain atomic and still obey the shared original-item and byte limits.
+    if (selectedUnits === 5) break;
   }
   if (!items.length) return null;
   const fingerprint = digestRepairJson({ baseline: baseline.packCommit, items: items.map(item => ({ id: item.itemId,
@@ -77,7 +86,10 @@ export async function selectAutomaticScope(workbench: AutomationWorkbench, issue
     if (!result.capabilities.generation) return null;
     if (inputDigest && inputDigest !== result.inputDigest) throw new Error('SOURCE_CHANGED');
     inputDigest = result.inputDigest;
-    for (const item of result.items.length ? await workbench.items(workflowId, result.items.map(item => item.itemId)) : []) {
+    const projected = expandProposalCards(result.items);
+    const members = [...new Set(result.items.flatMap(card => proposalMembers(card).map(item => item.itemId)))];
+    for (const raw of members.length ? await workbench.items(workflowId, members) : []) {
+      const item = { ...raw, ...(projected.find(p => p.itemId === raw.itemId)?.aggregation ? { aggregation: projected.find(p => p.itemId === raw.itemId)!.aggregation } : {}) };
       let reason: string | null = !item.sourceAvailable ? 'SOURCE_UNAVAILABLE' : null;
       const diagnoses = (Array.isArray(item.context?.diagnoses) ? item.context.diagnoses : []) as Array<Record<string, unknown>>;
       const eligible = diagnoses.filter(d => typeof d.completedAtMs === 'number' && d.completedAtMs <= scope.evidenceCutoffMs
@@ -108,16 +120,25 @@ export async function selectAutomaticScope(workbench: AutomationWorkbench, issue
     if (page >= result.page.totalPages) break;
     page++;
   }
-  const conflicts = new Set(selectionConflicts(items).flatMap(conflict => conflict.itemIds));
+  for (const item of items) if (item.aggregation && item.aggregation.itemIds.some(id => !items.some(i => i.itemId === id))) deferred[item.itemId] = 'PLAN_SCOPE_INCOMPLETE';
+  const conflicts = new Set(proposalConflicts(items).flatMap(conflict => conflict.itemIds));
   const batches: string[][] = [];
   let batch: string[] = [], bytes = 0;
   const maxBytes = MAX_MODEL_INPUT_BYTES - 64 * 1024;
+  const units = new Map<string, RepairInboxItem[]>();
   for (const item of items) {
-    if (conflicts.has(item.itemId)) { deferred[item.itemId] = 'CONFLICT_REQUIRES_CHOICE'; continue; }
-    const size = Buffer.byteLength(JSON.stringify(item));
-    if (size > maxBytes) { deferred[item.itemId] = 'EVIDENCE_REQUIRES_REDUCTION'; continue; }
-    if (batch.length >= MAX_ITEMS || bytes + size > maxBytes) { batches.push(batch); batch = []; bytes = 0; }
-    batch.push(item.itemId); bytes += size;
+    const key=item.aggregation?.id??item.itemId;
+    const unit=units.get(key)??[];unit.push(item);units.set(key,unit);
+  }
+  for (const unit of units.values()) {
+    let reason=unit.map(item=>deferred[item.itemId]).find(Boolean);
+    if (!reason && unit.some(item=>conflicts.has(item.itemId))) reason='CONFLICT_REQUIRES_CHOICE';
+    if (!reason && proposalPending(unit)) reason='PROPOSAL_INTEGRATION_PENDING';
+    const size=unit.reduce((sum,item)=>{const {aggregation:_projection,...raw}=item;return sum+Buffer.byteLength(JSON.stringify(raw));},0);
+    if (!reason && (size>maxBytes || unit.length>MAX_ITEMS)) reason='EVIDENCE_REQUIRES_REDUCTION';
+    if(reason){for(const item of unit)deferred[item.itemId]=reason;continue;}
+    if(batch.length+unit.length>MAX_ITEMS||bytes+size>maxBytes){batches.push(batch);batch=[];bytes=0;}
+    batch.push(...unit.map(item=>item.itemId));bytes+=size;
   }
   if (batch.length) batches.push(batch);
   const selected = items.filter(item => !deferred[item.itemId]);

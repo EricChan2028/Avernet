@@ -4,7 +4,6 @@ import asyncio
 import json
 import threading
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -14,6 +13,9 @@ from src.infra.adapters.in_memory_worker_registry_store import (
 )
 from src.infra.adapters.in_memory_worker_runtime_state_store import (
     InMemoryWorkerRuntimeStateStore,
+)
+from src.infra.public.stores.in_memory_worker_profile_content_store import (
+    InMemoryWorkerProfileContentStore,
 )
 from src.interfaces.api import profile_routes, worker_profile_parity_routes
 from src.interfaces.api.dependencies import fusion_dependencies
@@ -113,7 +115,7 @@ def test_sync_waits_for_index_and_optional_analysis_without_blocking_loop(
     app.state.context = SimpleNamespace(registry={
         "worker_registry_store": InMemoryWorkerRegistryStore(),
         "worker_runtime_state_store": InMemoryWorkerRuntimeStateStore(),
-        "worker_profile_content_store": MagicMock(),
+        "worker_profile_content_store": InMemoryWorkerProfileContentStore(),
     })
     app.include_router(worker_profile_parity_routes.api_router, prefix="/api/v1")
     app.include_router(worker_profile_parity_routes.compat_router, prefix="/v1")

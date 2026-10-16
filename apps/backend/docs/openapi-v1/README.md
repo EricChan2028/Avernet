@@ -1696,6 +1696,49 @@ strict enums (`PROD`/`PRE`, `SSE`/`STREAMABLE_HTTP`). **Preserved fail-open:** a
 marketplace outage still reports the caller as permitted (advisory endpoint; the
 MCP server enforces) — pinned by a test so it reads as a decision, not a bug._
 
+### ✅ acli CLIs on a bot (4 endpoints) · `openapi_v1/bots/acli_clis.py` — **IMPLEMENTED (2026-10-15)**
+Lets a caller manage the command-line tools a bot runs from the internal acli
+market. **AgentPass is the only record** of what a bot has; **the acli market is
+the only catalog** (no platform list, so a newly published tool needs no
+release). Spec: `apps/backend/specs/2026-10-15-openapi-v1-acli-clis/`.
+
+| Method | Path | Bar | Purpose |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/{bot_id}/clis` | MEMBER | Every CLI in the bot's grant: `cli_code`, `cli_name`, `cli_desc`, `identity_mode`, `default` |
+| GET | `/openapi/v1/bots/market/clis` | Any caller | Search the acli market (`keyword`, `page_no`, `page_size`). Not tied to a bot: the backend calls the market API at the configured `acli_market.search_url`; with none configured the answer is `501`, and an unreachable market is `502`. |
+| POST | `/openapi/v1/bots/{bot_id}/clis` | OWNER + edit lock | `{cli_code}` (the **market name**, e.g. `deepinsight-cli`, not `di`): install, then grant as `owner` |
+| DELETE | `/openapi/v1/bots/{bot_id}/clis/{cli_code}` | OWNER + edit lock | Revoke, then uninstall |
+| PATCH | `/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type` | OWNER + edit lock | Unchanged: switch `owner`/`caller` |
+
+**All-or-nothing.** Add installs first and grants second; a failed grant
+uninstalls again. Remove revokes first and uninstalls second; a failed uninstall
+re-grants with the same identity. When the undo fails too — or an uninstall's
+answer never arrives — the call answers `500` with `data.state` naming where the
+bot was left: `installed_not_granted`, `install_unknown_not_granted`,
+`grant_unknown_installed`, `revoked_still_installed`, `revoked_install_unknown`,
+or `revoke_unknown_installed`. An install whose answer never arrives is
+uninstalled again before the error is returned; a Passport write that reports an
+error but landed counts as done.
+
+| Status | When | `data` |
+|---|---|---|
+| 404 | Removing a CLI the bot does not have | — |
+| 409 | Already granted; removing a default CLI; no running container | `{code, reason}` for the container case |
+| 422 | Passing an alias (`di`) | `{market_name}` |
+| 422 | acli rejected the request (usually an unknown name) | `{code, reason}` |
+| 423 | Edit lock not held | — |
+| 501 | The bot's engine has no acli (only openclaw and claude_code do) | — |
+| 502 | acli or the container hop failed; the Passport write failed or did not persist | `{code, reason}` for acli |
+
+Where tools are installed is the engine's choice (`/home/admin/.agentclaw/bin`
+in both engines), on persisted storage and on the engine's `PATH`, so tools
+survive restarts and need none; the platform names only the tool. A removed
+CLI's caller/owner choice is kept, so re-adding it restores the identity the
+owner last set. Default CLIs are re-granted at every start and cannot be
+removed. The open-source image ships no acli: there, add, remove and search
+answer `502` with `code: acli_unavailable`.
+Adds and removes on one bot run one at a time within a backend instance.
+
 ### 🟩 lucas-xzp · P1 — resources (7 endpoints) · `openapi_v1/resources/router.py`
 The bot's workspace files and folders; storage location never exposed. Every
 operation is addressed by a workspace-relative `path` query parameter; the bot
@@ -1978,6 +2021,11 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 
 ## Changelog (append a dated line whenever you move the board)
 
+- **2026-10-15** — **acli CLIs on a bot.** `GET`/`POST /openapi/v1/bots/{bot_id}/clis`,
+  `GET /openapi/v1/bots/market/clis` and `DELETE …/clis/{cli_code}`: search the acli market,
+  add (install, then grant) and remove (revoke, then uninstall) a bot's tools,
+  each all-or-nothing with a named state when a rollback fails. AgentPass stays
+  the only record; the acli market is the only catalog.
 - **2026-08-23** — **The seam gets its adopters.** 60 `ServiceChecked` rows and
   8 `INHERITED` twins become `Check`, so `ServiceChecked` falls from 92 to 25
   and `Check` rises from 0 to 82; `scaffolding_row_count()` goes 181 → 99.
