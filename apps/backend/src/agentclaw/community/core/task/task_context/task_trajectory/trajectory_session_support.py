@@ -141,8 +141,9 @@ class TrajectorySessionSupport:
             # ②研判原料:仅未结束节点喂模型(msgs 原文)
             if state not in {s.value for s in _UNFINISHED}:
                 continue
-            if not excerpt:
-                continue
+            # NB:此处 excerpt 必非空——缓存命中分支以非空为前提,fetched 分支的
+            # 空 excerpt 已在其紧邻的 ``if not excerpt: continue`` 截走(原双重
+            # 防御中的后一处恒不可达,已删,保持 100% 覆盖诚实)。
             briefs.append({
                 "node_id": node.node_id,
                 "node_status": str(state),

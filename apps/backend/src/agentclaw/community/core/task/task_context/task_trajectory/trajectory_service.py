@@ -121,6 +121,21 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("task.trajectory")
 
+
+def _display_run_mode(node) -> "str | None":
+    """轨迹展示用的真实模态(2026-10-16 规则):
+
+    ``run_mode=bbs`` **短路直判 bbs**——BBS 节点的 ``extend_props.actual_run_mode``
+    可能残留单 bot 交通过渡值,展示口径一律以图的 bbs 为准;其余模态沿用
+    ``effective_run_mode``(``actual_run_mode`` 优先,缺失回退 ``run_mode``)。
+
+    NB:刻意**不改**全局 ``effective_run_mode``——它还驱动 harness 的 BBS 租约
+    语义,轨迹展示规则单独收口在此。"""
+    runtime = getattr(node, "run_info", None)
+    if runtime is not None and str(runtime.run_mode or "").strip() == "bbs":
+        return "bbs"
+    return effective_run_mode(node)
+
 # 会话明细探测:取最近 N 条 msg(条数上限),内容**不截断**(去掉了单条/总量
 # 字符预算,按需求保留会话原文;N 经 TrajectoryAnalysisConfig.
 # running_session_message_limit 配置,默认 60)。
@@ -613,9 +628,11 @@ class TaskTrajectoryService(
             out = getattr(node.run_info, "output", None)
             if isinstance(out, dict) and out:
                 outputs[node.node_id] = out
-            # 真实模态:actual_run_mode 优先(执行时交通覆盖),缺失回退 run_mode;
+            # 真实模态(2026-10-16):run_mode=bbs 短路直判 bbs,不看
+            # extend_props.actual_run_mode(其可能残留单 bot 过渡值);其余沿用
+            # effective_run_mode(actual_run_mode 优先,缺失回退 run_mode);
             # 两者皆缺 → 不挂(缺字段=无信号)。
-            mode = effective_run_mode(node)
+            mode = _display_run_mode(node)
             if mode:
                 run_modes[node.node_id] = mode
             if node.node_id == trajectory.task_id:

@@ -18,6 +18,7 @@ Authoritative: spec REQ-8 + 决策 #10/#13/#14.
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from dataclasses import asdict
 
 import pytest
@@ -1232,12 +1233,16 @@ async def test_get_trajectory_attaches_actual_run_mode_to_last_event():
                   extend_props={"actual_run_mode": "single_bot"}),
         _FakeNode(node_id="n2", status=Status.DONE, run_mode="bbs"),
         _FakeNode(node_id="n3", status=Status.PENDING),  # 两种模态都缺 → 不挂
+        # 2026-10-16 规则:run_mode=bbs 短路——纵有 actual_run_mode 也判 bbs
+        _FakeNode(node_id="n4", status=Status.RUNNING, run_mode="bbs",
+                  extend_props={"actual_run_mode": "single_bot"}),
     ])
     timeline = [
         _make_event(node_id="n1", action_type=TrajectoryActionType.PLAN, gmt_create=1000),
         _make_event(node_id="n1", action_type=TrajectoryActionType.EXECUTE, gmt_create=2000),
         _make_event(node_id="n2", action_type=TrajectoryActionType.PLAN, gmt_create=3000),
         _make_event(node_id="n3", action_type=TrajectoryActionType.PLAN, gmt_create=4000),
+        _make_event(node_id="n4", action_type=TrajectoryActionType.EXECUTE, gmt_create=5000),
     ]
     traj = _make_trajectory(task_id="t1", timeline=timeline)
     svc = TaskTrajectoryService(_FakeAssembler(traj), _FakeRepo(), _FakeAnalyzer(), None,
@@ -1254,6 +1259,10 @@ async def test_get_trajectory_attaches_actual_run_mode_to_last_event():
     assert n2_last.actual_run_mode == "bbs", "actual_run_mode 缺失回退 run_mode"
     n3_last = [e for e in result.timeline if e.node_id == "n3"][-1]
     assert n3_last.actual_run_mode is None, "两种模态都缺 → 不挂(缺字段=无信号)"
+    n4_last = [e for e in result.timeline if e.node_id == "n4"][-1]
+    assert n4_last.actual_run_mode == "bbs", (
+        "run_mode=bbs 短路:不再读 extend_props.actual_run_mode(即便它写着 single_bot)"
+    )
 
 
 @pytest.mark.asyncio
@@ -1745,3 +1754,295 @@ async def test_live_fetch_honors_running_session_message_limit_config():
 
     assert [c[1] for c in bcs.calls] == [7]
     assert [c[1] for c in openapi.calls] == [7]
+
+
+# ---------------------------------------------------------------------------
+# 覆盖率专项:trajectory_session_support 防御分支 + _attach_submit_goal 全路径
+# ---------------------------------------------------------------------------
+
+
+def _support_svc(graph=None, bcs=None, tokens=None, openapi_bot=None, config=None):
+    return TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory()), _FakeRepo(), _FakeAnalyzer(), config,
+        graph=graph, bcs=bcs, bcs_bot_tokens=tokens, openapi_bot=openapi_bot,
+    )
+
+
+def test_resolve_msg_limit_invalid_config_falls_back():
+    """``running_session_message_limit`` 配置值非法 → 回落默认(60)。"""
+    svc = _support_svc(config=SimpleNamespace(running_session_message_limit="bad"))
+    assert svc._resolve_msg_limit() == 60
+
+
+def test_node_elapsed_ms_defensive_bad_start_time():
+    """start_time 非数字 → elapsed 0(防御性读,不抛)。"""
+    node = SimpleNamespace(run_info=SimpleNamespace(start_time="not-a-number"))
+    assert TaskTrajectoryService._node_elapsed_ms(node, 1_790_000_000_000) == 0
+
+
+def test_last_event_ext_by_node_corrupt_or_non_dict_ext():
+    """records 的末位 ext_info 损坏 JSON / 非法形态 → 该节点回退空 dict。"""
+    svc = _support_svc()
+    records = [
+        _make_record(node_id="n1", action_type="execute", attempt=0,
+                     gmt_create_ms=1000, rec_id=1, ext_info="{corrupt-json"),
+        _make_record(node_id="n2", action_type="execute", attempt=0,
+                     gmt_create_ms=2000, rec_id=2, ext_info='"just-a-string"'),
+    ]
+    last = svc._last_event_ext_by_node(records)
+    assert last == {"n1": {}, "n2": {}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_collect_session_briefs_cached_hit_skips_fetch_and_merge():
+    """force=False 且末位事件 ext_info 已带 session_msgs → 缓存命中:零实拉
+    (bcs 不被调)、零合并,brief 直接用缓存内容。"""
+    msgs = [{"role": "user", "content": "cached"}]
+    records = [
+        _make_record(node_id="n1", action_type="execute", attempt=0,
+                     gmt_create_ms=1000, rec_id=1,
+                     ext_info=json.dumps({"session_msgs": msgs}, ensure_ascii=False)),
+    ]
+    bcs = _FakeBcs(messages_by_session={"sess-1": msgs})
+    graph = _FakeGraph([
+        _FakeNode(node_id="n1", status=Status.RUNNING,
+                  extend_props={"session_id": "sess-1"}, start_time=100),
+    ])
+    svc = _support_svc(graph=graph, bcs=bcs)
+
+    briefs, fresh = await svc._collect_session_briefs("t1", records, force_analysis=False)
+
+    assert bcs.calls == [], "缓存命中不应实拉"
+    assert fresh == {}
+    assert briefs is not None and briefs[0]["node_id"] == "n1"
+    assert briefs[0]["messages"] == msgs
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_collect_session_briefs_merge_failure_still_logs_and_fetch_failure_skips():
+    """① ext_info 合并失败(无事件行)→ INFO 降级不抛;② 通道拉取失败
+    (bcs raise)→ 该节点跳过 brief(excerpt 空 continue)。"""
+    class _MergeFalseRepo(_FakeRepo):
+        def merge_last_event_ext_info(self, task_id, node_id, key, value):
+            return False
+
+    msgs = [{"role": "user", "content": "hi"}]
+    graph = _FakeGraph([
+        _FakeNode(node_id="n1", status=Status.RUNNING,
+                  extend_props={"session_id": "sess-1"}, start_time=100),
+    ])
+    svc = TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory()), _MergeFalseRepo(), _FakeAnalyzer(), None,
+        graph=graph, bcs=_FakeBcs(messages_by_session={"sess-1": msgs}),
+    )
+    briefs, fresh = await svc._collect_session_briefs("t1", [], force_analysis=False)
+    assert briefs is not None and fresh == {"n1": msgs}, "合并失败仅 INFO,不影响 brief"
+
+    svc._bcs = _FakeBcs(raise_exc=RuntimeError("bcs down"))
+    briefs2, fresh2 = await svc._collect_session_briefs("t1", [], force_analysis=False)
+    assert briefs2 is None, "拉取失败无 excerpt → 无 brief"
+    assert fresh2 == {}
+
+
+def test_session_bearing_nodes_graph_failure_returns_none():
+    """图读失败 → 探测整体降级(None)。"""
+    class _BoomGraph:
+        def query_task_dashboard(self, task_id, node_id=None):
+            raise RuntimeError("graph down")
+    svc = _support_svc(graph=_BoomGraph())
+    assert svc._session_bearing_nodes("t1") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_fetch_engine_channel_unwired_returns_none():
+    """引擎会话键但 OpenApiBotPort 未接线 → None(WARNING 降级)。"""
+    svc = _support_svc()  # openapi_bot=None
+    node = SimpleNamespace(
+        node_id="n1",
+        run_info=SimpleNamespace(extend_props={
+            "session_id": "agent:main:session:abc:user:1", "assignee_owner_id": "7",
+        }, assignee="bot-x"),
+    )
+    assert await svc._fetch_node_session_msgs("t1", node, limit=60) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_fetch_engine_channel_ok_and_bcs_skips_non_dict_msgs():
+    """引擎通道正常拉取;BCS 通道混入非 dict 消息被防御跳过。"""
+    msgs = [{"role": "user", "content": "引擎原文"}]
+    svc = _support_svc(
+        openapi_bot=_FakeOpenApiBot(messages_by_session={
+            "agent:main:session:abc:user:1": msgs}))
+    engine_node = SimpleNamespace(
+        node_id="n1",
+        run_info=SimpleNamespace(extend_props={
+            "session_id": "agent:main:session:abc:user:1",
+            "assignee_owner_id": "7",
+        }, assignee="bot-x"),
+    )
+    out = await svc._fetch_node_session_msgs("t1", engine_node, limit=60)
+    assert out == [{"role": "user", "content": "引擎原文"}]
+
+    bcs = _FakeBcs(messages_by_session={"sess-1": ["junk", None, {"role": "a", "content": "ok"}]})
+    svc2 = _support_svc(bcs=bcs)
+    bcs_node = _FakeNode(node_id="n2", status=Status.RUNNING,
+                         extend_props={"session_id": "sess-1"})
+    out2 = await svc2._fetch_node_session_msgs("t1", bcs_node, limit=60)
+    assert out2 == [{"role": "a", "content": "ok"}], "非 dict 消息跳过"
+
+
+def test_holder_bearer_token_defensive_paths():
+    """持棒 token 解析:无持有者 → None;provider 异常 → None。"""
+    svc = _support_svc(tokens=_FakeTokenProvider(tokens={"bot-x:7": "tok"}))
+    node = _FakeNode(node_id="n1", status=Status.RUNNING,
+                     extend_props={"session_id": "s"}, assignee=None)
+    assert svc._holder_bearer_token(node) is None
+
+    svc._bcs_bot_tokens = _FakeTokenProvider(raise_exc=RuntimeError("provider down"))
+    node2 = _FakeNode(node_id="n2", status=Status.RUNNING,
+                      extend_props={"session_id": "s", "driver_bot_id": "bot-x"},
+                      assignee="bot-x")
+    assert svc._holder_bearer_token(node2) is None
+
+
+def test_safe_list_records_failure_returns_none():
+    """事件行读取失败 → None(富化降级)。"""
+    class _BoomRepo(_FakeRepo):
+        def list_events_by_task(self, task_id):
+            raise RuntimeError("db down")
+    svc = TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory()), _BoomRepo(), _FakeAnalyzer(), None)
+    assert svc._safe_list_records("t1") is None
+
+
+def test_attach_session_msgs_degrades_on_none_records_and_bad_fresh():
+    """records=None(读失败)→ 空映射;fresh 值非 list → 过滤;二者皆不影响轨迹。"""
+    svc = _support_svc()
+    timeline = [
+        _make_event(node_id="n1", gmt_create=1000, action_type=TrajectoryActionType.EXECUTE),
+    ]
+    traj = _make_trajectory(task_id="t1", timeline=timeline)
+    svc._attach_session_msgs(traj, None, {"n1": "not-a-list"})
+    assert timeline[0].session_msgs is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_attach_submit_goal_variants():
+    """根任务目标富化四态:①有 goal 且首事件 submit → 替换为可读目标;
+    ②首事件非 submit → 保持原值;③root spec 无 goal → 保持;④空时间线 no-op。"""
+    def _root_node(spec):
+        return _FakeNode(node_id="t1", status=Status.DONE, task_spec=spec)
+
+    goal = SimpleNamespace(objective="完成市场分析",
+                           acceptances=[SimpleNamespace(description="给结论")])
+    root_ok = _root_node(SimpleNamespace(goal=goal))
+
+    # ① 正向替换
+    graph = _FakeGraph([root_ok])
+    traj = _make_trajectory(task_id="t1", timeline=[
+        _make_event(node_id="t1", action_type=TrajectoryActionType.SUBMIT,
+                    action_result="success", gmt_create=100,
+                    action_input="digest-xyz"),
+    ])
+    svc = _support_svc(graph=graph)
+    svc._attach_submit_goal(traj, root_ok.task_spec)
+    assert "目标: 完成市场分析" in traj.timeline[0].action_input
+    assert "验收: 给结论" in traj.timeline[0].action_input
+
+    # ② 首事件非 submit → 不动
+    traj2 = _make_trajectory(task_id="t1", timeline=[
+        _make_event(node_id="t1", attempt=0, gmt_create=100,
+                    action_type=TrajectoryActionType.PLAN, action_input="digest-xyz"),
+    ])
+    svc._attach_submit_goal(traj2, root_ok.task_spec)
+    assert traj2.timeline[0].action_input == "digest-xyz"
+
+    # ③ root spec 无 goal → 不动
+    root_no_goal = _root_node(SimpleNamespace(goal=None))
+    svc2 = _support_svc(graph=_FakeGraph([root_no_goal]))
+    traj3 = _make_trajectory(task_id="t1", timeline=[
+        _make_event(node_id="t1", action_type=TrajectoryActionType.SUBMIT,
+                    action_result="success", gmt_create=100, action_input="digest-xyz"),
+    ])
+    svc2._attach_submit_goal(traj3, root_no_goal.task_spec)
+    assert traj3.timeline[0].action_input == "digest-xyz"
+
+    # ④ 空时间线 no-op
+    svc._attach_submit_goal(_make_trajectory(task_id="t1"), root_ok.task_spec)
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_collect_session_briefs_skips_non_string_session_id():
+    """节点 extend_props.session_id 非字符串(如实数)→ brief 循环防御跳过。"""
+    graph = _FakeGraph([
+        _FakeNode(node_id="n1", status=Status.RUNNING,
+                  extend_props={"session_id": 123}),
+    ])
+    svc = _support_svc(graph=graph, bcs=_FakeBcs())
+    briefs, fresh = await svc._collect_session_briefs("t1", [], force_analysis=False)
+    assert briefs is None
+    assert fresh == {}
+
+
+def test_attach_submit_goal_swallows_root_spec_errors():
+    """root spec 的 goal 访问抛异常 → 整体 except 吞掉,保持原 digest(决策 #14)。"""
+    class _BoomSpec:
+        @property
+        def goal(self):  # pragma: no cover - 演示属性访问炸
+            raise RuntimeError("spec corrupted")
+
+    svc = _support_svc()
+    traj = _make_trajectory(task_id="t1", timeline=[
+        _make_event(node_id="t1", action_type=TrajectoryActionType.SUBMIT,
+                    action_result="success", gmt_create=100, action_input="digest-xyz"),
+    ])
+    svc._attach_submit_goal(traj, _BoomSpec())
+    assert traj.timeline[0].action_input == "digest-xyz", "异常防守:富化失败保持原文"
+
+
+def test_attach_session_msgs_tolerates_corrupt_record_ext():
+    """attach 侧读 records 的 ext_info 损坏 → 空映射降级,不抛。"""
+    svc = _support_svc()
+    records = [
+        _make_record(node_id="n1", action_type="execute", attempt=0,
+                     gmt_create_ms=1000, rec_id=1, ext_info="{corrupt"),
+    ]
+    timeline = [
+        _make_event(node_id="n1", gmt_create=1000, action_type=TrajectoryActionType.EXECUTE),
+    ]
+    traj = _make_trajectory(task_id="t1", timeline=timeline)
+    svc._attach_session_msgs(traj, records, {"n1": []})
+    assert timeline[0].session_msgs is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_fetch_node_session_msgs_ignores_non_string_sid():
+    """fetch 入口:extend_props.session_id 非字符串 → 防御性 None。"""
+    svc = _support_svc(bcs=_FakeBcs())
+    node = SimpleNamespace(node_id="n1", run_info=SimpleNamespace(
+        extend_props={"session_id": 123}, assignee="bot-1"))
+    assert await svc._fetch_node_session_msgs("t1", node, limit=60) is None
+
+
+def test_attach_session_msgs_swallows_records_iteration_boom():
+    """records 自身迭代炸(读失败的特殊形态)→ 外层 except 空映射降级,不抛。"""
+    class _BoomRecords:
+        def __iter__(self):
+            raise RuntimeError("records unreadable")
+
+    svc = _support_svc()
+    timeline = [
+        _make_event(node_id="n1", gmt_create=1000, action_type=TrajectoryActionType.EXECUTE),
+    ]
+    traj = _make_trajectory(task_id="t1", timeline=timeline)
+    svc._attach_session_msgs(traj, _BoomRecords(), {"n1": [{"role": "u", "content": "fresh"}]})
+    assert timeline[0].session_msgs == [{"role": "u", "content": "fresh"}], (
+        "records 降级不掩盖 fresh 挂载"
+    )

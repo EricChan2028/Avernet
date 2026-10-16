@@ -61,10 +61,11 @@ class TrajectoryEventDTO(BaseModel):
     )
     actual_run_mode: str | None = Field(
         None,
-        description="子任务真实执行模态(single_bot|coop_group|bbs;读时经 "
-                    "effective_run_mode 定——task_node_run_info.extend_props."
-                    "actual_run_mode 优先,缺失回退 run_mode;仅该 node 在 timeline "
-                    "中的最后一条事件携带,无模态为 None)",
+        description="子任务真实执行模态(single_bot|coop_group|bbs;读时规则(2026-10-16):"
+                    "task_node_run_info.run_mode=bbs 时直判 bbs(不看 extend_props."
+                    "actual_run_mode);其余模态 extend_props.actual_run_mode 优先、"
+                    "缺失回退 run_mode;仅该 node 在 timeline 中的最后一条事件携带,"
+                    "无模态为 None)",
     )
     system_logs: "list[TrajectoryEventDTO] | None" = Field(
         None,
