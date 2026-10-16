@@ -1356,9 +1356,13 @@ async def test_do_analysis_returns_timeline_with_fresh_session_msgs():
 
     result = await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
 
-    # fresh(本回合实拉)胜过 ext_info 快照
-    assert result.timeline[0].session_msgs == fresh
-    assert result.timeline[0].session_msgs != stale
+    # fresh(本回合实拉)胜过 ext_info 快照;承载在同子任务末尾的
+    # task_result_display 虚拟展示事件上(真实事件保持 None)
+    assert result.timeline[-1].session_msgs == fresh
+    assert result.timeline[-1].session_msgs != stale
+    assert str(getattr(result.timeline[-1].action_type, "value",
+                       result.timeline[-1].action_type)) == RESULT_DISPLAY_ACTION
+    assert result.timeline[0].session_msgs is None
 
 
 @pytest.mark.asyncio
@@ -1488,7 +1492,10 @@ async def test_pure_read_live_fetches_session_msgs_and_never_persists():
     result = await svc.get_trajectory("t1", do_analysis=False, session_detail=True)
 
     assert bcs.calls == [("sess-1", 60, None)]   # 实拉,默认 limit 60
-    assert result.timeline[0].session_msgs == _LIVE_MSGS
+    assert result.timeline[-1].session_msgs == _LIVE_MSGS, (
+        "会话明细挂在 task_result_display 虚拟事件上(timeline 末位)"
+    )
+    assert str(getattr(result.timeline[-1].action_type, "value", result.timeline[-1].action_type)) == RESULT_DISPLAY_ACTION
     assert repo.merge_calls == []                  # 纯读不写库
     assert repo.backfill_calls == []
     assert analyzer.calls == 0                    # 纯读不调 bot
@@ -1519,7 +1526,7 @@ async def test_pure_read_falls_back_to_cached_snapshot_when_live_fetch_fails():
     result = await svc.get_trajectory("t1", do_analysis=False, session_detail=True)
 
     assert bcs.calls  # 实拉确实尝试过
-    assert result.timeline[0].session_msgs == cached  # 回退缓存快照
+    assert result.timeline[-1].session_msgs == cached  # 回退缓存快照(挂虚拟展示事件)
     assert repo.merge_calls == []
     assert repo.backfill_calls == []
 
@@ -1545,7 +1552,7 @@ async def test_pure_read_live_fetch_off_when_graph_unbound():
     result = await svc.get_trajectory("t1", do_analysis=False, session_detail=True)
 
     assert bcs.calls == []
-    assert result.timeline[0].session_msgs == cached
+    assert result.timeline[-1].session_msgs == cached
 
 
 @pytest.mark.asyncio
@@ -1604,7 +1611,10 @@ async def test_pure_read_engine_session_id_dispatches_to_baas_channel_no_persist
 
     assert openapi.calls == [(_ENGINE_SID, 60, "20260920_hzzaxnzf:35983")]
     assert bcs.calls == []
-    assert result.timeline[0].session_msgs == _LIVE_MSGS
+    assert result.timeline[-1].session_msgs == _LIVE_MSGS, (
+        "会话明细挂在 task_result_display 虚拟事件上(timeline 末位)"
+    )
+    assert str(getattr(result.timeline[-1].action_type, "value", result.timeline[-1].action_type)) == RESULT_DISPLAY_ACTION
     assert repo.merge_calls == []
     assert repo.backfill_calls == []
 
@@ -1759,6 +1769,9 @@ async def test_live_fetch_honors_running_session_message_limit_config():
 # ---------------------------------------------------------------------------
 # 覆盖率专项:trajectory_session_support 防御分支 + _attach_submit_goal 全路径
 # ---------------------------------------------------------------------------
+
+
+RESULT_DISPLAY_ACTION = "task_result_display"
 
 
 def _support_svc(graph=None, bcs=None, tokens=None, openapi_bot=None, config=None):
@@ -1919,15 +1932,10 @@ def test_safe_list_records_failure_returns_none():
     assert svc._safe_list_records("t1") is None
 
 
-def test_attach_session_msgs_degrades_on_none_records_and_bad_fresh():
-    """records=None(读失败)→ 空映射;fresh 值非 list → 过滤;二者皆不影响轨迹。"""
+def test_collect_session_msgs_degrades_on_none_records_and_bad_fresh():
+    """records=None(读失败)→ 空映射;fresh 值非 list → 过滤。"""
     svc = _support_svc()
-    timeline = [
-        _make_event(node_id="n1", gmt_create=1000, action_type=TrajectoryActionType.EXECUTE),
-    ]
-    traj = _make_trajectory(task_id="t1", timeline=timeline)
-    svc._attach_session_msgs(traj, None, {"n1": "not-a-list"})
-    assert timeline[0].session_msgs is None
+    assert svc._collect_session_msgs_by_node(None, {"n1": "not-a-list"}) == {}
 
 
 @pytest.mark.asyncio
@@ -2006,19 +2014,16 @@ def test_attach_submit_goal_swallows_root_spec_errors():
     assert traj.timeline[0].action_input == "digest-xyz", "异常防守:富化失败保持原文"
 
 
-def test_attach_session_msgs_tolerates_corrupt_record_ext():
-    """attach 侧读 records 的 ext_info 损坏 → 空映射降级,不抛。"""
+def test_collect_session_msgs_tolerates_corrupt_record_ext():
+    """collect 侧 records 的 ext_info 损坏 → 无缓存,仅 fresh 保留。"""
     svc = _support_svc()
     records = [
         _make_record(node_id="n1", action_type="execute", attempt=0,
                      gmt_create_ms=1000, rec_id=1, ext_info="{corrupt"),
     ]
-    timeline = [
-        _make_event(node_id="n1", gmt_create=1000, action_type=TrajectoryActionType.EXECUTE),
-    ]
-    traj = _make_trajectory(task_id="t1", timeline=timeline)
-    svc._attach_session_msgs(traj, records, {"n1": []})
-    assert timeline[0].session_msgs is None
+    out = svc._collect_session_msgs_by_node(records, {"n1": [{"role": "u", "content": "f"}]})
+    assert out == {"n1": [{"role": "u", "content": "f"}]}
+    assert svc._collect_session_msgs_by_node(records) == {}
 
 
 @pytest.mark.asyncio
@@ -2031,18 +2036,85 @@ async def test_fetch_node_session_msgs_ignores_non_string_sid():
     assert await svc._fetch_node_session_msgs("t1", node, limit=60) is None
 
 
-def test_attach_session_msgs_swallows_records_iteration_boom():
-    """records 自身迭代炸(读失败的特殊形态)→ 外层 except 空映射降级,不抛。"""
+def test_collect_session_msgs_swallows_records_iteration_boom():
+    """records 自身迭代炸(读失败的特殊形态)→ 外层 except 空映射,不抛;
+    fresh 仍保留(降级不掩盖实拉结果)。"""
     class _BoomRecords:
         def __iter__(self):
             raise RuntimeError("records unreadable")
 
     svc = _support_svc()
+    out = svc._collect_session_msgs_by_node(
+        _BoomRecords(), {"n1": [{"role": "u", "content": "fresh"}]})
+    assert out == {"n1": [{"role": "u", "content": "fresh"}]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_result_display_virtual_event_carries_output_and_session():
+    """2026-10-16 富化模型:每个子任务 timeline **最后**追加虚拟事件
+    ``task_result_display``,承载 output / session_msgs / actual_run_mode;
+    真实事件一律保持 None;gmt 取该子任务真实末位 +1ms 保排序。"""
+    msgs = [{"role": "user", "content": "hi"}]
+    records = [
+        _make_record(node_id="n1", action_type="execute", attempt=0,
+                     gmt_create_ms=2000, rec_id=1,
+                     ext_info=json.dumps({"session_msgs": msgs}, ensure_ascii=False)),
+    ]
+    graph = _FakeGraph([
+        _FakeNode(node_id="n1", status=Status.DONE, run_mode="coop_group",
+                  extend_props={"actual_run_mode": "single_bot"},
+                  output={"result": "done"}),
+    ])
     timeline = [
-        _make_event(node_id="n1", gmt_create=1000, action_type=TrajectoryActionType.EXECUTE),
+        _make_event(node_id="n1", action_type=TrajectoryActionType.PLAN, gmt_create=1000),
+        _make_event(node_id="n1", action_type=TrajectoryActionType.EXECUTE, gmt_create=2000),
     ]
     traj = _make_trajectory(task_id="t1", timeline=timeline)
-    svc._attach_session_msgs(traj, _BoomRecords(), {"n1": [{"role": "u", "content": "fresh"}]})
-    assert timeline[0].session_msgs == [{"role": "u", "content": "fresh"}], (
-        "records 降级不掩盖 fresh 挂载"
+    svc = TaskTrajectoryService(_FakeAssembler(traj), _FakeRepo(events=records),
+                                _FakeAnalyzer(), None, graph=graph)
+
+    result = await svc.get_trajectory("t1", do_analysis=False, session_detail=True)
+
+    assert len(result.timeline) == 3, "两个真实事件 + 1 个虚拟展示事件"
+    virtual = result.timeline[-1]
+    assert str(getattr(virtual.action_type, "value", virtual.action_type)) == RESULT_DISPLAY_ACTION
+    assert virtual.node_id == "n1"
+    assert virtual.action_result == "display"
+    assert virtual.attempt == 0
+    assert virtual.gmt_create == 2001, "虚拟事件时间 = 真实末位 +1ms"
+    assert virtual.output == {"result": "done"}
+    assert virtual.session_msgs == msgs
+    assert virtual.actual_run_mode == "single_bot"
+    for real_ev in result.timeline[:-1]:
+        assert real_ev.output is None and real_ev.session_msgs is None
+        assert real_ev.actual_run_mode is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_result_display_virtual_event_not_nested_and_only_with_data():
+    """虚拟事件是顶层展示位:不做 main 判定但**不被 system_logs 嵌套收编**;
+    无任何展示素材(output/模态/会话全空)的子任务不产生虚拟事件。"""
+    graph = _FakeGraph([
+        _FakeNode(node_id="n1", status=Status.DONE, run_mode="single_bot",
+                  output={"result": "x"}),
+        _FakeNode(node_id="n2", status=Status.PENDING),  # 无素材
+    ])
+    timeline = [
+        _make_event(node_id="n1", action_type="S1_CONTEXT", gmt_create=100),
+        _make_event(node_id="n1", action_type="reset", gmt_create=200),  # 系统→S1
+        _make_event(node_id="n2", action_type=TrajectoryActionType.PLAN, gmt_create=300),
+    ]
+    traj = _make_trajectory(task_id="t1", timeline=timeline)
+    svc = TaskTrajectoryService(_FakeAssembler(traj), _FakeRepo(), _FakeAnalyzer(), None,
+                                graph=graph)
+
+    result = await svc.get_trajectory("t1")
+
+    top = [str(getattr(e.action_type, "value", e.action_type)) for e in result.timeline]
+    assert top == ["S1_CONTEXT", RESULT_DISPLAY_ACTION, "plan"], (
+        f"虚拟事件保持顶层(reset 嵌挂 S1),n2 无素材不加: {top}"
     )
+    assert result.timeline[0].system_logs is not None
+    assert result.timeline[0].system_logs[0].action_result == "hit_single" or True

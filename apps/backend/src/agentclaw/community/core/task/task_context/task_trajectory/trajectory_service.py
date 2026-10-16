@@ -169,11 +169,19 @@ def _is_engine_session_id(session_id: str) -> bool:
 # S4A_EXECUTION、S5A_REFRESH_GAPS);组装序即 id 正序(仓储 ORDER BY gmt_create,id)。
 _MAIN_EVENT_RE = re.compile(r"^S\d+")
 
+# 子任务结果展示虚拟事件(2026-10-16):读时追加在每个子任务 timeline 末尾,
+# 承载 output / session_msgs / actual_run_mode——不落库、无 id,顶层展示位
+# (不参与 system_logs 嵌套的子事件归并)。
+_RESULT_DISPLAY_ACTION = "task_result_display"
+_RESULT_DISPLAY_RESULT = "display"
+
 
 def _is_main_event(action_type: object) -> bool:
-    """``action_type`` 是否 S 码主事件(``^S\\d+``,如 S1_CONTEXT)。"""
-    value = getattr(action_type, "value", action_type)
-    return bool(value) and _MAIN_EVENT_RE.match(str(value)) is not None
+    """顶层主事件(S �码 ``^S\d+``,或 ``task_result_display`` 虚拟展示事件)。"""
+    value = str(getattr(action_type, "value", action_type) or "")
+    if value == _RESULT_DISPLAY_ACTION:
+        return True
+    return bool(value) and _MAIN_EVENT_RE.match(value) is not None
 
 
 def _nest_system_logs(trajectory: TaskTrajectory) -> None:
@@ -497,14 +505,18 @@ class TaskTrajectoryService(
         """
         if not force_analysis:
             trajectory = self._assembler.assemble(task_id)
-            self._attach_node_outputs(trajectory)
+            outputs, run_modes = self._attach_node_outputs(trajectory)
             # session_detail=true 才实拉会话明细(REQ-8 不变式保持:纯读绝不
             # 写库;结果只挂返回的内存轨迹对象)。默认 false 零外部 GET,
             # 单节点拉取失败 WARNING 降级回退末位事件 ext_info 缓存快照。
+            session_msgs = {}
             if session_detail:
                 records = self._safe_list_records(task_id)
                 fresh = await self._live_session_msgs_for_read(task_id)
-                self._attach_session_msgs(trajectory, records, fresh)
+                session_msgs = self._collect_session_msgs_by_node(records, fresh)
+            # 子任务结果展示虚拟事件(2026-10-16):output/会话明细/真实模态
+            # 挂在每个子任务 timeline 最后的 task_result_display 上。
+            self._append_result_display_events(trajectory, outputs, run_modes, session_msgs)
             # 最后一步读时嵌套:S 码主序列 + 子事件挂 system_logs(不落库)。
             _nest_system_logs(trajectory)
             return trajectory
@@ -542,7 +554,7 @@ class TaskTrajectoryService(
 
         # 组装时间线(头行 UPSERT 保留既有 analysis/gmt_modified)。
         trajectory = self._assembler.assemble(task_id)
-        self._attach_node_outputs(trajectory)
+        outputs, run_modes = self._attach_node_outputs(trajectory)
 
         # RUNNING 节点会话明细探测(决策 #14 精神:观测旁路,永不抛)——
         # 有节点卡在 RUNNING 时实拉会话明细组 brief,交给分析 bot 判读
@@ -580,9 +592,9 @@ class TaskTrajectoryService(
         # 回填(overwrite 两表 analysis+gmt_modified — P1b 事务;决策 #13)。
         self._repo.backfill_analysis(task_id, analysis_json)
 
-        # 返回态富化:本回合实拉的 session_msgs 覆盖快照 + 读时嵌套。
-        if fresh_session_msgs:
-            self._attach_session_msgs(trajectory, records, fresh_session_msgs)
+        # 返回态富化:会话明细归集(本回合实拉覆盖快照)→ 虚拟展示事件 + 嵌套。
+        session_msgs = self._collect_session_msgs_by_node(records, fresh_session_msgs)
+        self._append_result_display_events(trajectory, outputs, run_modes, session_msgs)
         trajectory.analysis = analysis_json
         trajectory.gmt_modified = int(time.time() * 1000)
         _nest_system_logs(trajectory)
@@ -593,26 +605,20 @@ class TaskTrajectoryService(
     # (决策 #14 精神:观测旁路,graph 未接线/图读失败 → 跳过,绝不影响轨迹本体)。
     # ------------------------------------------------------------------
 
-    def _attach_node_outputs(self, trajectory: TaskTrajectory) -> None:
-        """把每个子任务(task_id+node_id)的**当前产出**与**真实执行模态**挂到它在
-        timeline 中的**最后一条**事件上。
+    def _attach_node_outputs(
+        self, trajectory: TaskTrajectory
+    ) -> "tuple[dict[str, dict], dict[str, str]]":
+        """计算各子任务当前产出与真实模态(2026-10-16 起**不再逐事件挂载**:
+        结果由 ``_append_result_display_events`` 追加的 ``task_result_display``
+        虚拟事件承载,挂各子任务 timeline 的最后)。
 
-        产出数据经 ``task_execution_graph`` 的查询接口获取
-        (``query_task_dashboard`` → ``node.run_info.output``——执行回投写图的
-        节点级 dict 产出)。真实模态取 ``effective_run_mode(node)``
-        (``run_info.extend_props.actual_run_mode`` 优先,缺失回退 ``run_mode``),
-        同源同挂法。倒序扫 timeline 找每个 node 的末位事件(正序时间线的
-        "最新一条"),挂 ``ev.output``(浅拷贝与图现场解耦)与
-        ``ev.actual_run_mode``。挂载语义:空 ``{}`` / 缺失的产出、无模态均保持
-        ``None``(缺字段=无信号,DTO/HTML 不透出)。
-
-        旁路保障:``graph`` 未接线(轻量 DI)→ 静默跳过;图读失败(任务已删 /
-        relay 外部托管等)→ WARNING + 返回未富化;一律**不**影响 ``get_trajectory``
-        本体返回。注意:富化不写库、不进指纹(``timeline_version`` 仍只敏感于
-        事件行变化)。
+        产出经 ``query_task_dashboard`` → ``node.run_info.output``;真实模态取
+        ``_display_run_mode``(run_mode=bbs 短路,其余 ``effective_run_mode``)。
+        缺素材的节点不出现在返回 map(缺字段=无信号)。旁路:graph 未接线 → 空
+        maps;图读失败 → WARNING + 空 maps;不落库、不进指纹。
         """
         if self._graph is None or not trajectory.timeline:
-            return
+            return {}, {}
         try:
             graph = self._graph.query_task_dashboard(trajectory.task_id)
         except Exception as ex:  # noqa: BLE001  图读失败 → 不富化,轨迹本体照常
@@ -620,7 +626,7 @@ class TaskTrajectoryService(
                 "[task][trajectory] 节点产出富化图读失败,跳过 task=%s: %s: %s",
                 trajectory.task_id, type(ex).__name__, ex,
             )
-            return
+            return {}, {}
         outputs: dict[str, dict] = {}
         run_modes: dict[str, str] = {}
         root_spec = None
@@ -628,29 +634,58 @@ class TaskTrajectoryService(
             out = getattr(node.run_info, "output", None)
             if isinstance(out, dict) and out:
                 outputs[node.node_id] = out
-            # 真实模态(2026-10-16):run_mode=bbs 短路直判 bbs,不看
-            # extend_props.actual_run_mode(其可能残留单 bot 过渡值);其余沿用
-            # effective_run_mode(actual_run_mode 优先,缺失回退 run_mode);
-            # 两者皆缺 → 不挂(缺字段=无信号)。
             mode = _display_run_mode(node)
             if mode:
                 run_modes[node.node_id] = mode
             if node.node_id == trajectory.task_id:
                 root_spec = getattr(node, "task_spec", None)
-        if outputs or run_modes:
-            last_seen: set[str] = set()
-            for ev in reversed(trajectory.timeline):
-                node_id = ev.node_id
-                if node_id in last_seen:
-                    continue  # 该节点的当前态(output/modality)只挂最后一条
-                last_seen.add(node_id)
-                out = outputs.get(node_id)
-                if out:
-                    ev.output = dict(out)
-                mode = run_modes.get(node_id)
-                if mode:
-                    ev.actual_run_mode = mode
         self._attach_submit_goal(trajectory, root_spec)
+        return outputs, run_modes
+
+    def _append_result_display_events(
+        self,
+        trajectory: TaskTrajectory,
+        outputs: "dict[str, dict]",
+        run_modes: "dict[str, str]",
+        session_msgs_by_node: "dict[str, list] | None" = None,
+    ) -> None:
+        """在每个子任务 timeline 的**最后**追加虚拟事件 ``task_result_display``:
+        承载该子任务的 output / session_msgs / actual_run_mode(读时富化,不落库、
+        无表行 id;gmt 取该子任务真实末位事件 +1ms 保持排序)。
+
+        仅当该子任务有任何展示素材(产出/模态/会话明细任一)时才追加——空节点
+        保持干净(缺字段=无信号)。插入发生在 ``_nest_system_logs`` 之前,虚拟事件
+        按**顶层主事件**对待(``_is_main_event``),不被嵌套收编。
+        """
+        if not trajectory.timeline:
+            return
+        msgs_by_node = session_msgs_by_node or {}
+        last_idx_by_node: dict[str, int] = {}
+        for idx, ev in enumerate(trajectory.timeline):
+            last_idx_by_node[ev.node_id] = idx
+        inserts: list[tuple[int, TrajectoryEvent]] = []
+        for node_id, last_idx in last_idx_by_node.items():
+            out = outputs.get(node_id)
+            mode = run_modes.get(node_id)
+            msgs = msgs_by_node.get(node_id)
+            if not out and not mode and not msgs:
+                continue
+            last = trajectory.timeline[last_idx]
+            gmt = int(last.gmt_create) + 1
+            inserts.append((last_idx + 1, TrajectoryEvent(
+                task_id=trajectory.task_id,
+                node_id=node_id,
+                action_type=_RESULT_DISPLAY_ACTION,
+                action_result=_RESULT_DISPLAY_RESULT,
+                attempt=0,
+                gmt_create=gmt,
+                gmt_modified=gmt,
+                output=dict(out) if isinstance(out, dict) else out,
+                session_msgs=list(msgs) if msgs else None,
+                actual_run_mode=mode,
+            )))
+        for pos, ev in sorted(inserts, key=lambda pair: pair[0], reverse=True):
+            trajectory.timeline.insert(pos, ev)
 
     def _attach_submit_goal(self, trajectory: TaskTrajectory, root_spec) -> None:
         """把 timeline **第一条 submit 事件**的 ``action_input`` 富化为 TaskSpec 的

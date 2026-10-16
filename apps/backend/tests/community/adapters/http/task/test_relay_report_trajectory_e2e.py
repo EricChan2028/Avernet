@@ -420,12 +420,18 @@ async def test_two_relay_reports_project_step_timeline(monkeypatch) -> None:
     timeline = resp_traj.json()["data"]["timeline"]
 
     expected = EXECUTION_STEPS + PLAN_STEPS
-    assert len(timeline) == len(expected) == 10, (
-        f"timeline 数量应为两次上报 step 之和(10),实际 {len(timeline)}:"
-        f" {[e['action_type'] + '/' + str(e['action_result']) for e in timeline]}"
+    steps = [ev for ev in timeline if ev["action_type"] != "task_result_display"]
+    assert len(steps) == len(expected) == 10, (
+        f"step 数量应为两次上报 step 之和(10),实际 {len(steps)}:"
+        f" {[e['action_type'] + '/' + str(e['action_result']) for e in steps]}"
     )
+    virtuals = [ev for ev in timeline if ev["action_type"] == "task_result_display"]
+    assert len(virtuals) == 1, "该子任务应恰有一条虚拟展示事件"
+    assert virtuals[0]["output"] is not None
+    assert virtuals[0]["actual_run_mode"] == "single_bot"
+    assert virtuals[0]["gmt_create"] == steps[-1]["gmt_create"] + 1
 
-    for i, (ev, exp) in enumerate(zip(timeline, expected)):
+    for i, (ev, exp) in enumerate(zip(steps, expected)):
         assert ev["node_id"] == NODE_ID, f"第 {i} 条 node_id 错误"
         assert ev["action_type"] == exp["action_type"], f"第 {i} 条 action_type 不符"
         assert ev["action_result"] == exp["action_result"], f"第 {i} 条 action_result 不符"
@@ -436,7 +442,7 @@ async def test_two_relay_reports_project_step_timeline(monkeypatch) -> None:
         assert ev["error_msg"] is None, f"第 {i} 条 error_msg 应为 null"
         assert ev["attempt"] == 0, f"第 {i} 条 attempt 应为 0"
 
-    # 时间单调:EXECUTION 5 条先于 PLAN 5 条
+    # 时间单调:EXECUTION 5 条先于 PLAN 5 条(虚拟事件 gmt=末位+1,天然有序)
     stamps = [ev["gmt_create"] for ev in timeline]
     assert stamps == sorted(stamps), "timeline 必须按 gmt_create 升序"
 
@@ -499,13 +505,24 @@ def _chain_expected(node_ids: list[str]) -> list[tuple[str, dict]]:
     return expected
 
 
-def _assert_step_timeline(timeline: list[dict], expected: list[tuple[str, dict]]) -> None:
-    """timeline 与期望逐条对齐:数量、(node_id, step) 顺序、七字段一致性、时间单调。"""
-    assert len(timeline) == len(expected), (
-        f"timeline 数量应为 {len(expected)}(各棒 step 之和),"
-        f"实际 {len(timeline)}"
+def _assert_step_timeline(
+    timeline: list[dict],
+    expected: list[tuple[str, dict]],
+    *,
+    node_ids: list[str] | None = None,
+) -> None:
+    """timeline 与期望逐条对齐:数量、(node_id, step) 顺序、七字段一致性、时间单调。
+
+    2026-10-16 起每个有素材(产出/模态/会话)的子任务在自身 timeline 末尾多一条
+    ``task_result_display`` 虚拟事件——step 序列比对将其剥离后进行;虚拟事件由
+    ``node_ids`` 单独断言(每子任务恰好一条,携 output/actual_run_mode)。"""
+    steps = [ev for ev in timeline if ev["action_type"] != "task_result_display"]
+    virtuals = [ev for ev in timeline if ev["action_type"] == "task_result_display"]
+    assert len(steps) == len(expected), (
+        f"step 数量应为 {len(expected)},实际 {len(steps)}:"
+        f" {[e['action_type'] for e in steps]}"
     )
-    for i, (ev, (node_id, step)) in enumerate(zip(timeline, expected)):
+    for i, (ev, (node_id, step)) in enumerate(zip(steps, expected)):
         assert ev["node_id"] == node_id, f"第 {i} 条 node_id 错误"
         assert ev["action_type"] == step["action_type"], f"第 {i} 条 action_type 不符"
         assert ev["action_result"] == step["action_result"], f"第 {i} 条 action_result 不符"
@@ -516,6 +533,18 @@ def _assert_step_timeline(timeline: list[dict], expected: list[tuple[str, dict]]
         assert ev["error_msg"] is None, f"第 {i} 条 error_msg 应为 null"
     stamps = [ev["gmt_create"] for ev in timeline]
     assert stamps == sorted(stamps), "timeline 必须按 gmt_create 升序"
+    if node_ids is not None:
+        # 每个有素材的子任务恰好一条虚拟展示事件,携带产出与真实模态
+        by_node = {}
+        for ev in virtuals:
+            by_node.setdefault(ev["node_id"], []).append(ev)
+        assert set(by_node) == set(node_ids), f"虚拟事件节点归属: {sorted(by_node)}"
+        for node_id, evs in by_node.items():
+            assert len(evs) == 1, f"{node_id} 应恰好 1 条虚拟事件,实际 {len(evs)}"
+            assert evs[0]["action_result"] == "display"
+            assert evs[0]["output"] is not None, "虚拟事件应携带该子任务当前产出"
+            assert evs[0]["actual_run_mode"] == "single_bot"
+            assert evs[0]["session_msgs"] is None, "本场景未拉会话明细(纯读默认)"
 
 
 def _report_cycle(
@@ -624,12 +653,15 @@ async def test_two_subtask_relay_chain_projects_step_timeline(monkeypatch) -> No
     )
     assert resp.status_code == 200, resp.text
     timeline = resp.json()["data"]["timeline"]
-    _assert_step_timeline(timeline, _chain_expected([NODE_ID, child_id]))
+    _assert_step_timeline(timeline, _chain_expected([NODE_ID, child_id]),
+                         node_ids=[NODE_ID, child_id])
 
-    # 棒间归属核验:1 号棒 10 条、2 号棒 10 条(reset 已嵌挂,不占顶层)
+    # 棒间归属核验:1 号棒 10 条 step、2 号棒 10 条 step(reset 已嵌挂不占顶层);
+    # 每棒另各有一条 task_result_display 虚拟展示事件 → 顶层各 11 条
     per_node = {}
     for ev in timeline:
-        per_node[ev["node_id"]] = per_node.get(ev["node_id"], 0) + 1
+        if ev["action_type"] != "task_result_display":
+            per_node[ev["node_id"]] = per_node.get(ev["node_id"], 0) + 1
     assert per_node == {NODE_ID: 10, child_id: 10}
 
     # 系统事件嵌挂:reset(id 在棒1 S5E 之后)挂最近前主事件 S5E 的 system_logs
@@ -673,8 +705,8 @@ async def test_three_subtask_relay_chain_projects_step_timeline(monkeypatch) -> 
     )
     assert resp.status_code == 200, resp.text
     timeline = resp.json()["data"]["timeline"]
-    assert len(timeline) == 30, f"三棒 30 条 step,实际 {len(timeline)}"
-    _assert_step_timeline(timeline, _chain_expected(chain_nodes))
+    _assert_step_timeline(timeline, _chain_expected(chain_nodes),
+                         node_ids=chain_nodes)
 
     # 最后一棒收敛:图终态 DONE、根任务完成
     topology = graph.query_task_dashboard(TASK_ID)
