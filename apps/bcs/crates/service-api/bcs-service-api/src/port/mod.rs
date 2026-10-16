@@ -10,6 +10,7 @@ pub mod delivery;
 pub mod event_delivery;
 pub mod event_metrics;
 pub mod event_recording;
+pub mod friend_connect_notification;
 pub mod friend_auth_sync;
 pub mod friendship_writeback;
 pub mod group_context;
@@ -53,9 +54,6 @@ pub use delivery::{
 pub use event_delivery::*;
 pub use event_metrics::*;
 pub use event_recording::*;
-pub use friend_auth_sync::{
-    FriendAuthSyncAction, FriendAuthSyncCommand, FriendAuthSyncPort, NoopFriendAuthSyncPort,
-};
 pub use friend_connect_notification::{
     FriendConnectNotificationCommand, FriendConnectNotificationKind, FriendConnectNotificationPort,
     NoopFriendConnectNotificationPort,
