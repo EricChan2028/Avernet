@@ -73,6 +73,11 @@ class TrajectoryEventDTO(BaseModel):
                     "内非 S 码 action_type、且 id 落在〔本主事件,下一主事件〕区间"
                     "的系统侧事件,按 id 正序;无嵌挂为 None",
     )
+    action_name: str = Field(
+        "",
+        description="action_type 的中文人读名(submit/S 码 step/虚拟展示事件的"
+                    "既定映射;未命中映射兜底为 action_type 原文)",
+    )
 
 
 class TaskTrajectoryDTO(BaseModel):
@@ -98,6 +103,30 @@ def _enum_value(v: object) -> str | None:
     if v is None:
         return None
     return v.value if hasattr(v, "value") else str(v)
+
+
+# action_type → action_name 中文人读名(2026-10-16):已知码取映射,未知码兜底
+# 为 action_type 原文(自由形态——S 码 step / harness-engine- 前缀 / 枚举裸词皆可)。
+_ACTION_NAME_MAP = {
+    "submit": "任务明确并提交",
+    "S1_CONTEXT": "步骤1:获取任务上下文",
+    "S2_GAPS": "步骤2:计算任务GAPs",
+    "S3_CAPABILITY": "步骤3:当前Bot能力匹配",
+    "S4A_EXECUTION": "步骤4A:任务执行",
+    "S4B_REPORT": "步骤4B:当前结果上报",
+    "S5A_REFRESH_GAPS": "步骤5A:更新任务GAPs",
+    "S5B_PLAN_NEXT_NODE": "步骤5B:规划下一步目标",
+    "S5C_SEARCH_CANDIDATES": "步骤5C:搜索下一棒候选者",
+    "S5D_SELECT_EXECUTOR": "步骤5D:确定下一棒执行人",
+    "S5E_REPORT_PLAN": "步骤5E:上报下一棒任务规划信息",
+    "task_result_display": "当前子任务结果及消息详情展示",
+}
+
+
+def _resolve_action_name(action_type: object) -> str:
+    """``action_type``(枚举或自由字符串)→ 中文人读名;未命中映射兜底原文。"""
+    value = str(getattr(action_type, "value", action_type) or "")
+    return _ACTION_NAME_MAP.get(value, value)
 
 
 def _event_to_dto(ev) -> TrajectoryEventDTO:
@@ -127,6 +156,7 @@ def _event_to_dto(ev) -> TrajectoryEventDTO:
             if ev.system_logs
             else None
         ),
+        action_name=_resolve_action_name(ev.action_type),
     )
 
 

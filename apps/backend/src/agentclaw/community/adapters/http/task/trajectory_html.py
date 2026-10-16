@@ -99,6 +99,14 @@ def _badge_class(action_type: str, action_result: str) -> str:
     return f'<span class="{cls}" style="{style}">{html.escape(action_type)}</span>'
 
 
+def _badge_action_text(action_type: str, action_name: str) -> str:
+    """徽章展示文本(2026-10-16):``action_type(action_name)``;名称=原文(映射
+    未命中兜底)时仅显示原文,避免 reset(reset) 式重复。"""
+    if action_name and action_name != action_type:
+        return f"{action_type}({action_name})"
+    return action_type
+
+
 def _result_chip(action_result: str, error_type: str | None) -> str:
     is_fail = (action_result in _FAILURE_RESULTS) or bool(error_type)
     cls = "chip" + (" chip-err" if is_fail else " chip-ok")
@@ -128,7 +136,10 @@ def _render_event(ev: "object") -> str:
     # 头部:徽章 + 节点 + 重试序号 + 时间(2026-10-16 起 action_result 移出头部,
     # 迁至 action_input 折叠块下方,带字段名标签——见下文 ev-meta 行)
     parts.append('<div class="ev-head">')
-    parts.append(_badge_class(action_type, action_result))
+    action_name = str(getattr(ev, "action_name", "") or "")
+    parts.append(
+        _badge_class(_badge_action_text(action_type, action_name), action_result)
+    )
     if node_id:
         parts.append(f'<span class="node" title="node_id">{html.escape(node_id)}</span>')
     if attempt:
