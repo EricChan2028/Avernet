@@ -12,7 +12,7 @@
 task-cli 输入
   → 目标解析与任务澄清 → 用户确认 TaskSpec
   → TaskService.execute → 根节点 task_id == node_id + 权威 root_execution_instruction
-  → Frontend 在当前 Bot 会话转发指令 → 首棒 S1 获取 TaskContext
+  → 正常任务 Frontend / benchmark 评测任务 Backend 在当前 Bot 会话转发指令 → 首棒 S1 获取 TaskContext
   → S2 缺口 → S3 能力 → S4 执行/上报
   → S5.1 更新缺口 → S5.2 规划下一棒 → S5.3 搜索候选
   → S5.4 决定执行者 → S5.5 一次上报并登记意图
@@ -31,7 +31,7 @@ task-cli 输入
 | Group 执行主体 | Group ID 保留为节点 `assignee`；唯一 manager/master Bot 是 Relay 协调执行者，负责 S1–S5 与上报；S3 读取其在群运行时真实可用的能力 | 群成员协作是 S4 内部执行，不把 Group ID 误当 Bot 身份 |
 | 同节点 harness 重试 | `exec_error` 接纳后停止 S5；harness 原子开启下一 attempt、签发新的可信 Runner 运行绑定；S1 只投影当前 attempt，拒绝旧绑定迟到请求 | 绑定经 Runtime 控制通道自动传递，Skill 不手填 attempt；报告响应丢失且已接纳成功时不递增 |
 | 本棒恢复 | `TaskContext.all_done_output` 只含本棒之前的事实；本棒已接纳执行 patch 与规划结果由图谱分别投影，Runtime 据此续跑 | 不持久化 `TaskContext`，也不重新执行已接纳的本棒业务操作 |
-| 首棒触发 | `start/execute` 创建根节点并返回 Backend 生成的 `root_execution_instruction`；Frontend 原样发送到用户确认任务的当前 Bot 会话 | 根节点不调用 Dispatcher/Runner，避免创建新会话或权限兜底协作群；后继节点才使用可靠投递意图 |
+| 首棒触发 | `start/execute` 创建根节点并返回 Backend 生成的 `root_execution_instruction`；正常任务由 Frontend 原样发送到用户确认任务的当前 Bot 会话，`benchmark_execute` 评测任务由 Backend 发送到同一评测会话 | 根节点不调用 Dispatcher/Runner，避免创建新会话或权限兜底协作群；后继节点才使用可靠投递意图 |
 | 确认与创建 | `TaskService.intake(CONFIRM)` 只返回 `TaskIntakeResult(CONFIRMED)`；CLI 随后以 `session_id` 请求 `/start`，由 Backend 构造内部 `TaskInfoRequest` | `RESUME` 本身只读；确认后中断可在恢复界面继续创建，不重放 CONFIRM |
 | S5 顺序 | Bot 先更新缺口、规划未落图节点、搜索并决定执行者；随后只上报一次 `PLAN_RESULT`，Backend 原子落图并写入选人决策 | 不存在 `DISPATCH_RESULT` 第二次决策上报 |
 | 目标对象 | `TaskInfoRequest.task_spec: TaskSpec`；`TaskOpResult.node_id`；节点级 `TaskContext`；统一 `TaskReportResult` | 已作为 Relay 对外合同 |
@@ -228,7 +228,7 @@ POST /api/v1/collaboration/tasks/dispatch
 | P1 确认/取消 | `TaskIntakeCommand(CONFIRM/CANCEL)` + 系统 `TaskIntakeContext` | `handle`：确认只冻结完整 `TaskSpec`，取消不建任务 | `TaskIntakeResult(CONFIRMED/CANCELLED)`；无任务 ID |
 | P2 创建命令 | HTTP `{session_id}`；Backend 读取 `TaskIntakeResult(CONFIRMED)` | 校验会话 owner 与状态后调用 `build_task_info_request`：解析 owner Bot，复制已确认 `TaskSpec`，附服务端执行策略与 intake 幂等关联 | 内部 `TaskInfoRequest` |
 | P3 注册根节点 | `TaskInfoRequest` | `TaskService.execute`：原子创建 `TaskInfo`、图和根节点，并根据权威节点与部署配置生成首棒指令 | `TaskOpResult(task_id,node_id,root_execution_instruction)`，成功时 `task_id == node_id` |
-| P4 当前会话唤起首棒 | `TaskOpResult.root_execution_instruction` | Frontend 不解释协议，把指令隐藏附加到任务面板消息并发送给完成确认的当前 Bot 会话 | 当前 Bot 取得 `task_id,node_id,relay_token,backend_url`，进入 S1 |
+| P4 当前会话唤起首棒 | `TaskOpResult.root_execution_instruction` | 正常任务由 Frontend、`benchmark_execute` 评测任务由 Backend；转发方不解释协议，把指令隐藏附加到任务面板消息并发送给完成确认的当前 Bot 会话 | 当前 Bot 取得 `task_id,node_id,relay_token,backend_url`，进入 S1 |
 
 确认动作和创建动作分开：正常路径中 CLI 收到 `CONFIRMED` 后立即以 `session_id` 调 `/start`；若两次请求之间崩溃，`task-cli resume <session-id>` 只读地恢复已确认会话，再展示「继续提交/查看任务」操作。CLI 无须从 `TaskIntakeResult` 判断任务是否已创建；该操作调用同一个幂等 `/start`，由 Backend 在已创建时返回原 `TaskOpResult`，否则创建一次。`TaskIntakeResult` 始终不反写任务 ID。用户看见任务 ID 后可用 `task-cli get` 查询进度。
 
@@ -369,7 +369,7 @@ if planning_report.target_node_id is not None and not planning_report.bbs_publis
 
 | 优先级 | 必须打通的变更 | 否则出现的问题 |
 | --- | --- | --- |
-| P0 | `start/execute` 返回 Backend 生成的 `root_execution_instruction`，Frontend 在当前 Bot 会话原样转发；根节点不得进入 Dispatcher/Runner | 根节点会创建错误的新会话或缺少 `backend_url/relay_token` |
+| P0 | `start/execute` 返回 Backend 生成的 `root_execution_instruction`；正常任务由 Frontend 在当前 Bot 会话原样转发，`benchmark_execute` 评测任务由 Backend 在同一评测会话原样转发；根节点不得进入 Dispatcher/Runner | 根节点会创建错误的新会话或缺少 `backend_url/relay_token` |
 | P0 | 节点级 `TaskContext` 查询和统一投影；修改 Runner 指令只定位节点 | 首棒、后续棒与恢复继续依赖不同上下文来源 |
 | P0 | `TaskOpResult.node_id`、`TaskInfoRequest.task_spec: TaskSpec`、intake session 创建幂等关联 | CLI 不可靠地取得根节点，确认后崩溃可能重复创建任务 |
 | P0 | 冻结 `execution_config.initial_target` 并据此初始化根节点 `run_mode/assignee`；Group ID 不因解析 `owner_bot_id` 丢失 | 指定 Group 却错误投递给 manager Bot |
@@ -543,7 +543,7 @@ P0–P1 TaskService.intake(START/RESUME/CONTINUE/CONFIRM/CANCEL)
 P2   CLI POST /start {session_id}；Backend 读取已确认 Result 并 build_task_info_request
 P3   Backend TaskService.execute(TaskInfoRequest)
        → TaskGraphService.initialize_graph + 生成 root_execution_instruction
-P4   Frontend 将 root_execution_instruction 发送到当前 Bot 会话 → 首棒 S1
+P4   正常任务 Frontend / benchmark 评测任务 Backend 将 root_execution_instruction 发送到当前 Bot 会话 → 首棒 S1
 S1   TaskService.get_node_context
        → TaskGraphService.get_node_context
 S4b  TaskService.report(EXECUTION_RESULT)

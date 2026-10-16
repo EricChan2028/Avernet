@@ -4,7 +4,7 @@ task-cli 的命令、intake session 和 HTTP adapter 设计见 [`task-cli/design
 
 ## 1. 文档定位
 
-本文定义分布式 Relay 模式下 S1-S6 的目标协议：Bot 执行 S1–S5.5 并通过 HTTP 触发 S6；Backend 的 `TaskDispatcher` 只实际派发后继棒。根节点由前端把 Backend 生成的权威执行指令转发到用户确认任务的当前 Bot 会话，不创建第二个 Runner 会话。每个步骤均建模为：
+本文定义分布式 Relay 模式下 S1-S6 的目标协议：Bot 执行 S1–S5.5 并通过 HTTP 触发 S6；Backend 的 `TaskDispatcher` 只实际派发后继棒。正常已确认任务的根节点由前端把 Backend 生成的权威执行指令转发到用户确认任务的当前 Bot 会话；`benchmark_execute` 评测任务由 Backend 在同一个评测会话中转发该指令。两种入口都不创建第二个 Runner 会话。每个步骤均建模为：
 
 ```text
 输入参数 -> 处理函数 -> 输出值或领域结果
@@ -22,7 +22,7 @@ task-cli 的命令、intake session 和 HTTP adapter 设计见 [`task-cli/design
 
 Bot 只消费一种 `TaskContext`，且只能由节点级 context API 返回：
 
-- 第一棒：`TaskService.execute()` 创建根节点并返回 `TaskOpResult(task_id, node_id)`，同时在 `extend_props.root_execution_instruction` 返回 Backend 生成的权威执行指令；前端将该指令原样发送到用户确认任务的当前 Bot 会话。
+- 第一棒：`TaskService.execute()` 创建根节点并返回 `TaskOpResult(task_id, node_id)`，同时在 `extend_props.root_execution_instruction` 返回 Backend 生成的权威执行指令。正常任务由前端将该指令原样发送到用户确认任务的当前 Bot 会话；`benchmark_execute` 评测任务由 Backend 发送到同一个评测会话。
 - 后续棒：S5.5 创建下一节点时同事务登记待投递意图；当前棒 Skill 调用 S6 HTTP 派发，后台消费者在未投递时恢复。派发消息只携带下一节点的 `task_id` 与 `node_id`。
 - S1：Bot Runtime 以这两个标识调用节点级 context API，取得 `TaskContext`。
 - harness 恢复：使用已持有的同一对标识调用同一接口。
@@ -72,7 +72,7 @@ Bot 本地推理：
   -> P2 Backend 读取 CONFIRMED Result 并构造内部 TaskInfoRequest
   -> TaskService.execute(TaskInfoRequest)
   -> 返回 TaskOpResult(task_id, node_id, root_execution_instruction)
-  -> Frontend 将 root_execution_instruction 发送到当前 Bot 会话
+  -> 正常任务 Frontend / benchmark 评测任务 Backend 将 root_execution_instruction 发送到当前 Bot 会话
   -> 首棒 S1 读取节点级 TaskContext
   -> S2 calculate_task_gaps
   -> S3 match_bot_capability
@@ -458,7 +458,7 @@ Group 目标 -> root_node.run_info.run_mode == "coop_group"
 
 #### 处理函数
 
-`TaskService.execute()` 从已持久化根节点读取服务端生成的 `relay_token`，结合部署配置中的 `backend_url` 生成完整 `root_execution_instruction`，随 `TaskOpResult` 返回。前端不得解释或重建协议，只把该指令隐藏附加到任务面板消息并发送给当前 Bot 会话。根节点不调用 `TaskDispatcher.dispatch(root_node)` 或 `TaskRunner.start_run(root_node)`，避免创建新会话或触发权限兜底建群。`TaskInfoRequest` 仅用于创建任务，不能替代包含节点和执行事实的 `TaskContext`。
+`TaskService.execute()` 从已持久化根节点读取服务端生成的 `relay_token`，结合部署配置中的 `backend_url` 生成完整 `root_execution_instruction`，随 `TaskOpResult` 返回。转发方不得解释或重建协议，只把该指令隐藏附加到任务面板消息并发送给当前会话；正常任务转发方是前端，`benchmark_execute` 评测任务转发方是 Backend。根节点不调用 `TaskDispatcher.dispatch(root_node)` 或 `TaskRunner.start_run(root_node)`，避免创建新会话或触发权限兜底建群。`TaskInfoRequest` 仅用于创建任务，不能替代包含节点和执行事实的 `TaskContext`。
 
 #### 输出对象
 
