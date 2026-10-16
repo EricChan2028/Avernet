@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -67,6 +68,11 @@ class TaskReportTraceStepDTO(BaseModel):
     error_msg`` 一键不可缺(值可为 None)。``action_type`` 即 Bot 侧 step 码
     (S 后带数字+其它,如 S1_CONTEXT)——2026-10-15 起其即轨迹主事件的
     action_type,读侧按 ``^S\\d+`` 识别主序列,不再限定枚举词表。
+
+    2026-10-16 语义复核:``action_input`` 是步骤输入;``action_result`` 是步骤
+    推理输出/产出摘要,必须为可解析的 JSON object 字符串,且包含非空 ``status``
+    字段与至少一个输出字段;``completed/failed/ready/not_applicable`` 等状态值
+    只能作为 JSON 内的 ``status`` 字段。``boost_reason`` 是执行过程证据：为什么推进、为什么选择等等维度信息;``error_msg`` 是失败原因;``status_from/status_to`` 是节点状态。
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -93,6 +99,28 @@ class TaskReportTraceStepDTO(BaseModel):
     def _reject_blank(cls, value: str | None) -> str | None:
         if value is not None and not value.strip():
             raise ValueError("must be a non-empty string when present")
+        return value
+
+    @field_validator("action_result", mode="after")
+    @classmethod
+    def _require_step_output_json(cls, value: str) -> str:
+        try:
+            output = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                "action_result must be a JSON object containing the step output"
+            ) from exc
+        if not isinstance(output, dict):
+            raise ValueError(
+                "action_result must be a JSON object containing the step output"
+            )
+        status = output.get("status")
+        if not isinstance(status, str) or not status.strip():
+            raise ValueError("action_result.status must be a non-empty string")
+        if len(output) <= 1:
+            raise ValueError(
+                "action_result must contain step output fields in addition to status"
+            )
         return value
 
 

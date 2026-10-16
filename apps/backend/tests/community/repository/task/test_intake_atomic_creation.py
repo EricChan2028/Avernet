@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from contextlib import contextmanager
 import asyncio
+import json
 import logging
 import time
 
@@ -160,7 +161,10 @@ def test_legacy_root_delivery_intent_is_retired_without_runner_dispatch() -> Non
         intent = session.query(TaskDeliveryIntentModel).one()
         assert intent.state == "DELIVERED"
     actions = repo.load_action_logs("task-1")["task-1"]
-    assert actions[-1].payload["action_result"] == "retired_legacy_root_intent"
+    assert json.loads(actions[-1].payload["action_result"]) == {
+        "status": "completed",
+        "retired_legacy_root_intent": True,
+    }
 
 
 def test_delivery_intent_claim_is_exclusive_and_recoverable() -> None:
@@ -315,7 +319,9 @@ def test_dispatch_node_acknowledges_only_after_real_dispatch() -> None:
     assert dispatcher.calls == 1
     actions = repo.load_action_logs("task-1")[node_id]
     assert actions[-1].action is NodeAction.DISPATCH
-    assert actions[-1].payload["action_result"] == "delivered"
+    dispatch_output = json.loads(actions[-1].payload["action_result"])
+    assert dispatch_output["status"] == "completed"
+    assert dispatch_output["dispatched"] is True
     with db.orm_session() as session:
         assert session.query(TaskDeliveryIntentModel).one().state == "DELIVERED"
 

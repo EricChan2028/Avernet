@@ -216,7 +216,7 @@ def test_relay_report_dto_carries_planned_runtime_fields() -> None:
                 {
                     "action_type": action_type,
                     "action_input": f"{{\"step\":\"{action_type}\"}}",
-                    "action_result": "completed",
+                    "action_result": f"{{\"status\":\"completed\",\"output\":\"{action_type}\"}}",
                     "status_from": "RUNNING",
                     "status_to": "RUNNING",
                     "boost_reason": "plan",
@@ -418,7 +418,16 @@ def test_task_service_dispatch_completes_dynamic_group_delivery_chain() -> None:
     assert intents.claims == [("task-1", "node-group", TEST_RELAY_TOKEN)]
     assert intents.marks == [("task-1", "node-group", True)]
     dispatch_log = persisted.run_info.action_log[-1]
-    assert dispatch_log.payload["action_result"] == "delivered"
+    assert json.loads(dispatch_log.payload["action_result"]) == {
+        "status": "completed",
+        "dispatched": True,
+        "target_node_id": "node-group",
+        "run_mode": "coop_group",
+        "assignee": "grp-created",
+        "actual_run_mode": None,
+        "group_id": "grp-created",
+        "session_id": None,
+    }
     assert dispatch_log.payload["run_mode"] == "coop_group"
     assert dispatch_log.payload["assignee"] == "grp-created"
     trace_steps = dispatch_log.payload["trace"]["steps"]
@@ -428,7 +437,16 @@ def test_task_service_dispatch_completes_dynamic_group_delivery_chain() -> None:
     assert trace_step["step"] == "S6_DISPATCH"
     assert trace_step["status"] == "completed"
     assert trace_step["detail"]["action_type"] == "dispatch"
-    assert trace_step["detail"]["action_result"] == "delivered"
+    assert json.loads(trace_step["detail"]["action_result"]) == {
+        "status": "completed",
+        "dispatched": True,
+        "target_node_id": "node-group",
+        "run_mode": "coop_group",
+        "assignee": "grp-created",
+        "actual_run_mode": None,
+        "group_id": "grp-created",
+        "session_id": None,
+    }
     assert trace_step["detail"]["status_from"] == "PENDING"
     assert trace_step["detail"]["status_to"] == "RUNNING"
     assert trace_step["detail"]["boost_reason"] == "relay handoff accepted by the selected runtime"
@@ -473,7 +491,10 @@ def test_task_service_dispatch_failure_records_s6_error_details() -> None:
 
     persisted = service.query_task_dashboard("task-1").tasks[-1]
     dispatch_log = persisted.run_info.action_log[-1]
-    assert dispatch_log.payload["action_result"] == "failed"
+    assert json.loads(dispatch_log.payload["action_result"]) == {
+        "status": "failed",
+        "dispatched": False,
+    }
     assert dispatch_log.payload["failure_reason"] == (
         "RuntimeError: delivery transport failed"
     )
@@ -482,7 +503,10 @@ def test_task_service_dispatch_failure_records_s6_error_details() -> None:
     assert trace_step["step"] == "S6_DISPATCH"
     assert trace_step["status"] == "failed"
     assert trace_step["detail"]["action_type"] == "dispatch"
-    assert trace_step["detail"]["action_result"] == "failed"
+    assert json.loads(trace_step["detail"]["action_result"]) == {
+        "status": "failed",
+        "dispatched": False,
+    }
     assert trace_step["detail"]["status_from"] == "PENDING"
     assert trace_step["detail"]["status_to"] == "RUNNING"
     assert trace_step["detail"]["boost_reason"] == "relay handoff rejected by the selected runtime"
@@ -525,14 +549,20 @@ def test_task_service_dispatch_without_dispatcher_records_s6_error_without_state
 
     persisted = service.query_task_dashboard("task-1").tasks[-1]
     dispatch_log = persisted.run_info.action_log[-1]
-    assert dispatch_log.payload["action_result"] == "failed"
+    assert json.loads(dispatch_log.payload["action_result"]) == {
+        "status": "failed",
+        "dispatched": False,
+    }
     assert dispatch_log.payload["failure_reason"].endswith("relay dispatcher is not configured")
     trace_step = dispatch_log.payload["trace"]["steps"][0]
     action_input = json.loads(trace_step["detail"]["action_input"])
     assert trace_step["step"] == "S6_DISPATCH"
     assert trace_step["status"] == "failed"
     assert trace_step["detail"]["action_type"] == "dispatch"
-    assert trace_step["detail"]["action_result"] == "failed"
+    assert json.loads(trace_step["detail"]["action_result"]) == {
+        "status": "failed",
+        "dispatched": False,
+    }
     assert trace_step["detail"]["status_from"] == "PENDING"
     assert trace_step["detail"]["status_to"] == "RUNNING"
     assert action_input["delivery_intake_status"] == "PENDING"
@@ -552,13 +582,19 @@ def test_task_service_dispatch_retires_legacy_root_with_s6_trace() -> None:
 
     assert delivered.node_id == "task-1"
     dispatch_log = root.run_info.action_log[-1]
-    assert dispatch_log.payload["action_result"] == "retired_legacy_root_intent"
+    assert json.loads(dispatch_log.payload["action_result"]) == {
+        "status": "completed",
+        "retired_legacy_root_intent": True,
+    }
     trace_step = dispatch_log.payload["trace"]["steps"][0]
     action_input = json.loads(trace_step["detail"]["action_input"])
     assert trace_step["step"] == "S6_DISPATCH"
     assert trace_step["status"] == "completed"
     assert trace_step["detail"]["action_type"] == "dispatch"
-    assert trace_step["detail"]["action_result"] == "retired_legacy_root_intent"
+    assert json.loads(trace_step["detail"]["action_result"]) == {
+        "status": "completed",
+        "retired_legacy_root_intent": True,
+    }
     assert trace_step["detail"]["status_from"] == "RUNNING"
     assert trace_step["detail"]["status_to"] == "RUNNING"
     assert trace_step["detail"]["boost_reason"] == (

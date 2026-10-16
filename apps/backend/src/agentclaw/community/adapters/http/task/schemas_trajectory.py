@@ -26,7 +26,7 @@ class TrajectoryEventDTO(BaseModel):
     action_type: str = Field(
         ..., description="动作类型(submit|plan|dispatch|execute|verify|reset|transition)"
     )
-    action_result: str = Field(..., description="动作结果枚举(success|hit_single|miss|failed|sla_timeout|...)")
+    action_result: str = Field(..., description="动作结果。系统动作使用结果词(success|hit_single|miss|failed|sla_timeout 等);Relay S-step/dispatch trace 使用该步骤推理输出 JSON(含 status 与实际输出字段)")
     attempt: int = Field(..., description="harness 重试序号快照")
     gmt_create: int = Field(..., description="事件发射时间(ms epoch;timeline 排序依据)")
     gmt_modified: int = Field(..., description="最后修改时间(分析回填时更新,未回填时等于 gmt_create)")
@@ -35,7 +35,7 @@ class TrajectoryEventDTO(BaseModel):
     status_to: str | None = Field(None, description="动作后节点状态(未翻态时 None)")
     error_type: str | None = Field(None, description="ReasonCatalog 错误分类(成功为 None)")
     error_msg: str | None = Field(None, description="截断后的错误消息(成功为 None)")
-    boost_reason: str | None = Field(None, description="本次动作的推进原因")
+    boost_reason: str | None = Field(None, description="执行过程证据：为什么推进、为什么选择等等维度信息")
     holder_id: str | None = Field(None, description="Relay 当前动作执行人")
     analysis: str | None = Field(None, description="内嵌 TrajectoryAnalysis JSON 字符串(未回填为 None)")
     output: dict[str, Any] | None = Field(

@@ -150,7 +150,7 @@ def _trace(event_type: str = "PLAN_RESULT") -> dict:
             {
                 "action_type": action_type,
                 "action_input": f"{{\"step\":\"{action_type}\"}}",
-                "action_result": "completed",
+                "action_result": f"{{\"status\":\"completed\",\"output\":\"{action_type} processed\"}}",
                 "status_from": None,
                 "status_to": None,
                 "boost_reason": "ok",
@@ -208,10 +208,67 @@ def test_report_dto_requires_complete_trace() -> None:
 
     assert command.trace is not None
     assert command.trace.steps[0].action_type == "S5A_REFRESH_GAPS"
-    assert command.trace.steps[0].action_result == "completed"
+    assert command.trace.steps[0].action_result == "{\"status\":\"completed\",\"output\":\"S5A_REFRESH_GAPS processed\"}"
     assert command.trace.steps[0].action_input == "{\"step\":\"S5A_REFRESH_GAPS\"}"
     assert command.trace.steps[0].status_from is None
     assert command.trace.steps[0].status_to is None
+
+
+def test_report_trace_step_rejects_non_json_status_action_result() -> None:
+    trace = _trace()
+    trace["steps"][0]["action_result"] = "ready"
+
+    with pytest.raises(ValidationError, match="JSON object containing the step output"):
+        TaskReportCommandDTO.model_validate(
+            {
+                "task_id": "t1",
+                "node_id": "n1",
+                "event_id": "e1",
+                "relay_token": "generation-1",
+                "event_type": "PLAN_RESULT",
+                "event": None,
+                "task_acceptance_result": {
+                    "verdict": "DONE",
+                    "done_items": ["acceptance-1"],
+                    "gap_items": [],
+                },
+                "trace": trace,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("action_result", "expected_error"),
+    [
+        ("ready", "JSON object containing the step output"),
+        ("[]", "JSON object containing the step output"),
+        ('{"output":"ready"}', "action_result.status must be a non-empty string"),
+        ('{"status":"completed"}', "output fields in addition to status"),
+    ],
+)
+def test_report_trace_step_requires_output_json_with_status(
+    action_result: str, expected_error: str
+) -> None:
+    trace = _trace()
+    trace["steps"][0]["action_result"] = action_result
+
+    with pytest.raises(ValidationError, match=expected_error):
+        TaskReportCommandDTO.model_validate(
+            {
+                "task_id": "t1",
+                "node_id": "n1",
+                "event_id": "e1",
+                "relay_token": "generation-1",
+                "event_type": "PLAN_RESULT",
+                "event": None,
+                "task_acceptance_result": {
+                    "verdict": "DONE",
+                    "done_items": ["acceptance-1"],
+                    "gap_items": [],
+                },
+                "trace": trace,
+            }
+        )
 
 
 def test_plan_report_dto_rejects_client_generated_node_id() -> None:

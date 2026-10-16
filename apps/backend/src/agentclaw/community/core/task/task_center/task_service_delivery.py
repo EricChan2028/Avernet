@@ -102,6 +102,43 @@ def _relay_delivery_input(task_id: str, node: TaskNode) -> dict[str, object]:
         "delivery_intake_status": node.status.value,
     }
 
+
+def _relay_delivery_success_output(node: TaskNode) -> str:
+    """Serialize the actual S6 output, not the dispatch state transition."""
+    extend_props = node.run_info.extend_props
+    return json.dumps(
+        {
+            "status": "completed",
+            "dispatched": True,
+            "target_node_id": node.node_id,
+            "run_mode": node.run_info.run_mode,
+            "assignee": node.run_info.assignee,
+            "actual_run_mode": extend_props.get("actual_run_mode"),
+            "group_id": extend_props.get("group_id"),
+            "session_id": extend_props.get("session_id"),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def _relay_delivery_failure_output() -> str:
+    """Keep S6 failure output separate from ``error_msg`` failure cause."""
+    return json.dumps(
+        {"status": "failed", "dispatched": False},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def _relay_delivery_legacy_root_output() -> str:
+    return json.dumps(
+        {"status": "completed", "retired_legacy_root_intent": True},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
 def _emit_delivery_trajectory(
     service: "TaskServiceDeliveryMixin",
     task_id: str,
@@ -206,19 +243,20 @@ class TaskServiceDeliveryMixin:
             intents.mark_delivery_intent(
                 task_id, node_id, claimed_delivery[1], delivered=True
             )
+            legacy_root_output = _relay_delivery_legacy_root_output()
             self._graph.append_action_event(
                 task_id,
                 node_id,
                 NodeAction.DISPATCH,
                 {
                     "phase": "delivery",
-                    "action_result": "retired_legacy_root_intent",
+                    "action_result": legacy_root_output,
                     "run_mode": node.run_info.run_mode,
                     "assignee": node.run_info.assignee,
                     **_relay_delivery_trace(
                         status="completed",
                         action_input=_relay_delivery_input(task_id, node),
-                        action_result="retired_legacy_root_intent",
+                        action_result=legacy_root_output,
                         status_from=initial_status,
                         status_to=node.status,
                         boost_reason="legacy root intent retired to avoid duplicate delivery",
@@ -231,7 +269,7 @@ class TaskServiceDeliveryMixin:
                 self, task_id, node_id,
                 status="completed",
                 action_input=_relay_delivery_input(task_id, node),
-                action_result="retired_legacy_root_intent",
+                action_result=legacy_root_output,
                 status_from=initial_status,
                 status_to=node.status,
                 boost_reason="legacy root intent retired to avoid duplicate delivery",
@@ -242,8 +280,9 @@ class TaskServiceDeliveryMixin:
                 node_id,
             )
             return node
+        dispatch_input = _relay_delivery_input(task_id, node)
+        dispatch_output: str
         try:
-            dispatch_input = _relay_delivery_input(task_id, node)
             if node.status == Status.PENDING and node.run_info.run_mode != "bbs":
                 self._report_node_patch(TaskNodePatch(
                     task_id=task_id,
@@ -261,19 +300,20 @@ class TaskServiceDeliveryMixin:
             intents.mark_delivery_intent(
                 task_id, node_id, claimed_delivery[1], delivered=True
             )
+            dispatch_output = _relay_delivery_success_output(delivered)
             self._graph.append_action_event(
                 task_id,
                 node_id,
                 NodeAction.DISPATCH,
                 {
                     "phase": "delivery",
-                    "action_result": "delivered",
+                    "action_result": dispatch_output,
                     "run_mode": delivered.run_info.run_mode,
                     "assignee": delivered.run_info.assignee,
                     **_relay_delivery_trace(
                         status="completed",
                         action_input=dispatch_input,
-                        action_result="delivered",
+                        action_result=dispatch_output,
                         status_from=initial_status,
                         status_to=delivered.status,
                         boost_reason="relay handoff accepted by the selected runtime",
@@ -286,13 +326,14 @@ class TaskServiceDeliveryMixin:
                 self, task_id, node_id,
                 status="completed",
                 action_input=dispatch_input,
-                action_result="delivered",
+                action_result=dispatch_output,
                 status_from=initial_status,
                 status_to=delivered.status,
                 boost_reason="relay handoff accepted by the selected runtime",
             )
             return delivered
         except Exception as exc:
+            dispatch_output = _relay_delivery_failure_output()
             intents.mark_delivery_intent(
                 task_id, node_id, claimed_delivery[1], delivered=False,
                 error=str(exc),
@@ -303,14 +344,14 @@ class TaskServiceDeliveryMixin:
                 NodeAction.DISPATCH,
                 {
                     "phase": "delivery",
-                    "action_result": "failed",
+                    "action_result": dispatch_output,
                     "run_mode": node.run_info.run_mode,
                     "assignee": node.run_info.assignee,
                     "failure_reason": f"{type(exc).__name__}: {exc}",
                     **_relay_delivery_trace(
                         status="failed",
                         action_input=dispatch_input,
-                        action_result="failed",
+                        action_result=dispatch_output,
                         status_from=initial_status,
                         status_to=node.status,
                         boost_reason="relay handoff rejected by the selected runtime",
@@ -324,7 +365,7 @@ class TaskServiceDeliveryMixin:
                 self, task_id, node_id,
                 status="failed",
                 action_input=dispatch_input,
-                action_result="failed",
+                action_result=dispatch_output,
                 status_from=initial_status,
                 status_to=node.status,
                 boost_reason="relay handoff rejected by the selected runtime",

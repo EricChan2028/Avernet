@@ -94,7 +94,7 @@ def _execution_trace() -> dict:
                 "action_input": (
                     "{\"step\":\"" + action_type + "\",\"smoke_gate\":\"checked\"}"
                 ),
-                "action_result": "completed",
+                "action_result": f"{{\"status\":\"completed\",\"output\":\"{action_type}\"}}",
                 "status_from": "RUNNING",
                 "status_to": "RUNNING",
                 "boost_reason": "ok",

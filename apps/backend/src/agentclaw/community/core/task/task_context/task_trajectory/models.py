@@ -111,7 +111,7 @@ class TrajectoryEvent:
     task_id: str
     node_id: str
     action_type: TrajectoryActionType
-    action_result: str                       # 动作结果(success|hit_single|miss|failed|sla_timeout|...)
+    action_result: str                       # 系统动作结果词;Relay S-step/dispatch trace 为步骤推理输出 JSON(含 status 与实际输出字段)
     attempt: int                             # harness 重试序号快照
     gmt_create: int                          # 事件发射时间(ms epoch)
     gmt_modified: int                          # 分析回填时更新(未回填 == gmt_create)
@@ -120,7 +120,7 @@ class TrajectoryEvent:
     status_to: Status | None = None          # 动作后节点状态(未翻态时 None)
     error_type: ReasonCatalog | None = None   # 仅出错时填(成功为 None)
     error_msg: str | None = None              # 截断错误消息(成功为 None)
-    boost_reason: str | None = None           # 本次动作推进原因(成功推进时可填)
+    boost_reason: str | None = None           # 执行过程证据:为什么推进、为什么选择等维度信息
     holder_id: str | None = None              # Relay 当前动作执行人(ext_info 定向投影)
     analysis: str | None = None              # 内嵌 TrajectoryAnalysis JSON(发射时 None)
     output: dict[str, Any] | None = None      # 读时富化:节点当前产出(仅该节点最后一条事件;不落库)

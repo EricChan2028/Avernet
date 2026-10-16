@@ -13,9 +13,10 @@ repo**替真。
   的第一次上报)——两次都成功落账后,timeline 应严格等于 10 条 step(5+5),
   顺序 = EXECUTION steps → PLAN steps。
 
-step 字段映射(旧 ``{step,status,detail}`` → 新七字段,映射约定注记在常量旁):
-``action_input = 原始 step 名 + detail 压缩 JSON``、``action_result = 原 status``、
-``action_type`` = step 码本身(S1_CONTEXT 等,2026-10-15 起为轨迹主事件标识)。
+step 字段映射(2026-10-16 语义复核):``action_type`` = step 码本身(S1_CONTEXT 等,
+轨迹主事件标识);``action_input`` = 该步骤输入;``action_result`` = 该步骤实际输出
+或产出摘要;``boost_reason`` = 执行过程证据：为什么推进、为什么选择等等维度信息;``error_msg`` = 失败原因;
+``status_from/status_to`` = 本步骤前后节点状态。
 """
 from __future__ import annotations
 
@@ -87,84 +88,76 @@ PLAN_EVENT_ID = "fa239f79-e8f8-4fa6-b437-da3e8650d73f"
 EXECUTION_STEPS = [
     {
         "action_type": "S1_CONTEXT",
-        "action_result": "completed",
-        "action_input": '{"step": "S1_CONTEXT", "recovery_stage": "fresh", '
-                        '"smoke_gate": "checked"}',
+        "action_input": '{"context_endpoint": "/context", "recovery_stage": "fresh"}',
+        "action_result": '{"status": "completed", "context_recovered": true, "key_context_summary": "根验收与前序事实已恢复"}',
         "status_from": "RUNNING", "status_to": "RUNNING",
-        "boost_reason": "上下文与恢复阶段确认,烟测门通过", "error_msg": None,
+        "boost_reason": "S1 context API 返回有效 TaskContext,烟测门通过", "error_msg": None,
     },
     {
         "action_type": "S2_GAPS",
-        "action_result": "completed",
-        "action_input": '{"step": "S2_GAPS", "gaps": ["ac3_remaining", "ac2", '
-                        '"ac1_remaining", "ac4"]}',
+        "action_input": '{"root_acceptances": ["ac1", "ac2", "ac3", "ac4"], "all_done_output": []}',
+        "action_result": '{"status": "completed", "task_gaps": ["ac3_remaining", "ac2", "ac1_remaining", "ac4"]}',
         "status_from": "RUNNING", "status_to": "RUNNING",
-        "boost_reason": "识别 4 条剩余缺口", "error_msg": None,
+        "boost_reason": "S2 对照根验收与前序事实,识别 4 条剩余缺口", "error_msg": None,
     },
     {
         "action_type": "S3_CAPABILITY",
-        "action_result": "completed",
-        "action_input": '{"step": "S3_CAPABILITY", "decision": "accepted", '
-                        '"matched_gaps": ["ac3_remaining", "ac2", '
-                        '"ac1_remaining", "ac4"]}',
+        "action_input": '{"task_gaps": ["ac3_remaining", "ac2", "ac1_remaining", "ac4"], "identity_evidence": "任务需求助手可产出研究报告"}',
+        "action_result": '{"status": "completed", "decision": "accepted", "actual_goal": "完成竞争格局与客户需求分析"}',
         "status_from": "RUNNING", "status_to": "RUNNING",
-        "boost_reason": "能力全量匹配缺口,承接执行", "error_msg": None,
+        "boost_reason": "IDENTITY/AGENTS 职责与当前缺口匹配,承接执行", "error_msg": None,
     },
     {
         "action_type": "S4A_EXECUTION",
-        "action_result": "completed",
-        "action_input": '{"step": "S4A_EXECUTION", "output_summary": '
-                        '"完成竞争格局+客户需求两大维度分析,产出阶段二报告"}',
+        "action_input": '{"actual_goal": "完成竞争格局与客户需求分析", "execution_plan": "读取前序事实并产出阶段二报告"}',
+        "action_result": '{"status": "completed", "output_summary": "完成竞争格局+客户需求两大维度分析,产出阶段二报告", "artifacts": ["report-stage-2.md"]}',
         "status_from": "RUNNING", "status_to": "RUNNING",
-        "boost_reason": "阶段二执行完成,正文见 output_patch", "error_msg": None,
+        "boost_reason": "关键执行过程完成,产物通过本棒局部验收", "error_msg": None,
     },
     {
         "action_type": "S4B_REPORT",
-        "action_result": "ready",
-        "action_input": '{"step": "S4B_REPORT", "event_type": "EXECUTION_RESULT"}',
+        "action_input": '{"event_type": "EXECUTION_RESULT", "event_id": "0a5ee59b-1820-4459-b6a7-05612046a4e6"}',
+        "action_result": '{"status": "completed", "data_status": "APPLIED", "http_status": 200}',
         "status_from": "RUNNING", "status_to": "RUNNING",
-        "boost_reason": "EXECUTION_RESULT 就绪,准备上报", "error_msg": None,
+        "boost_reason": "服务端返回 APPLIED,执行结果已接纳", "error_msg": None,
     },
 ]
 
-# PLAN_RESULT(收敛分支)的 5 个 step(原 S5A~S5E),七字段映射:
-#   S5A/S5B/S5E=plan、S5C/S5D=dispatch(无下一棒,not_applicable)。
 PLAN_STEPS = [
     {
         "action_type": "S5A_REFRESH_GAPS",
-        "action_result": "completed",
-        "action_input": '{"step": "S5A_REFRESH_GAPS", "refresh_task_gaps": []}',
+        "action_input": '{"root_acceptances": ["ac1", "ac2", "ac3", "ac4"], "accepted_execution_output": "阶段二报告"}',
+        "action_result": '{"status": "completed", "refresh_task_gaps": []}',
         "status_from": "RUNNING", "status_to": "RUNNING",
-        "boost_reason": "缺口收敛复核,无残留", "error_msg": None,
+        "boost_reason": "纳入本棒已接纳事实后,缺口收敛复核无残留", "error_msg": None,
     },
     {
         "action_type": "S5B_PLAN_NEXT_NODE",
-        "action_result": "completed",
-        "action_input": '{"step": "S5B_PLAN_NEXT_NODE", "relay_node": null}',
+        "action_input": '{"refresh_task_gaps": []}',
+        "action_result": '{"status": "completed", "next_node": null, "closure": true}',
         "status_from": "RUNNING", "status_to": "RUNNING",
-        "boost_reason": "无下一棒,走任务收敛分支", "error_msg": None,
+        "boost_reason": "无剩余缺口,走任务收敛分支", "error_msg": None,
     },
     {
         "action_type": "S5C_SEARCH_CANDIDATES",
-        "action_result": "not_applicable",
-        "action_input": '{"step": "S5C_SEARCH_CANDIDATES"}',
+        "action_input": '{"search_required": false, "reason": "closure"}',
+        "action_result": '{"status": "not_applicable", "search": null, "candidates": []}',
         "status_from": "RUNNING", "status_to": "RUNNING",
-        "boost_reason": "收敛分支无需搜推", "error_msg": None,
+        "boost_reason": "收敛分支没有下一棒,不触发搜索", "error_msg": None,
     },
     {
         "action_type": "S5D_SELECT_EXECUTOR",
-        "action_result": "not_applicable",
-        "action_input": '{"step": "S5D_SELECT_EXECUTOR"}',
+        "action_input": '{"candidates": [], "search_required": false}',
+        "action_result": '{"status": "not_applicable", "selected_executor": null, "run_mode": null}',
         "status_from": "RUNNING", "status_to": "RUNNING",
-        "boost_reason": "收敛分支无需选执行者", "error_msg": None,
+        "boost_reason": "收敛分支没有下一棒,无需选执行者", "error_msg": None,
     },
     {
         "action_type": "S5E_REPORT_PLAN",
-        "action_result": "ready",
-        "action_input": '{"step": "S5E_REPORT_PLAN", "event_type": '
-                        '"PLAN_RESULT", "branch": "closure"}',
+        "action_input": '{"event_type": "PLAN_RESULT", "branch": "closure", "event_id": "fa239f79-e8f8-4fa6-b437-da3e8650d73f"}',
+        "action_result": '{"status": "completed", "data_status": "APPLIED", "task_completed": true}',
         "status_from": "RUNNING", "status_to": "SUCCESS",
-        "boost_reason": "PLAN_RESULT 收敛上报就绪,任务完成", "error_msg": None,
+        "boost_reason": "服务端返回 APPLIED 且 task_completed=true,根任务收敛", "error_msg": None,
     },
 ]
 

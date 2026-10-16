@@ -131,6 +131,11 @@ def test_relay_prompt_requires_structured_diagnostic_trace() -> None:
     assert "允许为 null 的键也必须显式传 null" in prompt
     assert "action_type 和 action_result 必须是非空字符串" in prompt
     assert "action_input 必须是字符串或 null" in prompt
+    assert "action_result 记录该步骤的推理输出内容" in prompt
+    assert "必须序列化为紧凑 JSON object" in prompt
+    assert "包含非空 status 字段" in prompt
+    assert "等状态值只能作为 JSON 内的 status 字段" in prompt
+    assert "boost_reason 记录执行过程证据：为什么推进、为什么选择等等维度信息" in prompt
     assert "结构化内容先序列化为紧凑 JSON 文本" in prompt
     assert "禁止 step/status/detail 或下挂 detail 的旧结构" in prompt
     assert "step.detail" not in prompt
