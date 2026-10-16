@@ -21,6 +21,7 @@ export type CreateBenchDomainInput = {
   description?: string | null;
   createdBy?: string | null;
   ownerUserId?: string;
+  spaceId?: string | null;
 };
 
 export type UpdateBenchDomainInput = {
@@ -71,8 +72,8 @@ export class BenchDomainRepository {
     const now = this.db.dialect.now();
     const ownerUserId = input.ownerUserId ?? input.createdBy ?? "";
     await this.db.exec(
-      `INSERT INTO cm_bench_domains (domain_id, name, description, status, created_by, owner_user_id, gmt_create, gmt_modified)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO cm_bench_domains (domain_id, name, description, status, created_by, owner_user_id, gmt_create, gmt_modified${input.spaceId == null ? "" : ", space_id"})
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?${input.spaceId == null ? "" : ", ?"})`,
       [
         input.domainId,
         input.name,
@@ -82,6 +83,7 @@ export class BenchDomainRepository {
         ownerUserId,
         now,
         now,
+        ...(input.spaceId == null ? [] : [input.spaceId]),
       ],
     );
     const result = await this.findByOwnerAndDomainId(ownerUserId, input.domainId);

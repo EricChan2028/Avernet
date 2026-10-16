@@ -21,6 +21,8 @@ import {
   type InternalEvolveWorkflowRuntime,
 } from "./routes/internal/evolve.js";
 import { createInternalTaskGuardRouter } from "./routes/internal/task-guard.js";
+import { registerGeneratedBenchDomainRoute, type GeneratedBenchBotSpaceResolver } from "./routes/generated-bench-domain.js";
+import { Router as createRouter } from "express";
 import { createBenchRouter } from "./routes/bench.js";
 import { createStageSkillsRouter } from "./routes/stage-skills.js";
 import { createSkillAssetsRouter } from "./routes/skill-assets.js";
@@ -65,6 +67,7 @@ export type ClawevolveModuleOptions = {
   workflowRuntime?: InternalEvolveWorkflowRuntime;
   hostLocalSkills?: BotSkillGateway;
   hostSpaces?: SpaceDirectory;
+  resolveGeneratedBenchBotSpace?: GeneratedBenchBotSpaceResolver;
   hostExtensions?: readonly EvolveExtension[];
   /** Host-owned model catalog. Public code intentionally defines no provider defaults. */
   modelConfig?: EvolveModelConfig;
@@ -178,7 +181,12 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
     workflowRuntime: options.workflowRuntime,
   });
   const taskGuardRouter = createInternalTaskGuardRouter(evolve);
-  const benchRouter = createBenchRouter(
+  const benchRouter = createRouter();
+  registerGeneratedBenchDomainRoute(benchRouter, {
+    tasks: evolve, domains: benchDomain, resolveBotSpace: options.resolveGeneratedBenchBotSpace,
+  });
+  benchRouter.use(spaceAccessErrorHandler);
+  benchRouter.use(createBenchRouter(
     benchDomain,
     benchTemplate,
     benchTemplateVersion,
@@ -187,7 +195,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
     db,
     benchArtifact,
     benchTag,
-  );
+  ));
 
   let runAnalysisTimeoutTimer: NodeJS.Timeout | null = null;
   let suggestionApplyTimeoutTimer: NodeJS.Timeout | null = null;
