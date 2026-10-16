@@ -39,6 +39,13 @@ DEFAULT_MCPORTER_CONFIG_PATH = "~/.mcporter/mcporter.json"
 # 默认最大连接数（0 表示不限制）
 DEFAULT_MAX_CONNECTIONS = 0
 
+#: Where acli installs market tools. Shared by every engine and by the default
+#: CLIs the image installs at boot, so one acli record covers them all. It is
+#: on persisted storage (``/home/admin``) and is the directory the agent image
+#: puts on ``PATH``, so it is fixed rather than configurable: any other
+#: directory would install tools the agent cannot run.
+ACLI_INSTALL_DIR = "/home/admin/.agentclaw/bin"
+
 
 @dataclass(frozen=True)
 class MCPTokenSettings:

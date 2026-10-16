@@ -19,6 +19,9 @@ from typing import Any
 from agentclaw.community.di.task_dispatch_config import (
     TaskDispatchConfig as TaskDispatchConfig,
 )
+from agentclaw.community.di.acli_market_config import (
+    AcliMarketConfig as AcliMarketConfig,
+)
 from agentclaw.community.di.openapi_user_id_bypass_config import (
     OpenApiUserIdBypassConfig as OpenApiUserIdBypassConfig,
 )

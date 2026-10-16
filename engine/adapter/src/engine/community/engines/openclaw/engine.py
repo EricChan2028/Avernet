@@ -109,6 +109,9 @@ class OpenClawEngine(BaseEngine):
             Capability.CLI_LIST,
             Capability.CLI_REPLACE,
             Capability.CLI_DOWNLOAD,
+            # acli market tools, managed through the public API.
+            Capability.CLI_ACLI_INSTALL,
+            Capability.CLI_ACLI_UNINSTALL,
             # Approval
             Capability.APPROVAL_GET,
             Capability.APPROVAL_SET,
