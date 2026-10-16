@@ -1,3 +1,5 @@
+import { automaticAdvance, changedChainItems, isAutomaticBatch } from '../contracts/repair-automatic-chain.js';
+import { repairEvidenceFacts, repairEvidenceFlows } from '../contracts/repair-batch.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import {
   RepairBatchError, boundedRepairJson, canonicalRepairJson, digestRepairJson,
@@ -108,7 +110,7 @@ export class RepairBatchRepository {
 
   async setDisposition(tx: IDatabase, input: {
     workflowId: string; itemId: string; expectedStateVersion: number; action: 'no_action' | 'restore';
-    actorId: string; requestId: string; reason: string;
+    actorId: string; requestId: string; reason: string; untilMs?: number;
   }): Promise<RepairDispositionResult> {
     if (!['no_action', 'restore'].includes(input.action) || !input.requestId?.trim() || input.requestId.length > 128
       || !input.actorId?.trim() || input.actorId.length > 128 || typeof input.reason !== 'string' || input.reason.length > 4000) conflict('INVALID_INPUT', 'Invalid disposition request');
@@ -121,6 +123,7 @@ export class RepairBatchRepository {
       if (audit.requestDigest !== requestDigest) conflict('IDEMPOTENCY_MISMATCH', 'Request id was already used with different content');
       return audit.response;
     }
+    if (input.untilMs !== undefined && (!Number.isSafeInteger(input.untilMs) || input.untilMs <= Date.now() || input.action !== 'no_action')) conflict('INVALID_INPUT', 'Invalid disposition deadline');
     const item = await this.readItem(tx, input.workflowId, input.itemId);
     if (!item) conflict('ITEM_NOT_FOUND', 'Repair item does not exist in this workflow');
     if (item.activeTaskId) conflict('ITEM_BUSY', 'A task owns this content version');
@@ -129,7 +132,8 @@ export class RepairBatchRepository {
     // The unique identity key prevents a second same-content/same-episode item, including on restore.
     const atMs = Date.now();
     const disposition: RepairDisposition = { action: input.action, actorId: input.actorId, reason: input.reason,
-      requestId: input.requestId, contentRevision: item.contentRevision, atMs };
+      requestId: input.requestId, contentRevision: item.contentRevision, atMs, evidenceFlowIds: repairEvidenceFlows(item), evidenceEventIds: repairEvidenceFacts(item).eventIds, evidenceSeverity: repairEvidenceFacts(item).severity,
+      ...(input.untilMs === undefined ? {} : { untilMs: input.untilMs }) };
     const state = input.action === 'no_action' ? 'no_action' : 'pending';
     const updated = await tx.exec(`UPDATE workflow_repair_items SET state = ?, state_version = state_version + 1,
       disposition_json = ?, updated_at_ms = ? WHERE workflow_id = ? AND item_id = ? AND state_version = ?
@@ -184,11 +188,12 @@ export class RepairBatchRepository {
       return revisionFromRow(retry);
     }
     const previous = await this.latest(tx, workflowId, input.taskId);
+    automaticAdvance(await new RepairBatchRepository(tx).listRevisions(workflowId, input.taskId), input);
     if ((await tx.query('SELECT 1 FROM workflow_repair_revisions WHERE task_id = ? AND phase = ? LIMIT 1', [input.taskId, 'published'])).length) conflict('STATE_CONFLICT', '已部署任务不能再生成候选；请依据效果结论创建新基线任务');
     if (request.expectedAttemptRevision !== (previous?.revision ?? 0) || input.revision !== (previous?.revision ?? 0) + 1
-      || (previous && !['review', 'blocked', 'failed'].includes(previous.phase))) conflict('STATE_CONFLICT', 'Revision is not editable or latest attempt changed');
+      || (previous && !['review', 'blocked', 'failed', ...(isAutomaticBatch(input) ? ['no_change'] : [])].includes(previous.phase))) conflict('STATE_CONFLICT', 'Revision is not editable or latest attempt changed');
     if (previous && canonicalRepairJson(previous.input.baseline) !== canonicalRepairJson(input.baseline)) conflict('CONTENT_MISMATCH', 'A task cannot change its frozen baseline');
-    const successful = await this.latest(tx, workflowId, input.taskId, true);
+    const successful = isAutomaticBatch(input) ? (await new RepairBatchRepository(tx).listRevisions(workflowId, input.taskId)).find(r => r.draft !== null && r.phase !== 'failed') : await this.latest(tx, workflowId, input.taskId, true);
     if (input.parentCandidateCommit !== (successful?.draft?.candidateCommit ?? null)) conflict('CONTENT_MISMATCH', 'Parent must be the task last successful candidate');
     const claims = [];
     for (const frozenItem of input.items) {
@@ -202,7 +207,7 @@ export class RepairBatchRepository {
     await this.claimItems(tx, { workflowId, taskId: input.taskId, revision: input.revision, items: claims });
     const selected = new Set(input.items.map(item => item.itemId));
     const owned = await tx.query<Row>('SELECT item_id FROM workflow_repair_items WHERE workflow_id = ? AND active_task_id = ?', [workflowId, input.taskId]);
-    for (const row of owned) if (!selected.has(row.item_id)) {
+    for (const row of owned) if (!selected.has(row.item_id) && !isAutomaticBatch(input)) {
       await tx.exec(`UPDATE workflow_repair_items SET state = 'pending', active_task_id = NULL, active_revision = NULL,
         state_version = state_version + 1, updated_at_ms = ? WHERE workflow_id = ? AND item_id = ? AND active_task_id = ? AND state = 'processing'`,
       [Date.now(), workflowId, row.item_id, input.taskId]);
@@ -243,7 +248,15 @@ export class RepairBatchRepository {
     [input.phase, draftJson, checksJson, digestRepairJson(input.draft), digestRepairJson(input.checks), Date.now(),
       input.workflowId, input.taskId, input.revision, input.expectedStateVersion, current.phase]);
     if (result.affectedRows !== 1) conflict('STATE_CONFLICT', 'Draft result was already settled');
-    if (input.phase === 'no_change') {
+    let releaseUnchanged = input.phase === 'no_change' && !isAutomaticBatch(current.input);
+    const origin = current.input.automation;
+    if (input.phase === 'no_change' && isAutomaticBatch(current.input) && origin!.batchIndex === origin!.batchCount! - 1) {
+      const revisions = await new RepairBatchRepository(tx).listRevisions(input.workflowId, input.taskId);
+      // Only a complete, validated zero-change chain releases every reservation.
+      // Intermediate batches and candidates containing prior changes keep ownership.
+      releaseUnchanged = changedChainItems(revisions, revisions[0], true).length === 0;
+    }
+    if (releaseUnchanged) {
       await tx.exec(`UPDATE workflow_repair_items SET state = 'pending', active_task_id = NULL, active_revision = NULL,
         state_version = state_version + 1, updated_at_ms = ? WHERE workflow_id = ? AND active_task_id = ? AND state = 'processing'`,
       [Date.now(), input.workflowId, input.taskId]);

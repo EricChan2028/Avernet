@@ -19,6 +19,12 @@ from typing import Any
 from agentclaw.community.di.task_dispatch_config import (
     TaskDispatchConfig as TaskDispatchConfig,
 )
+from agentclaw.community.di.acli_market_config import (
+    AcliMarketConfig as AcliMarketConfig,
+)
+from agentclaw.community.di.openapi_user_id_bypass_config import (
+    OpenApiUserIdBypassConfig as OpenApiUserIdBypassConfig,
+)
 
 from agentclaw.community.core.bot_config_manifest.delivery_mode import (
     TeclawDeliveryMode,
@@ -514,6 +520,11 @@ class BaasConfig:
     eval_template_uuid: str = ""
     # Personal bot via BaaS (poolab template) — deploy supplies it.
     personal_bot_template_uuid: str = ""
+    # Singlebox-only. When enabled, Backend sends the bot identity through
+    # the existing BaaS ``deploy_config.arca_metadata`` field so the local
+    # process sandbox can resolve a workspace without BAAS core lifecycle
+    # changes. Every non-singlebox deployment leaves this disabled.
+    runtime_identity_metadata: bool = False
 
 
 @dataclass(frozen=True)

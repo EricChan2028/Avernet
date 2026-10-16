@@ -51,6 +51,8 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 
 _CALLER = "u-42"
+#: What the seam sees when no bypass is configured — the shipped default.
+_NO_BYPASS: frozenset[str] = frozenset()
 _PROBE = f"{PUBLIC_API_PREFIX}/bots/_probe"
 
 
@@ -189,7 +191,11 @@ def test_a_rejected_id_cannot_choose_how_much_it_logs(caplog):
 
     with caplog.at_level(logging.WARNING):
         with pytest.raises(UserIdMismatchError):
-            asyncio.run(require_user_id(principal={"user_id": _CALLER}, user_id=flood))
+            asyncio.run(
+                require_user_id(
+                    principal={"user_id": _CALLER}, user_id=flood, bypass=_NO_BYPASS
+                )
+            )
 
     logged = "\n".join(record.getMessage() for record in caplog.records)
     assert len(logged) < 500, "a caller must not choose the size of the log line"
@@ -201,7 +207,9 @@ def test_a_rejected_id_cannot_choose_how_much_it_logs(caplog):
 
 @pytest.mark.asyncio
 async def test_the_dependency_returns_the_request_user_id():
-    resolved = await require_user_id(principal={"user_id": _CALLER}, user_id=_CALLER)
+    resolved = await require_user_id(
+        principal={"user_id": _CALLER}, user_id=_CALLER, bypass=_NO_BYPASS
+    )
 
     assert resolved == _CALLER
 
@@ -209,14 +217,16 @@ async def test_the_dependency_returns_the_request_user_id():
 @pytest.mark.asyncio
 async def test_the_dependency_refuses_a_mismatch():
     with pytest.raises(UserIdMismatchError):
-        await require_user_id(principal={"user_id": _CALLER}, user_id="someone-else")
+        await require_user_id(
+            principal={"user_id": _CALLER}, user_id="someone-else", bypass=_NO_BYPASS
+        )
 
 
 @pytest.mark.asyncio
 async def test_the_dependency_refuses_an_unverifiable_caller():
     """Fail-closed on the principal before the parameter is even compared."""
     with pytest.raises(MissingPrincipalError):
-        await require_user_id(principal=None, user_id=_CALLER)
+        await require_user_id(principal=None, user_id=_CALLER, bypass=_NO_BYPASS)
 
 
 @pytest.mark.asyncio
@@ -231,7 +241,9 @@ async def test_the_mismatch_logs_both_ids(caplog):
     with caplog.at_level(logging.WARNING):
         with pytest.raises(UserIdMismatchError):
             await require_user_id(
-                principal={"user_id": _CALLER}, user_id="someone-else"
+                principal={"user_id": _CALLER},
+                user_id="someone-else",
+                bypass=_NO_BYPASS,
             )
 
     logged = "\n".join(record.getMessage() for record in caplog.records)
@@ -349,6 +361,7 @@ _NO_USER_DIMENSION = {
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/skills"),
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/mcp-servers"),
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/skill-center/skills"),
+    ("get", f"{PUBLIC_API_PREFIX}/bots/market/clis"),
     # Public Skill Center status and tag catalogues are tenant-wide reads.
     ("get", f"{PUBLIC_API_PREFIX}/bots/skills/{{skill_code}}/publish/status"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/market/skill-center/tags"),
@@ -553,8 +566,11 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # (/openapi/v1/bots/{bot_id}/avatar and /openapi/v1/bots/{bot_id}/links[/{resource_id}],
 # six path-addressed user-scoped operations) joins the public schema, so
 # ``path`` grows 172 -> 178. Classification and the Local Skill security read
-# each add another path-addressed operation.
-_BOT_ID_PLACEMENT = {"path": 181, "query": 1, "none": 125}
+# each add another path-addressed operation. The four acli market CLI
+# operations under /bots/{bot_id}/clis add four more: 181 -> 185. The acli
+# market search then moves to the tenant-wide /bots/market/clis, so one of
+# them leaves the path tier: path 185 -> 184, none 125 -> 126.
+_BOT_ID_PLACEMENT = {"path": 184, "query": 1, "none": 126}
 
 
 def _schema() -> dict:
@@ -756,7 +772,11 @@ def test_the_pinned_number_of_operations_take_it():
     # 246 -> 252 (and mirrors _BOT_ID_PLACEMENT["path"] 172 -> 178).
     # The Local Skill security read adds one user-scoped path operation.
     # Engine release inspection adds one Bot-addressed read.
-    assert len(taking) == 254
+# acli market CLIs: four path-addressed, user-scoped operations under
+# /bots/{bot_id}/clis take user_id like the identity switch beside them,
+# so ``taking`` grows 254 -> 258. The market search then moves to the
+# tenant-wide /bots/market/clis, which takes no user: 258 -> 257.
+    assert len(taking) == 257
 
 
 def test_the_exempt_operations_take_none():

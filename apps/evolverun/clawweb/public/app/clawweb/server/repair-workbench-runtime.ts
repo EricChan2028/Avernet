@@ -1,3 +1,5 @@
+import { createRepairTrialService } from '@avernet/workflow/server/services/repair-trial-service';
+import type { RepairTrialPort } from '@avernet/workflow/server/contracts/repair-trial';
 /** Shared composition root for the public and internal ClawWeb Hosts.
  * Workflow owns control-plane rules; old repositories supply read-only analysis sources.
  * The Host supplies verified identity and, independently, its AIS execution adapter.
@@ -16,12 +18,17 @@ import type { RepairExecutionPort } from '@avernet/workflow/server/contracts/rep
 import type { RepairPublicationPort } from '@avernet/workflow/server/contracts/repair-release';
 import { createRepairReleaseService } from '@avernet/workflow/server/services/repair-release-service';
 import { createRepairVerificationService } from '@avernet/workflow/server/services/repair-verification-service';
+import { createWorkflowAutomation } from '@avernet/workflow/server/services/workflow-automation-service';
+import { RepairAutomationDeniedError, type WorkflowAutomationPorts, type WorkflowAutomationService } from '@avernet/workflow/server/contracts/workflow-automation';
+import type { AutoAnalysisSettings } from '@avernet/workflow/server/services/task-guard/auto-analysis-settings';
 
 export function createWorkflowRepairRuntime(db: IDatabase, options: {
   principal: RepairPrincipalResolver;
   execution?: RepairExecutionPort;
   publication?: RepairPublicationPort;
-}): { service: ReturnType<typeof createRepairWorkbenchService>; release: ReturnType<typeof createRepairReleaseService>; router: Router; monitor: { reconcile(): Promise<number> } } {
+  trial?: RepairTrialPort;
+  automation?: { settings: AutoAnalysisSettings; ports: WorkflowAutomationPorts; now?: () => number };
+}): { service: ReturnType<typeof createRepairWorkbenchService>; release: ReturnType<typeof createRepairReleaseService>; trials: ReturnType<typeof createRepairTrialService>; router: Router; automation: WorkflowAutomationService | undefined; monitor: { reconcile(): Promise<number> } } {
   const sources = createRepairSourcePort({
     groups: (tx, workflowId, sourceOptions) => new IssueAggregationRepository(tx).listSources(workflowId, sourceOptions),
     suggestions: async (tx, workflowId, sourceOptions) => {
@@ -60,8 +67,19 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
     }
     return JSON.stringify(versions);
   };
-  const service = createRepairWorkbenchService(db, sources, options.execution);
+  let automation: WorkflowAutomationService | undefined;
+  const execution = options.execution ? { ...options.execution, dispatch: async (request: Parameters<RepairExecutionPort['dispatch']>[0]) => {
+    if (request.input.automation) {
+      if (!automation) throw new RepairAutomationDeniedError('AUTOMATION_UNAVAILABLE');
+      await automation.authorizeDraft({ workflowId: request.input.baseline.workflowId, actorId: request.actorId, taskId: request.input.taskId,
+        origin: request.input.automation, itemIds: request.input.items.map(item => item.itemId) });
+    }
+    return options.execution!.dispatch(request);
+  } } : undefined;
+  const service = createRepairWorkbenchService(db, sources, execution);
+  if (options.automation) automation = createWorkflowAutomation({ db, workbench: service, ...options.automation });
   const release = createRepairReleaseService({ db, workbench: service, publisher: options.publication });
+  const trials = createRepairTrialService({ db, workbench: service, port: options.trial });
   const authorize = createRepairAuthorizer(options.principal, new BotWorkflowPermissionRepository(db));
   const verification = createRepairVerificationService(db, options.publication);
   const monitor = { async reconcile() {
@@ -84,7 +102,8 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
       after = pending.at(-1)!.record_id;
     }
     await verification.automatic.reconcile();
+    await automation?.tick();
     return count;
   } };
-  return { service, release, monitor, router: createRepairBatchesRouter({ service, authorize, release, verification }) };
+  return { service, release, trials, monitor, automation, router: createRepairBatchesRouter({ service, authorize, release, trials, verification }) };
 }

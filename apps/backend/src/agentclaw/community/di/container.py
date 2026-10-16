@@ -43,6 +43,7 @@ from agentclaw.community.di.modules.manifest_fetch_module import ManifestFetchMo
 from agentclaw.community.di.modules.bot_public_module import BotPublicModule
 from agentclaw.community.di.modules.bot_quota_module import BotQuotaModule
 from agentclaw.community.di.modules.task_module import TaskModule
+from agentclaw.community.di.modules.acli_clis_module import AcliClisModule
 from agentclaw.community.di.modules.caller_identity_module import CallerIdentityModule
 from agentclaw.community.di.modules.channel_module import ChannelModule
 from agentclaw.community.di.modules.common_config_module import CommonConfigModule
@@ -71,6 +72,12 @@ from agentclaw.community.di.modules.mcp_runtime_credentials_config_module import
     McpRuntimeCredentialsConfigModule,
 )
 from agentclaw.community.di.modules.mcp_module import McpModule
+from agentclaw.community.di.modules.openapi_user_id_bypass_config_module import (
+    OpenApiUserIdBypassConfigModule,
+)
+from agentclaw.community.di.openapi_user_id_bypass_config import (
+    OpenApiUserIdBypassConfig,
+)
 from agentclaw.community.di.modules.bot_message_feedback_module import BotMessageFeedbackModule
 from agentclaw.community.di.modules.quality_module import QualityModule
 from agentclaw.community.di.modules.runtime_projection_recovery_module import (
@@ -148,6 +155,11 @@ def build_injector(
         # (bot_id + tc_bot timeout). Sits in its own module to keep
         # ConfigModule at zero headroom under the 1000-line cap.
         TaskTrajectoryConfigModule(),
+        # Public-API ``user_id`` bypass list (``openapi`` user_config block).
+        # Own module for the same headroom reason; its provider refuses a
+        # malformed block anywhere and a non-empty list in pre/prod, and is
+        # resolved unconditionally below so that refusal fails the boot.
+        OpenApiUserIdBypassConfigModule(),
         InstallationReadConfigModule(),
         SkillCenterModule(),
         SkillCenterGroup4Module(),
@@ -191,6 +203,7 @@ def build_injector(
         BotAppGrantModule(),
         BotChatOpenModule(),
         CallerIdentityModule(),
+        AcliClisModule(),
         UserListModule(),
         BotDormantModule(),
         TaskQueueModule(),
@@ -235,6 +248,14 @@ def build_injector(
     _app_injector.get(DraftContentStoreConfig)
     _app_injector.get(DesktopSkillRecoveryConfig)
     _app_injector.get(McpRuntimeCredentialsConfig)
+    # The public-API ``user_id`` bypass list is the same shape of risk with a
+    # sharper edge: its provider refuses a malformed block, and a non-empty
+    # list in pre/prod. Left lazy, that refusal would be swallowed here on a
+    # dev / singlebox / community boot and come back as a 500 on the first
+    # user-scoped /openapi/v1 request (``resolve_user_id_bypass`` does not
+    # read a raising provider as "no bypass"). Resolving it here makes the
+    # refusal a failed boot on every profile, pre/prod included.
+    _app_injector.get(OpenApiUserIdBypassConfig)
 
     return _app_injector
 

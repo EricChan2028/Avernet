@@ -124,6 +124,9 @@
         "secure": true
       }
     },
+    "openapi": {
+      "user_id_bypass": []
+    },
     "openapi_bot": {
       "api_key_prefix": "${api_key_prefix:-}",
       "api_key_secret": "${api_key_secret:-}",
@@ -188,6 +191,7 @@
       "desktop_ttl_minutes": 0,
       "eval_template_uuid": "",
       "personal_bot_template_uuid": "",
+      "runtime_identity_metadata": false,
       "teclaw_template_uuid": "",
       "template_uuid": "${BAAS_TEMPLATE_ID:-}",
       "tenant": "${BAAS_TENANT:-}"

@@ -183,6 +183,7 @@ from .collaborating_bots import router as collaborating_bots_router
 from .task import task_router
 from .bots.engine_version import router as engine_version_router
 from .bots.engine_config import router as engine_config_router
+from .bots.acli_clis import router as acli_clis_router
 from .bots.cli_tools import router as cli_tools_router
 from .bots.config_manifest import router as config_manifest_router
 from .bots.config_manifest_apply import router as config_manifest_apply_router
@@ -221,6 +222,7 @@ from .identity import router as identity_router
 from .local import router as local_router
 from .loadtest import router as loadtest_router
 from .market import router as market_router
+from .market.acli_clis import router as acli_market_router
 from .mcp import router as mcp_router
 from .mcp.router import bot_mcp_router
 from .bot_logs import router as logs_router
@@ -410,6 +412,9 @@ _ADDRESSED_BOT_SUBGROUPS = [
     diagnostics_router,
     channels_router,
     caller_identity_router,
+    # acli market CLIs: MEMBER reads, owner-only writes behind the edit
+    # lock — the bars of the identity switch above.
+    acli_clis_router,
     skill_sets_router,
     skill_center_references_router,
     bot_mcp_router,
@@ -558,6 +563,11 @@ def build_public_router() -> APIRouter:
     # before the ``{bot_id}`` wildcard router below.
     public.include_router(
         market_router,
+        responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    public.include_router(
+        acli_market_router,
         responses=ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )

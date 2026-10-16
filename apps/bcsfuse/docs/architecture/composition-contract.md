@@ -193,6 +193,21 @@ implementations are tested against the same contracts. Storage write and
 cleanup failures propagate to the application service and must not be reported
 as success.
 
+Worker registry providers must make `update(worker)` atomic with respect to
+`worker.version`: the database write must match that version, increment it
+once, and reject a conflict without writing. Sparse sync retries those
+conflicts against the latest Worker so concurrent updates to different fields
+do not silently overwrite each other. SQLite Worker/Profile stores also
+serialize all operations on each shared connection; the SQL version predicate
+coordinates writes from separate connections or processes.
+
+Profile providers implement `save_if_version(content, expected_version)` for
+sparse sync: `None` as the expected version inserts only when absent; an integer
+updates only that stored version. A version mismatch returns `None` without
+writing, while storage failures raise. Composed providers must support this
+operation before serving sync traffic. It allows concurrent syncs on the same
+Profile to re-read and re-merge without silently losing disjoint updates.
+
 ### MySQL storage timestamp compatibility (v1)
 
 MySQL-backed Worker/Profile providers, including injected providers, use the
@@ -275,6 +290,38 @@ aliases share a handler. New workers honor the supported `type` values
 write. Updates retain an existing worker's type. With `profile.activate=false`,
 sync saves the profile but preserves the existing active content, binding,
 and worker mirror, including the valid state with no active profile.
+
+For existing Workers and Profiles, sync is presence-aware. `name` is required
+and replaced; omitted mutable Worker fields (`description`, `responsibilities`,
+`domains`, `capabilities`, `skills`, `availability`, `trust_level`) retain their
+stored values. Supplied values replace them, including empty lists or an empty
+description. Omitted `runtime_state` or explicit null preserves the current
+runtime state; new Workers default online. Existing Profile scalar fields,
+`skill_sets`, and generated analysis fields survive omission. Supplied
+`skill_sets` replaces the list, including `[]`. Supplied nonempty `contents`
+and `metadata` maps merge by key; an explicitly empty map clears that map.
+Supplied `profile.summary` replaces `contents.ecb_summary`; null removes it.
+Concurrent syncs use versioned Worker and Profile writes and retry stale merges
+against the latest committed record up to five times. Exhausted Worker
+conflicts return 500 `SYNC_WORKER_ERROR`; exhausted Profile conflicts return
+500 `PROFILE_SYNC_FAILED`. Neither is acknowledged as a successful write.
+This does not make Worker and Profile writes one transaction.
+LLM analysis may replace only generated `contents` keys after successful
+analysis. Before writing, it reads the current Profile and skips a stale
+result when that Profile no longer matches the analyzed snapshot. This check
+does not provide cross-process compare-and-swap for a write racing after the
+read. A missing Profile provider returns 503, and
+Profile read/write/activation failures return 500 `PROFILE_SYNC_FAILED` rather
+than a false success. Worker changes made before such a failure may remain
+committed; repeating the same sync safely completes the Profile step.
+SQLite and MySQL Profile stores persist `description` under the reserved
+`__bcsfuse_profile_description_v1__` key in the existing `metadata` JSON
+column. Reads remove that storage key from caller-visible metadata. The key
+is written even when the description is null, so clearing a description does
+not revive a value from a previously added column; rows without the key can
+still read such a legacy column when present. The reserved key cannot be used
+as caller metadata. This contract requires no table alteration, including in
+internal DBA-managed deployments.
 
 With `ENABLE_PROFILE_EMBEDDING_INDEX=true`, successful explicit profile
 activation also refreshes the selected profile's vectors. Other profiles'

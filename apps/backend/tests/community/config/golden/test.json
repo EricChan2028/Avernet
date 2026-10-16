@@ -79,6 +79,9 @@
     "health_check": {
       "bcs_url": "http://localhost:21000"
     },
+    "openapi": {
+      "user_id_bypass": []
+    },
     "openclaw": {
       "skills_repo_url": ""
     },
@@ -120,6 +123,7 @@
       "desktop_ttl_minutes": 0,
       "eval_template_uuid": "",
       "personal_bot_template_uuid": "",
+      "runtime_identity_metadata": false,
       "teclaw_template_uuid": "",
       "template_uuid": "",
       "tenant": "default"
