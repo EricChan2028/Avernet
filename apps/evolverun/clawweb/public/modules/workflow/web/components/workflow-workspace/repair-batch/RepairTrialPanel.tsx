@@ -80,7 +80,8 @@ export default function RepairTrialPanel({ taskId, revision, enabled, open, onCl
   }, [scope, open, enabled, loadAttempt])
   const definition = { inputSchema: options?.inputSchema ?? null, inputDefinition: options?.inputDefinition ?? 'missing' as const }
   const selectedTarget = options?.targets.find(bot => bot.id === targetId)
-  const targetUnavailable = selectedTarget?.executionMode === 'unavailable' || selectedTarget?.executionMode === 'saved'
+  // An unknown request only reconciles its frozen identity; it never selects a new Bot.
+  const targetUnavailable = !uncertain && (!selectedTarget || selectedTarget.executionMode === 'unavailable' || selectedTarget.executionMode === 'saved')
   const locked = busy || uncertain || submitted
   function toggleAdvanced() {
     try {

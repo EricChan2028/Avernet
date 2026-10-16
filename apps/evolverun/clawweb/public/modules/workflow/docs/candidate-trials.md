@@ -45,7 +45,7 @@ Previously persisted saved-mode requests can still be read/reconciled by the sam
 
 ## Regression evidence (2026-10-16)
 
-- Workflow suite: 750 tests; paired OCB internal suite: 784 tests, zero failures. Public/dependency build and internal type checks passed using Node 24.13.0.
+- Workflow suite after integrating current dev (including #2831/#2847): 777 tests; paired OCB internal suite: 784 tests, zero failures. Public/dependency build and internal type checks passed using Node 24.13.0.
 - Local composition with task-workspace PR #2847 merged without source conflicts; 51 trial/release/workspace tests passed. Its tabs and inline actions were preserved; this change does not rewrite those components.
 - Real components in a local HTTP fixture at 1365×900 and 390×600: field-map form/defaults/enum, recursive object/array widgets without JSON, missing/empty definitions, loading/read failure/retry, modal focus/Tab/Esc/restore, internal scrolling, persistent modal actions, preserved Bot/input, old capability refusal and explicit Bot change were inspected.
 - A controlled lost response kept the original request/input/Bot across close/reopen; the two explicit HTTP attempts had identical bodies. Candidate change cleared input and labelled the old result; the background publication action stayed disabled. Fixture logs contained no publication or unexpected API writes.

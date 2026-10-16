@@ -15,6 +15,26 @@ beforeEach(() => {
     inputSchemaDigest: 'schema', targets: [{ id: 'prod:owner:bot', label: 'Production Bot' }] })
 })
 const panel = (rev = revision) => <MemoryRouter><RepairTrialPanel taskId="task" revision={rev} enabled open onClose={() => {}} onTrials={() => {}} /></MemoryRouter>
+it.each([false, true])('handles a removed selected Bot on reopen while preserving unknown-request reconciliation (uncertain=%s)', async uncertain => {
+  api.startTrial.mockRejectedValueOnce(new Error('response lost')).mockResolvedValueOnce(trial)
+  const view = render(panel())
+  await userEvent.selectOptions(await screen.findByRole('combobox', { name: '执行 Bot' }), 'prod:owner:bot')
+  await userEvent.type(screen.getByRole('textbox', { name: 'query' }), 'original')
+  if (uncertain) {
+    await userEvent.click(screen.getByRole('button', { name: '开始试跑' }))
+    await screen.findByRole('button', { name: '核对并重试原请求' })
+  }
+  view.rerender(<MemoryRouter><RepairTrialPanel taskId="task" revision={revision} enabled open={false} onClose={() => {}} onTrials={() => {}} /></MemoryRouter>)
+  api.trialOptions.mockResolvedValue({ inputSchema: { properties: { query: { type: 'string' } } }, inputSchemaDigest: 'schema', targets: [] })
+  view.rerender(panel())
+  await screen.findByText('没有已授权且支持工作流运行的生产 Bot。')
+  const start = screen.getByRole('button', { name: uncertain ? '核对并重试原请求' : '开始试跑' })
+  if (!uncertain) { expect(start).toBeDisabled(); expect(api.startTrial).not.toHaveBeenCalled() }
+  else {
+    expect(start).toBeEnabled(); await userEvent.click(start)
+    expect(api.startTrial.mock.calls[1]).toEqual(api.startTrial.mock.calls[0])
+  }
+})
 it('never selects a Bot or executes until explicit action, sends typed input and deduplicates double click', async () => {
   api.startTrial.mockResolvedValue(trial)
   render(panel())
