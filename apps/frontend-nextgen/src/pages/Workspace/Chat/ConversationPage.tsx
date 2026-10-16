@@ -5,7 +5,6 @@
 // (Bot 身份只读好友分支由 /workspace/chat 单一 Human 语义整体取代,旧分支 Task 10 退休)。
 // 登录用户变化(非首次出现)时重置会话 Store:缓存按 botId 记忆、无用户来源,
 // 防止上一用户的缓存/选中串号(控制器裁定,不在每次挂载时重置)。
-import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui';
 import type { IdentityView } from '@/domain/collaboration/types';
 import type { ConversationBotSection } from '@/domain/conversation/types';
 import { isManagedConversationSection } from '@/domain/conversation/types';
@@ -27,11 +26,8 @@ import { useBotChat } from '../hooks/useBotChat';
 import { ChatHeaderActions } from './components/ChatHeaderActions';
 import { ChatHeaderRightPanel, SessionDetailPanel } from './components/ChatHeaderRightPanel';
 import { ConversationSessionPlaceholder } from './components/ConversationSessionPlaceholder';
-import {
-  ConversationSidebar,
-  ConversationSidebarContent,
-  type ConversationSidebarProps,
-} from './components/ConversationSidebar';
+import { ConversationSidebar, type ConversationSidebarProps } from './components/ConversationSidebar';
+import { ConversationMobileSidebarDrawer } from './components/ConversationMobileSidebarDrawer';
 import { SessionHistorySearchPanel } from './components/SessionHistorySearchPanel';
 import { ConversationInteractiveStage } from './ConversationInteractiveStage';
 import { useChatHeaderPanels } from './hooks/useChatHeaderPanels';
@@ -252,23 +248,15 @@ export default function ConversationPage(): JSX.Element {
       <div className="flex min-h-0 flex-1">
         <ConversationSidebar {...sidebarProps} />
         {/* <lg 二级会话列表抽屉:与桌面端共用同一 Content,选中即收起。 */}
-        <Drawer
+        <ConversationMobileSidebarDrawer
+          sidebarProps={sidebarProps}
           open={mobileListOpen}
-          onOpenChange={(open) => {
-            if (!open) setMobileListOpen(false);
+          onOpenChange={(open) => setMobileListOpen(open)}
+          onOpenSession={(botId, section, sessionId, friendUserId) => {
+            handleOpenSession(botId, section, sessionId, friendUserId);
+            setMobileListOpen(false);
           }}
-        >
-          <DrawerContent side="left" size="sm" showClose={false} bodyClassName="p-0 flex flex-col">
-            <DrawerTitle className="sr-only">会话列表</DrawerTitle>
-            <ConversationSidebarContent
-              {...sidebarProps}
-              onOpenSession={(botId, section, sessionId, friendUserId) => {
-                handleOpenSession(botId, section, sessionId, friendUserId);
-                setMobileListOpen(false);
-              }}
-            />
-          </DrawerContent>
-        </Drawer>
+        />
         {selectionIsReadonly ? (
           <ReadOnlyConversationPanel
             bot={readonly.bot}
