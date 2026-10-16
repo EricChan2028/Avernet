@@ -138,8 +138,8 @@ def _display_run_mode(node) -> "str | None":
 
 # 会话明细探测:取最近 N 条 msg(条数上限),内容**不截断**(去掉了单条/总量
 # 字符预算,按需求保留会话原文;N 经 TrajectoryAnalysisConfig.
-# running_session_message_limit 配置,默认 60)。
-_RUNNING_SESSION_DEFAULT_MSG_LIMIT = 60
+# running_session_message_limit 配置,默认 200)。
+_RUNNING_SESSION_DEFAULT_MSG_LIMIT = 200
 
 # 引擎侧会话 key 判别(读通道分派依据):匹配 → 引擎会话(BaaS Open API 读,
 # ``agent:main:session:{uuid}:user:{pid}`` openclaw / ``agent:{bot}:session:...``

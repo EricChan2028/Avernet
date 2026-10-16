@@ -1491,7 +1491,7 @@ async def test_pure_read_live_fetches_session_msgs_and_never_persists():
 
     result = await svc.get_trajectory("t1", do_analysis=False, session_detail=True)
 
-    assert bcs.calls == [("sess-1", 60, None)]   # 实拉,默认 limit 60
+    assert bcs.calls == [("sess-1", 200, None)]   # 实拉,默认 limit 200
     assert result.timeline[-1].session_msgs == _LIVE_MSGS, (
         "会话明细挂在 task_result_display 虚拟事件上(timeline 末位)"
     )
@@ -1578,7 +1578,7 @@ async def test_do_analysis_engine_session_id_dispatches_to_baas_channel():
 
     await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
 
-    assert openapi.calls == [(_ENGINE_SID, 60, "20260920_hzzaxnzf:35983")]
+    assert openapi.calls == [(_ENGINE_SID, 200, "20260920_hzzaxnzf:35983")]
     assert bcs.calls == []
     briefs = analyzer.last_running_sessions
     assert briefs and briefs[0]["session_id"] == _ENGINE_SID
@@ -1609,7 +1609,7 @@ async def test_pure_read_engine_session_id_dispatches_to_baas_channel_no_persist
 
     result = await svc.get_trajectory("t1", do_analysis=False, session_detail=True)
 
-    assert openapi.calls == [(_ENGINE_SID, 60, "20260920_hzzaxnzf:35983")]
+    assert openapi.calls == [(_ENGINE_SID, 200, "20260920_hzzaxnzf:35983")]
     assert bcs.calls == []
     assert result.timeline[-1].session_msgs == _LIVE_MSGS, (
         "会话明细挂在 task_result_display 虚拟事件上(timeline 末位)"
@@ -1673,8 +1673,8 @@ async def test_mixed_bcs_and_engine_channels_probed_independently():
 
     await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
 
-    assert bcs.calls == [("sess-group", 60, "tok-holder")]
-    assert openapi.calls == [(_ENGINE_SID, 60, "20260920_hzzaxnzf:35983")]
+    assert bcs.calls == [("sess-group", 200, "tok-holder")]
+    assert openapi.calls == [(_ENGINE_SID, 200, "20260920_hzzaxnzf:35983")]
     assert {m[1] for m in repo.merge_calls} == {"n-bcs", "n-eng"}
     assert {b["node_id"] for b in analyzer.last_running_sessions} == {"n-bcs", "n-eng"}
 
@@ -1782,9 +1782,9 @@ def _support_svc(graph=None, bcs=None, tokens=None, openapi_bot=None, config=Non
 
 
 def test_resolve_msg_limit_invalid_config_falls_back():
-    """``running_session_message_limit`` 配置值非法 → 回落默认(60)。"""
+    """``running_session_message_limit`` 配置值非法 → 回落默认(200)。"""
     svc = _support_svc(config=SimpleNamespace(running_session_message_limit="bad"))
-    assert svc._resolve_msg_limit() == 60
+    assert svc._resolve_msg_limit() == 200
 
 
 def test_node_elapsed_ms_defensive_bad_start_time():
