@@ -25,8 +25,8 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { ReadOnlyConversationPanel } from '../components/ReadOnlyConversationPanel';
 import { useBotChat } from '../hooks/useBotChat';
 import { ChatHeaderActions } from './components/ChatHeaderActions';
-import { ConversationSessionPlaceholder } from './components/ConversationSessionPlaceholder';
 import { ChatHeaderRightPanel, SessionDetailPanel } from './components/ChatHeaderRightPanel';
+import { ConversationSessionPlaceholder } from './components/ConversationSessionPlaceholder';
 import {
   ConversationSidebar,
   ConversationSidebarContent,
@@ -35,6 +35,7 @@ import {
 import { SessionHistorySearchPanel } from './components/SessionHistorySearchPanel';
 import { ConversationInteractiveStage } from './ConversationInteractiveStage';
 import { useChatHeaderPanels } from './hooks/useChatHeaderPanels';
+import { useConversationDeepLinkSessionHydration } from './hooks/useConversationDeepLinkSessionHydration';
 import { useConversationDirectory } from './hooks/useConversationDirectory';
 import { useConversationHistory } from './hooks/useConversationHistory';
 import { useConversationInteractiveChat } from './hooks/useConversationInteractiveChat';
@@ -94,6 +95,12 @@ export default function ConversationPage(): JSX.Element {
       hydrated,
     });
   useConversationUrlSync({ hydrated, selection, onRouteSelection });
+  useConversationDeepLinkSessionHydration({
+    userId,
+    managedBots: managedAndTeamBots,
+    friendBots: directory.friendBots,
+    hydrated,
+  });
 
   // 交互式(mine)装配:target/viewer/认证信息/请求身份全部来自登录 Human(Task 7 约定)。
   // 登录用户切换瞬间不再装载旧用户会话(identityChanged 防串话,expand-selection 竞态保护)。
