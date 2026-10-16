@@ -2,16 +2,10 @@ import Ajv from 'ajv';
 import { containsSecret } from '@avernet/clawweb-shared/server/services/redaction';
 import { RepairBatchError, boundedRepairJson } from '../contracts/repair-batch.js';
 const sensitiveField = /password|passwd|secret|token|credential|authorization|cookie|api.?key|private.?key/i;
+const privateKey = (key: string) => sensitiveField.test(key) || containsSecret({ [key]: 'redaction-probe' });
 function redactText(value: string): string {
   return value.replace(/\b(Bearer\s+)\S+|\b(?:sk-|ghp_|github_pat_)[A-Za-z0-9_-]+/gi, '[REDACTED]')
     .replace(/((?:password|secret|token|api[_-]?key|authorization|cookie)\s*[=:]\s*)[^\s,;]+/gi, '$1[REDACTED]');
-}
-/** Check the complete bounded input, independently of history preview limits. */
-export function hasSensitiveTrialInput(value: unknown): boolean {
-  if (containsSecret(value)) return true;
-  if (typeof value === 'string') return redactText(value) !== value;
-  if (Array.isArray(value)) return value.some(hasSensitiveTrialInput);
-  return !!value && typeof value === 'object' && Object.entries(value).some(([key, item]) => sensitiveField.test(key) || hasSensitiveTrialInput(item));
 }
 /** History is always text, capped, and strips sensitive keys plus exact input values from output. */
 export function redactTrial(value: unknown, sensitiveValues: string[] = []): unknown {
@@ -21,12 +15,39 @@ export function redactTrial(value: unknown, sensitiveValues: string[] = []): unk
     return text.slice(0, 8192);
   }
   if (Array.isArray(value)) return value.slice(0, 100).map(item => redactTrial(item, sensitiveValues));
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).slice(0, 100).map(([key, item]) => [key, sensitiveField.test(key) ? '[REDACTED]' : redactTrial(item, sensitiveValues)]));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).slice(0, 100).map(([key, item]) => [key, privateKey(key) ? '[REDACTED]' : redactTrial(item, sensitiveValues)]));
   return value;
 }
-export function trialSensitiveValues(value: unknown): string[] {
+function schemaRecord(schema: unknown): Record<string, unknown> {
+  return schema && typeof schema === 'object' && !Array.isArray(schema) ? schema as Record<string, unknown> : {};
+}
+function privateSchema(schema: unknown): boolean {
+  const node = schemaRecord(schema);
+  return node.sensitive === true || node.writeOnly === true || node.format === 'password';
+}
+function allStrings(value: unknown): string[] {
+  return ['string', 'number', 'boolean'].includes(typeof value) ? [String(value)] : value && typeof value === 'object' ? Object.values(value).flatMap(allStrings) : [];
+}
+export function trialSensitiveValues(value: unknown, schema?: unknown): string[] {
+  if (privateSchema(schema)) return allStrings(value);
+  const node = schemaRecord(schema);
+  if (Array.isArray(value)) return value.flatMap((item, index) => trialSensitiveValues(item, Array.isArray(node.items) ? node.items[index] : node.items));
   if (!value || typeof value !== 'object') return [];
-  return Object.entries(value).flatMap(([key, item]) => sensitiveField.test(key) && typeof item === 'string' ? [item] : trialSensitiveValues(item));
+  const properties = schemaRecord(node.properties);
+  return Object.entries(value).flatMap(([key, item]) => privateKey(key) ? allStrings(item)
+    : trialSensitiveValues(item, properties[key] ?? node.additionalProperties));
+}
+/** Schema annotations protect business-named fields as well as conventional secret keys. */
+export function redactTrialInput(value: unknown, schema?: unknown): unknown {
+  if (privateSchema(schema)) return '[REDACTED]';
+  const node = schemaRecord(schema);
+  if (Array.isArray(value)) return value.slice(0, 100).map((item, index) => redactTrialInput(item, Array.isArray(node.items) ? node.items[index] : node.items));
+  if (value && typeof value === 'object') {
+    const properties = schemaRecord(node.properties);
+    return Object.fromEntries(Object.entries(value).slice(0, 100).map(([key, item]) => [key, privateKey(key) ? '[REDACTED]'
+      : redactTrialInput(item, properties[key] ?? node.additionalProperties)]));
+  }
+  return redactTrial(value);
 }
 export function validateTrialInput(input: unknown, schema: Record<string, unknown> | null): asserts input is Record<string, unknown> {
   boundedRepairJson(input, 32 * 1024);
