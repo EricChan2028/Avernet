@@ -974,3 +974,16 @@ def test_assemble_passes_through_harness_engine_prefix_action_types():
     assert str(getattr(timeline[2].action_type, "value", timeline[2].action_type)) == (
         "harness-engine-transition"
     )
+
+def test_assemble_passes_through_system_reject_action_type():
+    """``system`` 类型(2026-10-16:callback/report 拒绝上报的轨迹行)读侧白名单
+    放行原样透传;其非 S 码,读时按系统子事件嵌挂。"""
+    repo = _FakeRepo(events=[
+        _event_record(id=1, node_id="n1", action_type="S1_CONTEXT",
+                      action_result="completed", ms=_MS_BASE),
+        _event_record(id=2, node_id="n1", action_type="system",
+                      action_result="report_rejected", ms=_MS_BASE + 100),
+    ])
+    timeline = TaskTrajectoryAssembler(repo).assemble("T-1").timeline
+    assert len(timeline) == 2, "system 行不得被当损坏行跳过"
+    assert str(getattr(timeline[1].action_type, "value", timeline[1].action_type)) == "system"

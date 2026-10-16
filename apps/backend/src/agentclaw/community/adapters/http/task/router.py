@@ -36,6 +36,7 @@ from agentclaw.community.adapters.http.task.bbs_routes import router as bbs_api_
 from agentclaw.community.adapters.http.task.intake_routes import router as intake_api_router
 from agentclaw.community.adapters.http.task.callback_routes import (
     _dispatch,
+    emit_relay_report_reject_trajectory,
     persist_relay_report_audit,
     task_callback_router as task_callback_router,
 )
@@ -545,6 +546,11 @@ async def report_callback(
             await persist_relay_report_audit(
                 svc, raw=raw_event, command=command,
                 error=f"{type(relay_exc).__name__}: {relay_exc}",
+            )
+            # 被拒上报也落一条 system 轨迹行(错误信息 + 完整堆栈,2026-10-16):
+            # best-effort 吞异常,原异常照原路径外抛(不被掩盖、不被替换)。
+            emit_relay_report_reject_trajectory(
+                svc, command=command, exc=relay_exc,
             )
             raise
         await persist_relay_report_audit(

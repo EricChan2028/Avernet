@@ -56,6 +56,16 @@ from agentclaw.community.core.task.task_runner.client.callback_data_enricher imp
 )
 
 
+class _RecordingTrajEmitter:
+    """生产 ``TaskService._task_context_service`` 的替真:记录 emit 调用供断言。"""
+
+    def __init__(self) -> None:
+        self.emit_calls: list[tuple] = []
+
+    def emit_trajectory_event(self, task_id, node_id, action_type, **kwargs):
+        self.emit_calls.append((task_id, node_id, action_type, kwargs))
+
+
 class _StubCallback:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
@@ -124,6 +134,9 @@ class _StubService:
 
     def __init__(self) -> None:
         self.callback = _StubCallback()
+        # 生产 TaskService 的轨迹发射口属性名(emit_relay_report_reject_trajectory
+        # 经 getattr(svc, "_task_context_service") 查找)
+        self._task_context_service = _RecordingTrajEmitter()
         self._node_status: dict[tuple[str, str], Status] = {}
         self._node_planned_by: dict[tuple[str, str], str] = {}
         self._execution_config: dict = {}
@@ -610,6 +623,41 @@ class TestRouter:
         assert raw["event_id"] == "event-1"
         assert raw["relay_token"] == "***"
         assert payload["result"]["_ext_info"]["task_id"] == "t1"
+
+    def test_new_relay_report_rejection_emits_system_trajectory_row(self, task_client):
+        """被拒上报(token 过期)→ 轨迹事件表落一条 system 类型事件:
+        action_type=system、error_msg=异常信息、ext_info含完整堆栈与
+        phase/event_id;原异常照常外抛(响应非 200)。"""
+        client, svc = task_client
+        svc.set_execution_config(
+            {"orchestration_mode": "relay", "intake_session_id": "tis-1"}
+        )
+        svc.set_node_status("t1", "t1", Status.RUNNING)
+        # trace 在线上契约可选;拒绝场景走 token 校验,不带 trace 最小化 body
+        response = client.post(
+            "/api/v1/collaboration/tasks/callback/report",
+            json={
+                "task_id": "t1",
+                "node_id": "t1",
+                "event_type": "EXECUTION_RESULT",
+                "event_id": "event-stale",
+                "relay_token": "stale-run",
+                "event": {"execution_decision": "DECLINED"},
+            },
+        )
+        assert response.status_code != 200, "拒绝照常外抛"
+
+        emitter = svc._task_context_service
+        assert len(emitter.emit_calls) == 1, "应恰落一条 system 轨迹行"
+        task_id, node_id, action_type, kwargs = emitter.emit_calls[0]
+        assert (task_id, node_id, action_type) == ("t1", "t1", "system")
+        assert "expired" in kwargs["error_msg"], kwargs["error_msg"]
+        ext = kwargs["ext_info"]
+        assert ext["phase"] == "callback_report"
+        assert ext["relay_event_id"] == "event-stale"
+        assert "TaskStateError" in ext["stack"], "堆栈应记录异常类型"
+        assert "require_relay_attempt" in ext["stack"] or "Traceback" in ext[
+            "stack"], f"堆栈应含调用栈: {ext['stack'][:200]}"
 
     def test_new_relay_report_persists_callback_audit_on_rejection(
         self, task_client
