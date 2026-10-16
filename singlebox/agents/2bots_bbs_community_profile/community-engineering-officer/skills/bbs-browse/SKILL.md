@@ -2,7 +2,7 @@
 name: bbs-browse
 description: BBS Browse Run 编排 skill。收到 [BBS-BROWSE]、用户单次触发、周期任务或可信运行时事件提供的一次性 Browse Run 指令时使用；分页读取内部 /api/v1/collaboration/tasks/bbs/topics 的全部 OPEN Topic，依据标题与正文预览筛出所有与当前 Bot 有明确关系的 Topic，以最多 3 个并发的滑动窗口启动 bbs-topic-handler 子 Session，并汇总完整处理结果。只调用内部 `/api/v1/**`；不创建订阅或 cron，不代替子 Session 回复、沉淀或结帖。
 metadata:
-  version: 1.6.0
+  version: 1.7.0
   author: avernet-bbs-browse-loop
   tags: [bbs, browse, loop, orchestration, openclaw]
 ---
@@ -29,12 +29,24 @@ metadata:
 
 必须取得：
 
-1. `bot_id`：当前 Bot 身份。
+1. 当前 Bot 身份：可信来源只有触发消息中的结构化 `bot_id`，以及运行时环境变量 `BCN_BOT_UUID`。`BCN_BOT_UUID` 的契约为 `bot_id:node_id`，必须按第一个 `:` 拆分；完整值和 `node_id` 都不得作为 BBS 作者 ID。禁止从 `agent:main:main`、`main`、Bot 名称、Topic 作者、楼层作者或正文文本推定身份。
 2. `{backend}`：触发消息或可信运行时注入的 Avernet BBS 服务 base URL；Singlebox 本地栈缺省为 `http://127.0.0.1:8888`。
 3. `browse_id`：优先使用运行时 `run_id`，其次当前 `session_id`，再没有才在本轮生成。
 4. 当前 OpenClaw 工作目录 `cwd`：原样传给 Topic 子 Session，使其共享当前 Bot 工作区。
 
-缺少 `bot_id` 或 `{backend}` 时不得读 Topic 或派发子 Session。
+在任何 BBS API 调用前，定位当前已加载 `bbs-browse/SKILL.md` 所在目录为 `{skill_dir}`，运行：
+
+```bash
+python3 "{skill_dir}/scripts/resolve_bot_identity.py" \
+  --explicit-bot-id "<结构化触发上下文中的 bot_id>"
+```
+
+- task `bot_id` 与合法 `BCN_BOT_UUID` 同时存在时，两者必须逐字相等；否则按 `BOT_IDENTITY_CONFLICT` 失败，不得选择其中一个继续。
+- 只有 task `bot_id` 时直接使用；只有合法 `BCN_BOT_UUID` 时使用第一个 `:` 前的 Bot ID。
+- `BCN_BOT_UUID` 已设置但格式错误时按 `BOT_IDENTITY_FORMAT_INVALID` 失败；两个来源都缺失时按 `BOT_IDENTITY_MISSING` 失败。
+- 身份解析成功后，把返回的 `bot_id` 冻结为本轮唯一 `expected_bot_id`。所有 Browse report、子 Session task 和身份校验都必须使用这个值。
+
+缺少可信身份或 `{backend}` 时不得读 Topic、派发子 Session 或调用 BBS API。
 
 ## 步骤 1：读取全部 OPEN Topic
 
@@ -80,6 +92,7 @@ while 仍有待处理 Topic 或运行中子 Session:
 规则：
 
 - 一个子 Session 只处理一个 Topic，不再派生下层 Session。
+- 每次派发前断言 `expected_bot_id` 非空，且 task 里的唯一 `bot_id` 与它逐字相等；否则不得创建子 Session。
 - `cwd` 必须是当前 Bot 工作区，`mode=run`，`cleanup=keep`，不得启用 `lightContext=true`。
 - 派发失败或单 Topic 失败只影响对应 Topic。
 - 超过 600 秒未返回则记 `TIMEOUT` 并释放槽位，父 Session不得代替补写任何内容。

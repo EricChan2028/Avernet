@@ -355,3 +355,103 @@ async def test_invoke_routes_each_device_to_its_own_adapter(
     assert captured[0].headers["x-proxypass-token"] == "tokenA"
     assert str(captured[1].url) == "http://127.0.0.1:9902/api/sessions/dev-2/messages"
     assert "x-proxypass-token" not in captured[1].headers
+
+
+@pytest.mark.asyncio
+async def test_invoke_proxies_engine_capabilities(monkeypatch: MonkeyPatch):
+    engine_response = {
+        "success": True,
+        "data": {"supported": ["skills.local_package.apply.v1"]},
+    }
+    captured = {}
+
+    async def mock_proxy(adapter_url, conn_info, method, path, body, params, timeout):
+        captured.update(
+            {
+                "adapter_url": adapter_url,
+                "method": method,
+                "path": path,
+            }
+        )
+        return engine_response
+
+    transport = InMemoryDeviceAdapterTransport()
+    monkeypatch.setattr(transport, "_proxy", mock_proxy)
+
+    result = await transport.invoke(
+        {"target": "127.0.0.1:20018"}, "GET", "/api/engine/capabilities"
+    )
+
+    assert result == engine_response
+    assert captured == {
+        "adapter_url": "http://127.0.0.1:20018",
+        "method": "GET",
+        "path": "/api/engine/capabilities",
+    }
+
+
+@pytest.mark.asyncio
+async def test_invoke_multipart_proxies_package_bytes(monkeypatch: MonkeyPatch):
+    engine_response = {
+        "success": True,
+        "data": {
+            "skill_name": "bbs-browse",
+            "action": "created",
+            "content_digest": "sha256:test",
+            "target_path": "/tmp/skills-local/bbs-browse",
+        },
+    }
+    captured = {}
+
+    async def mock_proxy_multipart(
+        adapter_url, conn_info, path, *, files, data, headers, timeout
+    ):
+        captured.update(
+            {
+                "adapter_url": adapter_url,
+                "path": path,
+                "files": files,
+                "data": data,
+                "headers": headers,
+            }
+        )
+        return engine_response
+
+    transport = InMemoryDeviceAdapterTransport()
+    monkeypatch.setattr(transport, "_proxy_multipart", mock_proxy_multipart)
+    files = {"file": ("bbs-browse.zip", b"package", "application/zip")}
+
+    result = await transport.invoke_multipart(
+        {"target": "127.0.0.1:20018"},
+        "/api/skills/local/apply",
+        files=files,
+        data={"skill_name": "bbs-browse", "layout": "LEGACY"},
+        headers={"x-target-bot-id": "bot"},
+    )
+
+    assert result == engine_response
+    assert captured["adapter_url"] == "http://127.0.0.1:20018"
+    assert captured["files"] == files
+    assert captured["data"] == {
+        "skill_name": "bbs-browse",
+        "layout": "LEGACY",
+    }
+    assert captured["headers"] == {"x-target-bot-id": "bot"}
+
+
+@pytest.mark.asyncio
+async def test_invoke_multipart_without_adapter_does_not_fabricate_success():
+    transport = InMemoryDeviceAdapterTransport()
+
+    result = await transport.invoke_multipart(
+        {},
+        "/api/skills/local/apply",
+        files={"file": ("bbs-browse.zip", b"package", "application/zip")},
+        data={"skill_name": "bbs-browse", "layout": "LEGACY"},
+    )
+
+    assert result == {
+        "success": False,
+        "message": "unhandled path /api/skills/local/apply",
+        "error_code": 404,
+    }

@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1120" viewBox="0 0 1800 1120">
+  <defs>
+    <style>
+      .title{font:700 30px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;fill:#172033}
+      .sub{font:14px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;fill:#64748b}
+      .stage{font:700 20px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;fill:#172033}
+      .label{font:700 14px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;fill:#24324a}
+      .text{font:14px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;fill:#3b4860}
+      .small{font:13px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;fill:#58657a}
+      .warnText{font:600 13px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;fill:#9a3412}
+      .card{fill:#fff;stroke:#91a4bf;stroke-width:1.6;rx:14}
+      .head{fill:#e9f1ff;stroke:#6a8fd1;stroke-width:1.4;rx:14}
+      .input{fill:#f8fafc;stroke:#c6d1df;stroke-width:1.1;rx:9}
+      .warn{fill:#fff7ed;stroke:#f0a15b;stroke-width:1.2;rx:8}
+      .arrow{stroke:#607089;stroke-width:2;fill:none;marker-end:url(#arrow)}
+      .loop{stroke:#df7136;stroke-width:2.2;fill:none;stroke-dasharray:7 5;marker-end:url(#orange)}
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#607089"/></marker>
+    <marker id="orange" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#df7136"/></marker>
+  </defs>
+  <rect width="1800" height="1120" fill="#f5f7fb"/>
+  <text x="70" y="52" class="title">Avernet 当前 Task：各点位实际获得什么输入</text>
+  <text x="70" y="80" class="sub">同一组点位将用于目标架构映射。Graph 是当前实现载体，不代表目标协议必须绑定 Graph。</text>
+
+  <!-- row 1 -->
+  <g transform="translate(70,120)">
+    <rect width="500" height="390" class="card"/><rect width="500" height="62" class="head"/>
+    <text x="24" y="40" class="stage">1. Task Definition &amp; State</text>
+    <text x="24" y="96" class="label">触发：调用方创建 Task</text>
+    <text x="24" y="130" class="label">输入</text><rect x="22" y="145" width="456" height="126" class="input"/>
+    <text x="42" y="174" class="text">• 用户目标 / instruction</text><text x="42" y="201" class="text">• acceptance / 约束 / task_type / 执行配置</text><text x="42" y="228" class="text">• 初始化 root TaskNode，状态 = PENDING</text><text x="42" y="255" class="text">• 形成 TaskExecutionGraph</text>
+    <text x="24" y="305" class="label">产出：后续规划可读取的 Graph / Node</text>
+    <rect x="22" y="326" width="456" height="42" class="warn"/><text x="42" y="352" class="warnText">当前：规格只体现在 Graph/Node，无法与 Runtime 事实共用归属身份。</text>
+  </g>
+
+  <g transform="translate(650,120)">
+    <rect width="500" height="390" class="card"/><rect width="500" height="62" class="head"/>
+    <text x="24" y="40" class="stage">2. Planning · plan.initial</text>
+    <text x="24" y="96" class="label">触发：on_execute(root=PENDING)</text>
+    <text x="24" y="130" class="label">Planner 输入</text><rect x="22" y="145" width="456" height="126" class="input"/>
+    <text x="42" y="174" class="text">planner.plan(graph, target_node_id=root)</text><text x="42" y="205" class="text">graph 内含：</text><text x="42" y="232" class="text">• 全部 Node task_spec / status / run_info</text><text x="42" y="259" class="text">• 初始时通常只有 root，Graph 规模尚小</text>
+    <text x="24" y="305" class="label">产出：children / has_gap → 子节点写回 Graph</text>
+    <rect x="22" y="326" width="456" height="42" class="warn"/><text x="42" y="352" class="warnText">当前：接口只认完整 Graph，不表达首次规划真正需要什么。</text>
+  </g>
+
+  <g transform="translate(1230,120)">
+    <rect width="500" height="390" class="card"/><rect width="500" height="62" class="head"/>
+    <text x="24" y="40" class="stage">3. Execution · execute.initial</text>
+    <text x="24" y="96" class="label">触发：叶子就绪 → dispatch → start_run</text>
+    <text x="24" y="130" class="label">执行主体输入</text><rect x="22" y="145" width="456" height="126" class="input"/>
+    <text x="42" y="174" class="text">Engine/Runner build context：</text><text x="42" y="201" class="text">• 父节点 task_spec</text><text x="42" y="228" class="text">• 已 SUCCESS 的兄弟节点 output</text><text x="42" y="255" class="text">• 当前节点 task_spec → prompt → 单 Bot/群/BBS</text>
+    <text x="24" y="305" class="label">产出：外部 session、工具结果、output / exec_error</text>
+    <rect x="22" y="326" width="456" height="42" class="warn"/><text x="42" y="352" class="warnText">当前：按结构邻接拼接，不区分硬依赖、参考和预算。</text>
+  </g>
+
+  <!-- row 2 -->
+  <g transform="translate(70,655)">
+    <rect width="500" height="390" class="card"/><rect width="500" height="62" class="head"/>
+    <text x="24" y="40" class="stage">4. Report &amp; Acceptance</text>
+    <text x="24" y="96" class="label">触发：Callback / Poller 回投</text>
+    <text x="24" y="130" class="label">Task 控制流程输入</text><rect x="22" y="145" width="456" height="126" class="input"/>
+    <text x="42" y="174" class="text">• output / exec_error</text><text x="42" y="201" class="text">• acceptance_result / gaps</text><text x="42" y="228" class="text">• PASS → 结果入 Node 并推进</text><text x="42" y="255" class="text">• exec_error → harness retry；gap 未闭 → replan</text>
+    <text x="24" y="305" class="label">说明：当前主链路不单独派发 Verifier</text>
+    <rect x="22" y="326" width="456" height="42" class="warn"/><text x="42" y="352" class="warnText">当前：各来源按各自结构回写，身份、血缘和证据引用不统一。</text>
+  </g>
+
+  <g transform="translate(650,655)">
+    <rect width="500" height="390" class="card"/><rect width="500" height="62" class="head"/>
+    <text x="24" y="40" class="stage">5. Execution · execute.retry</text>
+    <text x="24" y="96" class="label">触发：exec_error，未超过 MAX_HARNESS</text>
+    <text x="24" y="130" class="label">重试执行主体输入</text><rect x="22" y="145" width="456" height="126" class="input"/>
+    <text x="42" y="174" class="text">• 同一 TaskNode 复位 PENDING</text><text x="42" y="201" class="text">• 新建外部 session/run</text><text x="42" y="228" class="text">• 仍按 execute.initial：父规格 + 成功兄弟 + 当前规格</text><text x="42" y="255" class="text">• last_exec_error / retries 留在 extend_props、action log</text>
+    <text x="24" y="305" class="label">产出：新的回投；成功或继续重试/挂起</text>
+    <rect x="22" y="326" width="456" height="42" class="warn"/><text x="42" y="352" class="warnText">当前：错误被记录，但没有加工成新的重试输入。</text>
+  </g>
+
+  <g transform="translate(1230,655)">
+    <rect width="500" height="390" class="card"/><rect width="500" height="62" class="head"/>
+    <text x="24" y="40" class="stage">6. Planning · plan.replan</text>
+    <text x="24" y="96" class="label">触发：父目标仍有 Gap，需要补救规划</text>
+    <text x="24" y="130" class="label">Planner 输入</text><rect x="22" y="145" width="456" height="126" class="input"/>
+    <text x="42" y="174" class="text">planner.plan(graph, target_node_id=target_parent)</text><text x="42" y="201" class="text">• 仍输入完整 Graph</text><text x="42" y="228" class="text">• Graph 此时已有完成项、output、状态和过程记录</text><text x="42" y="255" class="text">• Planner 自行从整图恢复当前 Gap 与可用结果</text>
+    <text x="24" y="305" class="label">产出：新的补救子节点写回 Graph</text>
+    <rect x="22" y="326" width="456" height="42" class="warn"/><text x="42" y="352" class="warnText">当前：没有面向 Gap 的重规划 View，也没有知识入口。</text>
+  </g>
+
+  <path d="M570 315 L650 315" class="arrow"/><path d="M1150 315 L1230 315" class="arrow"/>
+  <path d="M1480 510 C1480 565,320 565,320 655" class="arrow"/><text x="870" y="555" class="small">执行结果回投</text>
+  <path d="M570 850 L650 850" class="loop"/><text x="586" y="834" class="warnText">exec_error</text>
+  <path d="M570 900 C850 1090,1480 1100,1480 1045" class="loop"/><text x="930" y="1082" class="warnText">Gap 未闭 → target_parent 重规划</text>
+</svg>

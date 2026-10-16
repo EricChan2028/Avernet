@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1280" viewBox="0 0 2000 1280">
+<defs><style>
+.title{font:700 31px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;fill:#172033}.sub{font:14px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;fill:#64748b}.moduleTitle{font:700 23px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;fill:#172033}.boxTitle{font:700 16px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;fill:#24324a}.text{font:14px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;fill:#475569}.small{font:13px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;fill:#58657a}.tiny{font:12px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;fill:#5e6b7f}.protocolTitle{font:700 14px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;fill:#24405e}.protocolText{font:12px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;fill:#40556e}.outer{fill:#fff;stroke-width:2.4;rx:18}.inner{fill:#f8fafc;stroke:#b9c7d8;stroke-width:1.3;rx:10}.processor{fill:#f4fbf8;stroke:#54a88a;stroke-width:1.7;rx:12}.step{fill:#fff;stroke:#9bcbb9;stroke-width:1.1;rx:8}.external{fill:#fff;stroke:#aebccc;stroke-width:1.5;rx:11}.protocol{fill:#eef6ff;stroke:#7d9fc5;stroke-width:1.5;rx:11}.knowledgeBox{fill:#f7f0fc;stroke:#ae87c8;stroke-width:1.4;rx:10}.arrow{stroke:#566880;stroke-width:2;fill:none;marker-end:url(#arrow)}.both{stroke:#566880;stroke-width:2;fill:none;marker-start:url(#back);marker-end:url(#arrow)}.dash{stroke:#7b8da5;stroke-width:1.8;fill:none;stroke-dasharray:7 5;marker-end:url(#arrow)}.knowledge{stroke:#845da8;stroke-width:2.1;fill:none;marker-end:url(#purple)}.flowLabel{font:600 12px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;fill:#334155}
+</style>
+<marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#566880"/></marker>
+<marker id="back" markerWidth="10" markerHeight="10" refX="2" refY="3" orient="auto"><path d="M9,0 L9,6 L0,3 z" fill="#566880"/></marker>
+<marker id="purple" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#845da8"/></marker></defs>
+<rect width="2000" height="1280" fill="#f5f7fb"/>
+<text x="55" y="48" class="title">Avernet Context 目标模块架构</text>
+<text x="55" y="76" class="sub">原始结果先成为 Context Fact；Task 通过消费协议读取并作决策，再把 acceptance / gap / state 作为派生事实回写。</text>
+
+<!-- external producers -->
+<rect x="735" y="94" width="650" height="72" class="external"/>
+<text x="762" y="122" class="boxTitle">运行事实来源</text>
+<text x="762" y="149" class="text">单 Bot / 协作群 / BBS / Callback / Poller / 人工输入</text>
+<path d="M1060 166 L1060 238" class="arrow"/><text x="1075" y="205" class="flowLabel">生产协议</text>
+
+<!-- Task module -->
+<rect x="45" y="205" width="405" height="950" class="outer" stroke="#4f7fc7"/>
+<rect x="45" y="205" width="405" height="62" rx="18" fill="#e8f1ff"/>
+<text x="76" y="246" class="moduleTitle">Task 模块</text>
+<rect x="76" y="304" width="343" height="112" class="inner"/><text x="100" y="336" class="boxTitle">Task Definition &amp; State</text><text x="100" y="365" class="text">目标、约束、Work Unit、状态迁移</text><text x="100" y="391" class="small">生产：task/work_unit/state Fact</text>
+<rect x="76" y="465" width="343" height="128" class="inner"/><text x="100" y="497" class="boxTitle">Planning</text><text x="100" y="527" class="text">plan.initial：首次拆解</text><text x="100" y="555" class="text">plan.replan：围绕 Gap 补救</text><text x="100" y="579" class="small">消费 Planning View</text>
+<rect x="76" y="642" width="343" height="128" class="inner"/><text x="100" y="674" class="boxTitle">Execution &amp; Dispatch</text><text x="100" y="704" class="text">execute.initial：首次执行</text><text x="100" y="732" class="text">execute.retry：新 Attempt / Run</text><text x="100" y="756" class="small">消费 Execution View</text>
+<rect x="76" y="819" width="343" height="142" class="inner"/><text x="100" y="851" class="boxTitle">Report &amp; Acceptance</text><text x="100" y="881" class="text">消费 accept.result View</text><text x="100" y="909" class="text">判断验收、retry、replan、状态推进</text><text x="100" y="938" class="small">生产：acceptance / gap / state Fact</text>
+<rect x="76" y="1010" width="343" height="88" class="inner"/><text x="100" y="1042" class="boxTitle">Inspect</text><text x="100" y="1072" class="text">消费 explain View，查看依据与遗漏</text>
+<text x="76" y="1132" class="small">拥有生命周期决策；不拥有上下文选择与知识生产。</text>
+
+<!-- protocol seam -->
+<rect x="465" y="300" width="260" height="244" class="protocol"/>
+<text x="484" y="328" class="protocolTitle">① Evidence Producer Protocol</text>
+<text x="484" y="354" class="protocolText">event_id / event_type</text><text x="484" y="376" class="protocolText">subject:</text><text x="500" y="397" class="protocolText">task / work_unit / attempt / run</text><text x="484" y="419" class="protocolText">source / occurred_at / sequence</text><text x="484" y="441" class="protocolText">causation_id</text><text x="484" y="463" class="protocolText">payload_type / payload</text><text x="484" y="485" class="protocolText">artifact_refs / schema_version</text><text x="484" y="519" class="tiny">Task、Runtime → Context</text>
+<rect x="465" y="596" width="260" height="316" class="protocol"/>
+<text x="484" y="624" class="protocolTitle">② Context Consumption Protocol</text>
+<text x="484" y="652" class="protocolTitle">Request</text><text x="484" y="674" class="protocolText">consumer / purpose / variant</text><text x="484" y="696" class="protocolText">scope / as_of / budget</text><text x="484" y="718" class="protocolText">requirements</text>
+<text x="484" y="752" class="protocolTitle">View</text><text x="484" y="774" class="protocolText">items / source_refs</text><text x="484" y="796" class="protocolText">representation / derivation</text><text x="484" y="818" class="protocolText">omitted / conflicts</text><text x="484" y="840" class="protocolText">completeness / based_on</text><text x="484" y="880" class="tiny">Task ↔ Context</text>
+<path d="M419 360 L465 360" class="arrow"/><path d="M725 360 L750 360" class="arrow"/>
+<path d="M419 704 L465 704" class="both"/><path d="M725 704 L750 704" class="both"/>
+<path d="M419 890 C452 890 452 500 472 500" class="arrow"/>
+
+<!-- Context module -->
+<rect x="750" y="205" width="700" height="950" class="outer" stroke="#2e9b78"/>
+<rect x="750" y="205" width="700" height="62" rx="18" fill="#e5f7f0"/>
+<text x="781" y="246" class="moduleTitle">Context 模块</text>
+
+<rect x="783" y="303" width="275" height="145" class="inner"/>
+<text x="807" y="335" class="boxTitle">1. Fact Ingress</text><text x="807" y="365" class="text">校验 Schema 与归属</text><text x="807" y="391" class="text">规范来源、时间和幂等身份</text><text x="807" y="417" class="small">原生回投 → 标准 Fact</text>
+<rect x="1110" y="303" width="307" height="145" class="inner"/>
+<text x="1134" y="335" class="boxTitle">2. Fact Store &amp; Relation Index</text><text x="1134" y="365" class="text">追加保存原始 Fact</text><text x="1134" y="391" class="text">索引 task / work unit / attempt / run</text><text x="1134" y="417" class="small">因果 / 替代 / 冲突 / 当前有效投影</text>
+<path d="M1058 375 L1110 375" class="arrow"/>
+
+<rect x="783" y="500" width="634" height="378" class="processor"/>
+<text x="807" y="532" class="boxTitle">3. Context View Resolver —— 回答“本次到底给什么”</text>
+<text x="807" y="558" class="small">输入：purpose + variant + scope + budget + requirements</text>
+<rect x="807" y="584" width="586" height="52" class="step"/><text x="826" y="607" class="boxTitle">① 选配方</text><text x="930" y="607" class="text">阶段意图 → required / optional / excluded</text><text x="930" y="626" class="tiny">如 execute.retry 增加失败反馈；accept.result 锁定指定 Run</text>
+<rect x="807" y="650" width="586" height="52" class="step"/><text x="826" y="681" class="boxTitle">② 解范围与候选</text><text x="976" y="681" class="text">有效 Fact + 依赖闭包 + Artifact + Knowledge</text>
+<rect x="807" y="716" width="586" height="52" class="step"/><text x="826" y="747" class="boxTitle">③ 保护与选择</text><text x="960" y="747" class="text">required 不淘汰；optional 才做相关度排序</text>
+<rect x="807" y="782" width="586" height="68" class="step"/><text x="826" y="811" class="boxTitle">④ 按预算交付</text><text x="960" y="811" class="text">inline / snippet / summary / ref</text><text x="960" y="835" class="tiny">同时返回 omitted / conflicts / completeness / based_on</text>
+<path d="M1263 448 L1263 500" class="arrow"/><text x="1278" y="480" class="flowLabel">准确候选集</text>
+
+<rect x="783" y="930" width="634" height="150" class="inner"/>
+<text x="807" y="962" class="boxTitle">4. Knowledge Gateway</text>
+<text x="807" y="992" class="text">Session/Artifact + scope/source_refs → Knowledge Candidate</text>
+<text x="807" y="1020" class="text">ECB Published Knowledge → View 候选</text>
+<text x="807" y="1048" class="small">只连接知识生产与消费；不抽取、不融合、不发布</text>
+<path d="M1100 930 L1100 878" class="knowledge"/><text x="1115" y="910" class="flowLabel">知识候选</text>
+<text x="783" y="1132" class="small">一个深模块：隐藏事实归属、有效版本、依赖选择、相关度、预算和解释策略。</text>
+
+<!-- ECB module -->
+<rect x="1600" y="205" width="350" height="950" class="outer" stroke="#9569b9"/>
+<rect x="1600" y="205" width="350" height="62" rx="18" fill="#f2eafe"/>
+<text x="1630" y="246" class="moduleTitle">知识引擎（ECB）</text>
+<rect x="1632" y="325" width="286" height="112" class="knowledgeBox"/><text x="1656" y="357" class="boxTitle">Candidate Intake</text><text x="1656" y="386" class="text">content 或 content_ref</text><text x="1656" y="412" class="small">携带来源与适用范围</text>
+<rect x="1632" y="493" width="286" height="150" class="knowledgeBox"/><text x="1656" y="525" class="boxTitle">Knowledge Production</text><text x="1656" y="555" class="text">抽取 / 归一 / 融合</text><text x="1656" y="583" class="text">审核 / 发布 / 撤回</text><text x="1656" y="615" class="small">产生跨 Task 可复用的新语义</text>
+<rect x="1632" y="704" width="286" height="120" class="knowledgeBox"/><text x="1656" y="736" class="boxTitle">Published Knowledge</text><text x="1656" y="766" class="text">content / applicability / version</text><text x="1656" y="794" class="small">validation / source_refs</text>
+<text x="1632" y="1132" class="small">拥有知识生命周期；不决定某次 Task 看哪些内容。</text>
+
+<!-- knowledge protocol seam -->
+<rect x="1470" y="383" width="112" height="346" class="protocol"/>
+<text x="1485" y="407" class="protocolTitle">③ Knowledge</text><text x="1485" y="427" class="protocolTitle">Projection</text><text x="1485" y="447" class="protocolTitle">Protocol</text>
+<text x="1485" y="483" class="protocolText">Candidate:</text><text x="1485" y="504" class="protocolText">type</text><text x="1485" y="525" class="protocolText">content/ref</text><text x="1485" y="546" class="protocolText">source_refs</text><text x="1485" y="567" class="protocolText">scope</text>
+<text x="1485" y="607" class="protocolText">Published:</text><text x="1485" y="628" class="protocolText">knowledge_id</text><text x="1485" y="649" class="protocolText">version</text><text x="1485" y="670" class="protocolText">applicability</text><text x="1485" y="691" class="protocolText">validation</text>
+<path d="M1417 990 C1460 990 1460 381 1470 381" class="knowledge"/><path d="M1582 381 L1632 381" class="knowledge"/>
+<path d="M1632 764 L1582 690" class="knowledge"/><path d="M1470 690 L1417 1010" class="knowledge"/>
+
+<!-- artifact store and static sources -->
+<rect x="775" y="1185" width="430" height="64" class="external"/><text x="800" y="1212" class="boxTitle">Artifact Store / Agent Session Archive</text><text x="800" y="1236" class="small">完整 Session、日志和大型产物；Context 保存引用与归属</text>
+<path d="M990 1185 L990 1080" class="dash"/><text x="1005" y="1148" class="flowLabel">content_ref / ArtifactRef</text>
+<rect x="1640" y="1185" width="270" height="64" class="external"/><text x="1667" y="1212" class="boxTitle">静态知识 / 规范 / 手册</text><text x="1667" y="1236" class="small">进入 ECB 管理或发布</text>
+<path d="M1775 1185 L1775 824" class="dash"/>
+</svg>

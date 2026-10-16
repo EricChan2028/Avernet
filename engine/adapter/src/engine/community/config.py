@@ -551,6 +551,17 @@ def load_claude_code_skills_root() -> Path:
     return _claude_code_file_layout(Path.home()).active_root
 
 
+def load_openclaw_workspace() -> Path:
+    """Effective OpenClaw workspace, including per-bot Desktop overrides."""
+
+    from engine.community.plugin_api.workspace_root import workspace_root
+
+    root = workspace_root()
+    if not root.is_absolute():
+        raise ValueError("OpenClaw workspace must be an absolute path")
+    return root
+
+
 def load_file_count_roots(engine: str) -> tuple[Path, tuple[Path, ...]]:
     """Canonical relative-path root and explicit scan boundaries for the runtime.
 
@@ -563,8 +574,6 @@ def load_file_count_roots(engine: str) -> tuple[Path, tuple[Path, ...]]:
         root = _claude_code_file_layout(Path.home()).pool_root.parent.parent
         return root, load_claude_code_file_roots()
     if engine == "openclaw":
-        from engine.community.plugin_api.workspace_root import workspace_root
-
-        root = workspace_root().parent
+        root = load_openclaw_workspace().parent
         return root, (root, root.parent / "openclawExt")
     raise FileCountError("unsupported")

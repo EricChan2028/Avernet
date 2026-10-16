@@ -22,11 +22,14 @@ Capability matrix:
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
+from pathlib import Path
 
 from engine.community.core.engine.capability import Capability
 from engine.community.core.engine.context import AuthContext
 from engine.community.core.engine.exceptions import CapabilityNotSupportedError
+from engine.community.core.skills.local_package import LocalSkillPackagePublisher
 from engine.community.core.skills.local_package_application import (
     LocalSkillPackageApplication,
 )
@@ -39,6 +42,7 @@ from engine.community.core.skills.models import (
     CleanSymlinksResult,
     LocalSkillPackageApplyRequest,
     LocalSkillPackageApplyResult,
+    LocalSkillPackageLayout,
     PoolLayoutActivateRequest,
     PoolLayoutActivationResult,
     PoolLayoutActivationStatus,
@@ -93,12 +97,54 @@ def _serialize_pool_mapping(
     return {"source": item.source, "target": item.target}
 
 
+class OpenClawLocalSkillPackageApplication:
+    """Apply Local packages to an explicitly configured OpenClaw workspace.
+
+    Desktop and Singlebox runtimes may configure a per-bot OpenClaw workspace
+    that differs from the process user's default ``~/.openclaw`` layout. The
+    workspace is supplied by the Engine composition root; this adapter owns
+    only the OpenClaw-local projection and delegates validation to the shared
+    publisher.
+    """
+
+    def __init__(self, workspace: Path) -> None:
+        self._workspace = workspace
+        self._publisher = LocalSkillPackagePublisher()
+
+    async def apply(
+        self, request: LocalSkillPackageApplyRequest
+    ) -> LocalSkillPackageApplyResult:
+        local_root = (
+            self._workspace / "skills" / "skills-local"
+            if request.layout is LocalSkillPackageLayout.LEGACY
+            else self._workspace / "skills-pool" / "skills-local"
+        )
+        return await asyncio.to_thread(
+            self._publisher.publish,
+            skill_name=request.skill_name,
+            package=request.package,
+            target=local_root / request.skill_name,
+        )
+
+
 class OpenClawSkillsAdapter(SkillsService):
     """`SkillsService` backed by the OpenClaw native skills port."""
 
-    def __init__(self, port: OpenClawSkillsPort) -> None:
+    def __init__(
+        self,
+        port: OpenClawSkillsPort,
+        *,
+        local_package_workspace: Path | None = None,
+    ) -> None:
         self._port = port
-        self._local_packages = LocalSkillPackageApplication("openclaw")
+        # ``None`` preserves the process-home layout for standalone tests and
+        # non-composition-root constructions. Production configures a real
+        # per-bot workspace through ``OpenClawEngine``.
+        self._local_packages = (
+            OpenClawLocalSkillPackageApplication(local_package_workspace)
+            if local_package_workspace is not None
+            else LocalSkillPackageApplication("openclaw")
+        )
 
     async def apply_local_package(
         self,

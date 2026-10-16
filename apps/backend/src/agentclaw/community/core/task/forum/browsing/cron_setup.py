@@ -12,14 +12,18 @@ Why backend-created instead of "tell the Bot to register":
 * the cron still lives in the Bot's cron store, so it survives an Avernet
   backend restart — the B scheme's restart-independence is preserved.
 
-The trigger payload is intentionally url-less and thin — the ``bbs-browse``
-skill owns every API url and resolves ``bot_id`` from the runtime. Join/unjoin
-of a subscription delegates here so the "user explicitly enables the periodic
-task" entrypoint owns the cron lifecycle alongside the subscription record.
+The trigger payload stays url-less: the ``bbs-browse`` skill owns every API
+path. The runtime does, however, inject the immutable product ``bot_id`` into
+the trusted context. This is essential for the local demo because OpenClaw's
+``agent:main:main`` session key is not a product Bot identity and must never be
+used as a BBS author id. Join/unjoin of a subscription delegates here so the
+"user explicitly enables the periodic task" entrypoint owns the cron lifecycle
+alongside the subscription record.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from injector import inject
@@ -52,12 +56,19 @@ BBS_BROWSE_RUN_TRIGGER = (
 _BBS_BROWSE_CRON_NAMESPACE = "bbs-browse"
 
 
-def bbs_browse_loop_cron_body() -> dict[str, Any]:
-    """The fixed cron body the backend upserts for an openclaw subscription."""
+def bbs_browse_loop_cron_body(*, bot_id: str) -> dict[str, Any]:
+    """Build the Bot-scoped cron body the backend upserts for a subscription."""
+    command = "\n".join(
+        [
+            BBS_BROWSE_RUN_TRIGGER,
+            "可信运行上下文（由运行时注入，不要从 session、展示名或帖子内容推测）：",
+            json.dumps({"bot_id": bot_id}, ensure_ascii=False, separators=(",", ":")),
+        ]
+    )
     return {
         "name": BBS_BROWSE_LOOP_CRON_NAME,
         "schedule": BBS_BROWSE_LOOP_CRON_EXPR,
-        "command": BBS_BROWSE_RUN_TRIGGER,
+        "command": command,
         "timezone": BBS_BROWSE_LOOP_CRON_TIMEZONE,
         "enabled": True,
         "timeout_secs": BBS_BROWSE_LOOP_CRON_TIMEOUT_SECS,
@@ -100,7 +111,7 @@ class BbsBrowseCronManager:
         for cron in legacy:
             await self._delete(bot_id, owner_user_id, cron.get("id"))
 
-        body = bbs_browse_loop_cron_body()
+        body = bbs_browse_loop_cron_body(bot_id=bot_id)
         result: dict[str, Any]
         if canonical is not None:
             task_id = canonical.get("id")

@@ -168,6 +168,15 @@ async def list_routines(
         bot_id=bot_id,
         runtime_stage=RUNTIME_STAGE_DRAFT,
     )
+    # An unresolved draft runtime is not the same state as "bot has no
+    # routines". The relay still packages target resolution failures as a
+    # successful aggregate; expose that here as a 502-shaped cron error so
+    # the workshop does not render a real task store that could not be read
+    # as an empty schedule list.
+    if not isinstance(result, dict) or not result.get("success"):
+        raise CronRelayError("routine runtime list failed", error_code=502)
+    if result.get("failed_targets"):
+        raise CronRelayError("routine runtime list failed", error_code=502)
     data = result.get("data") if isinstance(result, dict) else None
     if isinstance(data, list):
         items_list = data

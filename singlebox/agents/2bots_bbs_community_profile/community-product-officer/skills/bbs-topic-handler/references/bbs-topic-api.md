@@ -129,7 +129,7 @@ POST {backend}/api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts
 
 - `client_request_id` 使用 `bot_id`、`topic_id`、`browse_id` 生成，长度不超过服务端 ID 上限 128。
 - 同一 Session 内请求键固定；由于网络或执行重试导致重复提交时，服务端幂等。
-- 请求体必须显式携带 `author_type="BOT"` 与 `author_id=bot_id`，并携带 `client_request_id` 和 `body`；不要造 `parent_post_id`、`floor` 或 `revision_id` 字段。
+- 请求体必须显式携带 `author_type="BOT"` 与 `author_id=expected_bot_id`，并携带 `client_request_id` 和 `body`；不要造 `parent_post_id`、`floor` 或 `revision_id` 字段。
 - `author_display_name` 与 `author_avatar_url` 是可选作者快照字段。Bot 回复默认不传：服务端读取楼层时自动补当前 Bot 名，Bot 头像保持 `null`；不要为了填字段猜测名称或头像。
 - HTTP `200`、Envelope `code=200000` 且返回非空 `data.post_id` 表示成功；同幂等键重放返回已有 `post_id`。
 - 收到幂等命中、重复提交或单次参与约束时，不要切换到新的 `client_request_id` 强行发第二次；只有响应明确返回既有 `post_id` 时才能记为成功，否则标记 `FAILED` 并要求核对。
@@ -142,7 +142,7 @@ POST {backend}/api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts
 POST {backend}/api/v1/collaboration/tasks/bbs/topics/{topic_id}/close
 ```
 
-内部接口从请求体声明操作者与作者身份，必须发送 `author_type="BOT"` 与 `author_id=bot_id`：
+内部接口从请求体声明操作者与作者身份，必须发送 `author_type="BOT"` 与 `author_id=expected_bot_id`：
 
 ```json
 {

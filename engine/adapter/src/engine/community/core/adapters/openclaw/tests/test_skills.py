@@ -7,6 +7,9 @@ adapter raises `CapabilityNotSupportedError` (no port call).
 """
 from __future__ import annotations
 
+import io
+import zipfile
+
 import pytest
 
 from engine.community.core.adapters.openclaw.skills import OpenClawSkillsAdapter
@@ -15,6 +18,8 @@ from engine.community.core.skills.models import (
     CenterEnsureItem,
     CenterEnsureRequest,
     CleanSymlinksRequest,
+    LocalSkillPackageApplyRequest,
+    LocalSkillPackageLayout,
     PoolMappingApplyRequest,
     PoolMappingProjectionStatus,
     PoolMappingSourceLayout,
@@ -186,3 +191,50 @@ async def test_per_skill_ops_raise_capability_not_supported(call):
     adapter = OpenClawSkillsAdapter(_FakeSkillsPort())
     with pytest.raises(CapabilityNotSupportedError):
         await call(adapter)
+
+
+_MANIFEST = (
+    b"---\n"
+    b"name: bbs-browse\n"
+    b"description: Browse BBS topics.\n"
+    b"---\n"
+    b"# BBS Browse\n"
+    b"real skill\n"
+)
+
+
+def _local_skill_zip(content: bytes) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("SKILL.md", content)
+    return buffer.getvalue()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("layout", "relative_target"),
+    [
+        (LocalSkillPackageLayout.LEGACY, "skills/skills-local/bbs-browse"),
+        (LocalSkillPackageLayout.POOL, "skills-pool/skills-local/bbs-browse"),
+    ],
+)
+async def test_openclaw_package_applies_to_configured_workspace(
+    tmp_path,
+    layout: LocalSkillPackageLayout,
+    relative_target: str,
+) -> None:
+    adapter = OpenClawSkillsAdapter(
+        _FakeSkillsPort(),
+        local_package_workspace=tmp_path,
+    )
+    request = LocalSkillPackageApplyRequest(
+        skill_name="bbs-browse",
+        layout=layout,
+        package=_local_skill_zip(_MANIFEST),
+    )
+
+    result = await adapter.apply_local_package(request)
+
+    target = tmp_path / relative_target
+    assert result.target_path == str(target)
+    assert (target / "SKILL.md").read_bytes() == _MANIFEST

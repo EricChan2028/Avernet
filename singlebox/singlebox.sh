@@ -1088,11 +1088,13 @@ main() {
     apply_hybrid_profile_defaults "$command" "${services[@]}" || exit 1
     if [ -n "${BOTS_PROFILE_DIR:-}" ]; then
         for svc in "${services[@]}"; do
-            # --profile-dir / BOTS_PROFILE_DIR is primarily for the bots target,
-            # but bcs_frontend and bcsfuse are allowed because they are started
-            # before bots and need the same profile dir to be wired into BCS.
+            # --profile-dir / BOTS_PROFILE_DIR is primarily for the bots target.
+            # The all group is allowed because it starts bots and conditionally
+            # seeds the matching BBS demo; bcs_frontend and bcsfuse are allowed
+            # because they are started before bots and need the same profile
+            # dir to be wired into BCS.
             case "$svc" in
-                bots|bcs_frontend|bcsfuse|hybrid|merchant_hybrid)
+                all|bots|bcs_frontend|bcsfuse|hybrid|merchant_hybrid)
                     ;;
                 *)
                     log_error "--profile-dir only supports the bots target (or bcs_frontend/bcsfuse when the same profile dir is needed), for example: ./singlebox/singlebox.sh $(singlebox_mode_option) start bots --profile-dir <dir>"

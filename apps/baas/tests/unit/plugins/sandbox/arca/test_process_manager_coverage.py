@@ -1030,6 +1030,9 @@ class TestCreateOpenclawConfig:
         assert config["gateway"]["mode"] == "local"
         assert config["gateway"]["auth"]["mode"] == "none"
         assert config["agents"]["defaults"]["workspace"] == str(workspace_dir)
+        # OpenClaw 2026.x rejects this Homebrew-era key, and the local demo must
+        # not write a user-specific full Skill repository into bot config.
+        assert "allowSymlinkTargets" not in config.get("skills", {}).get("load", {})
 
     def test_create_openclaw_config_no_template(self, monkeypatch, tmp_path):
         """create_openclaw_config uses minimal config when template not found."""

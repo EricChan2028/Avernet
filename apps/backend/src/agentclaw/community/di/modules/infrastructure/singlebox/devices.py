@@ -51,6 +51,7 @@ from agentclaw.community.core.devices.services.loopback_targets import (
 )
 from agentclaw.community.core.notify.protocol import NotifyBotLister
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
+from agentclaw.community.api.baas_service import BaasServiceProtocol
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.system_config import SystemConfigService
 from agentclaw.community.core.task_queue.services.task_queue_service import (
@@ -148,23 +149,22 @@ class SingleboxDevicesModule(Module):
 
     @singleton
     @provider
-    def device_adapter_transport(self) -> DeviceAdapterTransport:
-        """Singlebox: the in-memory cron adapter with a proxy fallback URL.
+    @inject
+    def device_adapter_transport(
+        self, baas_service: BaasServiceProtocol
+    ) -> DeviceAdapterTransport:
+        """Singlebox: forward engine requests through the real BaaS link.
 
-        The transport mocks the well-known paths (health, capabilities,
-        skills, /api/cron) in memory and proxies everything else to the
-        engine adapter's HTTP origin. A nil default_adapter_url preserves
-        the original test/sentinel behavior (no network).
+        BaaS owns routing from a binding to the local process/container HTTP
+        origin. Using the community transport keeps routine APIs and the
+        engine's own cron store behind the same ``/api/cron`` boundary, so
+        UI-visible tasks are created and queried in the bot's runtime.
         """
-        from os import environ
-
-        from agentclaw.community.plugins.local.device_adapter_transport import (
-            InMemoryDeviceAdapterTransport,
+        from agentclaw.community.plugins.community.device_adapter_transport import (
+            CommunityDeviceAdapterTransport,
         )
 
-        return InMemoryDeviceAdapterTransport(
-            default_adapter_url=environ.get("SINGLEBOX_ENGINE_ADAPTER_URL"),
-        )
+        return CommunityDeviceAdapterTransport(baas_service)
 
     @singleton
     @provider

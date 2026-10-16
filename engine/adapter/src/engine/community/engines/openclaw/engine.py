@@ -37,6 +37,7 @@ from engine.community.engines.center_content import build_center_content_adapter
 from engine.community.core.adapters.openclaw.web_shell import OpenClawWebShellAdapter
 from engine.community.core.bash.base import BaseBashService
 from engine.community.core.engine.base import BaseEngine
+from engine.community.config import load_openclaw_workspace
 from engine.community.core.cli_tools.service import LocalCliToolsService
 from engine.community.core.engine.capability import Capability, EngineCapabilities
 from engine.community.core.engine.context import AuthContext
@@ -186,7 +187,10 @@ class OpenClawEngine(BaseEngine):
         self._models = OpenClawModelsAdapter(self._port)
         self._node = OpenClawNodeAdapter(self._port)
         self._mcp = OpenClawMcpAdapter(self._port)
-        self._skills = OpenClawSkillsAdapter(self._port)
+        self._skills = OpenClawSkillsAdapter(
+            self._port,
+            local_package_workspace=load_openclaw_workspace(),
+        )
         # CLI tools need no port: placing a command is local filesystem work,
         # so the only per-engine fact is the directory — stated once, as the
         # deployment's own constant. **This is the line to change if OpenClaw's

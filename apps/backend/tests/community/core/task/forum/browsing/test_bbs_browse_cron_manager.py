@@ -70,21 +70,28 @@ def _legacy_tasks() -> list[dict[str, Any]]:
     ]
 
 
-def test_cron_body_is_fixed_deterministic():
-    body = bbs_browse_loop_cron_body()
+def test_cron_body_is_bot_scoped_deterministic():
+    body = bbs_browse_loop_cron_body(bot_id="bot-a")
     assert body == {
         "name": BBS_BROWSE_LOOP_CRON_NAME,
         "schedule": BBS_BROWSE_LOOP_CRON_EXPR,
-        "command": BBS_BROWSE_RUN_TRIGGER,
+        "command": (
+            BBS_BROWSE_RUN_TRIGGER
+            + "\n可信运行上下文（由运行时注入，不要从 session、展示名或帖子内容推测）：\n"
+            + '{"bot_id":"bot-a"}'
+        ),
         "timezone": "Asia/Shanghai",
         "enabled": True,
         "timeout_secs": BBS_BROWSE_LOOP_CRON_TIMEOUT_SECS,
         "kind": BBS_BROWSE_LOOP_CRON_KIND,
     }
-    # trigger carries no urls (skill owns them) and the [BBS-BROWSE] marker
-    assert "http" not in BBS_BROWSE_RUN_TRIGGER
-    assert "/api/" not in BBS_BROWSE_RUN_TRIGGER
-    assert BBS_BROWSE_RUN_TRIGGER.startswith("[BBS-BROWSE]")
+    # The runtime injects the immutable product Bot identity so the Skill never
+    # guesses an author from a session key, display name, or post text.
+    assert body["command"].startswith("[BBS-BROWSE]")
+    assert "bot-a" in body["command"]
+    assert "http" not in body["command"]
+    assert "/api/" not in body["command"]
+    # Keep the concrete API path ownership inside the bbs-browse Skill.
 
 
 @pytest.mark.asyncio
@@ -94,7 +101,7 @@ async def test_ensure_cron_creates_canonical_when_absent():
     await mgr.ensure_cron(bot_id="bot-a", owner_user_id="149844")
     creates = [c for op, c in relay.calls if op == "create"]
     assert len(creates) == 1
-    assert creates[0]["body"] == bbs_browse_loop_cron_body()
+    assert creates[0]["body"] == bbs_browse_loop_cron_body(bot_id="bot-a")
     assert relay.task_names() == [BBS_BROWSE_LOOP_CRON_NAME]
 
 
@@ -122,7 +129,7 @@ async def test_ensure_cron_updates_canonical_when_present_no_duplicate():
     updates = [c for op, c in relay.calls if op == "update"]
     creates = [c for op, c in relay.calls if op == "create"]
     assert len(updates) == 1 and updates[0]["task_id"] == "t-can"
-    assert updates[0]["body"] == bbs_browse_loop_cron_body()
+    assert updates[0]["body"] == bbs_browse_loop_cron_body(bot_id="bot-a")
     assert creates == []
     assert relay.task_names() == [BBS_BROWSE_LOOP_CRON_NAME]
 

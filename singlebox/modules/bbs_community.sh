@@ -6,7 +6,16 @@ _BBS_COMMUNITY_SH_LOADED=1
 BBS_COMMUNITY_PROFILE_DIR="${BBS_COMMUNITY_PROFILE_DIR:-singlebox/agents/2bots_bbs_community_profile}"
 BBS_COMMUNITY_OWNER_ID="${BBS_COMMUNITY_OWNER_ID:-mock-user}"
 BBS_COMMUNITY_BACKEND_PORT="${BACKEND_PORT:-8888}"
+BBS_COMMUNITY_GATEWAY_PORT="${GATEWAY_PORT:-8889}"
 BBS_COMMUNITY_LOG="${LOG_DIR}/bbs_community.log"
+BBS_COMMUNITY_COOKIE_FILE="${BBS_COMMUNITY_COOKIE_FILE:-${LOG_DIR}/bbs_community.cookies}"
+BBS_COMMUNITY_SKILL_SET_NAME="BBS Demo 能力集"
+BBS_COMMUNITY_SKILL_SET_DESCRIPTION="BBS 演示内置：社区巡检、主题处理与发帖。"
+BBS_COMMUNITY_SKILL_NAMES=(
+    "bbs-browse"
+    "bbs-topic-handler"
+    "bbs-create-topic"
+)
 
 bbs_community_enabled() {
     [ "${BOTS_PROFILE_DIR:-}" = "$BBS_COMMUNITY_PROFILE_DIR" ]
@@ -14,6 +23,20 @@ bbs_community_enabled() {
 
 bbs_community_backend_base_url() {
     printf 'http://127.0.0.1:%s\n' "$BBS_COMMUNITY_BACKEND_PORT"
+}
+
+bbs_community_gateway_base_url() {
+    printf 'http://127.0.0.1:%s\n' "$BBS_COMMUNITY_GATEWAY_PORT"
+}
+
+bbs_community_url_encode() {
+    jq -rn --arg value "$1" '$value | @uri'
+}
+
+bbs_community_openapi_query() {
+    local owner_id
+    owner_id="$(bbs_community_url_encode "${BBS_COMMUNITY_OWNER_ID}")"
+    printf 'user_id=%s&owner_id=%s\n' "$owner_id" "$owner_id"
 }
 
 bbs_community_prereqs() {
@@ -31,6 +54,12 @@ bbs_community_prereqs() {
             prereq_ok "curl found"
         else
             prereq_error "curl not found. Install curl before starting the BBS demo."
+            has_error=true
+        fi
+        if check_command python3; then
+            prereq_ok "python3 found"
+        else
+            prereq_error "python3 not found. Install python3 before starting the BBS demo."
             has_error=true
         fi
     else
@@ -120,17 +149,421 @@ bbs_community_seed_topics() {
     return "$result"
 }
 
+bbs_community_profile_bot_name() {
+    case "$1" in
+        community-product-officer) printf '%s' '社区产品官' ;;
+        community-engineering-officer) printf '%s' '社区工程官' ;;
+        *) return 1 ;;
+    esac
+}
+
+bbs_community_profile_bot_description() {
+    case "$1" in
+        community-product-officer) printf '%s' '社区产品官，从用户目标、场景、需求边界、验收标准和最小可用范围参与 BBS 讨论，给出产品侧结论与取舍' ;;
+        community-engineering-officer) printf '%s' '社区工程官，从实现可行性、系统边界、技术风险和验证方式参与 BBS 讨论，给出风险最小的实现路径' ;;
+        *) return 1 ;;
+    esac
+}
+
+bbs_community_backend_request() {
+    local method="$1"
+    local path="$2"
+    local payload="${3:-}"
+    local response
+    local args=(
+        --noproxy '*'
+        --connect-timeout 2
+        --max-time 90
+        -sS
+        -H "x-user-id: ${BBS_COMMUNITY_OWNER_ID}"
+        -X "$method"
+    )
+
+    if [ -n "$payload" ]; then
+        args+=(-H "Content-Type: application/json" --data-binary "@${payload}")
+    fi
+    response="$(curl "${args[@]}" "$(bbs_community_backend_base_url)${path}" 2>>"$BBS_COMMUNITY_LOG" || true)"
+    [ -n "$response" ] || return 1
+    printf '%s\n' "$response"
+}
+
+bbs_community_find_product_bot() {
+    local bot_name="$1"
+    local response
+    response="$(bbs_community_backend_request GET "/api/bots?user_id=${BBS_COMMUNITY_OWNER_ID}&entity_id=${BBS_COMMUNITY_OWNER_ID}&entity_type=staff&page=1&page_size=100")" || return 1
+    printf '%s\n' "$response" | jq -r --arg name "$bot_name" --arg entity_id "$BBS_COMMUNITY_OWNER_ID" '
+        (.data.bots // .data.items // .data.list // .data.records // .data // [])
+        | if type == "array" then . else [] end
+        | map(select((.bot_name == $name) and (.entity_id == $entity_id) and ((.is_delete // 0) == 0)))
+        | .[0].bot_id // empty
+    ' 2>/dev/null || true
+}
+
+bbs_community_create_product_bot() {
+    local profile="$1"
+    local bot_name bot_summary payload_file response bot_id
+
+    bot_name="$(bbs_community_profile_bot_name "$profile")" || return 1
+    bot_summary="$(bbs_community_profile_bot_description "$profile")" || return 1
+    payload_file="$(mktemp "${LOG_DIR}/bbs-bot.XXXXXX")" || return 1
+    trap 'rm -f "${payload_file:-}"' RETURN
+    jq -n \
+        --arg bot_name "$bot_name" \
+        --arg bot_desc "$bot_summary" \
+        --arg entity_id "$BBS_COMMUNITY_OWNER_ID" \
+        '{bot_name: $bot_name, bot_desc: $bot_desc, entity_id: $entity_id, entity_type: "staff", engine_type: "openclaw", bot_type: "personal", template_type: "normalCC"}' \
+        >"$payload_file"
+    response="$(bbs_community_backend_request POST "/api/bots?user_id=${BBS_COMMUNITY_OWNER_ID}" "$payload_file")" || return 1
+    bot_id="$(printf '%s\n' "$response" | jq -r '.data.bot_id // .data.bot.bot_id // .bot_id // empty' 2>/dev/null || true)"
+    if [ -z "$bot_id" ]; then
+        log_error "Backend product bot creation did not return bot_id: ${profile}: $(printf '%s' "$response" | head -c 500)"
+        return 1
+    fi
+    printf '%s' "$bot_id"
+}
+
+bbs_community_wait_product_bot_ready() {
+    local bot_id="$1"
+    local started_at elapsed response status error_message
+    started_at=$SECONDS
+
+    while true; do
+        response="$(bbs_community_backend_request GET "/api/bots/${bot_id}/status?owner_id=${BBS_COMMUNITY_OWNER_ID}")" || return 1
+        if printf '%s\n' "$response" | jq -e '.success == true and .data.is_ready == true' >/dev/null 2>&1; then
+            return 0
+        fi
+
+        status="$(printf '%s\n' "$response" | jq -r '.data.bot_status // empty' 2>/dev/null || true)"
+        error_message="$(printf '%s\n' "$response" | jq -r '.data.error_message // empty' 2>/dev/null || true)"
+        if [ "$status" = FAILED ] || [ -n "$error_message" ]; then
+            log_error "BBS product bot did not become ready: bot_id=${bot_id}, status=${status:-unknown}, error=${error_message:-none}"
+            return 1
+        fi
+
+        elapsed=$((SECONDS - started_at))
+        if [ "$elapsed" -ge "${BBS_COMMUNITY_PRODUCT_BOT_READY_TIMEOUT_SECONDS:-180}" ]; then
+            log_error "Timed out waiting for the BBS product bot: bot_id=${bot_id}"
+            return 1
+        fi
+        sleep 2
+    done
+}
+
+bbs_community_ensure_product_bot() {
+    local profile="$1"
+    local bot_name bot_id
+
+    bot_name="$(bbs_community_profile_bot_name "$profile")" || return 1
+    backend_ready || {
+        log_error "Backend is not ready; cannot create BBS product bot ${bot_name}"
+        return 1
+    }
+    baas_ready || {
+        log_error "BAAS is not ready; cannot create BBS product bot ${bot_name}"
+        return 1
+    }
+
+    bot_id="$(bbs_community_find_product_bot "$bot_name")" || return 1
+    if [ -z "$bot_id" ]; then
+        bot_id="$(bbs_community_create_product_bot "$profile")" || return 1
+    fi
+    bbs_community_wait_product_bot_ready "$bot_id" || return 1
+    printf '%s' "$bot_id"
+}
+
+bbs_community_bot_id() {
+    local profile="$1"
+    local bot_id
+
+    bot_id="$(bbs_community_ensure_product_bot "$profile")" || return 1
+    printf '%s' "$bot_id"
+}
+
+bbs_community_gateway_login() {
+    local response owner_id
+
+    owner_id="$(bbs_community_url_encode "${BBS_COMMUNITY_OWNER_ID}")"
+    mkdir -p "$LOG_DIR"
+    rm -f "$BBS_COMMUNITY_COOKIE_FILE"
+    response="$(curl --noproxy '*' --connect-timeout 2 --max-time 20 -fsS \
+        -c "$BBS_COMMUNITY_COOKIE_FILE" \
+        "$(bbs_community_gateway_base_url)/_dev/login?staff_id=${owner_id}&nick_name=${owner_id}&next=${FRONTEND_PORT:-8000}" \
+        2>>"$BBS_COMMUNITY_LOG")" || return 1
+    [ -f "$BBS_COMMUNITY_COOKIE_FILE" ] || return 1
+    printf '%s' "$response"
+}
+
+bbs_community_gateway_request() {
+    local method="$1"
+    local path="$2"
+    local payload="${3:-}"
+    local content_type="${4:-}"
+    local response
+    local args=(
+        --noproxy '*'
+        --connect-timeout 2
+        --max-time 60
+        -sS
+        -b "$BBS_COMMUNITY_COOKIE_FILE"
+        -X "$method"
+    )
+
+    if [ -n "$content_type" ]; then
+        args+=(-H "Content-Type: ${content_type}")
+    fi
+    if [ -n "$payload" ]; then
+        args+=(--data-binary "@${payload}")
+    fi
+    response="$(curl "${args[@]}" "$(bbs_community_gateway_base_url)${path}" \
+        2>>"$BBS_COMMUNITY_LOG" || true)"
+    [ -n "$response" ] || return 1
+    printf '%s\n' "$response"
+}
+
+bbs_community_create_skill_zip() {
+    local source_dir="$1"
+    local zip_file="$2"
+
+    python3 - "$source_dir" "$zip_file" <<'PY'
+from pathlib import Path
+import sys
+import zipfile
+
+source = Path(sys.argv[1]).resolve()
+target = Path(sys.argv[2])
+
+if not source.is_dir() or not (source / "SKILL.md").is_file():
+    raise SystemExit(f"Invalid BBS skill source: {source}")
+
+with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+    for path in sorted(source.rglob("*")):
+        relative = path.relative_to(source)
+        if relative == Path("."):
+            continue
+        if path.is_symlink():
+            raise SystemExit(f"BBS skill source contains a symlink: {path}")
+        if path.is_file():
+            archive.write(path, relative.as_posix())
+PY
+}
+
+bbs_community_gateway_json_request() {
+    local method="$1"
+    local path="$2"
+    local payload="$3"
+    local payload_file response
+
+    payload_file="$(mktemp "${LOG_DIR}/bbs-json.XXXXXX")" || return 1
+    trap 'rm -f "${payload_file:-}"' RETURN
+    printf '%s\n' "$payload" >"$payload_file"
+    response="$(bbs_community_gateway_request "$method" "$path" "$payload_file" 'application/json')" || return 1
+    printf '%s' "$response"
+}
+
+bbs_community_upload_skill() {
+    local profile="$1"
+    local source="$2"
+    local bot_id="$3"
+    local skill_name="$4"
+    local source_dir zip_file query upload_response skill_id skill_active
+
+    source_dir="${PROJECT_ROOT}/${BOTS_PROFILE_DIR}/${source}/skills/${skill_name}"
+    if [ ! -f "${source_dir}/SKILL.md" ]; then
+        log_error "Cannot seed ${profile} skill ${skill_name}: missing ${source_dir}/SKILL.md"
+        return 1
+    fi
+
+    zip_file="$(mktemp "${LOG_DIR}/bbs-skill.XXXXXX.zip")" || return 1
+    trap 'rm -f "${zip_file:-}"' RETURN
+    bbs_community_create_skill_zip "$source_dir" "$zip_file" || return 1
+
+    query="$(bbs_community_openapi_query)"
+    upload_response="$(bbs_community_gateway_request POST \
+        "/openapi/v1/bots/${bot_id}/skills?${query}" \
+        "$zip_file" 'application/zip')" || return 1
+    if ! printf '%s\n' "$upload_response" | jq -e \
+        '.code == 200000 or .code == 201000' >/dev/null 2>&1; then
+        log_error "Failed to upload ${profile} skill ${skill_name}: $(printf '%s' "$upload_response" | head -c 500)"
+        return 1
+    fi
+    skill_id="$(printf '%s\n' "$upload_response" | jq -r '.data.skill.skill_id // ""')"
+    skill_active="$(printf '%s\n' "$upload_response" | jq -r '.data.skill.active // false')"
+    if [ -z "$skill_id" ]; then
+        log_error "BBS skill upload did not return skill_id: ${profile}/${skill_name}"
+        return 1
+    fi
+    printf '%s\n%s\n' "$skill_id" "$skill_active"
+}
+
+bbs_community_verify_skill_content() {
+    local profile="$1"
+    local bot_id="$2"
+    local skill_id="$3"
+    local skill_name="$4"
+    local query response
+
+    query="$(bbs_community_openapi_query)"
+    response="$(bbs_community_gateway_request GET \
+        "/openapi/v1/bots/${bot_id}/skills/${skill_id}/content?${query}")" || return 1
+    if ! printf '%s\n' "$response" | jq -e \
+        '.code == 200000 and (.data.content | type == "string" and length > 0)' \
+        >/dev/null 2>&1; then
+        log_error "BBS skill content is not readable after upload: ${profile}/${skill_name}"
+        return 1
+    fi
+}
+
+bbs_community_find_skill_set() {
+    local bot_id="$1"
+    local query response set_id set_active
+
+    query="$(bbs_community_openapi_query)"
+    response="$(bbs_community_gateway_request GET \
+        "/openapi/v1/bots/${bot_id}/skill-sets?${query}")" || return 1
+    if ! printf '%s\n' "$response" | jq -e \
+        '.code == 200000 and (.data | type == "array")' >/dev/null 2>&1; then
+        log_error "Cannot list BBS skill set for bot ${bot_id}: $(printf '%s' "$response" | head -c 500)"
+        return 1
+    fi
+
+    set_id="$(printf '%s\n' "$response" | jq -r --arg name "$BBS_COMMUNITY_SKILL_SET_NAME" \
+        '.data[]? | select(.name == $name and .is_default == false) | .id' | head -n 1)"
+    set_active="$(printf '%s\n' "$response" | jq -r --arg name "$BBS_COMMUNITY_SKILL_SET_NAME" \
+        '.data[]? | select(.name == $name and .is_default == false) | .is_active | if . then "true" else "false" end' | head -n 1)"
+    printf '%s\n%s\n' "${set_id:-}" "${set_active:-false}"
+}
+
+bbs_community_create_skill_set() {
+    local bot_id="$1"
+    local query payload response set_id
+
+    query="$(bbs_community_openapi_query)"
+    payload="$(jq -n \
+        --arg name "$BBS_COMMUNITY_SKILL_SET_NAME" \
+        --arg description "$BBS_COMMUNITY_SKILL_SET_DESCRIPTION" \
+        '{name:$name, description:$description}')"
+    response="$(bbs_community_gateway_json_request POST \
+        "/openapi/v1/bots/${bot_id}/skill-sets?${query}" "$payload")" || return 1
+    if ! printf '%s\n' "$response" | jq -e \
+        '.code == 200000 or .code == 201000' >/dev/null 2>&1; then
+        log_error "Cannot create BBS skill set for bot ${bot_id}: $(printf '%s' "$response" | head -c 500)"
+        return 1
+    fi
+    set_id="$(printf '%s\n' "$response" | jq -r '.data.id // ""')"
+    if [ -z "$set_id" ]; then
+        log_error "BBS skill set creation did not return id for bot ${bot_id}"
+        return 1
+    fi
+    printf '%s' "$set_id"
+}
+
+bbs_community_deactivate_direct_skill() {
+    local bot_id="$1"
+    local skill_id="$2"
+    local skill_name="$3"
+    local query response
+
+    query="$(bbs_community_openapi_query)"
+    response="$(bbs_community_gateway_request POST \
+        "/openapi/v1/bots/${bot_id}/skills/${skill_id}/deactivate?${query}")" || return 1
+    if ! printf '%s\n' "$response" | jq -e \
+        '.code == 200000 and .data.skill.active == false' >/dev/null 2>&1; then
+        log_error "Failed to deactivate directly activated skill ${skill_name}: $(printf '%s' "$response" | head -c 500)"
+        return 1
+    fi
+}
+
+bbs_community_add_skill_to_set() {
+    local bot_id="$1"
+    local set_id="$2"
+    local skill_id="$3"
+    local skill_name="$4"
+    local query response
+
+    query="$(bbs_community_openapi_query)"
+    response="$(bbs_community_gateway_request PUT \
+        "/openapi/v1/bots/${bot_id}/skill-sets/${set_id}/skills/${skill_id}?${query}")" || return 1
+    if ! printf '%s\n' "$response" | jq -e \
+        '.code == 200000' >/dev/null 2>&1; then
+        log_error "Failed to add skill ${skill_name} to the BBS skill set: $(printf '%s' "$response" | head -c 500)"
+        return 1
+    fi
+}
+
+bbs_community_activate_skill_set() {
+    local bot_id="$1"
+    local set_id="$2"
+    local query response
+
+    query="$(bbs_community_openapi_query)"
+    response="$(bbs_community_gateway_request POST \
+        "/openapi/v1/bots/${bot_id}/skill-sets/${set_id}/activate?${query}")" || return 1
+    if ! printf '%s\n' "$response" | jq -e \
+        '.code == 200000 and .data.is_active == true' >/dev/null 2>&1; then
+        log_error "Failed to activate the BBS skill set: $(printf '%s' "$response" | head -c 500)"
+        return 1
+    fi
+}
+
+bbs_community_seed_profile_skills() {
+    local profile="$1"
+    local source="$2"
+    local bot_id skill_set_state skill_set_id skill_set_active query
+    local skill_name skill_state skill_id skill_active set_skills_response
+
+    bot_id="$(bbs_community_bot_id "$profile")" || return 1
+    skill_set_state="$(bbs_community_find_skill_set "$bot_id")" || return 1
+    skill_set_id="$(printf '%s\n' "$skill_set_state" | sed -n '1p')"
+    skill_set_active="$(printf '%s\n' "$skill_set_state" | sed -n '2p')"
+    if [ -z "$skill_set_id" ]; then
+        skill_set_id="$(bbs_community_create_skill_set "$bot_id")" || return 1
+        skill_set_active=true
+    fi
+
+    query="$(bbs_community_openapi_query)"
+    set_skills_response="$(bbs_community_gateway_request GET \
+        "/openapi/v1/bots/${bot_id}/skill-sets/${skill_set_id}/skills?${query}")" || return 1
+    if ! printf '%s\n' "$set_skills_response" | jq -e \
+        '.code == 200000 and (.data | type == "array")' >/dev/null 2>&1; then
+        log_error "Cannot list members of the BBS skill set for ${profile}: $(printf '%s' "$set_skills_response" | head -c 500)"
+        return 1
+    fi
+
+    for skill_name in "${BBS_COMMUNITY_SKILL_NAMES[@]}"; do
+        skill_state="$(bbs_community_upload_skill "$profile" "$source" "$bot_id" "$skill_name")" || return 1
+        skill_id="$(printf '%s\n' "$skill_state" | sed -n '1p')"
+        skill_active="$(printf '%s\n' "$skill_state" | sed -n '2p')"
+        bbs_community_verify_skill_content "$profile" "$bot_id" "$skill_id" "$skill_name" || return 1
+        if ! printf '%s\n' "$set_skills_response" | jq -e --arg name "$skill_name" \
+            'any(.data[]?; .name == $name)' >/dev/null 2>&1; then
+            if [ "$skill_active" = true ]; then
+                bbs_community_deactivate_direct_skill "$bot_id" "$skill_id" "$skill_name" || return 1
+            fi
+            bbs_community_add_skill_to_set "$bot_id" "$skill_set_id" "$skill_id" "$skill_name" || return 1
+        fi
+    done
+
+    if [ "$skill_set_active" != true ]; then
+        bbs_community_activate_skill_set "$bot_id" "$skill_set_id" || return 1
+    fi
+}
+
+bbs_community_seed_skills() {
+    bbs_community_gateway_login >/dev/null || {
+        log_error "Gateway dev login failed; check ${BBS_COMMUNITY_LOG}"
+        return 1
+    }
+
+    bbs_community_seed_profile_skills community-product-officer community-product-officer || return 1
+    bbs_community_seed_profile_skills community-engineering-officer community-engineering-officer
+}
+
 bbs_community_seed_subscription() {
     local profile="$1"
     local note="$2"
-    local session_file bot_id payload response
+    local bot_id payload response
 
-    session_file="$(bcs_bot_profile_dir "$profile")/.bcs/session.json"
-    bot_id="$(bots_session_bot_uuid "$session_file")"
-    if [ -z "$bot_id" ]; then
-        log_error "Cannot seed BBS subscription for ${profile}: bot_uuid missing in ${session_file}"
-        return 1
-    fi
+    bot_id="$(bbs_community_bot_id "$profile")" || return 1
 
     payload="$(jq -n --arg note "$note" '{note:$note}')"
     response="$(bbs_community_request POST \
@@ -148,6 +581,48 @@ bbs_community_seed_subscriptions() {
         || return 1
 }
 
+bbs_community_profile_routine_ready() {
+    local profile="$1"
+    local bot_id query response
+
+    bot_id="$(bbs_community_bot_id "$profile")" || return 1
+    query="$(bbs_community_openapi_query)"
+    response="$(bbs_community_gateway_request GET \
+        "/openapi/v1/bots/${bot_id}/routines?${query}&page=1&page_size=100")" || return 1
+    printf '%s\n' "$response" | jq -e \
+        '.code == 200000 and any(.data.items[]?; .name == "bbs-browse-loop" and .trigger.type == "schedule" and .trigger.cron == "*/30 * * * *" and .enabled == true and (.timezone // "Asia/Shanghai") == "Asia/Shanghai")' \
+        >/dev/null 2>&1
+}
+
+bbs_community_wait_profile_routine_ready() {
+    local profile="$1"
+    local started_at elapsed
+
+    started_at=$SECONDS
+    while true; do
+        if bbs_community_profile_routine_ready "$profile"; then
+            return 0
+        fi
+
+        elapsed=$((SECONDS - started_at))
+        if [ "$elapsed" -ge "${BBS_COMMUNITY_ROUTINE_READY_TIMEOUT_SECONDS:-180}" ]; then
+            log_error "Timed out waiting for the BBS bbs-browse-loop cron task: profile=${profile}"
+            return 1
+        fi
+        sleep 2
+    done
+}
+
+bbs_community_wait_routines_ready() {
+    bbs_community_wait_profile_routine_ready community-product-officer || return 1
+    bbs_community_wait_profile_routine_ready community-engineering-officer || return 1
+}
+
+bbs_community_routines_ready() {
+    bbs_community_profile_routine_ready community-product-officer || return 1
+    bbs_community_profile_routine_ready community-engineering-officer || return 1
+}
+
 bbs_community_start() {
     bbs_community_enabled || return 0
     mkdir -p "${LOG_DIR}"
@@ -157,10 +632,20 @@ bbs_community_start() {
         log_error "Backend is not ready; cannot initialize the BBS community demo"
         return 1
     }
+    gateway_ready || {
+        log_error "Gateway is not ready; cannot initialize BBS Skill Center state"
+        return 1
+    }
 
     log_info "Seeding BBS demo topics for ${BBS_COMMUNITY_OWNER_ID}..."
     if ! bbs_community_seed_topics; then
         log_error "Failed to seed BBS demo topics. Check ${BBS_COMMUNITY_LOG}"
+        return 1
+    fi
+
+    log_info "Uploading BBS skills and assembling BBS skill sets for the two community bots..."
+    if ! bbs_community_seed_skills; then
+        log_error "Failed to initialize BBS skills. Check ${BBS_COMMUNITY_LOG}"
         return 1
     fi
 
@@ -170,7 +655,13 @@ bbs_community_start() {
         return 1
     fi
 
-    log_info 'BBS community demo initialized: 5 topics, 2 subscriptions, and 2 bbs-browse-loop cron tasks'
+    log_info "Waiting for both BBS bots to expose the bbs-browse-loop routine..."
+    if ! bbs_community_wait_routines_ready; then
+        log_error "Failed to verify BBS bbs-browse-loop routine tasks. Check ${BBS_COMMUNITY_LOG}"
+        return 1
+    fi
+
+    log_info 'BBS community demo initialized: 5 topics, 2 active skill sets, 6 active skills, 2 subscriptions, and 2 bbs-browse-loop cron tasks'
 }
 
 bbs_community_topics_ready() {
@@ -191,11 +682,45 @@ bbs_community_subscriptions_ready() {
     [ "$total" -ge 2 ]
 }
 
+bbs_community_profile_skills_ready() {
+    local profile="$1"
+    local bot_id query resources set_id skills skill_name
+
+    bot_id="$(bbs_community_bot_id "$profile")" || return 1
+    query="$(bbs_community_openapi_query)"
+    resources="$(bbs_community_gateway_request GET \
+        "/openapi/v1/bots/${bot_id}/skill-sets/resources?${query}")" || return 1
+    set_id="$(printf '%s\n' "$resources" | jq -r --arg name "$BBS_COMMUNITY_SKILL_SET_NAME" \
+        '.data[]? | select(.name == $name and .is_default == false and .is_active == true) | .id' \
+        | head -n 1)"
+    if [ -z "$set_id" ]; then
+        return 1
+    fi
+
+    skills="$(bbs_community_gateway_request GET \
+        "/openapi/v1/bots/${bot_id}/skill-sets/${set_id}/skills?${query}")" || return 1
+    for skill_name in "${BBS_COMMUNITY_SKILL_NAMES[@]}"; do
+        printf '%s\n' "$skills" | jq -e --arg name "$skill_name" \
+            '.code == 200000 and any(.data[]?; .name == $name)' \
+            >/dev/null 2>&1 || return 1
+    done
+}
+
+bbs_community_skills_ready() {
+    gateway_ready || return 1
+    bbs_community_gateway_login >/dev/null || return 1
+
+    bbs_community_profile_skills_ready community-product-officer || return 1
+    bbs_community_profile_skills_ready community-engineering-officer
+}
+
 bbs_community_ready() {
     bbs_community_enabled || return 0
 
     bbs_community_topics_ready || return 1
-    bbs_community_subscriptions_ready
+    bbs_community_subscriptions_ready || return 1
+    bbs_community_skills_ready || return 1
+    bbs_community_routines_ready
 }
 
 bbs_community_stop() {
@@ -207,12 +732,12 @@ bbs_community_status() {
     bbs_community_enabled || return 0
 
     if bbs_community_ready; then
-        echo '  BBS Community: Ready (5 topics; 2 subscriptions; 2 bbs-browse-loop cron tasks)'
+        echo '  BBS Community: Ready (5 topics; 2 active skill sets; 6 active skills; 2 subscriptions; 2 bbs-browse-loop cron tasks)'
     else
         echo '  BBS Community: Not ready'
     fi
 }
 
 bbs_community_help() {
-    echo 'bbs_community - seed local 2-bot BBS demo topics, subscriptions, and fixed-name cron tasks'
+    echo 'bbs_community - seed local 2-bot BBS demo topics, skills, skill sets, subscriptions, and fixed-name cron tasks'
 }
