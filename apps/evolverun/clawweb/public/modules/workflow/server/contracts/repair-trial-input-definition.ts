@@ -26,7 +26,7 @@ function fieldDescriptor(value: unknown): boolean {
   return typeof value.type === 'string' || Array.isArray(value.type) || Array.isArray(value.enum) || Array.isArray(value.required)
     || ['title', 'description', 'format', 'pattern'].some(key => typeof value[key] === 'string')
     || ['sensitive', 'writeOnly'].some(key => typeof value[key] === 'boolean')
-    || ['minimum', 'maximum', 'minLength', 'maxLength', 'minItems', 'maxItems'].some(key => typeof value[key] === 'number')
+    || ['minimum', 'maximum', 'minLength', 'maxLength', 'minItems', 'maxItems', 'minProperties', 'maxProperties'].some(key => typeof value[key] === 'number')
     || Object.hasOwn(value, 'default') && !record(value.default);
 }
 
@@ -52,6 +52,7 @@ export function normalizeTrialInputDefinition(definition: TrialInputDefinition |
     const jsonSchema = typeof raw.type === 'string' || Array.isArray(raw.type) || 'properties' in raw && !fieldDescriptor(raw.properties)
       || Array.isArray(raw.required) || ['$schema', '$id', '$ref'].some(key => typeof raw[key] === 'string')
       || ['allOf', 'anyOf', 'oneOf'].some(key => Array.isArray(raw[key]))
+      || ['minProperties', 'maxProperties'].some(key => typeof raw[key] === 'number')
       || ['$defs', 'definitions', 'patternProperties'].some(key => record(raw[key]) && !fieldDescriptor(raw[key]))
       || ['additionalProperties', 'not'].some(key => typeof raw[key] === 'boolean' || record(raw[key]));
     if (jsonSchema) {
@@ -72,6 +73,8 @@ export function normalizeTrialInputDefinition(definition: TrialInputDefinition |
   const allRequired = [...new Set([...names(schema.required ?? []), ...required])];
   for (const key of allRequired) if (!Object.hasOwn(properties, key)) properties[key] = { type: 'string' };
   const inputSchema = { ...schema, properties, ...(allRequired.length || schema.required !== undefined ? { required: allRequired } : {}) };
-  const constrained = ['$ref', 'allOf', 'anyOf', 'oneOf', 'not', 'patternProperties'].some(key => key in schema);
+  const constrained = ['$ref', 'allOf', 'anyOf', 'oneOf', 'not', 'patternProperties'].some(key => key in schema)
+    || schema.additionalProperties === true || record(schema.additionalProperties)
+    || ['minProperties', 'maxProperties'].some(key => typeof schema[key] === 'number');
   return { inputSchema, inputDefinition: Object.keys(properties).length || constrained ? 'defined' : 'none' };
 }

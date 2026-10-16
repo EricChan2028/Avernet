@@ -40,13 +40,13 @@ function newValue(schema: TrialValueSchema | boolean): unknown {
     default: return ''
   }
 }
-/** Checkbox controls represent false even when a required field has not been touched. */
+/** Remove cleared optional fields before hashing/submission; untouched required checkboxes represent false. */
 export function completeTrialValue(schema: TrialValueSchema | boolean, value: unknown): unknown {
   if (typeof schema === 'boolean') return value
   if (Array.isArray(value)) return value.map((item, index) => completeTrialValue(itemSchema(schema, index), item))
   if (!record(value)) return value
   const fields = properties(schema)
-  const completed = Object.fromEntries(Object.entries(value).map(([key, item]) => [key, completeTrialValue(fields[key] ?? {}, item)]))
+  const completed = Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined).map(([key, item]) => [key, completeTrialValue(fields[key] ?? {}, item)]))
   for (const key of schema.required ?? []) if (completed[key] === undefined && trialValueType(fields[key] ?? {}) === 'boolean') completed[key] = false
   return completed
 }
@@ -93,7 +93,7 @@ export default function TrialValueInput({ schema, name, value, disabled, require
     const values = Array.isArray(value) ? value : []
     return <fieldset aria-label={name} className="min-w-0 space-y-3 rounded border border-input p-3"><legend className="px-1 text-sm">{label}</legend>
       {values.map((item, index) => <div key={index} className="space-y-2 rounded border border-input p-2">
-        <TrialValueInput schema={itemSchema(spec, index)} name={`${name}.${index + 1}`} value={item} disabled={disabled} sensitive={masked} onChange={next => onChange(values.map((previous, i) => i === index ? next : previous))} />
+        <TrialValueInput schema={itemSchema(spec, index)} name={`${name}.${index + 1}`} value={item} required disabled={disabled} sensitive={masked} onChange={next => onChange(values.map((previous, i) => i === index ? next : previous))} />
         <button type="button" aria-label={`移除 ${name} 第 ${index + 1} 项`} className={button} disabled={disabled} onClick={() => onChange(values.filter((_, i) => i !== index))}>移除条目</button>
       </div>)}
       <button type="button" aria-label={`添加 ${name} 条目`} className={button} disabled={disabled || spec.items === false} onClick={() => onChange([...values, newValue(itemSchema(spec, values.length))])}>添加条目</button>
@@ -105,7 +105,11 @@ export default function TrialValueInput({ schema, name, value, disabled, require
       <option value="" disabled>请选择</option>{spec.enum.map((item, index) => <option key={JSON.stringify(item)} value={JSON.stringify(item)}>{typeof item === 'object' ? `选项 ${index + 1}` : String(item)}</option>)}
     </select> : type === 'boolean' ? <input aria-label={name} type="checkbox" checked={value === true} disabled={disabled} onChange={event => onChange(event.target.checked)} />
       : <input aria-label={name} type={masked ? 'password' : ['number', 'integer'].includes(type) ? 'number' : 'text'} step={type === 'integer' ? 1 : 'any'} className={control} disabled={disabled} value={value == null ? '' : String(value)}
-        onChange={event => { const text = event.target.value; onChange(['number', 'integer'].includes(type) && text !== '' ? Number(text) : text) }} />}
+        onChange={event => {
+          const text = event.target.value
+          onChange(['number', 'integer'].includes(type) ? text !== '' ? Number(text)
+            : Array.isArray(spec.type) && spec.type.includes('null') ? null : required ? '' : undefined : text)
+        }} />}
     {description}
   </label>
 }

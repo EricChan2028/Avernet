@@ -1,6 +1,7 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import userEvent from '@testing-library/user-event'
+import Ajv from 'ajv'
 import { beforeEach, expect, it, vi } from 'vitest'
 const api = vi.hoisted(() => ({ trials: vi.fn(), trialOptions: vi.fn(), startTrial: vi.fn() }))
 vi.mock('../../../../api/repair-batches', () => ({ repairBatches: api }))
@@ -314,4 +315,67 @@ it('uses business key/value fields for open objects and string entries for array
   expect(document.querySelector('textarea')).toBeNull()
   await userEvent.click(screen.getByRole('button', { name: '开始试跑' }))
   expect(api.startTrial).toHaveBeenCalledWith('task', expect.objectContaining({ input: { details: { taskId: 'task-1' }, tags: ['business'] } }))
+})
+
+it('omits cleared optional numeric fields recursively while preserving nullable null, zero, false and untouched defaults', async () => {
+  const schema = { type: 'object', properties: {
+    limit: { type: 'integer', default: 5 }, nullable: { type: ['number', 'null'], default: 3 }, zero: { type: 'integer', default: 0 }, enabled: { type: 'boolean', default: false },
+    details: { type: 'object', properties: { optional: { type: 'number', default: 1.5 }, unchanged: { type: 'integer', default: 7 } } },
+    rows: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, optional: { type: 'integer' } } }, default: [{ id: 'a', optional: 4 }] },
+    nullableValues: { type: 'array', items: { type: ['integer', 'null'] }, default: [1] },
+  } }
+  api.trialOptions.mockResolvedValue({ inputSchema: schema, inputSchemaDigest: 'schema', targets: [{ id: 'prod:owner:bot', label: 'Production Bot' }] })
+  api.startTrial.mockResolvedValue(trial)
+  render(panel())
+  await userEvent.selectOptions(await screen.findByRole('combobox', { name: '执行 Bot' }), 'prod:owner:bot')
+  await userEvent.clear(screen.getByRole('spinbutton', { name: 'limit' }))
+  await userEvent.clear(screen.getByRole('spinbutton', { name: 'nullable' }))
+  await userEvent.clear(screen.getByRole('spinbutton', { name: 'details.optional' }))
+  await userEvent.clear(screen.getByRole('spinbutton', { name: 'rows.1.optional' }))
+  await userEvent.clear(screen.getByRole('spinbutton', { name: 'nullableValues.1' }))
+  await userEvent.click(screen.getByRole('button', { name: '开始试跑' }))
+  const input = api.startTrial.mock.calls[0][1].input
+  expect(input).toEqual({ nullable: null, zero: 0, enabled: false, details: { unchanged: 7 }, rows: [{ id: 'a' }], nullableValues: [null] })
+  expect(Object.hasOwn(input, 'limit')).toBe(false)
+  expect(Object.hasOwn(input.details, 'optional')).toBe(false)
+  expect(Object.hasOwn(input.rows[0], 'optional')).toBe(false)
+  expect(new Ajv({ strict: false }).compile(schema)(input)).toBe(true)
+})
+
+it('keeps cleared required numeric fields invalid instead of restoring defaults or silently deleting them', async () => {
+  const schema = { type: 'object', required: ['count'], properties: { count: { type: 'integer', default: 5 }, details: { type: 'object', required: ['count'], properties: { count: { type: 'integer', default: 7 } } }, values: { type: 'array', items: { type: 'integer' }, default: [2] } } }
+  api.trialOptions.mockResolvedValue({ inputSchema: schema, inputSchemaDigest: 'schema', targets: [{ id: 'prod:owner:bot', label: 'Production Bot' }] })
+  api.startTrial.mockRejectedValue(Object.assign(new Error('invalid'), { status: 400, body: JSON.stringify({ code: 'INVALID_INPUT', error: '嵌套数值必填参数无效' }) }))
+  render(panel())
+  await userEvent.selectOptions(await screen.findByRole('combobox', { name: '执行 Bot' }), 'prod:owner:bot')
+  await userEvent.clear(screen.getByRole('spinbutton', { name: 'count' }))
+  await userEvent.click(screen.getByRole('button', { name: '开始试跑' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('请填写必填参数：count')
+  expect(api.startTrial).not.toHaveBeenCalled()
+  await userEvent.type(screen.getByRole('spinbutton', { name: 'count' }), '0')
+  await userEvent.clear(screen.getByRole('spinbutton', { name: 'details.count' }))
+  await userEvent.clear(screen.getByRole('spinbutton', { name: 'values.1' }))
+  await userEvent.click(screen.getByRole('button', { name: '开始试跑' }))
+  await screen.findByText('嵌套数值必填参数无效')
+  const input = api.startTrial.mock.calls[0][1].input
+  expect(input).toEqual({ count: 0, details: { count: '' }, values: [''] })
+  expect(new Ajv({ strict: false }).compile(schema)(input)).toBe(false)
+})
+
+it.each([
+  { type: 'object', additionalProperties: true },
+  { type: 'object', additionalProperties: { type: 'string' }, minProperties: 1 },
+  { minProperties: 1 },
+])('offers business key/value fields for a schema without named properties: %j', async schema => {
+  api.trialOptions.mockResolvedValue({ inputSchema: schema, inputSchemaDigest: 'schema', targets: [{ id: 'prod:owner:bot', label: 'Production Bot' }] })
+  api.startTrial.mockResolvedValue(trial)
+  render(panel())
+  await userEvent.selectOptions(await screen.findByRole('combobox', { name: '执行 Bot' }), 'prod:owner:bot')
+  expect(screen.queryByText('此工作流无需参数。')).not.toBeInTheDocument()
+  await userEvent.type(screen.getByRole('textbox', { name: '参数名 1' }), 'taskId')
+  await userEvent.type(screen.getByRole('textbox', { name: '参数值 1' }), 'task-1')
+  await userEvent.click(screen.getByRole('button', { name: '开始试跑' }))
+  const input = api.startTrial.mock.calls[0][1].input
+  expect(input).toEqual({ taskId: 'task-1' })
+  expect(new Ajv({ strict: false }).compile(schema)(input)).toBe(true)
 })

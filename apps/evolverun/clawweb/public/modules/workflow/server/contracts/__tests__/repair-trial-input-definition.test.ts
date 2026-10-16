@@ -38,6 +38,20 @@ describe('normalizeTrialInputDefinition', () => {
     for (const input of [{}, { schema: {} }, { schema: { type: 'object' } }, { schema: { type: 'object', properties: {} } }, { requiredParams: [] }, { params: {} }]) expect(normalize(input).inputDefinition).toBe('none');
   });
   it.each([
+    { type: 'object', additionalProperties: true },
+    { type: 'object', additionalProperties: { type: 'string' } },
+    { type: 'object', additionalProperties: { type: 'string' }, minProperties: 1 },
+    { type: 'object', minProperties: 1 },
+    { minProperties: 1 },
+  ])('keeps an explicitly open or constrained object available for business input: %j', schema => {
+    expect(normalize({ schema })).toEqual({ inputDefinition: 'defined', inputSchema: { ...schema, type: 'object', properties: {} } });
+  });
+  it('keeps an explicitly closed empty object parameterless without changing schema constraints', () => {
+    const schema = { type: 'object', additionalProperties: false };
+    expect(normalize({ schema })).toEqual({ inputDefinition: 'none', inputSchema: { ...schema, properties: {} } });
+    expect(normalize({ schema: {} }).inputDefinition).toBe('none');
+  });
+  it.each([
     { schema: [] }, { schema: 'text' }, { schema: { query: 'string' } }, { schema: { properties: [] } },
     { schema: { properties: { query: 3 } } }, { requiredParams: 'query' }, { requiredParams: [3] }, { params: [] },
   ])('rejects malformed input definitions: %j', definition => {

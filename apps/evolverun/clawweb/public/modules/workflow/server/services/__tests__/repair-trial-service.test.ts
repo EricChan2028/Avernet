@@ -47,15 +47,19 @@ it('freezes the reviewed Pack, validates input, deduplicates dispatch and binds 
         return { id: 'bot', botId: 'bot', ownerId: 'owner', environment: 'prod', label: 'Bot', executionMode: 'pinned', capabilityId: 'c'.repeat(64) };
       },
       targets: async (_w, actor) => actor === 'actor' ? [{ id: 'bot', botId: 'bot', ownerId: 'owner', environment: 'prod', label: 'Bot' }] : [],
-      inspect: async (_candidate, mode) => ({ ...(mode === 'saved' ? { source: 'saved' as const } : {}), packId: base.packId, workflowIds: ['wf-1', 'child'], candidateRef: `refs/heads/snapshots/${draft.candidateCommit}`, inputSchema: { type: 'object', required: ['query'], properties: { query: { type: 'string' }, password: { type: 'string', default: 'schema-private-default' } } } }),
+      inspect: async (_candidate, mode) => ({ ...(mode === 'saved' ? { source: 'saved' as const } : {}), packId: base.packId, workflowIds: ['wf-1', 'child'], candidateRef: `refs/heads/snapshots/${draft.candidateCommit}`, inputSchema: {
+        type: 'object', required: ['query'], $defs: { customer: { type: 'string', writeOnly: true, default: 'customer-private-default' } },
+        properties: { query: { type: 'string' }, password: { type: 'string', default: 'schema-private-default' }, customer: { allOf: [{ $ref: '#/$defs/customer' }] } },
+      } }),
       save: async () => { saves++; }, dispatch: async () => { sends++; throw Error('response lost'); },
     } });
-    const request = { revision: 1, expectedStateVersion: 1, requestId: 'trial', targetId: 'bot', input: { query: 'hello', password: 'very-secret' }, inputSchemaDigest: digestRepairJson((await service.options('actor', rev.taskId, 1)).inputSchema) };
+    const request = { revision: 1, expectedStateVersion: 1, requestId: 'trial', targetId: 'bot', input: { query: 'hello', password: 'very-secret', customer: 'customer-private-default' }, inputSchemaDigest: digestRepairJson((await service.options('actor', rev.taskId, 1)).inputSchema) };
     await expect(service.start('actor', rev.taskId, { ...request, input: {} })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
     const trial = await service.start('actor', rev.taskId, request);
     expect(trial).toMatchObject({ status: 'unknown', candidateCommit: draft.candidateCommit, packDigest: draft.packDigest, input: { password: '[REDACTED]' } });
     expect(JSON.stringify(trial)).not.toContain('very-secret');
     expect(JSON.stringify(trial)).not.toContain('schema-private-default');
+    expect(JSON.stringify(trial)).not.toContain('customer-private-default');
     expect((await service.start('actor', rev.taskId, request)).id).toBe(trial.id);
     expect(sends).toBe(1); expect(saves).toBe(1);
     await expect(service.start('actor', rev.taskId, { ...request, input: { query: 'changed' } })).rejects.toMatchObject({ code: 'IDEMPOTENCY_MISMATCH' });
@@ -82,6 +86,13 @@ it('freezes the reviewed Pack, validates input, deduplicates dispatch and binds 
     expect(f.raw.prepare("SELECT COUNT(*) AS n FROM workflow_repair_release_records WHERE record_kind='trial_run'").get()).toEqual({ n: 2 });
     expect(f.raw.prepare("SELECT workflow_id FROM workflow_repair_release_records WHERE record_id='child-flow'").get()).toEqual({ workflow_id: 'child' });
     expect((await service.list(rev.taskId))[0]).toMatchObject({ flowId: 'actual-native-flow', status: 'waiting' });
+    f.raw.prepare("UPDATE flow_runs SET result_json=? WHERE flow_id='actual-native-flow'").run(JSON.stringify({ customer: request.input.customer, echo: JSON.stringify(request.input), public: 'readable' }));
+    const history = (await service.list(rev.taskId))[0];
+    expect(history.input.customer).toBe('[REDACTED]');
+    expect(history.output).toContain('readable');
+    expect(JSON.stringify(history)).not.toContain('customer-private-default');
+    expect(JSON.stringify(history)).not.toContain('very-secret');
+    expect((await service.resolveRunRequest(trial.id, { botId: 'bot', ownerId: 'owner' })).input).toEqual(request.input);
     const boundary = 'b'.repeat(64);
     await registerRunRequest(f.db, { ...child, flow_id: boundary }, async tx => { await tx.exec("INSERT INTO flow_runs VALUES (?, 'child', 'bot:owner', 'running', NULL, NULL)", [boundary]); });
     expect(f.raw.prepare("SELECT record_id FROM workflow_repair_release_records WHERE record_id=?").get(boundary)).toEqual({ record_id: boundary });
