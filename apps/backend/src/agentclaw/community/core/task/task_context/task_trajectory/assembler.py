@@ -364,7 +364,12 @@ class TaskTrajectoryAssembler:
             action_type: object = TrajectoryActionType(rec.action_type)
         except ValueError:
             raw_action = str(rec.action_type or "")
-            if re.match(r"^S\d+", raw_action):
+            if re.match(r"^S\d+", raw_action) or raw_action.startswith(
+                "harness-engine-"
+            ):
+                # 2026-10-16:harness 引擎闸门发射的行统一 ``harness-engine-`` 前缀
+                # (centralized_recovery._harness_action)——枚举之外放行 S 码
+                # step 行与此前缀形态,其余仍按损坏行跳过。
                 action_type = raw_action
             else:
                 raise

@@ -953,3 +953,24 @@ def test_assemble_hit_single_without_search_evidence_probe_none():
     )])
     probe = TaskTrajectoryAssembler(repo).assemble("T-1").timeline[0].search_probe
     assert probe is None
+
+def test_assemble_passes_through_harness_engine_prefix_action_types():
+    """harness 模块轨迹事件(2026-10-16)action_type 带 ``harness-engine-`` 前缀
+    (harness-engine-reset/transition/dispatch/submit)——读侧白名单放行原样透传,
+    不当损坏行丢弃;这些事件非 S 码,读时按系统子事件嵌挂最近主事件。"""
+    repo = _FakeRepo(events=[
+        _event_record(id=1, node_id="n1", action_type="S1_CONTEXT",
+                      action_result="completed", ms=_MS_BASE),
+        _event_record(id=2, node_id="n1", action_type="harness-engine-reset",
+                      action_result="sla_timeout", ms=_MS_BASE + 100),
+        _event_record(id=3, node_id="n1", action_type="harness-engine-transition",
+                      action_result="to_hung", ms=_MS_BASE + 200),
+    ])
+    timeline = TaskTrajectoryAssembler(repo).assemble("T-1").timeline
+    assert len(timeline) == 3, "前缀行不得被当损坏行跳过"
+    assert str(getattr(timeline[1].action_type, "value", timeline[1].action_type)) == (
+        "harness-engine-reset"
+    )
+    assert str(getattr(timeline[2].action_type, "value", timeline[2].action_type)) == (
+        "harness-engine-transition"
+    )

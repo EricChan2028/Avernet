@@ -686,7 +686,8 @@ class TestE2EFourFailureTypesAcceptance:
         trajectory, analysis = _assemble_and_analyze(repo, task_id=task_id)
 
         # the RESET row carries sla_timeout + ext_info elapsed/threshold
-        reset_rows = [ev for ev in trajectory.timeline if ev.action_type == TrajectoryActionType.RESET]
+        reset_rows = [ev for ev in trajectory.timeline
+                       if str(getattr(ev.action_type, "value", ev.action_type)) == "harness-engine-reset"]
         assert reset_rows, f"no reset row in timeline: {_timeline_action_types(trajectory)}"
         rec = reset_rows[0]
         assert rec.action_result == "sla_timeout"
@@ -735,10 +736,10 @@ class TestE2EFourFailureTypesAcceptance:
         # last action — assert a HUNG transition exists (the analyzer's
         # ``_terminal_status`` walks back past the trailing reset to find it).
         actions = _timeline_action_types(trajectory)
-        assert "reset" in actions, f"reset row missing: {actions}"
-        assert "transition" in actions, f"transition row missing: {actions}"
+        assert "harness-engine-reset" in actions, f"reset row missing: {actions}"
+        assert "harness-engine-transition" in actions, f"transition row missing: {actions}"
         trans_events = [ev for ev in trajectory.timeline
-                        if ev.action_type == TrajectoryActionType.TRANSITION]
+                        if str(getattr(ev.action_type, "value", ev.action_type)) == "harness-engine-transition"]
         assert trans_events[-1].status_to == Status.HUNG
 
         # analyzer: failure_reason starts with hung: + the real gate's hung_reason
@@ -804,13 +805,13 @@ class TestTransitionGateEmitsTrajectoryRow:
 
         # the transition row landed in task_trajectory_events (real SQL INSERT)
         events = repo.list_events_by_task(task_id)
-        transition_rows = [e for e in events if e.action_type == "transition"]
+        transition_rows = [e for e in events if e.action_type == "harness-engine-transition"]
         assert transition_rows, (
             f"no transition row landed in task_trajectory_events; "
             f"action_types={[e.action_type for e in events]}"
         )
         rec = transition_rows[-1]
-        assert rec.action_type == "transition"
+        assert rec.action_type == "harness-engine-transition"
         assert rec.action_result == "hung"  # status_to-derived (HUNG→"hung")
         assert rec.status_to == Status.HUNG
         assert rec.status_from == Status.RUNNING  # node was RUNNING before the HUNG flip
@@ -826,8 +827,11 @@ class TestTransitionGateEmitsTrajectoryRow:
         # the real assembler reads the transition row back; the analyzer's
         # terminal gate now finds the terminal HUNG transition (NOT None).
         trajectory = TaskTrajectoryAssembler(repo).assemble(task_id)
-        trans_events = [ev for ev in trajectory.timeline
-                        if ev.action_type == TrajectoryActionType.TRANSITION]
+        trans_events = [
+            ev for ev in trajectory.timeline
+            if str(getattr(ev.action_type, "value", ev.action_type))
+            == "harness-engine-transition"
+        ]
         assert trans_events, "assembled timeline missing the transition event"
         assert trans_events[-1].status_to == Status.HUNG
 
