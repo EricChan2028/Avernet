@@ -111,7 +111,7 @@ export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, o
         {trialConfigured && canEdit && isCurrent && selected?.phase === 'review' && !pending && !succeeded && <button className={button} disabled={busy} onClick={() => setTrialOpen(true)}>先试跑</button>}
         {dialog && <button className={button} disabled={busy} onClick={() => setDialog(false)}>返回审阅</button>}
         {pending && deployment.target.scope === 'workflow' && <button className={button} disabled={busy || !canEdit} onClick={() => void resume()}>继续原发布</button>}
-        {!succeeded && <button className={primary} disabled={busy || loading || (pending ? !canEdit : !canPublish || dialog && (!ack || !target))}
+        {!succeeded && <button className={primary} disabled={trialOpen || busy || loading || (pending ? !canEdit : !canPublish || dialog && (!ack || !target))}
           onClick={() => { if (pending) void reconcile(); else if (dialog) void publish(); else void open() }}>
           {busy ? '提交中…' : pending ? '核对发布状态' : dialog ? '确认发布' : '发布此版本'}</button>}
       </div>
