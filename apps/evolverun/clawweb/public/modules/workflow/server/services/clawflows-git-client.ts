@@ -111,18 +111,19 @@ async function configureGitCredential(
   const host = getHostFromRemoteUrl(remoteUrl);
   if (!host || !token) return;
 
-  git(repoDir, ["config", "credential.helper", "cache --timeout 86400"]);
-  execFileSync(
-    "git",
-    ["credential", "approve"],
-    {
-      cwd: repoDir,
-      input: `protocol=https\nhost=${host}\nusername=${username}\npassword=${token}\n`,
-      encoding: "utf-8",
-      timeout: 5_000,
-      env: isolatedGitEnvironment(process.env),
-    },
+  // Use a credentials file stored inside the temporary repo directory so that
+  // subsequent git operations (fetch/push) can authenticate without keeping the
+  // token in the remote URL. The whole repoDir is removed once auto-heal finishes.
+  const credentialsPath = path.join(repoDir, ".git", "credentials");
+  const encodedUsername = encodeURIComponent(username || "");
+  const encodedToken = encodeURIComponent(token);
+  await writeFile(
+    credentialsPath,
+    `https://${encodedUsername}:${encodedToken}@${host}\n`,
+    { mode: 0o600 },
   );
+
+  git(repoDir, ["config", "credential.helper", `store --file ${credentialsPath}`]);
 }
 
 function getTempRepoPrefix(): string {
