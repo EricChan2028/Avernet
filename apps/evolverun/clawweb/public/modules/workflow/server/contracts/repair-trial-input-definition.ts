@@ -29,6 +29,19 @@ function fieldDescriptor(value: unknown): boolean {
     || ['minimum', 'maximum', 'minLength', 'maxLength', 'minItems', 'maxItems', 'minProperties', 'maxProperties'].some(key => typeof value[key] === 'number')
     || Object.hasOwn(value, 'default') && !record(value.default);
 }
+const rootConstraintKeywords = ['dependencies', 'if', 'then', 'else', 'propertyNames', 'enum', 'const'];
+function rootConstraintKeyword(schema: Record<string, unknown>, key: string): boolean {
+  const value = schema[key];
+  if (key === 'enum') return Array.isArray(value);
+  if (key === 'propertyNames') return typeof value === 'boolean' || record(value);
+  // These values can also be legacy business-field descriptors. Preserve that
+  // meaning when valid; e.g. dependencies.type = ['billingAddress'] is not one.
+  let descriptor = false;
+  if (fieldDescriptor(value)) { try { field(value); descriptor = true; } catch { /* Check the root-keyword shape instead. */ } }
+  if (key === 'const') return !descriptor;
+  if (key === 'dependencies') return record(value) && !descriptor;
+  return typeof value === 'boolean' || record(value) && (!descriptor || ['if', 'then', 'else'].filter(branch => Object.hasOwn(schema, branch)).length > 1);
+}
 
 /** Normalize the two existing workflow schema shapes and legacy parameter declarations.
  * Root params is a value map, not a second field-descriptor protocol.
@@ -53,6 +66,7 @@ export function normalizeTrialInputDefinition(definition: TrialInputDefinition |
       || Array.isArray(raw.required) || ['$schema', '$id', '$ref'].some(key => typeof raw[key] === 'string')
       || ['allOf', 'anyOf', 'oneOf'].some(key => Array.isArray(raw[key]))
       || ['minProperties', 'maxProperties'].some(key => typeof raw[key] === 'number')
+      || rootConstraintKeywords.some(key => Object.hasOwn(raw, key) && rootConstraintKeyword(raw, key))
       || ['$defs', 'definitions', 'patternProperties'].some(key => record(raw[key]) && !fieldDescriptor(raw[key]))
       || ['additionalProperties', 'not'].some(key => typeof raw[key] === 'boolean' || record(raw[key]));
     if (jsonSchema) {
@@ -74,6 +88,7 @@ export function normalizeTrialInputDefinition(definition: TrialInputDefinition |
   for (const key of allRequired) if (!Object.hasOwn(properties, key)) properties[key] = { type: 'string' };
   const inputSchema = { ...schema, properties, ...(allRequired.length || schema.required !== undefined ? { required: allRequired } : {}) };
   const constrained = ['$ref', 'allOf', 'anyOf', 'oneOf', 'not', 'patternProperties'].some(key => key in schema)
+    || rootConstraintKeywords.some(key => Object.hasOwn(schema, key))
     || schema.additionalProperties === true || record(schema.additionalProperties)
     || ['minProperties', 'maxProperties'].some(key => typeof schema[key] === 'number');
   return { inputSchema, inputDefinition: Object.keys(properties).length || constrained ? 'defined' : 'none' };

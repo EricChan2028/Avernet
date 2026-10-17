@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeTrialInputDefinition as normalize } from '../repair-trial-input-definition';
+import { validateTrialInput } from '../../services/repair-trial-input';
 
 describe('normalizeTrialInputDefinition', () => {
   it('normalizes the deployed field-map shape without inventing properties named type or required', () => {
@@ -50,6 +51,52 @@ describe('normalizeTrialInputDefinition', () => {
     const schema = { type: 'object', additionalProperties: false };
     expect(normalize({ schema })).toEqual({ inputDefinition: 'none', inputSchema: { ...schema, properties: {} } });
     expect(normalize({ schema: {} }).inputDefinition).toBe('none');
+  });
+  it.each([
+    { dependencies: { creditCard: ['billingAddress'] } },
+    { dependencies: { creditCard: { required: ['billingAddress'] } } },
+    { dependencies: { type: ['billingAddress'] } },
+  ])('retains root dependencies without type for actual non-coercing input validation: %j', schema => {
+    const normalized = normalize({ schema });
+    expect(normalized).toEqual({ inputDefinition: 'defined', inputSchema: { ...schema, type: 'object', properties: {} } });
+    const trigger = Object.keys(schema.dependencies)[0];
+    expect(() => validateTrialInput({ [trigger]: 'card' }, normalized.inputSchema)).toThrow(/参数校验失败/);
+    const valid = { [trigger]: 'card', billingAddress: 'address' };
+    expect(() => validateTrialInput(valid, normalized.inputSchema)).not.toThrow();
+    expect(valid).toEqual({ [trigger]: 'card', billingAddress: 'address' });
+  });
+  it('keeps conditional root branches without type and validates both sides', () => {
+    const schema = { if: { required: ['creditCard'] }, then: { required: ['billingAddress'] }, else: { required: ['customerId'] } };
+    const normalized = normalize({ schema });
+    expect(normalized).toEqual({ inputDefinition: 'defined', inputSchema: { ...schema, type: 'object', properties: {} } });
+    expect(() => validateTrialInput({ creditCard: 'card' }, normalized.inputSchema)).toThrow(/参数校验失败/);
+    expect(() => validateTrialInput({}, normalized.inputSchema)).toThrow(/参数校验失败/);
+    expect(() => validateTrialInput({ creditCard: 'card', billingAddress: 'address' }, normalized.inputSchema)).not.toThrow();
+    expect(() => validateTrialInput({ customerId: 'customer' }, normalized.inputSchema)).not.toThrow();
+  });
+  it.each([
+    { enum: [{ method: 'manual' }] },
+    { const: { method: 'manual' } },
+    { if: true, then: { const: { method: 'manual' } }, else: false },
+  ])('preserves root object enum/const and boolean condition branches: %j', schema => {
+    const normalized = normalize({ schema });
+    expect(normalized).toEqual({ inputDefinition: 'defined', inputSchema: { ...schema, type: 'object', properties: {} } });
+    expect(() => validateTrialInput({ method: 'auto' }, normalized.inputSchema)).toThrow(/参数校验失败/);
+    expect(() => validateTrialInput({ method: 'manual' }, normalized.inputSchema)).not.toThrow();
+  });
+  it('preserves root property-name constraints without type', () => {
+    const schema = { propertyNames: { pattern: '^[a-z]+$' } };
+    const normalized = normalize({ schema });
+    expect(normalized).toEqual({ inputDefinition: 'defined', inputSchema: { ...schema, type: 'object', properties: {} } });
+    expect(() => validateTrialInput({ INVALID: 'name' }, normalized.inputSchema)).toThrow(/参数校验失败/);
+    expect(() => validateTrialInput({ valid: 'name' }, normalized.inputSchema)).not.toThrow();
+  });
+  it('keeps business fields named dependencies or const when their values are valid field descriptors', () => {
+    const schema = { dependencies: { type: 'string', description: '业务依赖' }, const: { enum: ['manual', 'auto'] }, if: { type: 'string' } };
+    const normalized = normalize({ schema });
+    expect(normalized).toEqual({ inputDefinition: 'defined', inputSchema: { type: 'object', properties: schema } });
+    expect(() => validateTrialInput({ dependencies: 'business', const: 'manual' }, normalized.inputSchema)).not.toThrow();
+    expect(() => validateTrialInput({ dependencies: 42, const: 'other' }, normalized.inputSchema)).toThrow(/参数校验失败/);
   });
   it.each([
     { schema: [] }, { schema: 'text' }, { schema: { query: 'string' } }, { schema: { properties: [] } },

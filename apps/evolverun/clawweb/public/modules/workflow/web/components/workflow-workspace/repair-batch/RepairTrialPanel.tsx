@@ -73,6 +73,7 @@ export default function RepairTrialPanel({ taskId, revision, enabled, open, onCl
       if (initialized.current !== mine) {
         const defaults = trialInputDefaults(next.inputSchema)
         setParams(defaults); setJson(JSON.stringify(defaults, null, 2)); initialized.current = mine
+        if (Object.keys(defaults).length) setEntries(Object.entries(defaults).map(([key, value]) => ({ key, value })))
       }
       setOptions(next)
     }).catch(reason => { if (active && current.current === mine) setLoadError(reason instanceof TrialInputDefinitionError ? reason.message : '无法读取候选参数和授权 Bot，请重试。') })

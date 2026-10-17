@@ -5,6 +5,7 @@ export type TrialValueSchema = {
   type?: string | string[]; title?: string; description?: string; enum?: unknown[]; default?: unknown;
   sensitive?: boolean; writeOnly?: boolean; format?: string; required?: string[];
   properties?: Record<string, TrialValueSchema | boolean>; items?: TrialValueSchema | boolean | TrialValueSchema[];
+  additionalProperties?: TrialValueSchema | boolean; patternProperties?: Record<string, TrialValueSchema | boolean>;
 }
 function record(value: unknown): value is Record<string, unknown> { return !!value && typeof value === 'object' && !Array.isArray(value) }
 export function trialValueType(schema: TrialValueSchema | boolean, value?: unknown): string {
@@ -16,6 +17,21 @@ function properties(schema: TrialValueSchema): Record<string, TrialValueSchema |
   const fields = { ...schema.properties }
   for (const name of schema.required ?? []) if (!Object.hasOwn(fields, name)) fields[name] = { type: 'string' }
   return fields
+}
+/** Control hints combine matching rules; the original schema remains the validation authority. */
+export function trialPropertySchema(schema: TrialValueSchema, key: string): TrialValueSchema | boolean {
+  const matched: (TrialValueSchema | boolean)[] = []
+  if (Object.hasOwn(schema.properties ?? {}, key)) matched.push(schema.properties![key])
+  try {
+    for (const [pattern, child] of Object.entries(schema.patternProperties ?? {})) if (new RegExp(pattern, 'u').test(key)) matched.push(child)
+  } catch { return false }
+  if (!matched.length) return schema.additionalProperties ?? {}
+  if (matched.includes(false)) return false
+  return Object.assign({}, ...matched.filter(child => typeof child !== 'boolean'))
+}
+export function trialPropertyValue(schema: TrialValueSchema, previousKey: string, key: string, value: unknown): unknown {
+  const previous = trialPropertySchema(schema, previousKey), next = trialPropertySchema(schema, key)
+  return value === undefined || value === '' || trialValueType(previous, value) !== trialValueType(next, value) ? newValue(next) : value
 }
 function itemSchema(schema: TrialValueSchema, index: number): TrialValueSchema | boolean {
   return Array.isArray(schema.items) ? schema.items[index] ?? {} : schema.items ?? {}
@@ -46,29 +62,31 @@ export function completeTrialValue(schema: TrialValueSchema | boolean, value: un
   if (Array.isArray(value)) return value.map((item, index) => completeTrialValue(itemSchema(schema, index), item))
   if (!record(value)) return value
   const fields = properties(schema)
-  const completed = Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined).map(([key, item]) => [key, completeTrialValue(fields[key] ?? {}, item)]))
+  const completed = Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined).map(([key, item]) => [key, completeTrialValue(trialPropertySchema(schema, key), item)]))
   for (const key of schema.required ?? []) if (completed[key] === undefined && trialValueType(fields[key] ?? {}) === 'boolean') completed[key] = false
   return completed
 }
 
 const control = 'mt-1 block w-full min-w-0 rounded border border-input bg-background p-2'
 type Props = { schema: TrialValueSchema | boolean; name: string; value: unknown; disabled: boolean; required?: boolean; sensitive?: boolean; onChange: (value: unknown) => void }
-function OpenObjectInput({ name, value, disabled, sensitive, onChange }: Omit<Props, 'schema'>) {
+function OpenObjectInput({ schema, name, value, disabled, sensitive, onChange }: Props & { schema: TrialValueSchema }) {
   const [key, setKey] = useState('')
-  const [text, setText] = useState('')
+  const [newItem, setNewItem] = useState<unknown>('')
   const [error, setError] = useState('')
   const current = record(value) ? value : {}
   return <div className="space-y-2">
     {Object.entries(current).map(([key, item]) => <div key={key} className="space-y-1 rounded border border-input p-2">
-      <TrialValueInput schema={{}} name={`${name}.${key}`} value={item} disabled={disabled} sensitive={sensitive} onChange={next => onChange({ ...current, [key]: next })} />
+      <TrialValueInput schema={trialPropertySchema(schema, key)} name={`${name}.${key}`} value={item} required={schema.required?.includes(key)} disabled={disabled} sensitive={sensitive} onChange={next => onChange({ ...current, [key]: next })} />
       <button type="button" aria-label={`移除 ${name}.${key}`} className={button} disabled={disabled} onClick={() => onChange(Object.fromEntries(Object.entries(current).filter(([other]) => other !== key)))}>移除字段</button>
     </div>)}
     <div className="flex flex-wrap gap-2">
-      <input aria-label={`${name} 新字段名`} placeholder="字段名" className={`${control} flex-1`} value={key} disabled={disabled} onChange={event => { setKey(event.target.value); setError('') }} />
-      <input aria-label={`${name} 新字段值`} placeholder="字段值" type={sensitive || /password|token|secret|key/i.test(key) ? 'password' : 'text'} className={`${control} flex-1`} value={text} disabled={disabled} onChange={event => setText(event.target.value)} />
+      <input aria-label={`${name} 新字段名`} placeholder="字段名" className={`${control} flex-1`} value={key} disabled={disabled} onChange={event => {
+        setNewItem(trialPropertyValue(schema, key.trim(), event.target.value.trim(), newItem)); setKey(event.target.value); setError('')
+      }} />
+      <TrialValueInput schema={trialPropertySchema(schema, key.trim())} name={`${name} 新字段值`} value={newItem} disabled={disabled} sensitive={sensitive || /password|token|secret|key/i.test(key)} onChange={setNewItem} />
       <button type="button" aria-label={`${name} 添加字段`} className={button} disabled={disabled || !key.trim()} onClick={() => {
         if (Object.hasOwn(current, key.trim())) { setError('字段名不能重复。'); return }
-        onChange({ ...current, [key.trim()]: text }); setKey(''); setText(''); setError('')
+        onChange({ ...current, [key.trim()]: newItem }); setKey(''); setNewItem(''); setError('')
       }}>添加字段</button>
     </div>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
@@ -84,8 +102,8 @@ export default function TrialValueInput({ schema, name, value, disabled, require
   if (!spec.enum && type === 'object') {
     const fields = properties(spec), current = record(value) ? value : {}
     return <fieldset aria-label={name} className="min-w-0 space-y-3 rounded border border-input p-3"><legend className="px-1 text-sm">{label}</legend>
-      {Object.keys(fields).length ? Object.entries(fields).map(([key, child]) => <TrialValueInput key={key} schema={child} name={`${name}.${key}`} value={current[key]} required={spec.required?.includes(key)} disabled={disabled} sensitive={masked} onChange={next => onChange({ ...current, [key]: next })} />)
-        : <OpenObjectInput name={name} value={current} disabled={disabled} sensitive={masked} onChange={onChange} />}
+      {Object.keys(fields).length ? Object.entries(fields).map(([key, child]) => <TrialValueInput key={key} schema={Object.hasOwn(spec.properties ?? {}, key) ? trialPropertySchema(spec, key) : child} name={`${name}.${key}`} value={current[key]} required={spec.required?.includes(key)} disabled={disabled} sensitive={masked} onChange={next => onChange({ ...current, [key]: next })} />)
+        : <OpenObjectInput schema={spec} name={name} value={current} disabled={disabled} sensitive={masked} onChange={onChange} />}
       {description}
     </fieldset>
   }
