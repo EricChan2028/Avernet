@@ -9,7 +9,7 @@ export type ProposalAggregation = {
   id: string; fingerprint: string; itemIds: string[]; title: string; changes: string[]; relation: ProposalRelation;
   status: 'ready' | 'queued' | 'organizing' | 'retryable' | 'unavailable' | 'uncertain' | 'stale';
   causes?: ProposalCause[]; unknowns?: string[];
-  flowIds: string[]; originals: RepairInboxItem[]; conflicts: ProposalConflict[];
+  flowIds: string[]; runCount?: number; originals: RepairInboxItem[]; conflicts: ProposalConflict[];
 };
 /** Expand the displayed selection into original identities without selecting hidden alternatives. */
 export function proposalMembers(item: RepairInboxItem): RepairInboxItem[] {
@@ -38,6 +38,8 @@ export function proposalConflicts(items: RepairInboxItem[]): ProposalConflict[] 
 }
 export function proposalPending(items: RepairInboxItem[]): boolean {
   const ids = new Set(items.map(item => item.itemId));
+  if (items.length > 1 && items.some(item => item.readSummary && !item.readSummary.conflictsComplete
+    && !(item.aggregation?.status === 'ready' && item.aggregation.relation !== 'uncertain' && item.aggregation.itemIds.every(id => ids.has(id))))) return true;
   if (items.some(item => item.aggregation?.status === 'ready' && item.aggregation.relation !== 'exact' && item.aggregation.itemIds.some(id => !ids.has(id)))) return true;
   return selectionConflicts(items).some(c => {
     const pair = items.filter(i => c.itemIds.includes(i.itemId));
