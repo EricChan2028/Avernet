@@ -2,6 +2,13 @@
 
 ## Provides
 
+`BotRegistryCoreService::resolve_provider_coordination_surface` reads trusted
+Provider affiliation without consulting process-local client kind. `None` means
+unaffiliated; disabled coordination returns a disabled surface, while deleted,
+missing or unreadable affiliations return errors. Bot application handshake and
+effective surface resolution share this contract. Bot metadata precedes legacy
+gateway bindings; upstream affiliation does not grant HTTP delivery privileges.
+
 ProviderManagementService and ProviderCoreService expose public slug discovery
 as `Option<ProviderBasicInfo>`, excluding complete config and credentials.
 Slug-aware core mutation methods preserve legacy callers, while ProviderRepoPort

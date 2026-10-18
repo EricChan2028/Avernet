@@ -41,11 +41,15 @@ Provider admin and Human owner checks. Corrupt discovery config remains an error
 
 ## Configuration
 
-- Bootstrap injects `UplinkConfig` into the streaming connection use case.
-  After authentication, explicit V3 requests may select allowed built-in MCP
-  profiles. This is deployment-wide authorization, not per-Bot provisioning.
-  Only the negotiated kind is process-local; reconnect/disconnect clears stale
-  selection. Provider-bound coordination resolution remains Provider-owned.
+- After authentication, streaming connections resolve Provider coordination from
+  Bot-owned metadata, with legacy delivery bindings only as an absence fallback.
+  Explicit V3 uses the Provider MCP mode even when bridge omits `client_kind`.
+  Disabled/missing/unreadable Provider policy never falls back to client claims;
+  failed negotiation releases its streaming slot. Only unaffiliated Bots use
+  bootstrap-injected `UplinkConfig` to select built-in MCP profiles.
+  The negotiated kind remains process-local; reconnect/disconnect clears it.
+  Tool authorization uses the source Bot's exact Provider mapping, cached per run
+  by message-flow. No metadata lookup is added to chat/token delta handling.
 
 - Bootstrap injects stores, collaborators, and policy knobs explicitly.
 - This crate must not choose concrete plugins or inspect env directly.

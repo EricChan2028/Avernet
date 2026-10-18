@@ -296,15 +296,18 @@ coordination profile 由 BCS 服务端管理，至少包含：
 - coordination tool 的 exact canonical name；
 - 支持的 coordination call versions。
 
-客户端在 connect 中通过 `client_kind` 声明能力，不能上传或覆盖 tool allowlist。
-已归属 Provider 的 Bot（包括无 HTTP binding 的 plugin Bot）从服务端保存的
-Bot–Provider 关系读取 Provider 的 coordination 模式与精确工具映射；匹配模式和显式 V3
-共同决定 task intent 能力，不继承全局上行授权。Provider 禁用、归属已删除或配置无效时拒绝，
-重新连接时读取当前配置。以下部署级内置 profile 规则仅适用于没有 Provider 归属的 Bot。
+Provider 归属由服务端 Bot 元数据决定，旧 delivery binding 仅在归属元数据缺失时兼容读取。
+认证后的 V3 连接优先采用所属 Provider 的 coordination 配置；bridge 省略
+`client_kind` 时仍可协商该 Provider 的 MCP 模式。工具来源按发出事件的主 Bot
+的 Provider 精确映射授权，不能借用目标 Bot 的配置。Provider 禁用、删除、缺失
+或配置读取/解析失败不能回退到客户端声明；失败握手释放 streaming slot。
+Provider 配置为 disabled/native_tool 时不开放 tool-result task intent；V1/V2 仍关闭。
+
+没有 Provider 归属的客户端在 connect 中通过 `client_kind` 选择内置 profile，不能上传或覆盖 tool allowlist。
 本阶段不持久化逐 Bot profile，也不提供管理 API。生产来源为启动配置
 `[uplink] allowed_profiles = ["native_mcp", "mcporter_mcp"]`，默认空列表，
 未启用或未知 kind 关闭 task intent；V1/V2 不支持该模式。
-这是部署级授权：所有已认证上行 Bot（含新接入 Bot）均可请求已启用类型，
+这是部署级授权：所有无 Provider 归属的已认证上行 Bot（含新接入 Bot）均可请求已启用类型，
 不是逐 Bot 授权。管理员只能在信任这些运行时的部署开启；修改配置需重启。
 所有生产/本地服务组装路径将该配置注入 Bot 连接用例，不依赖测试写入元数据。
 
@@ -314,7 +317,8 @@ Bot–Provider 关系读取 Provider 的 coordination 模式与精确工具映�
 `exec`/`bash`/`shell`/`mcporter` 的成功结果保留完整 coordination envelope，
 不复用 native MCP 映射。既有配对、上下文、授权、claim、幂等检查不变。
 普通 `native_tool`/插件及 legacy 保持原路径。协商 kind 是进程内连接状态，
-重连覆盖、省略或断开清除；重启后重新从启动配置协商。Provider 下行配置不变。
+重连覆盖、断开清除；无 Provider 的连接省略 kind 时清除。重启后根据所属 Provider
+或启动配置重新协商。Provider 下行配置不变。已有 WS 连接需重连才能取得新能力。
 
 connect 成功响应应返回协商后的能力，例如：
 

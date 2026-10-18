@@ -158,7 +158,8 @@ pub trait BotRegistryCoreService: Send + Sync {
     /// Process-local, non-persisted.
     ///
     /// Supported runtime keys include `"agent_token"`, the negotiated
-    /// `"client_kind"`. Profile authorization is injected startup configuration.
+    /// `"client_kind"`. Profile authorization comes from Provider policy or
+    /// injected startup configuration for unaffiliated Bots.
     async fn add_bot_info(&self, _bot_id: &str, _key: &str, _value: String) {}
 
     /// Replace or clear one process-local runtime extension field.
@@ -183,6 +184,17 @@ pub trait BotRegistryCoreService: Send + Sync {
         })
     }
 
+    /// Resolve server-owned Provider policy, independently of a negotiated client profile.
+    /// `None` means no Provider affiliation; only then may deployment-authorized
+    /// built-in profiles apply. Disabled/deleted/unreadable affiliation is never
+    /// treated as absence. Implementations without Provider storage return None.
+    async fn resolve_provider_coordination_surface(
+        &self,
+        _bot_id: &str,
+    ) -> ServiceResult<Option<CoordinationSurface>> {
+        Ok(None)
+    }
+
     async fn resolve_coordination_surface(
         &self,
         bot_id: &str,
@@ -191,6 +203,9 @@ pub trait BotRegistryCoreService: Send + Sync {
             .get(bot_id)
             .await
             .ok_or_else(|| ServiceError::BotNotFound(bot_id.to_string()))?;
+        if let Some(surface) = self.resolve_provider_coordination_surface(bot_id).await? {
+            return Ok(surface);
+        }
         let client_kind = self
             .get_bot_info(bot_id, "client_kind")
             .await

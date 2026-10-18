@@ -41,25 +41,24 @@ impl BotRuntimeConnectionService for Bot {
                 .set_protocol_version(&result.bot_uuid, version)
                 .await;
         }
-        // Authenticate first; only persisted ownership may select Provider permissions.
-        let provider_surface = match &self.bot_core {
-            Some(core) => match core.provider_coordination_surface(&result.bot_uuid).await {
-                Ok(surface) => surface,
-                Err(error) => {
-                    self.registry.disconnect_streaming(&result.bot_uuid).await;
-                    return Err(error.into());
-                }
-            },
-            None => None,
+        // Authenticate first, then authorize from this Bot's server-owned Provider.
+        // A missing client_kind (as sent by bridge) cannot hide that policy, and
+        // a client declaration cannot override a disabled Provider surface.
+        let provider_surface = match self.registry
+            .resolve_provider_coordination_surface(&result.bot_uuid).await {
+            Ok(surface) => surface,
+            Err(error) => {
+                self.registry.set_bot_info(&result.bot_uuid, "client_kind", None).await;
+                self.registry.disconnect_streaming(&result.bot_uuid).await;
+                return Err(error.into());
+            }
         };
         let negotiated_client_kind = match provider_surface {
-            Some(surface) if protocol_version == Some(3) => match requested_client_kind.as_deref() {
-                Some("native_mcp") if surface.mode == bcs_service_api::CoordinationMode::NativeMcp => requested_client_kind,
-                Some("mcporter_mcp") if surface.mode == bcs_service_api::CoordinationMode::McporterMcp => requested_client_kind,
-                Some("native_mcp" | "mcporter_mcp") => None,
-                _ => requested_client_kind,
+            Some(surface) => match (protocol_version, surface.mode) {
+                (Some(3), bcs_service_api::CoordinationMode::NativeMcp) => Some("native_mcp".into()),
+                (Some(3), bcs_service_api::CoordinationMode::McporterMcp) => Some("mcporter_mcp".into()),
+                _ => None,
             },
-            Some(_) => requested_client_kind.filter(|kind| !matches!(kind.as_str(), "native_mcp" | "mcporter_mcp")),
             None => self.uplink.negotiate(protocol_version, requested_client_kind),
         };
         self.registry

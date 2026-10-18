@@ -352,6 +352,13 @@ impl BotRegistryCoreService for BotCore {
         })
     }
 
+    async fn resolve_provider_coordination_surface(
+        &self,
+        bot_id: &str,
+    ) -> ServiceResult<Option<CoordinationSurface>> {
+        self.provider_coordination_surface(bot_id).await
+    }
+
     async fn resolve_coordination_surface(
         &self,
         bot_id: &str,
@@ -362,7 +369,7 @@ impl BotRegistryCoreService for BotCore {
             .await
             .ok_or_else(|| ServiceError::BotNotFound(bot_id.to_string()))?;
 
-        if let Some(surface) = self.provider_coordination_surface(bot_id).await? {
+        if let Some(surface) = self.resolve_provider_coordination_surface(bot_id).await? {
             return Ok(surface);
         }
 
