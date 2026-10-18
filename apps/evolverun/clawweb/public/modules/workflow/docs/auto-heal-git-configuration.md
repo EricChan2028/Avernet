@@ -63,13 +63,50 @@ If the merged remote URL is missing or whitespace-only, resolution throws an
 service construction, temporary directories, Git operations, deployment-history
 reservation, workflow writes, or auto-run dispatch.
 
+## Git authentication and shared execution
+
+The workflow-owned Git client is the single implementation for public and
+internal AutoHeal save/deploy operations:
+
+```ts
+import { cloneClawflows } from "@avernet/workflow/server/services/clawflows-git-client";
+```
+
+The internal host's compatibility module must re-export this client rather than
+keep a second implementation. Sharing the DB resolver alone is insufficient: an
+internal client that installs credentials only **after** cloning still cannot
+clone a private repository, even when the enabled DB row supplies a valid token.
+
+For HTTPS repositories with an explicit token, credentials must be available
+**before the first clone** and remain available for subsequent fetch/push
+operations. A plain HTTP remote with a token or embedded URL password is rejected
+before credentials are written or Git is started; credential-free HTTP remains
+supported. This prevents sending configured secrets over an unencrypted
+connection. Tokens must not be inserted into Git command arguments, the origin
+URL, or error responses. Credential files are private to the temporary operation
+and use owner-only permissions; bootstrap credentials are removed on success or
+failure, and the save/deploy service removes the temporary repository in its
+`finally` block. No global Git configuration or shared credential cache is
+modified. Tokenless local/file/SSH operations retain their existing behavior.
+
+AutoHeal intentionally ignores system/global Git configuration and inherited
+`GIT_CONFIG_*` overrides so they cannot replace the operation-specific helper.
+Do not rely on a credential helper installed in the build runner or the host's
+global Git configuration to authenticate AutoHeal at runtime. Supply the runtime Git
+settings through the existing enabled DB row or bootstrap fallbacks. Build-time
+source checkout credentials are not runtime workflow-repository credentials.
+
 ## Build and deployment order
 
 Package subpath exports resolve to `dist`, not source. Build workflow dependencies
 first, then `@avernet/workflow`, then the public app and the separately maintained
 internal host. Deploy the updated workflow artifact before or together with
 hosts importing the new resolver; restart those hosts to load the new code.
-A DB edit alone cannot update an older host that still caches startup settings.
+A DB edit alone cannot update an older host that still caches startup settings
+or uses the old internal Git client. A combined public/internal deployment must
+include both the updated workflow package and the internal compatibility
+re-export; updating only the public source checkout does not change an internal
+service that still imports its own implementation.
 Focused local tests may alias package imports to source, but those tests do not
 replace checking the built resolver export before deploying either host.
 
@@ -78,3 +115,15 @@ The app-level `server/auto-heal-config.ts` remains a compatibility re-export of
 exports the merged resolver). Existing router dependency and service constructor
 signatures are unchanged. No database migration or new configuration key is
 required.
+
+## Regression verification
+
+The Git client tests exercise the real credential-helper protocol before the
+first clone, then clone/fetch/commit/push against temporary local repositories.
+Only remote transport selection is replaced; no production credentials or
+repositories are used. They cover cleanup on failure, private file permissions,
+secret-free errors, inherited Git configuration, and rejection of credentials
+on plain HTTP before any Git command or credential-file write. The internal
+compatibility tests verify shared function identity and existing mockability
+against the built public package. These checks do not replace a deployment-time
+verification of the actual HTTPS server, TLS setup, and repository permissions.
