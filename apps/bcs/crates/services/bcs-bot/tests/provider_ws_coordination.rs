@@ -15,6 +15,7 @@ struct Fixture {
     providers: Arc<MemoryProviderStore>,
     provider_id: String,
     bot_id: String,
+    client_token: tokio::sync::Mutex<Option<String>>,
 }
 
 impl Fixture {
@@ -45,17 +46,21 @@ impl Fixture {
                 ..Default::default()
             }).await.unwrap();
         assert!(providers.get_binding_by_bot_uuid(&bot.bot_uuid).await.unwrap().is_none());
-        Self { _dir: dir, bots, metadata, registry, providers, provider_id: provider.provider.provider_id, bot_id: bot.bot_uuid }
+        Self { _dir: dir, bots, metadata, registry, providers, provider_id: provider.provider.provider_id,
+            bot_id: bot.bot_uuid, client_token: tokio::sync::Mutex::new(None) }
     }
 
     async fn connect(&self, version: Option<u32>, kind: Option<&str>) -> Result<BotRuntimeConnectOutcome, BotUseCaseError> {
-        Bot::new(self.registry.clone()).with_uplink_config(bcs_config_api::UplinkConfig {
+        let mut client_token = self.client_token.lock().await;
+        let result = Bot::new(self.registry.clone()).with_uplink_config(bcs_config_api::UplinkConfig {
             allowed_profiles: vec![bcs_config_api::UplinkProfile::NativeMcp],
         }).connect_streaming(BotRuntimeConnectCommand {
-            caller_actor_id: None, token: self.registry.load_token(&self.bot_id).await,
+            caller_actor_id: None, token: client_token.clone(),
             bot_id: Some(self.bot_id.clone()), protocol_version: version,
             client_kind: kind.map(str::to_string),
-        }).await
+        }).await?;
+        *client_token = Some(result.token.clone());
+        Ok(result)
     }
 }
 
@@ -69,7 +74,7 @@ async fn upstream_metadata_resolves_provider_mapping_without_a_delivery_binding(
 }
 
 #[tokio::test]
-async fn bridge_v3_without_client_kind_uses_its_authenticated_provider() {
+async fn provider_v3_without_client_kind_uses_its_authenticated_provider() {
     let f = Fixture::new("native_mcp").await;
     let result = f.connect(Some(3), None).await.unwrap();
     assert_eq!(result.negotiated_client_kind.as_deref(), Some("native_mcp"));
@@ -99,7 +104,7 @@ async fn provider_policy_cannot_be_overridden_by_client_or_global_allowlist() {
 }
 
 #[tokio::test]
-async fn disabled_provider_fails_closed_and_releases_streaming_slot() {
+async fn disabled_provider_fails_before_acquiring_streaming_slot() {
     let f = Fixture::new("native_mcp").await;
     f.providers.update_provider_disabled(&f.provider_id, true, 2).await.unwrap();
     assert!(f.connect(Some(3), Some("native_mcp")).await.is_err());
@@ -154,10 +159,7 @@ async fn provider_authorization_does_not_bypass_token_authentication() {
     let service = Bot::new(f.registry.clone());
     // Legacy plugin registration starts with a MOCK token. First complete its
     // existing promotion flow, then exercise rejection of an incorrect token.
-    service.connect_streaming(BotRuntimeConnectCommand {
-        caller_actor_id: None, token: None, bot_id: Some(f.bot_id.clone()),
-        protocol_version: Some(3), client_kind: None,
-    }).await.unwrap();
+    f.connect(Some(3), None).await.unwrap();
     service.disconnect_streaming(BotRuntimeDisconnectCommand { bot_id: f.bot_id.clone() }).await.unwrap();
     assert!(service.connect_streaming(BotRuntimeConnectCommand {
         caller_actor_id: None, token: Some("wrong-runtime-token".into()), bot_id: Some(f.bot_id.clone()),
@@ -184,16 +186,138 @@ impl ProviderRepoPort for UnavailableProviders {
 }
 
 #[tokio::test]
+async fn provider_checked_streaming_passes_core_contract() {
+    let f = Fixture::new("native_mcp").await;
+    let unavailable = BotCore::with_provider_repos(f.bots.clone(), Arc::new(UnavailableProviders),
+        f.providers.clone(), f.providers.clone()).with_bot_provider_repo(f.metadata.clone());
+    bcs_test_support::contract::core::provider_checked_connection::provider_checked_streaming_core_contract_tests(
+        &unavailable, f.registry.as_ref(), &f.bot_id,
+    ).await;
+}
+
+#[tokio::test]
 async fn provider_read_failure_is_propagated_and_reconnect_can_recover() {
     let mut f = Fixture::new("native_mcp").await;
     let healthy_registry = f.registry.clone();
     f.registry = Arc::new(BotCore::with_provider_repos(f.bots.clone(), Arc::new(UnavailableProviders),
         f.providers.clone(), f.providers.clone()).with_bot_provider_repo(f.metadata.clone()));
-    let error = f.connect(Some(3), Some("native_mcp")).await.unwrap_err();
+    let original_token = f.registry.load_token(&f.bot_id).await.unwrap();
+    assert!(is_mock_token(&original_token));
+    let request = || BotRuntimeConnectCommand {
+        caller_actor_id: None, token: None, bot_id: Some(f.bot_id.clone()),
+        protocol_version: Some(3), client_kind: None,
+    };
+    let error = Bot::new(f.registry.clone()).connect_streaming(request()).await.unwrap_err();
     assert!(error.to_string().contains("provider store unavailable"), "{error}");
     assert!(f.registry.resolve_coordination_surface(&f.bot_id).await.is_err());
     assert!(!f.registry.is_connected(&f.bot_id).await);
-    f.registry = healthy_registry;
-    assert_eq!(f.connect(Some(3), None).await.unwrap().negotiated_client_kind.as_deref(), Some("native_mcp"));
+    assert_eq!(f.registry.load_token(&f.bot_id).await.as_deref(), Some(original_token.as_str()),
+        "failed policy validation must not replace the client's bootstrap credential");
+    let reloaded = MemoryBotRepo::with_base_dir(f._dir.path().into());
+    assert_eq!(reloaded.load_token(&f.bot_id).await.as_deref(), Some(original_token.as_str()),
+        "failed policy validation must also preserve the persisted bootstrap credential");
+    let retry = Bot::new(healthy_registry).connect_streaming(request()).await.unwrap();
+    assert_eq!(retry.negotiated_client_kind.as_deref(), Some("native_mcp"));
+    assert!(!is_mock_token(&retry.token));
 }
 
+struct DelayedProviders {
+    record: ProviderRecord,
+    fail: bool,
+    entered: tokio::sync::Semaphore,
+    resume: tokio::sync::Semaphore,
+}
+
+#[async_trait::async_trait]
+impl ProviderRepoPort for DelayedProviders {
+    async fn get_provider(&self, _: &str) -> ServiceResult<Option<ProviderRecord>> {
+        self.entered.add_permits(1);
+        self.resume.acquire().await.unwrap().forget();
+        if self.fail {
+            Err(ServiceError::InternalError("delayed provider failure".into()))
+        } else {
+            Ok(Some(self.record.clone()))
+        }
+    }
+    async fn insert_provider(&self, _: ProviderRecord) -> ServiceResult<()> { unreachable!() }
+    async fn get_provider_by_slug(&self, _: &str) -> ServiceResult<Option<ProviderRecord>> { unreachable!() }
+    async fn list_providers(&self) -> ServiceResult<Vec<ProviderRecord>> { unreachable!() }
+    async fn update_provider_metadata(&self, _: &str, _: Option<&str>, _: Option<&str>, _: Option<&str>, _: u64)
+        -> ServiceResult<Option<ProviderRecord>> { unreachable!() }
+    async fn update_provider_disabled(&self, _: &str, _: bool, _: u64)
+        -> ServiceResult<Option<ProviderRecord>> { unreachable!() }
+}
+
+#[tokio::test]
+async fn delayed_policy_check_cannot_replace_or_disconnect_a_successful_connection() {
+    for fail in [false, true] {
+        let f = Fixture::new("native_mcp").await;
+        let delayed = Arc::new(DelayedProviders {
+            record: f.providers.get_provider(&f.provider_id).await.unwrap().unwrap(),
+            fail, entered: tokio::sync::Semaphore::new(0), resume: tokio::sync::Semaphore::new(0),
+        });
+        let registry = Arc::new(BotCore::with_provider_repos(f.bots.clone(), delayed.clone(),
+            f.providers.clone(), f.providers.clone()).with_bot_provider_repo(f.metadata.clone()));
+        let bot_id = f.bot_id.clone();
+        let pending = tokio::spawn(async move {
+            Bot::new(registry).connect_streaming(BotRuntimeConnectCommand {
+                caller_actor_id: None, token: None, bot_id: Some(bot_id),
+                protocol_version: Some(3), client_kind: None,
+            }).await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(5), delayed.entered.acquire())
+            .await.unwrap().unwrap().forget();
+        let winner = f.connect(Some(3), None).await.unwrap();
+        delayed.resume.add_permits(1);
+        let error = tokio::time::timeout(std::time::Duration::from_secs(5), pending)
+            .await.unwrap().unwrap().unwrap_err();
+        if fail {
+            assert!(error.to_string().contains("delayed provider failure"), "{error}");
+        } else {
+            assert!(matches!(error, BotUseCaseError::Connect(ConnectError::AlreadyConnected(_))));
+        }
+        assert_eq!(f.registry.load_token(&f.bot_id).await.as_deref(), Some(winner.token.as_str()));
+        assert!(f.registry.is_connected(&f.bot_id).await);
+        assert_eq!(f.registry.get_bot_info(&f.bot_id, "client_kind").await.as_deref(), Some("native_mcp"));
+    }
+}
+
+#[tokio::test]
+async fn disabled_and_corrupt_provider_preserve_mock_until_policy_recovers() {
+    for corrupt in [false, true] {
+        let f = Fixture::new("native_mcp").await;
+        let saved = f.providers.get_provider(&f.provider_id).await.unwrap().unwrap();
+        let original_token = f.registry.load_token(&f.bot_id).await.unwrap();
+        assert!(is_mock_token(&original_token));
+        if corrupt {
+            f.providers.update_provider_metadata(&f.provider_id, None, Some("invalid-json"), None, 2).await.unwrap();
+        } else {
+            f.providers.update_provider_disabled(&f.provider_id, true, 2).await.unwrap();
+        }
+        let request = || BotRuntimeConnectCommand {
+            caller_actor_id: None, token: None, bot_id: Some(f.bot_id.clone()),
+            protocol_version: Some(3), client_kind: None,
+        };
+        let service = Bot::new(f.registry.clone());
+        assert!(service.connect_streaming(request()).await.is_err());
+        assert_eq!(f.registry.load_token(&f.bot_id).await.as_deref(), Some(original_token.as_str()));
+        assert!(!f.registry.is_connected(&f.bot_id).await);
+        f.providers.update_provider_disabled(&f.provider_id, false, 3).await.unwrap();
+        f.providers.update_provider_metadata(&f.provider_id, None, Some(&saved.config), None, 3).await.unwrap();
+        assert!(service.connect_streaming(request()).await.is_ok());
+    }
+}
+
+#[tokio::test]
+async fn provider_policy_follows_token_identity_instead_of_requested_bot_id() {
+    let f = Fixture::new("native_mcp").await;
+    f.registry.register_with_owner_and_token("other-bot".into(), BotCapabilities::default(),
+        "alice", "other-runtime-token").await.unwrap();
+    let result = Bot::new(f.registry.clone()).connect_streaming(BotRuntimeConnectCommand {
+        caller_actor_id: None, token: Some("other-runtime-token".into()), bot_id: Some(f.bot_id.clone()),
+        protocol_version: Some(3), client_kind: None,
+    }).await.unwrap();
+    assert_eq!(result.bot_uuid, "other-bot");
+    assert_eq!(result.negotiated_client_kind, None);
+    assert!(is_mock_token(&f.registry.load_token(&f.bot_id).await.unwrap()));
+}

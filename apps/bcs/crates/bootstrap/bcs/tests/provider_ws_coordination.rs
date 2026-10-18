@@ -3,8 +3,7 @@ mod helpers;
 use std::{net::SocketAddr, time::{Duration, SystemTime, UNIX_EPOCH}};
 use bcs::{BcsServer, BcsServerExtensions, InfrastructurePlugins};
 use bcs_cache_api::CacheSetMode;
-use bcs_service_api::{BotRunContext, CoordinationMode, ProviderAuthMode,
-    ProviderBotConnectionMode, RegisterProviderBotParams};
+use bcs_service_api::{BotRunContext, CoordinationMode, ProviderAuthMode};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, tungstenite::Message};
@@ -29,6 +28,24 @@ async fn send(ws: &mut Socket, frame: Value) {
     ws.send(Message::Text(frame.to_string().into())).await.unwrap();
 }
 
+fn principal() -> String {
+    use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let mut header = Header::new(Algorithm::HS256);
+    header.typ = Some("JWT".into());
+    header.kid = Some("bare".into());
+    encode(&header, &json!({"iss":"gateway", "aud":"bcs", "iat":now-1, "exp":now+120,
+        "principals":[{"type":"user", "tenant":"tenant-a",
+            "subject":{"id":"alice", "username":"alice", "tenant_id":"tenant-a"}}]}),
+        &EncodingKey::from_secret(b"test-only-provider-ws-signing-key")).unwrap()
+}
+
+async fn response_data(request: reqwest::RequestBuilder, status: reqwest::StatusCode) -> Value {
+    let response = request.send().await.unwrap_or_else(|error| panic!("{}", error.without_url()));
+    assert_eq!(response.status(), status);
+    response.json::<Value>().await.unwrap()["data"].clone()
+}
+
 async fn connect(addr: SocketAddr, bot_id: &str, token: &str) -> Socket {
     let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/ws/bot")).await.unwrap();
     send(&mut ws, json!({"type":"req","id":"connect","method":"bot.connect",
@@ -38,6 +55,7 @@ async fn connect(addr: SocketAddr, bot_id: &str, token: &str) -> Socket {
         if frame["id"] == "connect" {
             assert_eq!(frame["ok"], true, "{frame}");
             assert_eq!(frame["payload"]["capabilities"]["tool_result_task_intent"], true, "{frame}");
+            assert_eq!(frame["payload"]["token"], token, "OpenAPI credential must remain unchanged");
             return ws;
         }
     }
@@ -96,14 +114,22 @@ async fn provider_bridge_stored_intent_reaches_worker_once_through_real_ws() {
         ProviderAuthMode::StaticBearer, "alice".into(), None,
         Some(serde_json::from_value(json!({"mode":"native_mcp","mcp_server":"custom_bcs",
             "tool_name_mapping":{TOOL:"bcs_assign_task"}})).unwrap())).await.unwrap();
-    let (registered, _) = state.services.provider_bot_core.register_provider_bot_with_bot_uuid(
-        &provider.provider.provider_id, &provider.provider_admin_token, RegisterProviderBotParams {
-            bot_name:"Manager".into(), provider_bot_ref:"manager:alice".into(),
-            owners:vec!["alice".into()], connection_mode:ProviderBotConnectionMode::Plugin,
-            ..Default::default()
-        }).await.unwrap();
-    let bot_id = registered.bot_uuid;
-    let token = state.services.registry.load_token(&bot_id).await.unwrap();
+    // Match bridge's actual registration chain: issue a Provider-scoped token,
+    // POST the OpenAPI, and use only the credential returned to the client.
+    let http = reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(10)).build().unwrap();
+    let registration_url = format!("http://{addr}/openapi/v1/collaboration/register");
+    let issued = response_data(http.get(format!("{registration_url}/token"))
+        .header("x-avernet-principal", principal())
+        .query(&[("provider_id", provider.provider.provider_id.as_str())]), reqwest::StatusCode::OK).await;
+    let registered = response_data(http.post(&registration_url).query(&[
+        ("token", issued["token"].as_str().unwrap()), ("bot-name", "Manager"),
+        ("provider_bot_ref", "manager:alice"), ("mode", "plugin"),
+    ]), reqwest::StatusCode::CREATED).await;
+    assert_eq!(registered["registration"]["mode"], "plugin");
+    let bot_id = registered["bot_uuid"].as_str().unwrap().to_string();
+    let token = registered["bot_token"].as_str().unwrap().to_string();
+    assert!(!bcs_service_api::is_mock_token(&token));
+    assert!(uuid::Uuid::parse_str(&token).is_ok(), "registration returns a real runtime token");
     let mut manager = connect(addr, &bot_id, &token).await;
     let client = bcs_cli::BcsClient::with_token(format!("http://{addr}"), &token);
     client.set_visibility(&bot_id, "public").await.unwrap();
@@ -169,4 +195,3 @@ async fn provider_bridge_stored_intent_reaches_worker_once_through_real_ws() {
     worker.disconnect().await;
     server.abort();
 }
-

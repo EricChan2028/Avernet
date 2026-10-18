@@ -21,6 +21,8 @@ use tracing::{debug, info, warn};
 
 use super::ids::{new_bot_uuid, new_session_token};
 use super::provider_core::{parse_coordination_config, parse_downlink_config};
+
+mod connection;
 use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
 
 /// Core bot registry service implementation.
@@ -773,138 +775,23 @@ impl BotRegistryCoreService for BotCore {
         self.repo.register_http_connection(bot_id, token).await
     }
 
+    async fn connect_streaming_with_provider(
+        &self,
+        params: BotConnectParams,
+    ) -> Result<bcs_service_api::ProviderCheckedConnection, bcs_service_api::ProviderCheckedConnectError> {
+        self.connect_with_policy(params, ConnectionKind::Streaming, true).await
+    }
+
     async fn connect_bot(
         &self,
         params: BotConnectParams,
         kind: ConnectionKind,
     ) -> Result<BotConnectResult, ConnectError> {
-        let token_preview = params
-            .token
-            .as_ref()
-            .map(|t| format!("{}...", &t[..t.len().min(4)]))
-            .unwrap_or_else(|| "None".to_string());
-        info!(token_present = params.token.is_some(), token_preview = %token_preview, "Processing connect_bot");
-
-        let (is_new, bot_id, token): (bool, String, String) = if let Some(ref token_str) =
-            params.token
-        {
-            if let Some(existing_bot_id) = self.repo.find_bot_by_token(token_str).await {
-                info!(bot_id = %existing_bot_id, token_preview = %token_preview, "Valid token, reconnection");
-                self.repo
-                    .store_token_mapping(token_str.clone(), existing_bot_id.clone())
-                    .await;
-                (false, existing_bot_id, token_str.clone())
-            } else {
-                let new_token = new_session_token();
-                info!(token_preview = %token_preview, new_token_preview = %format!("{}...", &new_token[..4]), "Invalid/not found token, new connection");
-                (true, String::new(), new_token)
-            }
-        } else {
-            let new_token = new_session_token();
-            info!(new_token_preview = %format!("{}...", &new_token[..4]), "No token, new connection");
-            (true, String::new(), new_token)
-        };
-
-        let (final_bot_id, final_token) = if is_new {
-            let connect_bot_id = if let Some(ref provided_bot_id) = params.bot_id {
-                if provided_bot_id.is_empty() {
-                    return Err(ConnectError::InvalidBotId);
-                }
-                // Reject a provided bot_id that already exists, EXCEPT for the
-                // plugin connection_mode promote path: if the existing bot's
-                // stored token is the MOCK sentinel, a streaming connect is
-                // allowed to promote it to a real token (§3.5). Everything else
-                // (Http connections; real-token bots) keeps the historical
-                // `AlreadyRegistered` refusal so duplicate ids cannot hijack.
-                if self.repo.get(provided_bot_id).await.is_some() {
-                    let allow_promote = matches!(kind, ConnectionKind::Streaming)
-                        && self
-                            .repo
-                            .load_token(provided_bot_id)
-                            .await
-                            .map(|t| bcs_service_api::is_mock_token(&t))
-                            .unwrap_or(false);
-                    if !allow_promote {
-                        return Err(ConnectError::AlreadyRegistered(
-                            provided_bot_id.clone(),
-                        ));
-                    }
-                }
-                info!(bot_id = %provided_bot_id, "Using preconfigured bot_id");
-                provided_bot_id.clone()
-            } else {
-                let temp_id = new_bot_uuid();
-                info!(temp_id = %temp_id, "Generated bot_id");
-                temp_id
-            };
-
-            let registered_token = match kind {
-                ConnectionKind::Streaming => {
-                    // Delegate create / MOCK-promote / already registered+connected
-                    // to the store, which decides atomically under its write lock
-                    // (the lock-free `repo.get` check that used to fire
-                    // `AlreadyRegistered` here is moved into that lock).
-                    self.repo
-                        .connect_or_promote_streaming(connect_bot_id.clone())
-                        .await
-                        .map_err(|e| match e {
-                            ConnectStreamError::AlreadyConnected(id) => {
-                                ConnectError::AlreadyConnected(id)
-                            }
-                            ConnectStreamError::AlreadyRegistered(id) => {
-                                ConnectError::AlreadyRegistered(id)
-                            }
-                            ConnectStreamError::InternalError(m) => ConnectError::InternalError(m),
-                        })?
-                }
-                ConnectionKind::Http => {
-                    self.repo
-                        .register_http_connection(connect_bot_id.clone(), token.clone())
-                        .await
-                }
-            };
-
-            (connect_bot_id, registered_token)
-        } else {
-            match kind {
-                ConnectionKind::Streaming => {
-                    // The token was resolved above. An occupied streaming slot
-                    // must reject this socket; never fall back to registration
-                    // and report success without acquiring the slot.
-                    let (reconnected_bot_id, tok) = self.repo
-                        .reconnect_streaming(token.clone())
-                        .await
-                        .map_err(|()| ConnectError::AlreadyConnected(bot_id.clone()))?;
-                    info!(bot_id = %reconnected_bot_id, "Reconnected via streaming transport");
-                    (reconnected_bot_id, tok)
-                }
-                ConnectionKind::Http => {
-                    self.repo
-                        .store_token_mapping(token.clone(), bot_id.clone())
-                        .await;
-                    (bot_id, token)
-                }
-            }
-        };
-
-        if is_new {
-            if self.repo.has_been_onboarded(&final_bot_id).await {
-                if let Some(caps) = self.repo.load_from_storage(&final_bot_id).await {
-                    let _ = self.repo.register(final_bot_id.clone(), caps).await;
-                    info!(bot_id = %final_bot_id, "Loaded capabilities from storage for previously onboarded bot");
-                }
-            } else {
-                info!(bot_id = %final_bot_id, "New bot connected, waiting for onboard");
-            }
-        } else if let Some(caps) = self.repo.load_from_storage(&final_bot_id).await {
-            let _ = self.repo.register(final_bot_id.clone(), caps).await;
-            info!(bot_id = %final_bot_id, "Loaded capabilities from storage for reconnecting bot");
-        }
-
-        Ok(BotConnectResult {
-            is_new,
-            bot_uuid: final_bot_id,
-            token: final_token,
-        })
+        self.connect_with_policy(params, kind, false).await
+            .map(|outcome| outcome.connection)
+            .map_err(|error| match error {
+                bcs_service_api::ProviderCheckedConnectError::Connect(error) => error,
+                bcs_service_api::ProviderCheckedConnectError::Policy(error) => ConnectError::InternalError(error.to_string()),
+            })
     }
 }

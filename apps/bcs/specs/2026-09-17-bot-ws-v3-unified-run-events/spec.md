@@ -300,7 +300,11 @@ Provider 归属由服务端 Bot 元数据决定，旧 delivery binding 仅在归
 认证后的 V3 连接优先采用所属 Provider 的 coordination 配置；bridge 省略
 `client_kind` 时仍可协商该 Provider 的 MCP 模式。工具来源按发出事件的主 Bot
 的 Provider 精确映射授权，不能借用目标 Bot 的配置。Provider 禁用、删除、缺失
-或配置读取/解析失败不能回退到客户端声明；失败握手释放 streaming slot。
+或配置读取/解析失败不能回退到客户端声明。连接流程先解析 token 对应的实际身份
+（或验证首次连接资格），再校验 Provider，最后写入凭据并申请 streaming slot。
+校验失败不得升级旧 Plugin 预注册的 MOCK token，也不得修改已有连接；
+客户端恢复后使用原凭据重试。真实 bridge 的 OpenAPI 注册直接返回正式 token，
+其 WS 连接使用该 token，不经过 MOCK 升级。
 Provider 配置为 disabled/native_tool 时不开放 tool-result task intent；V1/V2 仍关闭。
 
 没有 Provider 归属的客户端在 connect 中通过 `client_kind` 选择内置 profile，不能上传或覆盖 tool allowlist。

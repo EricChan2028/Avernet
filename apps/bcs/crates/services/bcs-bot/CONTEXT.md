@@ -41,11 +41,15 @@ Provider admin and Human owner checks. Corrupt discovery config remains an error
 
 ## Configuration
 
-- After authentication, streaming connections resolve Provider coordination from
+- After resolving token identity or first-connect eligibility, streaming connections resolve Provider coordination from
   Bot-owned metadata, with legacy delivery bindings only as an absence fallback.
   Explicit V3 uses the Provider MCP mode even when bridge omits `client_kind`.
   Disabled/missing/unreadable Provider policy never falls back to client claims;
-  failed negotiation releases its streaming slot. Only unaffiliated Bots use
+  validation precedes credential writes and streaming admission. A failed check
+  preserves legacy MOCK credentials and existing connections, so clients retry
+  with their original credentials. The core returns the validated surface with
+  the connection result; application negotiation does not reread it.
+  Only unaffiliated Bots use
   bootstrap-injected `UplinkConfig` to select built-in MCP profiles.
   The negotiated kind remains process-local; reconnect/disconnect clears it.
   Tool authorization uses the source Bot's exact Provider mapping, cached per run
@@ -91,8 +95,9 @@ before owner-edge writes. Bot control-plane views hydrate upstream affiliation f
 Bot metadata without treating it as HTTP delivery or adding gateway-only privileges.
 
 Provider coordination policy also follows Bot-owned affiliation for plugin Bots.
-After authentication, the runtime connect use case matches an explicit V3 MCP
-client kind against that policy; only unaffiliated Bots use deployment-wide
+After identity resolution and before streaming admission, the core validates
+that policy. The runtime connect use case derives the MCP kind from it for
+explicit V3, even when the client omits its kind; only unaffiliated Bots use deployment-wide
 uplink grants. Deleted ownership, missing/disabled Providers and malformed policy
 fail closed. Reconnect reads current policy rather than persisting an entitlement.
 Policy resolution is bounded: plugin ownership uses one indexed metadata read and

@@ -11,10 +11,18 @@ Resolve Bot-owned Provider metadata first and retain legacy gateway binding
 compatibility. Missing/disabled/deleted or unreadable affiliated Providers fail
 closed; they must not fall back to client-declared profiles. No affiliation keeps
 the existing deployment-authorized built-in profile behavior. Provider identity
-never comes from a tool result or bot.connect argument. Negotiate after runtime
-authentication, using V3 only; preserve the existing event adapter and cached
-start identity checks. Resolve the exact configured mapping through the same
-Provider resolver during message-flow processing.
+never comes from a tool result or bot.connect argument. Resolve runtime token
+identity or first-connect eligibility, then validate Provider policy before
+credential writes or streaming admission. Return the validated surface with
+the connection for V3 negotiation; preserve the existing event adapter and
+cached start identity checks. Resolve the exact configured mapping through
+the same Provider resolver during message-flow processing.
+
+Legacy Provider-admin Plugin registration stores a MOCK credential until first
+connection. A failed Provider check must preserve it so the client can retry
+the same request after recovery, without reading undisclosed server credentials.
+Standard bridge registration instead uses the OpenAPI and receives a real UUID
+token immediately; its integration fixture must use that HTTP registration chain.
 
 This requires a BCS release and a bridge reconnect, but no bridge wire change,
 database migration or Provider config rewrite. An existing HTTP gateway route is
@@ -27,11 +35,12 @@ the WS admission bug cannot be repaired by changing tool_name_mapping alone.
    V3 capability negotiation without client_kind, deny modes and disabled data.
    Run the tests before implementation.
 2. Add a narrow core contract for Provider-owned coordination resolution; share
-   the resolver with runtime negotiation and existing tool mapping. Extract the
-   affected oversized application file by responsibility to meet 1,000 lines.
-3. Add a bootstrap test using real manager/worker WebSockets, upstream metadata,
-   custom MCP names and the v2 cache contract. Verify worker receipt, rejection
-   of unmapped sources and no repeat dispatch for an applied intent.
+   the resolver with runtime negotiation and existing tool mapping. Reuse the
+   upstream runtime/helper split and keep changed source files below 1,000 lines.
+3. Add a bootstrap test using Provider-scoped OpenAPI registration, real
+   manager/worker WebSockets, upstream metadata, custom MCP names and the v2
+   cache contract. Verify worker receipt, rejection of unmapped sources and no
+   repeat dispatch for an applied intent.
 4. Run relevant bot, WS, message-flow, coordination and architecture checks;
    review the diff, document database access costs and deployment alternatives.
 
@@ -39,6 +48,9 @@ the WS admission bug cannot be repaired by changing tool_name_mapping alone.
 
 - Provider policy overrides deployment-wide profiles; no client self-authorization.
 - Provider metadata errors propagate; disabled/tombstoned identities never fall back.
+- Failed checks preserve legacy MOCK credentials in memory and persistence.
+  Retry uses the original client credentials. A delayed check must not overwrite
+  or disconnect a connection that succeeded while the check was pending.
 - No new DB reads on ordinary chat deltas. Negotiation performs bounded identity
   and Provider lookups; mapping keeps the existing per-run surface cache.
 - Keep the nameless BaaS result fixture and start/run/Bot/Session identity checks.
@@ -48,33 +60,49 @@ the WS admission bug cannot be repaired by changing tool_name_mapping alone.
 
 - Investigation complete. User explicitly requested this repair and tests.
 - Isolated worktree created at baseline 26196ac2c; original workspace untouched.
+- Rebased onto dev d2a964de9, retaining the upstream Provider resolver and
+  runtime/helper split. The upstream mismatch test now asserts the configured
+  Provider kind, while disabled coordination and V2 still reject task intents.
 - Hook installer moved to devops/hook/install_git_hooks.sh in this checkout.
 
 ## Implementation and evidence
 
 - Added a Provider-only registry query shared by streaming negotiation and
   effective coordination resolution. It uses authenticated Bot identity.
+- The core's Provider-checked streaming operation validates policy before
+  credential upgrades and returns the validated surface to the application.
+  Repository admission checks still run after asynchronous policy resolution.
+  HTTP and direct legacy core connection entry points keep their existing behavior.
 - Provider policy wins over runtime kind and the deployment allowlist. V3-only
   gating, exact tool mapping, cached start, run/Session/role checks and intent
   claims remain on the existing path. No WS adapter bypass was added.
-- Extracted query/discovery/management/runtime application implementations from
-  the existing oversized Bot file; unchanged implementations were preserved.
+- Reuse upstream's runtime/helper application split and Provider resolver,
+  including Gateway disabled-binding and Bot identity consistency checks.
+  Core connection orchestration lives in a separate module; unrelated Bot
+  query, discovery and management implementations remain unchanged from dev.
 - The initial four service regressions failed on the old behavior, then passed
-  after the fix. The final service target has nine passing tests, including
-  disabled/corrupt/missing Provider policy, read failures and recovered reconnect,
-  legacy binding fallback, metadata precedence, tombstones and token rejection.
+  after the fix. Two original-credential regressions also reproduced premature
+  MOCK upgrades before the admission-order correction. The final service target
+  has thirteen passing tests, including the shared core conformance harness,
+  read/disabled/corrupt Provider failure and retry, persisted MOCK preservation,
+  delayed admission races, token-derived identity, legacy binding fallback,
+  metadata precedence, tombstones and token rejection.
 - Real WS integration uses production SQLite/cache composition with no globally
-  enabled profiles. A bridge-shaped V3 handshake with null client_kind consumes
+  enabled profiles. It obtains a Provider-scoped register token and calls the
+  real OpenAPI to create the manager. Only the returned UUID token is used for
+  WS authentication, and the handshake must return that same token.
+  A bridge-shaped V3 handshake with null client_kind consumes
   a stored v2 intent, the worker receives chat.send with the stored arguments,
   and the receipt is applied with a task_id. Unmapped tools, failed tool results
   and a repeated applied intent do not produce another task.
-- Bot, WS, message-flow and coordination-store suites: 1003 passed, 14 existing
+- Bot, WS, message-flow and coordination-store suites after rebase: 1010 passed, 14 existing
   WS tests ignored (their coordination behavior moved to message-flow). The
   permanent nameless BaaS stored-intent case passes in message-flow. New provider
-  WS integration plus existing uplink integration: four passed.
+  WS integration plus existing Provider plugin, OpenAPI registration and uplink
+  integration: seven passed.
 - Independent read-only review found no blocking issues. Changed/added Rust
   sources are all below 1000 lines; git diff --check passes.
-- Architecture gate is not green: check-deps.sh fails at line 36 with an unbound
+- Earlier architecture runs were not green: check-deps.sh failed at line 36 with an unbound
   variable, and the import checker reports existing boundary violations. Both
   failures were reproduced in the untouched original checkout. Port-purity and
   forbidden-symbol checks passed. The conformance scanner also reports existing
@@ -84,11 +112,15 @@ the WS admission bug cannot be repaired by changing tool_name_mapping alone.
 
 ## Database access cost
 
-For a Provider-owned connection, negotiation adds one indexed, environment-scoped
+For a Provider-owned connection, negotiation uses the existing indexed, environment-scoped
 Bot metadata query returning at most one row, followed by the existing cached
-Provider lookup (at most one row/query on a cache miss). Missing membership uses
-the existing delivery-binding projection as a bounded compatibility fallback;
-the projection's configured source can also read Bot connection mode. Resolution
+Provider lookup (at most one row/query on a cache miss). These reads happen
+before admission; the application consumes their returned result without a
+second Provider read. A policy failure performs no token upgrade or connection
+write and requires no rollback. Missing membership uses
+the existing delivery-binding projection as a bounded compatibility fallback.
+Gateway affiliation also retains the existing binding-disabled check.
+The projection's configured source can also read Bot connection mode. Resolution
 does not scan or write Provider data and propagates errors without retry loops.
 Effective tool mapping still uses message-flow's per-run surface cache. There
 are no added database queries per chat/token delta. No new cache or invalidation

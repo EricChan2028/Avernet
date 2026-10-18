@@ -159,7 +159,7 @@ async fn provider_plugin_dispatches_with_exact_mapping_without_global_uplink_per
 }
 
 #[tokio::test]
-async fn provider_policy_overrides_global_profile_grants_and_requires_matching_v3_kind() {
+async fn provider_policy_overrides_client_and_global_profiles_but_requires_v3() {
     let dir = tempfile::tempdir().unwrap();
     let (addr, server, state) = BcsServer::new_allowing_private_outbound_for_tests(
         configured(dir.path(), &["native_mcp", "mcporter_mcp"]))
@@ -173,7 +173,10 @@ async fn provider_policy_overrides_global_profile_grants_and_requires_matching_v
     ws.close(None).await.unwrap();
     let (_, bot) = provider_bot(&http, addr, &state, "native_mcp").await;
     let (mut ws, payload) = connect(addr, "mcporter_mcp", Some(3), &bot).await;
-    assert_eq!(payload["capabilities"]["tool_result_task_intent"], false);
+    assert_eq!(payload["capabilities"]["tool_result_task_intent"], true);
+    assert_eq!(state.services.registry.get_bot_info(
+        bot["bot_uuid"].as_str().unwrap(), "client_kind",
+    ).await.as_deref(), Some("native_mcp"), "Provider mode overrides the client's declaration");
     ws.close(None).await.unwrap();
     let (_, bot) = provider_bot(&http, addr, &state, "native_mcp").await;
     let (mut ws, payload) = connect(addr, "native_mcp", Some(2), &bot).await;

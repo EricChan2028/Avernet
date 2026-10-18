@@ -1,6 +1,7 @@
 //! Core service contract harnesses.
 
 pub mod message_delivery;
+pub mod provider_checked_connection;
 
 use std::collections::BTreeMap;
 

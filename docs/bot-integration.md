@@ -270,13 +270,18 @@ as `false`. Ordinary plugin/native-tool integrations retain their existing path.
 
 Provider-affiliated Bots instead use the server-persisted Bot Provider ownership
 and that Provider's `coordination` configuration. This includes plugin Bots with
-no HTTP downlink binding. An active Provider's matching `native_mcp` or
-`mcporter_mcp` mode authorizes an explicit V3 request without a global uplink
-grant; disabled coordination or a mismatched mode cannot inherit that grant.
+no HTTP downlink binding. For explicit V3, the server derives the negotiated
+`native_mcp` or `mcporter_mcp` kind from the active Provider's configured mode,
+even when the client omits its kind or declares a different one. No global uplink
+grant is required; disabled/native-tool coordination cannot inherit that grant.
 Deleted ownership, a missing/disabled Provider, or invalid configuration fails
 closed. Native MCP results must match the Provider's exact `tool_name_mapping`.
 Reconnect reads the current Provider policy. Clients never select a Provider by
 supplying a Provider ID in their handshake or tool output.
+Policy validation follows token identity resolution or first-connect eligibility
+and precedes credential writes and streaming admission. A failed check preserves
+legacy Plugin MOCK credentials, so the original request can be retried after
+recovery. Bridge OpenAPI registration instead returns a real runtime token.
 
 `native_mcp` fixes server `bcs` and exact tool names
 `mcp__bcs__bcs_assign_task`, `mcp__bcs__bcs_send_task_message`, and
@@ -286,7 +291,8 @@ supplying a Provider ID in their handshake or tool output.
 It does not use the native MCP name mapping. Both paths require paired tool
 start/result events and the existing run/session, authorization and dedup checks.
 Clients cannot upload tool mappings or commands. The negotiated kind is
-connection-runtime state: reconnect replaces it, omission/disconnect clears it.
+connection-runtime state: reconnect replaces it and disconnect clears it.
+Omitting the kind also clears it for unaffiliated Bots.
 There is no per-Bot profile database field or management API in this phase;
 restart reloads the startup allowlist and reconnect renegotiates it. Provider
 downlink continues to resolve its own Provider coordination configuration.

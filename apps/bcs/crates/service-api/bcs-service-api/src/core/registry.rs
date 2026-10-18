@@ -35,9 +35,24 @@ pub enum ConnectError {
     InternalError(String),
 }
 
+/// A streaming connection and the Provider policy validated before committing it.
+#[derive(Debug)]
+pub struct ProviderCheckedConnection {
+    pub connection: BotConnectResult,
+    pub provider_surface: Option<CoordinationSurface>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ProviderCheckedConnectError {
+    #[error(transparent)]
+    Connect(#[from] ConnectError),
+    #[error(transparent)]
+    Policy(#[from] ServiceError),
+}
+
 /// Internal sentinel prefix for a plugin-mode pre-registration placeholder
 /// token. A `session_token` prefixed with this marks a bot created by a
-/// `connection_mode=plugin` provider registration before any plugin has
+/// legacy Provider-admin `connection_mode=plugin` registration before any plugin has
 /// attached over WebSocket; the WS-connect `connect_or_promote_streaming`
 /// branch promotes a MOCK to a real runtime token. Never exposed externally.
 pub const MOCK_TOKEN_PREFIX: &str = "MOCK_";
@@ -643,6 +658,17 @@ pub trait BotRegistryCoreService: Send + Sync {
     }
 
     // ===== Unified Bot Connection =====
+
+    /// Resolve the token's identity (or validate first-connect eligibility),
+    /// then validate its Provider policy before creating a connection or
+    /// promoting a MOCK credential. Policy failure must leave credentials and
+    /// existing connections unchanged. Commit retains repository admission checks.
+    async fn connect_streaming_with_provider(
+        &self,
+        _params: BotConnectParams,
+    ) -> Result<ProviderCheckedConnection, ProviderCheckedConnectError> {
+        Err(ConnectError::InternalError("Provider-checked streaming connect is not configured".into()).into())
+    }
 
     /// Register an HTTP connection for a bot (no streaming channel).
     /// Creates a minimal bot entry if needed and stores token mapping.

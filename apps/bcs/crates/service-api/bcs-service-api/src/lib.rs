@@ -283,7 +283,7 @@ pub use core::{
     BotCandidateSearchMode, BotCandidateSearchQuery, BotCapabilities, BotConnectParams,
     BotConnectResult, BotControlPlaneCandidate,
     BotControlPlaneCoreService, BotControlPlaneProvider, BotControlPlaneView, BotDynamicStatus,
-    BotRegistryCoreService,
+    BotRegistryCoreService, ProviderCheckedConnection, ProviderCheckedConnectError,
     BotSendResult, ChatEventRouting, ConnectError, ConnectStreamError, ConnectionKind,
     ContextBotSummary, HiddenMentionInfo, ContextBotSummary as BotContextSummary, ContextConflict, ContextConflictPosition,
     ContextFusionRequest, ContextFusionResponse, ContextParticipantPerspective, DefaultDelivery,

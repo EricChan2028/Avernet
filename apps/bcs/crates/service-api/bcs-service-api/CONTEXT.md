@@ -9,6 +9,14 @@ missing or unreadable affiliations return errors. Bot application handshake and
 effective surface resolution share this contract. Bot metadata precedes legacy
 gateway bindings; upstream affiliation does not grant HTTP delivery privileges.
 
+`BotRegistryCoreService::connect_streaming_with_provider` resolves runtime token
+identity or first-connect eligibility, then checks Provider policy before
+creating a streaming connection or promoting a legacy MOCK credential. It
+returns the validated surface with the connection, distinguishes connection
+errors from policy errors, and preserves credentials/connections on policy
+failure. Its default fails closed; runtime implementations must provide this
+operation rather than composing a post-connect policy check in the application.
+
 ProviderManagementService and ProviderCoreService expose public slug discovery
 as `Option<ProviderBasicInfo>`, excluding complete config and credentials.
 Slug-aware core mutation methods preserve legacy callers, while ProviderRepoPort

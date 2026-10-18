@@ -30,29 +30,17 @@ impl BotRuntimeConnectionService for Bot {
             protocol_version,
             client_kind: None,
         };
-        let result = self
-            .registry
-            .connect_bot(params, ConnectionKind::Streaming)
-            .await
-            .map_err(BotUseCaseError::Connect)?;
+        let checked = self.registry.connect_streaming_with_provider(params).await
+            .map_err(|error| match error {
+                bcs_service_api::ProviderCheckedConnectError::Connect(error) => BotUseCaseError::Connect(error),
+                bcs_service_api::ProviderCheckedConnectError::Policy(error) => BotUseCaseError::Service(error),
+            })?;
+        let result = checked.connection;
+        let provider_surface = checked.provider_surface;
 
         if let Some(version) = protocol_version {
-            self.registry
-                .set_protocol_version(&result.bot_uuid, version)
-                .await;
+            self.registry.set_protocol_version(&result.bot_uuid, version).await;
         }
-        // Authenticate first, then authorize from this Bot's server-owned Provider.
-        // A missing client_kind (as sent by bridge) cannot hide that policy, and
-        // a client declaration cannot override a disabled Provider surface.
-        let provider_surface = match self.registry
-            .resolve_provider_coordination_surface(&result.bot_uuid).await {
-            Ok(surface) => surface,
-            Err(error) => {
-                self.registry.set_bot_info(&result.bot_uuid, "client_kind", None).await;
-                self.registry.disconnect_streaming(&result.bot_uuid).await;
-                return Err(error.into());
-            }
-        };
         let negotiated_client_kind = match provider_surface {
             Some(surface) => match (protocol_version, surface.mode) {
                 (Some(3), bcs_service_api::CoordinationMode::NativeMcp) => Some("native_mcp".into()),
