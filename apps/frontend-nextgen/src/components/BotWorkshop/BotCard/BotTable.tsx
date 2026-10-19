@@ -94,6 +94,7 @@ const BotTable: React.FC<BotTableProps> = ({
         id: 'info',
         header: 'Bot信息',
         width: showDescriptionColumn ? 'w-[clamp(192px,16vw,240px)]' : 'w-[clamp(224px,19vw,320px)]',
+        className: 'normal-case',
         cell: (bot) => (
           <BotInfoCell
             bot={bot}
