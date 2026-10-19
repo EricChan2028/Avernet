@@ -25,3 +25,11 @@ it('does not import unselected members or require plan confirmation', () => {
   expect(result.current.a.aggregation).toBeUndefined()
   expect(result.planReview).toBe(false)
 })
+
+it('retains a verified historical suggestion as a read-only goal for the current target', () => {
+  const snapshot = { kind: 'deployment' as const, workflowId: 'wf', workflowVersion: 39, deployNumber: 34, configDigest: 'a'.repeat(64) }
+  const old = { ...item('old'), state: 'verified' as const, context: { sourceSnapshot: { status: 'resolved', snapshot } } }
+  const fresh = { items: [old], missing: [], inputDigest: 'new', canEdit: true,
+    activeSnapshot: { status: 'resolved' as const, snapshot: { ...snapshot, workflowVersion: 40, deployNumber: 35 } } }
+  expect(reviewedSelection(['old'], { old }, fresh).retained).toEqual(['old'])
+})
