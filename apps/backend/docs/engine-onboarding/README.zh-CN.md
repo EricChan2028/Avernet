@@ -7,11 +7,12 @@
 Agent 本身由你们的引擎运行。
 
 如果你们只想让 bot 加入多 bot 群聊，可以跳过本指南的大部分内容，直接阅读
-[Bot 接入指南](../../../../docs/bot-integration.zh-CN.md)（见[第 6 步](#第-6-步可选加入群体协作bcn)）。
+[Bot 接入指南](../../../../docs/bot-integration.zh-CN.md)（见[第 7 步](#第-7-步可选加入群体协作bcn)）。
 
-> **状态说明。**第 2 至 5 步描述的是平台与第一个外部引擎（teclaw）之间已经在用
-> 的契约。第 1 步（注册**由你们自己托管**的引擎）**尚未定案**。标注 **待确认** 的
-> 事项须在上线前与 Avernet 团队确定，见[待确认事项](#待确认事项)。
+> **状态说明。**本指南描述的是平台与第一个外部引擎（teclaw）之间已经在用的契约。
+> 有两部分**尚未定案**：由你们自己托管的引擎如何注册与鉴权，以及第 2 步生命周期
+> 接口的具体请求格式。标注 **待确认** 的事项须在上线前与 Avernet 团队确定，见
+> [待确认事项](#待确认事项)。
 
 ---
 
@@ -19,13 +20,14 @@ Agent 本身由你们的引擎运行。
 
 - [接入原理](#接入原理)
 - [接入清单](#接入清单)
-- [第 1 步：注册引擎](#第-1-步注册引擎)
-- [第 2 步：接收 bot 配置（`POST /api/v1/bot/apply`）](#第-2-步接收-bot-配置)
-- [第 3 步：理解配置 artifact](#第-3-步理解配置-artifact)
-- [第 4 步：实现文件接口](#第-4-步实现文件接口)
-- [第 5 步：实现运行时接口](#第-5-步实现运行时接口)
-- [第 6 步（可选）：加入群体协作（BCN）](#第-6-步可选加入群体协作bcn)
-- [第 7 步：联调自查](#第-7-步联调自查)
+- [第 1 步：在 BaaS 注册引擎](#第-1-步在-baas-注册引擎)
+- [第 2 步：实现 bot 生命周期接口（由 BaaS 调用）](#第-2-步实现-bot-生命周期接口)
+- [第 3 步：接收 bot 配置（`POST /api/v1/bot/apply`）](#第-3-步接收-bot-配置)
+- [第 4 步：理解配置 artifact](#第-4-步理解配置-artifact)
+- [第 5 步：实现文件接口](#第-5-步实现文件接口)
+- [第 6 步：实现运行时接口](#第-6-步实现运行时接口)
+- [第 7 步（可选）：加入群体协作（BCN）](#第-7-步可选加入群体协作bcn)
+- [第 8 步：联调自查](#第-8-步联调自查)
 - [通用约定](#通用约定)
 - [待确认事项](#待确认事项)
 - [参考文档](#参考文档)
@@ -34,22 +36,44 @@ Agent 本身由你们的引擎运行。
 
 ## 接入原理
 
+有两个 Avernet 服务会调用你们的引擎：
+
+- **BaaS** 负责每个 bot 的生命周期与路由。它请你们的平台创建、更新、重启、删除
+  bot，并算出访问每个 bot 所用的地址和令牌。它还在你们的 bot 上运行定时任务与
+  协作任务。
+- **Backend** 负责每个 bot 的配置和工作台。它向运行中的 bot 下发配置和文件修改，
+  并把用户的对话与会话请求转发给 bot。
+
 ```text
- Avernet 工作台（用户）
-          │
-          ▼
- Avernet 平台 ──── 1. POST /api/v1/bot/apply （整包 bot 配置）────▶ ┐
-  （backend） ──── 2. /api/v1/file/*          （编辑文件）    ────▶ │  你们的引擎
-              ──── 3. /api/sessions、/api/{engine}/ws（对话） ────▶ │ （一个 HTTP 服务，
-                                                                    │   承载一个或多个 bot）
- 内容存储（OSS）◀──── 引擎下载 skill / 文件 ─────────────────────── ┘
+                      Avernet 工作台（用户）
+                                │
+                                ▼
+ ┌─────────────────────────── Avernet 平台 ───────────────────────────┐
+ │                                                                     │
+ │  Backend ── 向 BaaS 询问「bot X 在哪」──▶ BaaS                      │
+ │ （配置、文件、对话）                      （生命周期、路由、         │
+ │                                            任务运行）               │
+ └───────┬────────────────────────────────────────────┬────────────────┘
+         │                                            │
+         │ A. 单 bot 调用（地址与令牌来自 BaaS）：     │ B. 生命周期调用：
+         │    POST /api/v1/bot/apply                  │    创建 / 更新 / 重启 /
+         │    /api/v1/file/*                          │    删除 / 查询 bot
+         │    /api/sessions、/api/{engine}/ws         │ C. 经 /api/{engine}/ws 运行任务
+         ▼                                            ▼
+ ┌──────────────────────────── 你们的引擎 ────────────────────────────┐
+ │  生命周期接口（第 2 步）── 完成后向 BaaS 回调 ──▶ BaaS              │
+ │  单 bot 接口（第 3、5、6 步）                                        │
+ └────────────────────────────────┬────────────────────────────────────┘
+                                  │ 下载 skill / 文件
+                                  ▼
+                          内容存储（OSS）
 ```
 
 需要理解三点：
 
 1. **配置归平台，应用归引擎。**用户在 Avernet 里管理 bot 的 skill、MCP 服务、
-   身份文件、资源文件和 CLI 工具。任何一项变化，平台都会组装出该 bot 的**完整**
-   配置（即 *artifact*），发给你们的引擎。
+   身份文件、资源文件和 CLI 工具。平台组装出该 bot 的**完整**配置（即
+   *artifact*）发给引擎：创建 bot 时发一次，之后配置每变化一次就再发一次。
 2. **artifact 是全量快照，不是增量。**每次下发都描述完整的期望状态，引擎让 bot
    与之完全一致。
 3. **大内容按引用传递。**artifact 不含文件内容，只含 `{store, path}` 引用，由
@@ -59,43 +83,117 @@ Agent 本身由你们的引擎运行。
 
 ## 接入清单
 
-| # | 要做的事 | 是否必须 |
-|---|---|---|
-| 1 | 注册引擎（引擎类型、访问地址、鉴权方式） | 必须 |
-| 2 | 实现 `POST /api/v1/bot/apply`，按整包替换语义应用 artifact | 必须 |
-| 3 | 从内容存储下载 artifact 引用的内容 | 必须 |
-| 4 | 实现文件接口（`/api/v1/file/*`） | 工作台文件编辑需要 |
-| 5 | 实现运行时接口（健康检查、会话、对话） | 工作台对话需要 |
-| 6 | 接入 BCN | 仅多 bot 协作需要 |
-| 7 | 通过联调自查清单 | 必须 |
+| # | 要做的事 | 调用方 | 是否必须 |
+|---|---|---|---|
+| 1 | 注册引擎（引擎类型、访问地址、鉴权方式） | — | 必须 |
+| 2 | 实现 bot 生命周期接口并发送完成回调 | BaaS | 必须 |
+| 3 | 实现 `POST /api/v1/bot/apply`，按整包替换语义应用 artifact | Backend | 必须 |
+| 4 | 从内容存储下载 artifact 引用的内容 | — | 必须 |
+| 5 | 实现文件接口（`/api/v1/file/*`） | Backend | 工作台文件编辑需要 |
+| 6 | 实现运行时接口（健康检查、会话、对话） | Backend、BaaS | 对话与任务运行需要 |
+| 7 | 接入 BCN | — | 仅多 bot 协作需要 |
+| 8 | 通过联调自查清单 | — | 必须 |
 
 ---
 
-## 第 1 步：注册引擎
+## 第 1 步：在 BaaS 注册引擎
 
-平台要把请求路由到你们的引擎，需要以下信息：
+BaaS 是唯一知道如何访问你们引擎的地方。其他 Avernet 服务调用某个 bot 之前，都会
+先向 BaaS 获取它的地址和令牌。注册时 BaaS 需要：
 
 | 项 | 说明 | 状态 |
 |---|---|---|
-| **引擎类型** | 简短的小写标识，如 `teclaw`。它会作为 `engine_type` 出现在每份 artifact 里。 | 与 Avernet 团队商定 |
-| **访问地址** | 平台调用的 HTTPS 地址。本指南中的路径都相对于它。 | **待确认** |
-| **鉴权** | 平台如何向引擎证明身份，以及引擎如何向平台证明身份。 | **待确认** |
-| **bot 寻址** | 一个服务承载多个 bot 时，一次请求如何指定某个 bot。 | **待确认** |
+| **引擎类型** | 简短的小写标识，如 `teclaw`。它会作为 `engine_type` 出现在每份 artifact 里，也出现在对话 WebSocket 路径中。 | 与 Avernet 团队商定 |
+| **生命周期接口地址** | BaaS 发送生命周期调用（第 2 步）的地址。 | **待确认** |
+| **单 bot 地址** | BaaS 如何拼出某个 bot 的 HTTP 与 WebSocket 地址（第 3、5、6 步）。 | **待确认** |
+| **鉴权** | BaaS 与 Backend 如何向引擎证明身份，以及引擎回调 BaaS 时如何证明身份。 | **待确认** |
 
-**当前机制（平台托管的引擎）。**目前外部引擎的容器由平台托管，经平台的代理网关
-访问。容器收到的请求带 `x-proxypass-token` 请求头；bot 由请求体中的 `bot_id`
-字段标识（skill 包上传则用 `x-target-bot-id` 请求头）。对于**你们自己托管**的
-引擎，访问地址的注册方式和鉴权方案都还没有设计。请在开始第 2 步之前与 Avernet
-团队确定，因为它们决定了下文每个请求的请求头。
+**当前机制（平台托管的引擎）。**目前 BaaS 经平台的代理网关访问 bot：以
+`TECLAW_{bot_id}@{template_id}:{port}`（默认端口 `20003`）寻址，并给调用方一个
+令牌，调用方放在 `x-proxypass-token` 请求头里发送。对于**你们自己托管**的引擎，
+地址与鉴权方案都还没有设计。请在开始其他步骤之前与 Avernet 团队确定，因为它们
+决定了下文每个请求的请求头。
 
 ---
 
-## 第 2 步：接收 bot 配置
+## 第 2 步：实现 bot 生命周期接口
+
+BaaS 通过这组接口管理你们平台上的 bot。bot 的创建与删除只通过这里进行。
+
+> **待确认：**这些操作的路径以及请求、响应体尚未公布。本节说明每个操作必须做
+> 什么，具体的报文格式由 Avernet BaaS 团队提供。
+
+### 操作
+
+| 操作 | 你们平台要做的事 | 返回 |
+|---|---|---|
+| **创建** | 按请求中的配置创建 bot（其中包含该 bot 的第一份 artifact，见第 4 步）并启动。bot 就绪前必须应用完整份 artifact（[R4](#应用-artifact-的规则)）。 | 你们的 bot ID 与状态，或任务 ID（异步） |
+| **更新** | 把新配置应用到已有 bot。应用规则与第 3 步相同。 | bot ID 与状态，或任务 ID（异步） |
+| **重启** | 重启 bot。BaaS 以「用它上次发送的配置再更新一次」实现，因此必须幂等（[R3](#应用-artifact-的规则)）。 | bot ID 与状态，或任务 ID（异步） |
+| **删除** | 停止并删除 bot。 | bot ID 与状态 |
+| **查询** | 返回 bot 当前的状态、当前配置和出站规则。 | bot 信息 |
+| **更新出站规则** | 替换 bot 的出站请求规则（例如给 bot 发出的请求加上哪些请求头）。目前是 `PUT /api/v1/bot/{bot_id}/operationRules`，请求体形如 `{"header_operation_rules": [...]}`。规则也可以只针对某一个会话追加。 | 是否接受 |
+
+### 异步操作与回调
+
+创建、更新、重启可能耗时较长，因此是异步的：
+
+1. BaaS 在请求中带上 `callback_context`：
+
+   ```json
+   {
+     "callback_url": "https://<baas>/api/v1/publish/teclaw-callback",
+     "publish_id": "123",
+     "device_uuid": "dev-...",
+     "tenant": "default",
+     "operator": "u1"
+   }
+   ```
+
+2. 你们的平台立即返回**任务 ID**、操作类型（`CREATE`、`UPDATE` 或 `DELETE`）、
+   bot ID（如已知）以及进行中的状态（如 `RUNNING`）。
+3. 操作完成后，你们的平台把结果 `POST` 到 `callback_url`：
+
+   ```json
+   {
+     "success": true,
+     "data": {
+       "schema_version": 1,
+       "callback_context": { "...": "第 1 步中的 callback_context，原样返回" },
+       "task_id": "task-...",
+       "operation": "CREATE",
+       "task_status": "SUCCESS",
+       "bot_id": "b_01KV5KRZG3FGC3H06RE5T9YRT0",
+       "version": 7
+     },
+     "error": null,
+     "error_code": null
+   }
+   ```
+
+| 字段 | 必有 | 说明 |
+|---|---|---|
+| `success` | 是 | 操作成功为 `true`。 |
+| `data.schema_version` | 是 | 回调格式的版本。取值**待确认**。 |
+| `data.callback_context` | 是 | BaaS 发来的 `callback_context`，**原样返回**。必须包含 `device_uuid`、`publish_id`、`tenant`，否则 BaaS 以 `400` 拒绝回调。 |
+| `data.task_id` | 是 | 第 2 步返回的任务 ID。 |
+| `data.operation` | 是 | `CREATE`、`UPDATE` 或 `DELETE`。 |
+| `data.task_status` | 是 | 终态，如 `SUCCESS` 或 `FAILED`。 |
+| `data.bot_id`、`data.version` | 否 | 你们的 bot ID，以及已应用的配置版本。 |
+| `error`、`error_code` | 否 | `success` 为 `false` 时说明出错原因。 |
+
+BaaS 不认识该设备时返回 `404`。回调是幂等的：没送达的回调可以放心重试。BaaS
+如何对回调鉴权**待确认**（见第 1 步）。
+
+---
+
+## 第 3 步：接收 bot 配置
 
 ### `POST /api/v1/bot/apply`
 
-bot 配置每次变化时平台都会调用此接口：创建 bot、用户编辑 skill / MCP 服务 /
-身份文件 / 资源文件 / 渠道、发布 bot。
+bot 运行期间，配置每变化一次，Backend 都会调用 bot 上的这个接口：用户编辑
+skill / MCP 服务 / 身份文件 / 资源文件 / 渠道，或应用配置清单（manifest）时。
+Backend 会先向 BaaS 获取 bot 的地址和令牌。
 
 **请求**
 
@@ -108,7 +206,7 @@ Content-Type: application/json
 {
   "bot_id": "b_01KV5KRZG3FGC3H06RE5T9YRT0",
   "operation": "UPDATE",
-  "bot_config": { "...": "artifact，见第 3 步" }
+  "bot_config": { "...": "artifact，见第 4 步" }
 }
 ```
 
@@ -116,7 +214,7 @@ Content-Type: application/json
 |---|---|
 | `bot_id` | 本次配置对应的 bot。 |
 | `operation` | 目前固定为 `"UPDATE"`。遇到不认识的值按错误处理。 |
-| `bot_config` | 完整的 artifact（见[第 3 步](#第-3-步理解配置-artifact)）。 |
+| `bot_config` | 完整的 artifact（见[第 4 步](#第-4-步理解配置-artifact)）。 |
 
 **响应**
 
@@ -128,13 +226,13 @@ Content-Type: application/json
 目前平台不读取响应体。建议使用标准信封（见[通用约定](#通用约定)）：
 `{"success": true}`。
 
-**首次配置。**对于平台托管的引擎，第一份 artifact 在容器创建时交给容器，早于
-bot 启动。自托管引擎如何收到第一份 artifact **待确认**。在此之前，请预期会收到
-一个未见过的 bot 的 `POST /api/v1/bot/apply`，届时创建该 bot。
+bot 的**第一份** artifact 不经过此接口，而是随生命周期的**创建**调用到达（第 2
+步）。两条路径携带的是同一种 artifact，适用同样的规则。
 
 ### 应用 artifact 的规则
 
-以下五条是契约的核心，引擎必须全部遵守。
+以下五条是契约的核心，适用于每一份 artifact，无论它经生命周期调用还是经
+`/api/v1/bot/apply` 到达。
 
 | # | 规则 | 含义 |
 |---|---|---|
@@ -189,7 +287,7 @@ artifact 可能带一个 `ownership` 映射，按类目说明平台给出的列�
 
 ---
 
-## 第 3 步：理解配置 artifact
+## 第 4 步：理解配置 artifact
 
 artifact 的正式定义是 JSON Schema
 [`artifact.schema.json`](../../src/agentclaw/community/kernel/bot_config/artifact.schema.json)，
@@ -252,7 +350,7 @@ artifact 的正式定义是 JSON Schema
 | `mcp.servers` | 是 | bot 可用的 MCP 服务。 |
 | `cli_tools` | 否 | 要放到 Agent `PATH` 上的命令行工具。 |
 | `engine_overrides` | 是 | bot 级设置（如渠道），叠加在引擎自己的基础配置之上。基础配置文件归引擎所有，平台从不下发。 |
-| `ownership` | 否 | 各类目的归属，见[第 2 步](#每个类目归谁管理ownership)。 |
+| `ownership` | 否 | 各类目的归属，见[第 3 步](#每个类目归谁管理ownership)。 |
 | `engine_ext` | 是 | 归引擎所有的自由 JSON，见下文。 |
 
 ### 文件引用（`skills`、`identity_files`、`resources`）
@@ -322,10 +420,10 @@ store 的路径。**文件在引擎内落到哪里由你们决定。**
 
 ---
 
-## 第 4 步：实现文件接口
+## 第 5 步：实现文件接口
 
-用户可以在工作台里浏览和编辑 bot 的文件。平台通过引擎上的文件接口完成这些操作，
-每个文件一次请求。运行中的 bot 是其文件的真相源，所以这些编辑不经过
+用户可以在工作台里浏览和编辑 bot 的文件。Backend 通过 bot 上的文件接口完成这些
+操作，每个文件一次请求。运行中的 bot 是其文件的真相源，所以这些编辑不经过
 `/api/v1/bot/apply`。
 
 ### 路径
@@ -373,10 +471,11 @@ store 的路径。**文件在引擎内落到哪里由你们决定。**
 
 ---
 
-## 第 5 步：实现运行时接口
+## 第 6 步：实现运行时接口
 
-这些接口支撑工作台中的对话和 bot 管理。平台把用户请求转发给引擎并返回引擎的
-应答，所以引擎没有实现的接口，对应功能在你们的 bot 上就不可用。
+这些接口支撑对话、bot 管理和任务运行。Backend 转发用户在工作台发起的请求，BaaS
+也用同一组接口运行定时任务与协作任务。引擎没有实现的接口，对应功能在你们的 bot
+上就不可用。
 
 | 接口 | 用途 |
 |---|---|
@@ -394,6 +493,12 @@ store 的路径。**文件在引擎内落到哪里由你们决定。**
 部分代理会拒绝路径中的冒号，因此平台可能以**去掉填充的 base64url 编码**发送 ID。
 所有会话路由都要同时接受这两种形式。
 
+**BaaS 发起的任务运行。**BaaS 在 bot 上运行任务时，会自己指定会话 ID，格式为
+`agent:main:default:{run_id}:user:{user_id}`。它先查询该会话
+（`GET /api/sessions/{session_id}`），不存在则调用 `POST /api/sessions` 并
+**传入这个会话 ID** 来创建，再通过 WebSocket 对话。因此 `POST /api/sessions`
+必须接受调用方指定的会话 ID。
+
 平台对这组接口的参考实现是 Avernet 引擎适配层（`engine/adapter/`，见其
 [开源指南](../../../../engine/adapter/docs/open-source-guide.zh-CN.md)）。各运行时
 接口的具体请求/响应结构，以及对话 WebSocket 的帧协议，**待与 Avernet 团队确认**。
@@ -401,18 +506,27 @@ store 的路径。**文件在引擎内落到哪里由你们决定。**
 
 ---
 
-## 第 6 步（可选）：加入群体协作（BCN）
+## 第 7 步（可选）：加入群体协作（BCN）
 
 要让 bot 参与多 bot 群聊、路由与协作，需要让每个 bot 通过 WebSocket 连接 Bot
-协作网络（BCN）。这一步与第 2 至 5 步相互独立，在
+协作网络（BCN）。这一步与其他步骤相互独立，在
 [Bot 接入指南](../../../../docs/bot-integration.zh-CN.md)中有完整说明和可运行的
 快速入门。
 
 ---
 
-## 第 7 步：联调自查
+## 第 8 步：联调自查
 
 上线前请逐项检查。Avernet 团队联调时也会验证同样的项目。
+
+**生命周期（BaaS）**
+
+- [ ] 创建后 bot 启动时第一份 artifact 已完整应用，随后发送 `SUCCESS` 回调。
+- [ ] 更新与重启会应用配置并发送回调。
+- [ ] 操作失败时发送 `success: false`、`task_status` 为 `FAILED` 的回调。
+- [ ] 每个回调都原样返回 `callback_context`。
+- [ ] 删除会停止并移除 bot。
+- [ ] 查询返回 bot 的状态和当前配置。
 
 **应用 artifact**
 
@@ -443,6 +557,7 @@ store 的路径。**文件在引擎内落到哪里由你们决定。**
 - [ ] 读取不存在的文件返回 `404`。
 - [ ] `remove` 能删除整个目录。
 - [ ] 会话路由同时接受原始与 base64url 编码的会话 ID。
+- [ ] `POST /api/sessions` 能以调用方指定的 ID 创建会话。
 
 ---
 
@@ -471,14 +586,14 @@ store 的路径。**文件在引擎内落到哪里由你们决定。**
 
 上线前需与 Avernet 团队确定：
 
-| # | 事项 |
-|---|---|
-| O1 | 自托管引擎如何向平台注册访问地址。 |
-| O2 | 平台如何向引擎鉴权，以及引擎如何向平台鉴权。 |
-| O3 | 一个服务承载多个 bot 时，一次请求如何指定某个 bot。 |
-| O4 | 自托管引擎如何收到 bot 的第一份 artifact（以及如何得知 bot 已被删除）。 |
-| O5 | 引擎如何获得内容存储的读权限。 |
-| O6 | 运行时接口响应结构及对话 WebSocket 协议的书面规范。 |
+| # | 事项 | 负责方 |
+|---|---|---|
+| O1 | 自托管引擎如何注册生命周期接口地址与单 bot 地址。 | BaaS |
+| O2 | BaaS 与 Backend 如何向引擎鉴权，以及引擎回调 BaaS 时如何鉴权。 | BaaS |
+| O3 | 一个服务承载多个 bot 时，一次请求如何指定某个 bot。 | BaaS |
+| O4 | 生命周期接口的路径与请求、响应体，以及回调的 `schema_version` 取值。 | BaaS |
+| O5 | 引擎如何获得内容存储的读权限。 | Backend |
+| O6 | 运行时接口响应结构及对话 WebSocket 协议的书面规范。 | Backend、引擎 |
 
 ---
 
@@ -487,7 +602,7 @@ store 的路径。**文件在引擎内落到哪里由你们决定。**
 | 文档 | 内容 |
 |---|---|
 | [`artifact.schema.json`](../../src/agentclaw/community/kernel/bot_config/artifact.schema.json) | artifact 的正式定义。 |
-| [跨引擎收敛语义契约](../bot-config-manifest/engine-convergence-contract.zh-CN.md) | 第 2 步应用规则的完整论证。 |
+| [跨引擎收敛语义契约](../bot-config-manifest/engine-convergence-contract.zh-CN.md) | 第 3 步应用规则的完整论证。 |
 | [CLI 工具契约](../bot-config-manifest/teclaw-cli-contract.zh-CN.md) | `cli_tools` 的完整契约及用例。 |
 | [Bot 接入指南](../../../../docs/bot-integration.zh-CN.md) | 将 bot 接入 BCN 参与群体协作。 |
 | [引擎适配层开源指南](../../../../engine/adapter/docs/open-source-guide.zh-CN.md) | 运行时接口的参考实现。 |

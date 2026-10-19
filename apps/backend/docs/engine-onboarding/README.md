@@ -8,13 +8,14 @@ bots in the Avernet workbench like any other bot. Your engine runs the agent.
 
 If you only want your bots to join multi-bot group chat, you can skip most of
 this guide and read [Bot Integration Guide](../../../../docs/bot-integration.md)
-instead (see [Step 6](#step-6-optional-join-group-collaboration-bcn)).
+instead (see [Step 7](#step-7-optional-join-group-collaboration-bcn)).
 
-> **Status.** Steps 2 to 5 describe the contract the platform already uses with
-> the first external engine (teclaw). Step 1 (registering an engine that you
-> host yourself) is **not finalized yet**. The items marked **To be confirmed**
-> must be agreed with the Avernet team before you go live. See
-> [Open items](#open-items).
+> **Status.** This guide describes the contract the platform already uses with
+> the first external engine (teclaw). Two parts are **not finalized yet**: how an
+> engine that you host yourself is registered and authenticated, and the exact
+> request format of the lifecycle API in Step 2. Items marked
+> **To be confirmed** must be agreed with the Avernet team before you go live.
+> See [Open items](#open-items).
 
 ---
 
@@ -22,13 +23,14 @@ instead (see [Step 6](#step-6-optional-join-group-collaboration-bcn)).
 
 - [How the integration works](#how-the-integration-works)
 - [Checklist](#checklist)
-- [Step 1: Register your engine](#step-1-register-your-engine)
-- [Step 2: Accept bot configuration (`POST /api/v1/bot/apply`)](#step-2-accept-bot-configuration)
-- [Step 3: Understand the configuration artifact](#step-3-understand-the-configuration-artifact)
-- [Step 4: Implement the file endpoints](#step-4-implement-the-file-endpoints)
-- [Step 5: Implement the runtime endpoints](#step-5-implement-the-runtime-endpoints)
-- [Step 6 (optional): Join group collaboration (BCN)](#step-6-optional-join-group-collaboration-bcn)
-- [Step 7: Verify your integration](#step-7-verify-your-integration)
+- [Step 1: Register your engine with BaaS](#step-1-register-your-engine-with-baas)
+- [Step 2: Implement the bot lifecycle API (called by BaaS)](#step-2-implement-the-bot-lifecycle-api)
+- [Step 3: Accept bot configuration (`POST /api/v1/bot/apply`)](#step-3-accept-bot-configuration)
+- [Step 4: Understand the configuration artifact](#step-4-understand-the-configuration-artifact)
+- [Step 5: Implement the file endpoints](#step-5-implement-the-file-endpoints)
+- [Step 6: Implement the runtime endpoints](#step-6-implement-the-runtime-endpoints)
+- [Step 7 (optional): Join group collaboration (BCN)](#step-7-optional-join-group-collaboration-bcn)
+- [Step 8: Verify your integration](#step-8-verify-your-integration)
 - [Conventions](#conventions)
 - [Open items](#open-items)
 - [Reference](#reference)
@@ -37,23 +39,48 @@ instead (see [Step 6](#step-6-optional-join-group-collaboration-bcn)).
 
 ## How the integration works
 
+Two Avernet services call your engine:
+
+- **BaaS** manages each bot's lifecycle and routing. It asks your platform to
+  create, update, restart and delete bots, and it works out the URL and token
+  for reaching each bot. It also runs scheduled and collaborative tasks on your
+  bots.
+- **Backend** owns each bot's configuration and the workbench. It sends
+  configuration and file edits to a running bot, and forwards users' chat and
+  session requests to it.
+
 ```text
- Avernet workbench (users)
-          │
-          ▼
- Avernet platform ──── 1. POST /api/v1/bot/apply  (whole bot config) ───▶ ┐
-   (backend)      ──── 2. /api/v1/file/*          (edit files)       ───▶ │  Your engine
-                  ──── 3. /api/sessions, /api/{engine}/ws (chat)     ───▶ │  (one HTTP service,
-                                                                          │   one or many bots)
- Content stores (OSS) ◀──── your engine downloads skills / files ──────── ┘
+                      Avernet workbench (users)
+                                │
+                                ▼
+ ┌───────────────────────── Avernet platform ─────────────────────────┐
+ │                                                                     │
+ │  Backend ── asks BaaS "where is bot X?" ──▶ BaaS                    │
+ │  (config, files, chat)                      (lifecycle, routing,    │
+ │                                              task runs)             │
+ └───────┬────────────────────────────────────────────┬────────────────┘
+         │                                            │
+         │ A. per-bot calls (URL + token from BaaS):  │ B. lifecycle calls:
+         │    POST /api/v1/bot/apply                  │    create / update / restart /
+         │    /api/v1/file/*                          │    delete / get a bot
+         │    /api/sessions, /api/{engine}/ws         │ C. task runs over /api/{engine}/ws
+         ▼                                            ▼
+ ┌──────────────────────────── Your engine ───────────────────────────┐
+ │  Lifecycle API (Step 2) ── on completion, POST a callback ──▶ BaaS │
+ │  Per-bot API (Steps 3, 5, 6)                                        │
+ └────────────────────────────────┬────────────────────────────────────┘
+                                  │ downloads skills / files
+                                  ▼
+                       Content stores (OSS)
 ```
 
 You need to understand three ideas:
 
 1. **The platform owns the configuration and your engine applies it.** Users
    manage a bot's skills, MCP servers, identity files, resources and CLI tools
-   in Avernet. Whenever any of them changes, the platform builds the bot's
-   **complete** configuration (the *artifact*) and sends it to your engine.
+   in Avernet. The platform builds the bot's **complete** configuration (the
+   *artifact*) and sends it to your engine: first when the bot is created, then
+   every time the configuration changes.
 2. **The artifact is a snapshot, not a diff.** Each delivery describes the
    whole desired state. Your engine makes the bot match it exactly.
 3. **Large content is passed by reference.** The artifact does not contain file
@@ -64,47 +91,126 @@ You need to understand three ideas:
 
 ## Checklist
 
-| # | What you do | Required |
-|---|---|---|
-| 1 | Register your engine (engine type, base URL, authentication) | Yes |
-| 2 | Implement `POST /api/v1/bot/apply` and apply artifacts with full-replace semantics | Yes |
-| 3 | Download artifact content from the content stores | Yes |
-| 4 | Implement the file endpoints (`/api/v1/file/*`) | Yes, for file editing in the workbench |
-| 5 | Implement the runtime endpoints (health, sessions, chat) | Yes, for chat in the workbench |
-| 6 | Connect to BCN | Only for multi-bot collaboration |
-| 7 | Pass the verification checklist | Yes |
+| # | What you do | Called by | Required |
+|---|---|---|---|
+| 1 | Register your engine (engine type, base URL, authentication) | — | Yes |
+| 2 | Implement the bot lifecycle API and send completion callbacks | BaaS | Yes |
+| 3 | Implement `POST /api/v1/bot/apply` and apply artifacts with full-replace semantics | Backend | Yes |
+| 4 | Download artifact content from the content stores | — | Yes |
+| 5 | Implement the file endpoints (`/api/v1/file/*`) | Backend | Yes, for file editing in the workbench |
+| 6 | Implement the runtime endpoints (health, sessions, chat) | Backend, BaaS | Yes, for chat and task runs |
+| 7 | Connect to BCN | — | Only for multi-bot collaboration |
+| 8 | Pass the verification checklist | — | Yes |
 
 ---
 
-## Step 1: Register your engine
+## Step 1: Register your engine with BaaS
 
-To route requests to your engine, the platform needs:
+BaaS is the single place that knows how to reach your engine. Every other
+Avernet service asks BaaS for a bot's address and token before calling it. To
+register, BaaS needs:
 
 | Item | Description | Status |
 |---|---|---|
-| **Engine type** | A short, lowercase identifier, such as `teclaw`. It appears as `engine_type` in every artifact. | Agree with the Avernet team |
-| **Base URL** | The HTTPS address the platform calls. All paths in this guide are relative to it. | **To be confirmed** |
-| **Authentication** | How the platform proves its identity to your engine, and how your engine identifies itself to the platform. | **To be confirmed** |
-| **Bot addressing** | How one request names one bot when your service hosts many bots. | **To be confirmed** |
+| **Engine type** | A short, lowercase identifier, such as `teclaw`. It appears as `engine_type` in every artifact and in the chat WebSocket path. | Agree with the Avernet team |
+| **Lifecycle API address** | Where BaaS sends lifecycle calls (Step 2). | **To be confirmed** |
+| **Per-bot address** | How BaaS builds the HTTP and WebSocket URL of one bot (Steps 3, 5, 6). | **To be confirmed** |
+| **Authentication** | How BaaS and Backend prove their identity to your engine, and how your engine proves its identity when it calls BaaS back. | **To be confirmed** |
 
-**Current mechanism (platform-hosted engines).** Today, external engine
-containers are hosted by the platform and reached through the platform's proxy
-gateway. Each container receives requests with an `x-proxypass-token` header,
-and the bot is identified by the `bot_id` field in the request body (or the
-`x-target-bot-id` header for skill packages). For an engine that **you host
-yourself**, the base URL registration and the authentication scheme have not
-been designed yet. Agree on them with the Avernet team before you start
-Step 2, because they decide the headers on every request below.
+**Current mechanism (platform-hosted engines).** Today, BaaS reaches a bot
+through the platform's proxy gateway. It addresses the bot as
+`TECLAW_{bot_id}@{template_id}:{port}` (default port `20003`) and gives callers
+a token, which they send in an `x-proxypass-token` header. For an engine that
+**you host yourself**, the address and authentication scheme have not been
+designed yet. Agree on them with the Avernet team before you start the other
+steps, because they decide the headers on every request below.
 
 ---
 
-## Step 2: Accept bot configuration
+## Step 2: Implement the bot lifecycle API
+
+BaaS calls this API to manage bots on your platform. It is the only way bots
+are created and deleted.
+
+> **To be confirmed:** the paths and request and response bodies of these
+> operations are not published yet. This section describes what each operation
+> must do. The Avernet BaaS team will provide the wire format.
+
+### Operations
+
+| Operation | What your platform does | Returns |
+|---|---|---|
+| **Create** | Create a bot from the configuration in the request (it contains the bot's first artifact, see Step 4) and start it. Apply the whole artifact before the bot is ready ([R4](#rules-for-applying-an-artifact)). | Your bot ID and status, or a task ID (async) |
+| **Update** | Apply a new configuration to an existing bot. Same apply rules as Step 3. | Bot ID and status, or a task ID (async) |
+| **Restart** | Restart a bot. BaaS implements this as an update with the last configuration it sent, so it must be idempotent ([R3](#rules-for-applying-an-artifact)). | Bot ID and status, or a task ID (async) |
+| **Delete** | Stop the bot and delete it. | Bot ID and status |
+| **Get** | Return the bot's current status, its current configuration and its outbound rules. | Bot info |
+| **Update outbound rules** | Replace the bot's outbound request rules (for example, headers to add to the bot's outgoing requests). Today this is `PUT /api/v1/bot/{bot_id}/operationRules` with a body such as `{"header_operation_rules": [...]}`. A rule can also be added for one session only. | Accepted or not |
+
+### Asynchronous operations and callbacks
+
+Create, update and restart can take a while, so they are asynchronous:
+
+1. BaaS includes a `callback_context` in the request:
+
+   ```json
+   {
+     "callback_url": "https://<baas>/api/v1/publish/teclaw-callback",
+     "publish_id": "123",
+     "device_uuid": "dev-...",
+     "tenant": "default",
+     "operator": "u1"
+   }
+   ```
+
+2. Your platform replies at once with a **task ID**, the operation (`CREATE`,
+   `UPDATE` or `DELETE`), the bot ID (if known) and an in-progress status such
+   as `RUNNING`.
+3. When the operation finishes, your platform `POST`s the result to
+   `callback_url`:
+
+   ```json
+   {
+     "success": true,
+     "data": {
+       "schema_version": 1,
+       "callback_context": { "...": "the callback_context from step 1, unchanged" },
+       "task_id": "task-...",
+       "operation": "CREATE",
+       "task_status": "SUCCESS",
+       "bot_id": "b_01KV5KRZG3FGC3H06RE5T9YRT0",
+       "version": 7
+     },
+     "error": null,
+     "error_code": null
+   }
+   ```
+
+| Field | Required | Description |
+|---|---|---|
+| `success` | Yes | `true` if the operation succeeded. |
+| `data.schema_version` | Yes | Version of this callback format. The value to use is **To be confirmed**. |
+| `data.callback_context` | Yes | The `callback_context` BaaS sent, **unchanged**. It must contain `device_uuid`, `publish_id` and `tenant`, or BaaS rejects the callback with `400`. |
+| `data.task_id` | Yes | The task ID you returned in step 2. |
+| `data.operation` | Yes | `CREATE`, `UPDATE` or `DELETE`. |
+| `data.task_status` | Yes | Final status, for example `SUCCESS` or `FAILED`. |
+| `data.bot_id`, `data.version` | No | Your bot ID and the configuration version you applied. |
+| `error`, `error_code` | No | What went wrong, when `success` is `false`. |
+
+BaaS answers `404` if it doesn't know the device. Callbacks are idempotent: you
+can safely retry one that failed to arrive. How BaaS authenticates your
+callback is **To be confirmed** (see Step 1).
+
+---
+
+## Step 3: Accept bot configuration
 
 ### `POST /api/v1/bot/apply`
 
-The platform calls this endpoint every time a bot's configuration changes: when
-the bot is created, when a user edits skills, MCP servers, identity files,
-resources or channels, and when a bot is published.
+While a bot is running, Backend calls this endpoint on the bot every time its
+configuration changes: when a user edits skills, MCP servers, identity files,
+resources or channels, or applies a configuration manifest. Backend gets the
+bot's URL and token from BaaS first.
 
 **Request**
 
@@ -117,7 +223,7 @@ Content-Type: application/json
 {
   "bot_id": "b_01KV5KRZG3FGC3H06RE5T9YRT0",
   "operation": "UPDATE",
-  "bot_config": { "...": "the artifact, see Step 3" }
+  "bot_config": { "...": "the artifact, see Step 4" }
 }
 ```
 
@@ -125,7 +231,7 @@ Content-Type: application/json
 |---|---|
 | `bot_id` | The bot this configuration is for. |
 | `operation` | Currently always `"UPDATE"`. Treat any value you don't recognize as an error. |
-| `bot_config` | The complete artifact (see [Step 3](#step-3-understand-the-configuration-artifact)). |
+| `bot_config` | The complete artifact (see [Step 4](#step-4-understand-the-configuration-artifact)). |
 
 **Response**
 
@@ -138,16 +244,14 @@ Content-Type: application/json
 The response body is not read today. We recommend the standard envelope (see
 [Conventions](#conventions)): `{"success": true}`.
 
-**First configuration.** For platform-hosted engines, the first artifact is
-handed to the container when it is created, before the bot starts. How a
-self-hosted engine receives its first artifact is **To be confirmed**. Until
-then, expect the first `POST /api/v1/bot/apply` to arrive for a bot you have not
-seen before, and create the bot when it does.
+A bot's **first** artifact doesn't come through this endpoint: it arrives in
+the lifecycle **Create** call (Step 2). Both paths carry the same artifact, and
+the same rules apply.
 
 ### Rules for applying an artifact
 
-These five rules are the core of the contract. Your engine must follow all of
-them.
+These five rules are the core of the contract. They apply to every artifact,
+whether it arrives through a lifecycle call or through `/api/v1/bot/apply`.
 
 | # | Rule | What it means |
 |---|---|---|
@@ -206,7 +310,7 @@ truth for its files. Applying a bot configuration manifest produces
 
 ---
 
-## Step 3: Understand the configuration artifact
+## Step 4: Understand the configuration artifact
 
 The artifact's formal definition is the JSON Schema
 [`artifact.schema.json`](../../src/agentclaw/community/kernel/bot_config/artifact.schema.json).
@@ -269,7 +373,7 @@ Validate against it in your tests. This section explains the fields.
 | `mcp.servers` | Yes | MCP servers the bot can use. |
 | `cli_tools` | No | Command-line tools to put on the agent's `PATH`. |
 | `engine_overrides` | Yes | Bot-specific settings (for example channels) to apply on top of your engine's own base configuration. Your base configuration file belongs to you; the platform never sends it. |
-| `ownership` | No | Who owns each category. See [Step 2](#who-owns-each-category-ownership). |
+| `ownership` | No | Who owns each category. See [Step 3](#who-owns-each-category-ownership). |
 | `engine_ext` | Yes | Free-form JSON that belongs to your engine. See below. |
 
 ### File references (`skills`, `identity_files`, `resources`)
@@ -344,11 +448,11 @@ access) is **To be confirmed** for self-hosted engines.
 
 ---
 
-## Step 4: Implement the file endpoints
+## Step 5: Implement the file endpoints
 
-Users can browse and edit a bot's files in the workbench. The platform does
-this through file endpoints on your engine, one request per file. The running
-bot is the source of truth for its files, so these edits don't go through
+Users can browse and edit a bot's files in the workbench. Backend does this
+through file endpoints on the bot, one request per file. The running bot is the
+source of truth for its files, so these edits don't go through
 `/api/v1/bot/apply`.
 
 ### Paths
@@ -398,11 +502,12 @@ package, `413` if it's too large.
 
 ---
 
-## Step 5: Implement the runtime endpoints
+## Step 6: Implement the runtime endpoints
 
-These endpoints power chat and bot management in the workbench. The platform
-forwards a user's request to your engine and returns your answer, so a feature
-whose endpoint you don't implement is unavailable for your bots.
+These endpoints power chat, bot management and task runs. Backend forwards
+users' requests from the workbench, and BaaS uses the same endpoints to run
+scheduled and collaborative tasks. A feature whose endpoint you don't implement
+is unavailable for your bots.
 
 | Endpoint | Purpose |
 |---|---|
@@ -421,6 +526,13 @@ whose endpoint you don't implement is unavailable for your bots.
 path, so the platform may send the ID **base64url-encoded without padding**.
 Accept both forms on every session route.
 
+**Task runs from BaaS.** When BaaS runs a task on a bot, it picks the session ID
+itself, in the form `agent:main:default:{run_id}:user:{user_id}`. It first asks
+for that session (`GET /api/sessions/{session_id}`). If it doesn't exist, BaaS
+creates it with `POST /api/sessions`, **passing that session ID**, then chats
+over the WebSocket. So `POST /api/sessions` must accept a session ID chosen by
+the caller.
+
 The platform's reference implementation of this surface is the Avernet engine
 adapter (`engine/adapter/`; see its
 [Open-Source Guide](../../../../engine/adapter/docs/open-source-guide.md)). The
@@ -430,20 +542,31 @@ written spec exists, use the engine adapter as the reference.
 
 ---
 
-## Step 6 (optional): Join group collaboration (BCN)
+## Step 7 (optional): Join group collaboration (BCN)
 
 To let your bots take part in multi-bot group chat, routing and collaboration,
 connect each bot to the Bot Coordination Network (BCN) over WebSocket. This is
-independent of Steps 2 to 5 and fully documented in the
+independent of the other steps and fully documented in the
 [Bot Integration Guide](../../../../docs/bot-integration.md), with a runnable
 quick start.
 
 ---
 
-## Step 7: Verify your integration
+## Step 8: Verify your integration
 
 Run these checks before going live. The Avernet team runs the same checks
 during joint testing.
+
+**Lifecycle (BaaS)**
+
+- [ ] Create starts a bot with its first artifact fully applied, then sends a
+      `SUCCESS` callback.
+- [ ] Update and restart apply the configuration and send a callback.
+- [ ] A failed operation sends a callback with `success: false` and
+      `task_status` `FAILED`.
+- [ ] Every callback echoes `callback_context` unchanged.
+- [ ] Delete stops and removes the bot.
+- [ ] Get returns the bot's status and current configuration.
 
 **Applying artifacts**
 
@@ -476,6 +599,7 @@ during joint testing.
 - [ ] `read` returns `404` for a missing file.
 - [ ] `remove` deletes a whole directory.
 - [ ] Session routes accept both raw and base64url-encoded session IDs.
+- [ ] `POST /api/sessions` creates a session with a caller-chosen ID.
 
 ---
 
@@ -505,14 +629,14 @@ HTTPS, don't log full payloads and don't keep secrets unencrypted.
 
 Agree on these with the Avernet team before going live:
 
-| # | Item |
-|---|---|
-| O1 | How a self-hosted engine registers its base URL with the platform. |
-| O2 | How the platform authenticates to your engine, and how your engine authenticates to the platform. |
-| O3 | How one request addresses one bot when your service hosts many bots. |
-| O4 | How a self-hosted engine receives a bot's first artifact (and learns that a bot was deleted). |
-| O5 | How your engine gets read access to the content stores. |
-| O6 | A written spec of the runtime endpoints' response shapes and the chat WebSocket protocol. |
+| # | Item | Owner |
+|---|---|---|
+| O1 | How a self-hosted engine registers its lifecycle API address and per-bot addresses. | BaaS |
+| O2 | How BaaS and Backend authenticate to your engine, and how your engine authenticates its callbacks to BaaS. | BaaS |
+| O3 | How one request addresses one bot when your service hosts many bots. | BaaS |
+| O4 | The paths and request and response bodies of the lifecycle API, and the callback `schema_version` value. | BaaS |
+| O5 | How your engine gets read access to the content stores. | Backend |
+| O6 | A written spec of the runtime endpoints' response shapes and the chat WebSocket protocol. | Backend, Engine |
 
 ---
 
@@ -521,7 +645,7 @@ Agree on these with the Avernet team before going live:
 | Document | Contents |
 |---|---|
 | [`artifact.schema.json`](../../src/agentclaw/community/kernel/bot_config/artifact.schema.json) | The formal artifact definition. |
-| [Engine convergence contract](../bot-config-manifest/engine-convergence-contract.zh-CN.md) (Chinese) | The full reasoning behind the apply rules in Step 2. |
+| [Engine convergence contract](../bot-config-manifest/engine-convergence-contract.zh-CN.md) (Chinese) | The full reasoning behind the apply rules in Step 3. |
 | [CLI tools contract](../bot-config-manifest/teclaw-cli-contract.zh-CN.md) (Chinese) | The full `cli_tools` contract, with use cases. |
 | [Bot Integration Guide](../../../../docs/bot-integration.md) | Connecting bots to BCN for group collaboration. |
 | [Engine adapter Open-Source Guide](../../../../engine/adapter/docs/open-source-guide.md) | The reference implementation of the runtime surface. |
