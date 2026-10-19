@@ -308,11 +308,13 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         fail('INVALID_INPUT', 'Invalid issue preview scope');
       }
       const snapshot = await this.readSnapshot(workflowId, includeHistorical);
-      const versionItems=snapshot.items.filter(item=>inVersionScope(item,activeSnapshot,versionScope));
+      if (query.snapshotKey !== undefined && !requiredText(query.snapshotKey, 2048)) fail('INVALID_INPUT', 'Invalid snapshot key');
+      const versionItems=snapshot.items.filter(item=>inVersionScope(item,activeSnapshot,versionScope) && (query.snapshotKey === undefined || (itemSnapshotKey(item) ?? 'unresolved') === query.snapshotKey));
       const versionInputDigest=activeSnapshot===undefined?snapshot.inputDigest:versionDigest(versionItems);
+      // Preserve the full model work unit; signature filters apply to presented cards.
       let presentation = versionItems;
       if (!query.rawItems && this.proposals && this.execution) {
-        try { presentation = await this.proposals.present(workflowId, versionItems, this.sources.activeSnapshot?undefined:await this.execution.resolveBaseline(workflowId)); }
+        try { presentation = await this.proposals.present(workflowId, presentation, this.sources.activeSnapshot?undefined:await this.execution.resolveBaseline(workflowId)); }
         catch { /* A failed aggregation/read never removes original suggestions or breaks the issue list. */ }
       }
       const visibleItems = presentation.filter(item => matchesScope(item, { signature: query.signature }) && (includeHistorical ||
