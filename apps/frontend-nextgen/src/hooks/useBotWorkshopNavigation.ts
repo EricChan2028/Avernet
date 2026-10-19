@@ -28,6 +28,10 @@ export function useBotWorkshopNavigation() {
       return;
     }
     const ownerContext = bot.spaceKind === 'team' ? bot.harnessContext?.entityId : bot.ownerId;
+    if (bot.spaceKind === 'team' && !ownerContext) {
+      toast.error('缺少团队 Bot 实体标识，请刷新后重试');
+      return;
+    }
     const botId = bot.id.includes(':') || !ownerContext ? bot.id : `${bot.id}:${ownerContext}`;
     const section = bot.spaceKind === 'team' ? 'team' : 'managed';
     workspaceService.switchIdentity(user.id);

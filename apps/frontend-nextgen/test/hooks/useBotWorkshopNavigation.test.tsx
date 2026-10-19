@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import { useBotWorkshopNavigation } from '@/hooks/useBotWorkshopNavigation';
+import { mapBotDto } from '@/services/botWorkshop/botMapper';
 import { buildAgentCodingChatPath, workspaceService } from '@/services/workspace';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { act, renderHook } from '@testing-library/react';
@@ -60,6 +61,33 @@ it('团队 Bot 使用 team 路由和所属 entity 上下文打开会话', () => 
   act(() => result.current.openConversation(teamBot as never));
 
   expect(history.push).toHaveBeenCalledWith('/workspace/chat?section=team&bot=bot-1%3Ateam-entity-1&origin=mine');
+});
+
+it('真实 inventory 响应经 mapper 后以 entity_id 路由，并保留 owner_entity_id 作为 owner', () => {
+  const { result } = renderHook(() => useBotWorkshopNavigation());
+  const inventoryDto = {
+    bot_id: 'team-bot-1',
+    bot_name: '团队协作者 Bot',
+    bot_desc: 'fixture',
+    engine: 'openclaw',
+    bot_type: 'personal',
+    kind: 'personal_cloud',
+    deploy_mode: 'cloud',
+    display_state: 'running',
+    status: 'ACTIVE',
+    entity_id: 'team_spc-example',
+    owner_entity_id: 'owner-user-1',
+    space: { space_id: '252', name: 'Fixture Team', kind: 'team' },
+    actions: ['view', 'chat', 'edit'],
+  };
+  const bot = mapBotDto(inventoryDto).item;
+
+  act(() => result.current.openConversation(bot));
+
+  expect(bot.ownerId).toBe('owner-user-1');
+  expect(history.push).toHaveBeenCalledWith(
+    '/workspace/chat?section=team&bot=team-bot-1%3Ateam_spc-example&origin=mine',
+  );
 });
 
 it('AgentCoding Bot 继续使用专用对话路由', () => {
