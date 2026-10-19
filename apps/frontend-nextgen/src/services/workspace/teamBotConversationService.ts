@@ -56,9 +56,7 @@ function readTemplateName(dto: CollaboratingBotDto, templateType: string | undef
 function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
   const realBotId = dto.bot_id.trim();
   const entityId = dto.entity_id?.trim() || undefined;
-  // Backend session/connection APIs currently address team Bots through the
-  // entity_id context (owner_id is only a deprecated alias for that context).
-  const ownerId = entityId;
+  const ownerId = dto.owner_id?.trim() || undefined;
   const botId = entityId ? `${realBotId}:${entityId}` : realBotId;
   const declaredTemplateType = readTemplateType(dto);
   const templateType = normalizeTemplateType(dto.engine, declaredTemplateType);
@@ -80,7 +78,7 @@ function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
     botType: dto.bot_type,
     online: dto.status === 'ACTIVE' || dto.status === 'online',
     reachability: 'reachable',
-    chatable: Boolean(realBotId && entityId),
+    chatable: Boolean(realBotId && entityId && ownerId),
     isAgentCodingBot: runtime.isAgentCodingBot,
     templateType: runtime.templateType,
     templateName: runtime.templateName,

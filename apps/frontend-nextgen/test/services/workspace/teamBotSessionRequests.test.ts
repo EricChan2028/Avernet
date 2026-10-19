@@ -51,8 +51,8 @@ beforeEach(async () => {
     .mocked(ctrl.favoriteBotSession)
     .mockResolvedValue({ code: 200000, data: { session_id: 'session-1', favorited: true } });
 });
-const params = { user_id: 'login-viewer', owner_id: 'team-entity' };
-test('团队 Bot 会话 API 用登录用户及 entity_id owner 上下文；DTO owner_id 是用户字段', async () => {
+const params = { user_id: 'login-viewer', owner_id: 'actual-owner' };
+test('mine 列表、创建、详情、消息和模型用登录用户及 Bot owner_id；Bot ID 复合后缀仍为 entity_id', async () => {
   await botSessionService.listSessionsPage(bot, 'login-viewer');
   await botSessionService.createSession(bot, 'login-viewer');
   await botSessionService.getSessionDetail(bot, 'login-viewer', 'session-1');
@@ -68,7 +68,7 @@ test('团队 Bot 会话 API 用登录用户及 entity_id owner 上下文；DTO o
   });
   expect(ctrl.listBotModels).toHaveBeenCalledWith('shared', { ...params, page: 1, page_size: 50 });
 });
-test('团队会话变更 API 显式带 entity_id owner 上下文，不依赖当前登录用户推断', async () => {
+test('团队改名/清理/删除/收藏/模型修改必须显式带 Bot owner_id，不可依赖当前登录用户推断', async () => {
   await botSessionService.updateSessionTitle(bot, 'login-viewer', 'session-1', '新标题');
   await botSessionService.clearContext(bot, 'login-viewer', 'session-1');
   await botSessionService.deleteSession(bot, 'login-viewer', 'session-1');

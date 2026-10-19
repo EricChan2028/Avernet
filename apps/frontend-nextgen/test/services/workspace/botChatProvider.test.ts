@@ -367,7 +367,7 @@ it('desktop recovery rediscovers a changed localhost port and cancels on disconn
   }
 });
 
-it('团队连接、IAM 和消息历史使用登录用户与 entity_id owner 上下文，不注入 f_user_id', async () => {
+it('团队连接、IAM 和消息历史使用登录用户与 Bot owner_id，不注入 f_user_id', async () => {
   mockedGetConnection.mockResolvedValue({
     code: 200000,
     data: { engine: 'openclaw', expires_at: 'x', sockets: [{ kind: 'chat', url: 'wss://gw/ws?token=fixture' }] },
@@ -376,14 +376,14 @@ it('团队连接、IAM 和消息历史使用登录用户与 entity_id owner 上�
     ...bot,
     botId: 'shared:team-entity',
     realBotId: 'shared',
-    ownerId: 'team-entity',
+    ownerId: 'actual-owner',
     isTeamBot: true,
   };
   const provider = createBotChatProvider({ bot: teamBot, userId: 'human_viewer', sessionId: 'team-session' });
   await provider.connect();
   await provider.loadHistory();
-  expect(mockedGetConnection).toHaveBeenCalledWith('shared', { user_id: 'viewer', owner_id: 'team-entity' });
-  expect(mockedGetIamToken).toHaveBeenCalledWith('shared', 'viewer', 'team-entity', 'online');
+  expect(mockedGetConnection).toHaveBeenCalledWith('shared', { user_id: 'viewer', owner_id: 'actual-owner' });
+  expect(mockedGetIamToken).toHaveBeenCalledWith('shared', 'viewer', 'actual-owner', 'online');
   expect(botSessionService.botSessionService.listMessagesPage).toHaveBeenCalledWith(
     teamBot,
     'human_viewer',
