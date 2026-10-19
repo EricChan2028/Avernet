@@ -27,14 +27,16 @@ export function useBotWorkshopNavigation() {
       toast.error('用户身份未加载完成，请稍后重试');
       return;
     }
-    const botId = bot.id.includes(':') || !bot.ownerId ? bot.id : `${bot.id}:${bot.ownerId}`;
+    const ownerContext = bot.spaceKind === 'team' ? bot.harnessContext?.entityId : bot.ownerId;
+    const botId = bot.id.includes(':') || !ownerContext ? bot.id : `${bot.id}:${ownerContext}`;
+    const section = bot.spaceKind === 'team' ? 'team' : 'managed';
     workspaceService.switchIdentity(user.id);
     const workspace = useWorkspaceStore.getState();
     workspace.setView('chat');
     workspace.selectBotSession(null);
     if (!workspace.expandedBotIds[botId]) workspace.toggleBotExpanded(botId);
     workspace.setBotExpandedSection(botId, 'mine');
-    history.push(`/workspace/chat?${serializeConversationRoute({ section: 'managed', botId, origin: 'mine' })}`);
+    history.push(`/workspace/chat?${serializeConversationRoute({ section, botId, origin: 'mine' })}`);
   }, []);
   return { openDetail, openConversation };
 }
