@@ -14,7 +14,8 @@ instead (see [Step 7](#step-7-optional-join-group-collaboration-bcn)).
 > the first external engine (teclaw). Two parts are **not finalized yet**: how an
 > engine that you host yourself is registered and authenticated, and the exact
 > request format of the lifecycle API in Step 2. Items marked
-> **To be confirmed** must be agreed with the Avernet team before you go live.
+> **To be confirmed with BaaS** or **To be confirmed with Backend** must be agreed
+> with that team before you go live.
 > See [Open items](#open-items).
 
 ---
@@ -56,23 +57,29 @@ Two Avernet services call your engine:
  ┌───────────────────────── Avernet platform ─────────────────────────┐
  │                                                                     │
  │  Backend ── asks BaaS "where is bot X?" ──▶ BaaS                    │
- │  (config, files, chat)                      (lifecycle, routing,    │
+ │  (config, files, chat)                      (registration,          │
+ │                                              lifecycle, routing,    │
  │                                              task runs)             │
  └───────┬────────────────────────────────────────────┬────────────────┘
          │                                            │
-         │ A. per-bot calls (URL + token from BaaS):  │ B. lifecycle calls:
-         │    POST /api/v1/bot/apply                  │    create / update / restart /
-         │    /api/v1/file/*                          │    delete / get a bot
-         │    /api/sessions, /api/{engine}/ws         │ C. task runs over /api/{engine}/ws
+         │ A. per-bot calls (Steps 3, 5, 6;           │ B. lifecycle calls (Step 2):
+         │    URL + token from BaaS):                 │    create / update / restart /
+         │    POST /api/v1/bot/apply                  │    delete / get a bot
+         │    /api/v1/file/*                          │ C. task runs over /api/ws (Step 6)
+         │    /api/sessions, /api/ws                  │
          ▼                                            ▼
  ┌──────────────────────────── Your engine ───────────────────────────┐
+ │  Step 1: register with BaaS before go-live (one-time setup,        │
+ │          not a runtime call)                                        │
  │  Lifecycle API (Step 2) ── on completion, POST a callback ──▶ BaaS │
  │  Per-bot API (Steps 3, 5, 6)                                        │
  └────────────────────────────────┬────────────────────────────────────┘
-                                  │ downloads skills / files
+                                  │ downloads skills / files (Step 4)
                                   ▼
                        Content stores (OSS)
 ```
+
+Step 7 (joining BCN) is optional and independent of this picture.
 
 You need to understand three ideas:
 
@@ -112,17 +119,17 @@ register, BaaS needs:
 
 | Item | Description | Status |
 |---|---|---|
-| **Engine type** | A short, lowercase identifier, such as `teclaw`. It appears as `engine_type` in every artifact and in the chat WebSocket path. | Agree with the Avernet team |
-| **Lifecycle API address** | Where BaaS sends lifecycle calls (Step 2). | **To be confirmed** |
-| **Per-bot address** | How BaaS builds the HTTP and WebSocket URL of one bot (Steps 3, 5, 6). | **To be confirmed** |
-| **Authentication** | How BaaS and Backend prove their identity to your engine, and how your engine proves its identity when it calls BaaS back. | **To be confirmed** |
+| **Engine type** | A short, lowercase identifier, such as `teclaw`. It appears as `engine_type` in every artifact. | Agree with BaaS |
+| **Lifecycle API address** | Where BaaS sends lifecycle calls (Step 2). | **To be confirmed with BaaS** |
+| **Per-bot address** | How BaaS builds the HTTP and WebSocket URL of one bot (Steps 3, 5, 6). | **To be confirmed with BaaS** |
+| **Authentication** | How BaaS and Backend prove their identity to your engine, and how your engine proves its identity when it calls BaaS back. | **To be confirmed with BaaS** |
 
 **Current mechanism (platform-hosted engines).** Today, BaaS reaches a bot
 through the platform's proxy gateway. It addresses the bot as
 `TECLAW_{bot_id}@{template_id}:{port}` (default port `20003`) and gives callers
 a token, which they send in an `x-proxypass-token` header. For an engine that
 **you host yourself**, the address and authentication scheme have not been
-designed yet. Agree on them with the Avernet team before you start the other
+designed yet. Agree on them with BaaS before you start the other
 steps, because they decide the headers on every request below.
 
 ---
@@ -132,7 +139,7 @@ steps, because they decide the headers on every request below.
 BaaS calls this API to manage bots on your platform. It is the only way bots
 are created and deleted.
 
-> **To be confirmed:** the paths and request and response bodies of these
+> **To be confirmed with BaaS:** the paths and request and response bodies of these
 > operations are not published yet. This section describes what each operation
 > must do. The Avernet BaaS team will provide the wire format.
 
@@ -189,7 +196,7 @@ Create, update and restart can take a while, so they are asynchronous:
 | Field | Required | Description |
 |---|---|---|
 | `success` | Yes | `true` if the operation succeeded. |
-| `data.schema_version` | Yes | Version of this callback format. The value to use is **To be confirmed**. |
+| `data.schema_version` | Yes | Version of this callback format. The value to use is **To be confirmed with BaaS**. |
 | `data.callback_context` | Yes | The `callback_context` BaaS sent, **unchanged**. It must contain `device_uuid`, `publish_id` and `tenant`, or BaaS rejects the callback with `400`. |
 | `data.task_id` | Yes | The task ID you returned in step 2. |
 | `data.operation` | Yes | `CREATE`, `UPDATE` or `DELETE`. |
@@ -199,7 +206,7 @@ Create, update and restart can take a while, so they are asynchronous:
 
 BaaS answers `404` if it doesn't know the device. Callbacks are idempotent: you
 can safely retry one that failed to arrive. How BaaS authenticates your
-callback is **To be confirmed** (see Step 1).
+callback is **To be confirmed with BaaS** (see Step 1).
 
 ---
 
@@ -444,7 +451,7 @@ it. The platform always adds four keys:
 The object key for a reference is `base` + `/` + `path`.
 
 How your engine gets **read access** to these stores (credentials, network
-access) is **To be confirmed** for self-hosted engines.
+access) is **To be confirmed with Backend** for self-hosted engines.
 
 ---
 
@@ -519,7 +526,7 @@ is unavailable for your bots.
 | `GET`/`DELETE /api/sessions/{session_id}` | Read and delete one session. |
 | `POST /api/sessions/{session_id}/update` | Update session metadata. |
 | `GET`/`DELETE /api/sessions/{session_id}/messages` | Read and clear a session's messages. |
-| `WebSocket /api/{engine_type}/ws` | Real-time chat (send messages, stream replies, abort). |
+| `WebSocket /api/ws` | Real-time chat (send messages, stream replies, abort). |
 
 **Session IDs.** Session IDs can contain colons (for example
 `agent:default:default:c_01M2F9:user:272471`). Some proxies reject colons in a
@@ -537,7 +544,7 @@ The platform's reference implementation of this surface is the Avernet engine
 adapter (`engine/adapter/`; see its
 [Open-Source Guide](../../../../engine/adapter/docs/open-source-guide.md)). The
 exact request and response shapes of each runtime endpoint, and the chat
-WebSocket frame protocol, are **To be confirmed** with the Avernet team. Until a
+WebSocket frame protocol, are **To be confirmed with Backend**. Until a
 written spec exists, use the engine adapter as the reference.
 
 ---
