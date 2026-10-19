@@ -46,6 +46,13 @@ the rest.
   explicitly signed off on the memory consequence in DR-1.
 
 ### RSI-02 Genome schema and patch format
+- **Status**: done (2026-10-18). Contract:
+  [`apps/backend/api-contracts/genome/v1/`](../../api-contracts/genome/v1/README.md); spec:
+  `apps/backend/specs/2026-10-18-bot-genome-schema/`. Owner and engine-review
+  sign-off: @totalfrank. Closed G-1, G-2, G-3, G-7, G-10. Follow-ups opened:
+  #2858 (`engine_config`), #2859 (effective MCP config), #2860 (MCP header
+  credentials), #2862 (`script: null`); depends on #2162 (resource removal)
+  through RSI-04.
 - **Module**: backend (contract), engine (review)
 - **Goal**: Normative JSON Schema for Genome Revision (`spec`, `policy`,
   `revision` metadata) and Genome Patch (ops, risk-tier mapping, rewrite
@@ -57,8 +64,8 @@ the rest.
 - **Deliverable**: `apps/backend/specs/<date>-bot-genome-schema/` with schema files,
   examples, and a compatibility table against Manifest v1.
 - **Done when**: every Manifest v1 example round-trips into a revision;
-  every patch op has a defined risk tier; reviewers agree on locked-gene
-  defaults.
+  every patch op has a defined risk tier; reviewers agree on the policy
+  defaults (`mutable_genes`, `pins`).
 
 ### RSI-06 Strategy port, capability catalog, and Job Protocol
 - **Module**: evolution (new), arch
@@ -134,7 +141,17 @@ the rest.
      a patch, not fetched);
   5. applied-document digest: the apply report records the digest of the
      exact document it applied; for service bots, the publish record
-     records the digest of the published document.
+     records the digest of the published document;
+  6. Center-skill source: an entry may name a pinned Skill Center version
+     (Manifest v1 cannot declare one, and apply removes every skill a
+     `skills` section omits, so a compiled revision would otherwise remove
+     the bot's Center skills).
+  Compiled revisions must also be able to remove what a revision omits, so
+  this item depends on two Manifest fixes: resource removal
+  ([#2162](https://github.com/inclusionAI/Avernet/issues/2162)) and
+  `script: null` ([#2862](https://github.com/inclusionAI/Avernet/issues/2862)).
+  The proposed spellings of the content-store and Center sources are in
+  [`manifest-v1-compatibility.md`](../../api-contracts/genome/v1/manifest-v1-compatibility.md).
   No revision table, refs, or `revision_id` in the Manifest; the
   `/config-manifest` endpoints are unchanged. The existing service-bot
   rollback feature is not changed.
@@ -306,7 +323,8 @@ the rest.
   amend reserved-file rule accordingly.
 - **Depends on**: RSI-02, DR-1 accepted.
 - **Interim**: until done, memory evolution uses a platform-managed persona
-  file (e.g. `LESSONS.md`).
+  file, an existing identity type such as `KNOWLEDGE.md` (`LESSONS.md` is not
+  a Manifest identity type; [01-genome.md](01-genome.md) §7).
 
 ### RSI-15 Memory consolidation strategy
 - **Module**: evolution

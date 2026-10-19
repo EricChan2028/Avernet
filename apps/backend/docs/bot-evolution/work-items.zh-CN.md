@@ -43,6 +43,12 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
   记忆的后果。
 
 ### RSI-02 基因组 schema 与补丁格式
+- **状态**：已完成（2026-10-18）。契约：
+  [`apps/backend/api-contracts/genome/v1/`](../../api-contracts/genome/v1/README.md)；规格：
+  `apps/backend/specs/2026-10-18-bot-genome-schema/`。负责人及引擎评审签字：
+  @totalfrank。已关闭 G-1、G-2、G-3、G-7、G-10。已开启的后续事项：#2858
+  （`engine_config`）、#2859（生效的 MCP 配置）、#2860（MCP 请求头凭证）、#2862
+  （`script: null`）；通过 RSI-04 依赖 #2162（资源删除）。
 - **模块**：backend（契约）、engine（评审）
 - **目标**：为基因组修订版（Genome Revision）（`spec`、`policy`、`revision`
   元数据）和基因组补丁（Genome Patch）（操作、风险等级映射、重写阈值）制定
@@ -54,7 +60,7 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 - **交付物**：`apps/backend/specs/<date>-bot-genome-schema/`，包含 schema 文件、
   示例，以及与 Manifest v1 的兼容性对照表。
 - **完成标准**：每个 Manifest v1 示例都能往返转换为修订版；每种补丁操作都有
-  明确的风险等级；评审者就锁定基因的默认值达成一致。
+  明确的风险等级；评审者就策略配置默认值（`mutable_genes`、`pins`）达成一致。
 
 ### RSI-06 进化策略端口、能力目录与作业协议
 - **模块**：evolution（新增）、arch
@@ -115,7 +121,15 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
      （`EngineMemoryProjection`；在 RSI-05 之后落地）；
   4. 内容存储的产出内容写入路径（由补丁创建、而非拉取的内容）；
   5. 已应用文档摘要：apply 报告记录它所应用的确切文档的摘要；对服务型 Bot，
-     发布记录记录所发布文档的摘要。
+     发布记录记录所发布文档的摘要；
+  6. Center 技能源：条目可以指定一个固定的 Skill Center 版本（Manifest v1 无法
+     声明 Center 技能，而 apply 会删除 `skills` 部分中省略的每个技能，否则已编译
+     的修订版会删除 Bot 的 Center 技能）。
+  已编译的修订版还必须能删除修订版中省略的内容，因此本项依赖两个 Manifest 修复：
+  资源删除（[#2162](https://github.com/inclusionAI/Avernet/issues/2162)）和
+  `script: null`（[#2862](https://github.com/inclusionAI/Avernet/issues/2862)）。内容
+  存储源和 Center 源的提议写法见
+  [`manifest-v1-compatibility.md`](../../api-contracts/genome/v1/manifest-v1-compatibility.md)。
   Manifest 中没有修订版表、引用或 `revision_id`；`/config-manifest` 端点保持
   不变。现有的服务型 Bot 回滚功能不做改变。
 - **依赖**：RSI-03。
@@ -262,8 +276,9 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 - **目标**：`export_memory` / `project_memory(mode)` 契约、能力矩阵条目、
   OpenClaw 实现、teclaw artifact 字段提案；相应修订保留文件规则。
 - **依赖**：RSI-02、DR-1 已被接受。
-- **过渡方案**：完成之前，记忆进化使用一个由平台管理的人设文件（例如
-  `LESSONS.md`）。
+- **过渡方案**：完成之前，记忆进化使用一个由平台管理的人设文件，即一个现有的
+  身份文件类型，例如 `KNOWLEDGE.md`（`LESSONS.md` 不是 Manifest 的身份文件类型；
+  见 [01-genome.zh-CN.md](01-genome.zh-CN.md) §7）。
 
 ### RSI-15 记忆整合进化策略
 - **模块**：evolution
