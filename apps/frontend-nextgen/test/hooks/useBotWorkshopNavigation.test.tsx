@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 import { useBotWorkshopNavigation } from '@/hooks/useBotWorkshopNavigation';
-import { workspaceService } from '@/services/workspace';
+import { buildAgentCodingChatPath, workspaceService } from '@/services/workspace';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { act, renderHook } from '@testing-library/react';
 import { history } from '@umijs/max';
@@ -11,6 +11,8 @@ jest.mock('@/services/workspace', () => ({
   workspaceService: { switchIdentity: jest.fn() },
 }));
 jest.mock('sonner', () => ({ toast: { error: jest.fn() } }));
+
+const mockedBuildAgentCodingChatPath = buildAgentCodingChatPath as jest.MockedFunction<typeof buildAgentCodingChatPath>;
 
 const baseBot = {
   id: 'bot-1',
@@ -32,6 +34,7 @@ const baseBot = {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockedBuildAgentCodingChatPath.mockReturnValue('/coding/coding-chat?botId=bot-1');
   useWorkspaceStore
     .getState()
     .setIdentities([{ id: 'current-user', kind: 'user', displayName: '当前用户', online: true }], 'current-user');
@@ -57,4 +60,24 @@ it('团队 Bot 使用 team 路由和所属 entity 上下文打开会话', () => 
   act(() => result.current.openConversation(teamBot as never));
 
   expect(history.push).toHaveBeenCalledWith('/workspace/chat?section=team&bot=bot-1%3Ateam-entity-1&origin=mine');
+});
+
+it('AgentCoding Bot 继续使用专用对话路由', () => {
+  const { result } = renderHook(() => useBotWorkshopNavigation());
+  const agentCodingTeamBot = {
+    ...baseBot,
+    spaceKind: 'team' as const,
+    spaceId: 'team-space-1',
+    spaceName: '团队空间',
+    runtime: { isAgentCodingBot: true },
+  };
+
+  act(() => result.current.openConversation(agentCodingTeamBot as never));
+
+  expect(mockedBuildAgentCodingChatPath).toHaveBeenCalledWith({
+    botId: 'bot-1',
+    spaceId: 'team-space-1',
+    spaceName: '团队空间',
+  });
+  expect(history.push).toHaveBeenCalledWith('/coding/coding-chat?botId=bot-1');
 });
