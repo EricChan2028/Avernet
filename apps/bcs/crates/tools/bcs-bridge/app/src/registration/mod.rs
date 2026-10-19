@@ -299,7 +299,7 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
             bot.insert("engine_options".into(), options.into());
         }
     }
-    let mut document = bootstrap.document;
+    let mut document = bootstrap.document.clone();
     let append = document.contains_key("provider_id");
     let mut existing_bots = document.remove("bot").and_then(|v| v.as_array().cloned()).unwrap_or_default();
     document.insert("provider_id".into(), provider_id.clone().into());

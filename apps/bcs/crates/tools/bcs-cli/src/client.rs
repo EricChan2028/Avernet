@@ -3340,7 +3340,7 @@ impl BcsClient {
             url.push('?');
             url.push_str(&params.join("&"));
         }
-        let mut resp = self
+        let resp = self
             .add_auth(self.http_client.get(&url))
             .send()
             .await
@@ -3398,7 +3398,7 @@ impl BcsClient {
         if let Some(t) = ttl {
             url.push_str(&format!("?ttl={}", t));
         }
-        let resp = self
+        let mut resp = self
             .add_auth(self.http_client.get(&url))
             .send()
             .await

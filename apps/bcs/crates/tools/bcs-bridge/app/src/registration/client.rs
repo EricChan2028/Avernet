@@ -215,7 +215,7 @@ mod tests {
         }.with_headers(headers);
         let client = if legacy { client.with_legacy_registration() } else { client };
         client.get("api/v1/collaboration/bots/me", "Identity", "Request failed").await.unwrap();
-        client.register("test-register-token", "Test Bot", "agent_test", "plugin", None, "prv_test").await.unwrap();
+        client.register("test-register-token", "Test Bot", "agent_test", "plugin", None, "prv_test", None).await.unwrap();
         server.join().unwrap();
         }
     }
