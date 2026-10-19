@@ -1,4 +1,5 @@
 import { serializeConversationRoute } from '@/domain/conversation';
+import { isSameHumanIdentity } from '@/domain/userIdentity';
 import type { BotDomain } from '@/services/botWorkshop';
 import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
 import { buildAgentCodingChatPath, workspaceService } from '@/services/workspace';
@@ -27,13 +28,15 @@ export function useBotWorkshopNavigation() {
       toast.error('用户身份未加载完成，请稍后重试');
       return;
     }
-    const ownerContext = bot.spaceKind === 'team' ? bot.harnessContext?.entityId : bot.ownerId;
-    if (bot.spaceKind === 'team' && !ownerContext) {
+    const isOwner = isSameHumanIdentity(bot.ownerId, user.id, 'user');
+    const isCollaboratingTeamBot = bot.spaceKind === 'team' && !isOwner;
+    const ownerContext = isCollaboratingTeamBot ? bot.harnessContext?.entityId : bot.ownerId;
+    if (isCollaboratingTeamBot && !ownerContext) {
       toast.error('缺少团队 Bot 实体标识，请刷新后重试');
       return;
     }
     const botId = bot.id.includes(':') || !ownerContext ? bot.id : `${bot.id}:${ownerContext}`;
-    const section = bot.spaceKind === 'team' ? 'team' : 'managed';
+    const section = isCollaboratingTeamBot ? 'team' : 'managed';
     workspaceService.switchIdentity(user.id);
     const workspace = useWorkspaceStore.getState();
     workspace.setView('chat');

@@ -90,6 +90,33 @@ it('真实 inventory 响应经 mapper 后以 entity_id 路由，并保留 owner_
   );
 });
 
+it('团队空间内的 Owner Bot 保持 managed owner 路由', () => {
+  const { result } = renderHook(() => useBotWorkshopNavigation());
+  useWorkspaceStore
+    .getState()
+    .setIdentities([{ id: 'human_900003', kind: 'user', displayName: '当前用户', online: true }], 'human_900003');
+  const ownerBot = mapBotDto({
+    bot_id: 'team-owner-bot-1',
+    bot_name: '团队空间 Owner Bot',
+    bot_desc: 'owner fixture',
+    engine: 'openclaw',
+    bot_type: 'personal',
+    kind: 'personal_cloud',
+    deploy_mode: 'cloud',
+    display_state: 'running',
+    status: 'ACTIVE',
+    entity_id: 'team_spc-example',
+    owner_entity_id: '900003',
+    space: { space_id: '252', name: 'Fixture Team', kind: 'team' },
+  }).item;
+
+  act(() => result.current.openConversation(ownerBot));
+
+  expect(history.push).toHaveBeenCalledWith(
+    '/workspace/chat?section=managed&bot=team-owner-bot-1%3A900003&origin=mine',
+  );
+});
+
 it('AgentCoding Bot 继续使用专用对话路由', () => {
   const { result } = renderHook(() => useBotWorkshopNavigation());
   const agentCodingTeamBot = {
