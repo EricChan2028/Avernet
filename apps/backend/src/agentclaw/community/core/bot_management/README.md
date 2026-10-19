@@ -27,6 +27,9 @@ consumes:
   - "CallerIdentityRepositoryProtocol"
   - "AuthRelationshipPlugin"
   - "DeviceService"
+  - "ArcaRestartBindings (binding reads)"
+  - "ArcaRestartTransport (fixed-target Arca command execution)"
+  - "BaasRestartRuntime (coding backup inventory/commands)"
   - "ResourceService"
   - "BotPublishService"
   - "SkillCenter factories"
@@ -76,6 +79,7 @@ internal_dependencies:
   - agentclaw.community.di
   - agentclaw.community.di.modules
   - agentclaw.community.kernel.lifecycle
+  - agentclaw.community.kernel.device_dto    # CommandResult contract for coding-owned Arca backup execution
   - agentclaw.community.log
   - agentclaw.community.plugin_api.devices
   - agentclaw.community.plugin_api.drm
@@ -94,6 +98,21 @@ internal_dependencies:
 ### Change impact
 
 Highest-fanout domain — 12+ other core domains import it. BotService signature changes ripple widely. Repository protocol changes break the corresponding plugin_impl repos.
+
+Coding restart recovery policy, target checks and the direct-Arca command transport
+contract are internal to `engines/aicoding/restart_arca.py`. `ArcaRestartBindings`
+only reads the captured binding; `ArcaRestartTransport` wraps the existing provider
+hook. The composition root selects that hook, while the shared device router and
+its ordinary APIs stay unchanged. Changes require community strategy tests and OCB
+corp sandbox/tenant execution-versus-release contract tests. Bound coding Arca
+replacement orchestration lives in `engines/aicoding/restart_arca_lifecycle.py`;
+the coding worker invokes it directly, just as it invokes the BaaS executor.
+Shared stop/start primitives and allocation lock handoff remain unchanged.
+`aicoding/restart_dependencies.py` owns the immutable, lazy
+`RestartBackupDependencies` envelope and its BaaS runtime contract. DI supplies
+it once; BotService and both coding executors pass the same envelope rather
+than separate provider-specific backup factories. Published/Caller dispatch
+adapts its existing runtime into this envelope without changing its callers.
 
 ## Owner display name on OpenAPI creation
 

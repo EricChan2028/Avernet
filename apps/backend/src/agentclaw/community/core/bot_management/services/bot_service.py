@@ -74,6 +74,9 @@ if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.bot_quota_service_protocol import (
         BotQuotaServiceProtocol,
     )
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import (
+        RestartBackupDependencies,
+    )
 from agentclaw.community.core.bot_management.repository.models import BotRestartLockRecord
 from agentclaw.community.core.repository.protocols.bot import BotRestartLockRepositoryProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -378,6 +381,7 @@ class BotService(BotServiceProtocol):
         runtime_reconciler_provider: "Callable[[], CoreBotRuntimeProjectorProtocol] | None" = None,
         bot_quota_service: "BotQuotaServiceProtocol | None" = None,
         bot_storage_policy: BotStoragePolicyProtocol | None = None,
+        restart_backup_dependencies: "RestartBackupDependencies | None" = None,
     ) -> None:
         self._repository = repository
         self._skills_pool_native_creation_policy = skills_pool_native_creation_policy
@@ -404,6 +408,7 @@ class BotService(BotServiceProtocol):
         # the cycle never closes during graph build.
         self._bot_publish_provider = bot_publish_service_provider
         self._device_service_provider = device_service_provider
+        self._restart_backup_dependencies = restart_backup_dependencies
         # Typed against a **core-level protocol**, not the concrete service:
         # selecting an implementation is the composition root's job. Not the
         # Service API Protocol either — core may not import ``api/``, which the
@@ -4885,8 +4890,8 @@ class BotService(BotServiceProtocol):
         # lock exists, so no cleanup is needed.
         verify_restart_backup = strategy.prepare_restart(
             ctx, binding_id=binding_id,
+            restart_dependencies=self._restart_backup_dependencies,
             device_service_provider=self._device_service_provider,
-            target_runtime_provider=lambda: self._baas_service_provider(),
             bot_repository=self._repository,
         )
 
