@@ -472,42 +472,144 @@ store 的路径。**文件在引擎内落到哪里由你们决定。**
 ```
 
 `action` 取 `created`、`replaced` 或 `unchanged`。平台会校验 `skill_name` 与
-`sha256` 是否与发送的一致。错误：包无效返回 `400`，包过大返回 `413`。
+`sha256` 是否与发送的一致。错误：包无效返回 `400`，包过大返回 `413`；bot 正在
+发布时返回 `409` 并带 `"error": "publish_in_progress"`；拿不到发布锁时返回
+`503` 并带 `"error": "publish_lock_unavailable"`。
 
 ---
 
 ## 第 6 步：实现运行时接口
 
-这些接口支撑对话、bot 管理和任务运行。Backend 转发用户在工作台发起的请求，BaaS
-也用同一组接口运行定时任务与协作任务。引擎没有实现的接口，对应功能在你们的 bot
-上就不可用。
+这些接口支撑对话、会话管理、定时任务和 bot 管理。Backend 转发用户在工作台和公开
+OpenAPI 中发起的请求；BaaS 用会话接口和对话 WebSocket 运行定时任务与协作任务。
+引擎没有实现的接口，对应功能在你们的 bot 上就不可用。
+
+以下是平台当前对外部引擎调用的全部单 bot 运行时接口。配置与文件接口见
+[第 3 步](#第-3-步接收-bot-配置)和[第 5 步](#第-5-步实现文件接口)。
+
+### 引擎信息
+
+| 接口 | 调用方 | 用途与约定 |
+|---|---|---|
+| `GET /api/engine/status` | Backend | 引擎状态。原样返回给调用方（不要求信封）。 |
+| `GET /api/engine/capabilities` | Backend | `{"success": true, "data": {"supported": [...]}}`：引擎支持的功能。也决定是否提供审批模式。 |
+| `GET /api/engine/list` | Backend | 该运行环境中可用的引擎。 |
+| `POST /api/engine/restart` | Backend | 重启引擎进程。请求体 `{"force": false}`。 |
+| `GET /api/openclaw/default-config` | Backend | 引擎出厂默认配置。不支持则返回 `501`。 |
+| `GET /api/models` | Backend | bot 可用的模型：`{"success": true, "data": {"models": [...], "total": n}}`。 |
+| `GET /api/models/{model_id}` | Backend | 单个模型。 |
+| `GET /api/nodes` | Backend | 连接到 bot 的节点。查询参数：`status`、`platform`、`limit` 等。 |
+| `POST /api/approvals/mode/get` | Backend | 读取会话的审批模式。请求体 `{"session_key", "user_id"}`（原始会话 key）。 |
+| `POST /api/approvals/mode/set` | Backend | 设置会话的审批模式。请求体 `{"session_key", "mode", "user_id"}`。 |
+
+### 会话
+
+| 接口 | 调用方 | 用途与约定 |
+|---|---|---|
+| `GET /api/sessions` | Backend、BaaS | 列出会话。查询参数：`user_id`、`agent_id`、`limit`、`offset`，可选 `session_key`、`engine`。 |
+| `POST /api/sessions` | Backend、BaaS | 创建会话。请求体：`title`、`user_id`，可选 `model`、`cwd`、`agent_id`、`engine`、`uuid`。带 `uuid` 时**以它作为会话 ID**，并在 `data.id` 中原样返回。 |
+| `GET /api/sessions/{session_id}` | Backend、BaaS | 读取单个会话。不存在时返回 `404`。 |
+| `POST /api/sessions/{session_id}/update` | Backend | 更新会话。要修改的字段放在**查询参数**里，不在请求体中。 |
+| `DELETE /api/sessions/{session_id}` | Backend | 删除会话。 |
+| `GET /api/sessions/{session_id}/messages` | Backend、BaaS | 会话消息，从最新的窗口开始。查询参数：`limit`、`offset`。 |
+| `DELETE /api/sessions/{session_id}/messages` | Backend | 清空会话消息。 |
+| `GET /api/session-favorites` | Backend | 列出用户收藏的会话。查询参数：`user_id`、`agent_id`、`limit`、`offset`。 |
+| `PUT /api/session-favorites/{session_id}` | Backend | 收藏会话。查询参数：`user_id`。 |
+| `DELETE /api/session-favorites/{session_id}` | Backend | 取消收藏。查询参数：`user_id`。 |
+
+会话对象包含 `id`、`title`、`user_id`、`agent_id`、`model`、`gmt_created`、
+`gmt_modified`、`message_count`、`last_message`。消息对象包含 `id`、
+`session_id`、`role`、`content`、`metadata`、`gmt_created`、`history_meta`。
+
+### 会话文件
+
+| 接口 | 调用方 | 用途与约定 |
+|---|---|---|
+| `POST /api/resource-materializations` | Backend | 把用户附带的文件放进会话工作区。请求体包含 `resource_id`、`session_id`、`workspace_relative_path`、`filename`、`size_bytes`、`content_hash`。返回 `{"success": true, "data": {"accepted": true}}`。 |
+| `GET /api/resource-materializations/{resource_id}/content` | Backend | 流式返回已落地的文件。查询参数：`disposition`。 |
+| `GET /api/session-files/{resource_id}/content` | Backend | 流式返回 bot 在会话中产生的文件。查询参数：`sessionKey`（原始值）、`disposition`。 |
+
+### 定时任务（cron）
+
+已发布的 bot 有多个实例时，Backend 会把每次调用发给所有实例。
+
+| 接口 | 调用方 | 用途 |
+|---|---|---|
+| `GET /api/cron` | Backend | 列出定时任务。 |
+| `GET /api/cron/running` | Backend | 列出正在运行的任务。 |
+| `GET /api/cron/status` | Backend | 调度器状态。 |
+| `POST /api/cron` | Backend | 创建任务。 |
+| `GET /api/cron/{task_id}` | Backend | 读取任务。 |
+| `PUT /api/cron/{task_id}` | Backend | 更新任务。已发布的 bot 只能启用或停用。 |
+| `DELETE /api/cron/{task_id}` | Backend | 删除任务。 |
+| `POST /api/cron/{task_id}/run` | Backend | 立即运行任务。查询参数：`force`（可选）。 |
+| `GET /api/cron/{task_id}/runs` | Backend | 任务的运行历史。查询参数：`limit`。 |
+
+### 对话 WebSocket：`/api/ws`
+
+用户在工作台里通过这个 WebSocket 与 bot 对话，BaaS 也通过它运行任务。消息为
+JSON 帧：
+
+- 请求：`{"type": "req", "id", "method", "params"}`
+- 响应：`{"type": "res", "id", "ok", "payload", "error": {"code", "message", "retryable"}}`
+- 事件：`{"type": "event", "event", "payload"}`
+
+| 方法（客户端 → 引擎） | 用途与约定 |
+|---|---|
+| `connect` | 握手。参数：`minProtocol`、`maxProtocol`（当前为 `3`）、`client`。返回 `ok: true`，并带 `payload.server` 与 `payload.features`。 |
+| `chat.send` | 发送消息并运行 Agent。参数：`sessionKey`、`message`，可选 `permissionMode`、`timeoutMs`、`attachments`、`appId`、`traceId`，以及 `eval_id` 等元数据键。 |
+| `chat.inject` | 向运行中的会话追加消息，不发起新的运行。参数同 `chat.send`。 |
+| `chat.abort` | 中止会话当前的运行。参数：`sessionKey`，可选 `runId`。 |
+| `interaction.resolve` | 回答 Agent 提出的问题或审批。参数：`interactionId`、`decision`，按需带 `answer` / `values` / `selectedOptions`。 |
+| `mode_transition.resolve` | 回答模式切换请求。参数：`transitionId`、`decision`。 |
+
+| 事件（引擎 → 客户端） | 约定 |
+|---|---|
+| `chat` | `payload.state` 为 `delta`、`final` 或 `error`。delta 带新增文本；`final` 带 `message.content`；`error` 带 `errorMessage` 与 `errorCode`。追加消息的 final 事件，其 `runId` 以 `inject-` 开头。 |
+| `agent` | 流式细节：`payload.stream` 为 `assistant`、`tool` 或 `lifecycle`。 |
+| `interaction.requested`、`interaction.resolved` | Agent 需要或已得到用户的回答，带 `interactionId`。 |
+| `tick` | 保活。约每 30 秒发送一次；平台关闭了协议层 ping。 |
+
+每个事件都必须带 `payload.sessionKey`。工作台的对话客户端还可能发送其他方法
+（如 `chat.history`、`sessions.*`、`models.list`），完整列表与帧细节
+**待与 Backend 确认**（O6）。
+
+### 可选：A2A 传输
+
+如果 BaaS 为任务运行开启了 A2A，它会改用以下接口而不是 WebSocket。除非 Avernet
+团队要求，否则无需实现。
 
 | 接口 | 用途 |
 |---|---|
-| `GET /health` | 存活检查，返回 `{"status": "ok"}`。 |
-| `GET /api/engine/status` | 该 bot 的引擎状态。 |
-| `GET /api/engine/capabilities` | `{"success": true, "data": {"supported": [...]}}`：引擎支持的功能。 |
-| `GET /api/models`、`GET /api/models/{model_id}` | bot 可用的模型。 |
-| `GET /api/sessions`、`POST /api/sessions` | 列出、创建会话。 |
-| `GET`/`DELETE /api/sessions/{session_id}` | 读取、删除单个会话。 |
-| `POST /api/sessions/{session_id}/update` | 更新会话元数据。 |
-| `GET`/`DELETE /api/sessions/{session_id}/messages` | 读取、清空会话消息。 |
-| `WebSocket /api/ws` | 实时对话（发送消息、流式回复、中止）。 |
+| `GET /.well-known/agent-card.json` | Agent 名片。必须列出协议版本为 `1.x` 的 `JSONRPC` 接口。 |
+| `POST /rpc` | JSON-RPC：`SendStreamingMessage`（SSE 响应；`contextId` 即会话 key）、`CancelTask`、`InjectContext`、`ResolveInteraction`。 |
 
-**会话 ID。**会话 ID 可能包含冒号（如 `agent:default:default:c_01M2F9:user:272471`）。
-部分代理会拒绝路径中的冒号，因此平台可能以**去掉填充的 base64url 编码**发送 ID。
-所有会话路由都要同时接受这两种形式。
+### 会话 ID
 
-**BaaS 发起的任务运行。**BaaS 在 bot 上运行任务时，会自己指定会话 ID，格式为
-`agent:main:default:{run_id}:user:{user_id}`。它先查询该会话
-（`GET /api/sessions/{session_id}`），不存在则调用 `POST /api/sessions` 并
-**传入这个会话 ID** 来创建，再通过 WebSocket 对话。因此 `POST /api/sessions`
-必须接受调用方指定的会话 ID。
+会话 ID 可能包含冒号（如 `agent:main:default:{run_id}:user:{user_id}`），而且按
+调用方不同，以不同形式到达引擎。**所有形式都要接受**：
 
-平台对这组接口的参考实现是 Avernet 引擎适配层（`engine/adapter/`，见其
-[开源指南](../../../../engine/adapter/docs/open-source-guide.zh-CN.md)）。各运行时
-接口的具体请求/响应结构，以及对话 WebSocket 的帧协议，**待与 Backend 确认**。
-在书面规范出来之前，以引擎适配层为参考。
+| 位置 | 形式 |
+|---|---|
+| 路径段，来自 Backend 公开 API | 去掉填充的 URL 安全 base64 |
+| 路径段，来自 BaaS | 带填充的标准 base64（可能含 `+`、`/`、`=`） |
+| 路径段，来自 Backend 专家对话 | 百分号编码（`:` 为 `%3A`） |
+| 请求体或查询参数（`session_key`、`sessionKey`） | 原始值 |
+
+BaaS 运行任务时会自己指定会话 ID，格式为
+`agent:main:default:{run_id}:user:{user_id}`。它先读取该会话，失败则调用
+`POST /api/sessions` 并把 ID 放在 `uuid` 中创建，再通过 WebSocket 对话。
+
+### 当前还会被调用的接口
+
+| 接口 | 调用方 | 说明 |
+|---|---|---|
+| `POST /api/mcp/call-tool` | Backend | 通过 bot 的 MCP 工具解析语雀文档链接。请求体 `{"tool", "args": ["url=..."]}`。 |
+| `POST /api/cron/auto-initiate/run-single` | Backend | 发起一个工作项任务，供编码类 bot 使用。 |
+| `/api/v1/bot/cron`、`/api/v1/bot/cron/{task_id}`、`.../run`、`.../runs` | Avernet 修复工具 | 上文 cron 操作在 teclaw 上的现有路径。是否保留**待与 Backend 确认**。 |
+
+平台对标准运行时接口的参考实现是 Avernet 引擎适配层（`engine/adapter/`，见其
+[开源指南](../../../../engine/adapter/docs/open-source-guide.zh-CN.md)）。
 
 ---
 
@@ -561,8 +663,12 @@ store 的路径。**文件在引擎内落到哪里由你们决定。**
 - [ ] 在 `/workspace` 与 `/identity` 下上传、读取、列出、删除均正常。
 - [ ] 读取不存在的文件返回 `404`。
 - [ ] `remove` 能删除整个目录。
-- [ ] 会话路由同时接受原始与 base64url 编码的会话 ID。
-- [ ] `POST /api/sessions` 能以调用方指定的 ID 创建会话。
+- [ ] 会话路由接受第 6 步列出的所有会话 ID 形式（原始值、百分号编码、去掉填充
+      的 URL 安全 base64、标准 base64）。
+- [ ] `POST /api/sessions` 带 `uuid` 时以该 ID 创建会话，并在 `data.id` 中返回。
+- [ ] 第 6 步中的每个运行时接口都能应答；不支持的功能返回 `501`。
+- [ ] `/api/ws` 对话 WebSocket 能完成 `connect`，对 `chat.send` 流式返回 `chat`
+      事件，并在 `chat.abort` 后停止。
 
 ---
 

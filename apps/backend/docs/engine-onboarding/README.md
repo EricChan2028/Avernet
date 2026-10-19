@@ -505,47 +505,153 @@ All requests are `POST`.
 
 `action` is `created`, `replaced` or `unchanged`. The platform checks that
 `skill_name` and `sha256` match what it sent. Errors: `400` for an invalid
-package, `413` if it's too large.
+package, `413` if it's too large, `409` with `"error": "publish_in_progress"`
+while the bot is being published, and `503` with
+`"error": "publish_lock_unavailable"` if you can't take the publish lock.
 
 ---
 
 ## Step 6: Implement the runtime endpoints
 
-These endpoints power chat, bot management and task runs. Backend forwards
-users' requests from the workbench, and BaaS uses the same endpoints to run
+These endpoints power chat, session management, scheduled tasks and bot
+management. Backend forwards users' requests from the workbench and the public
+OpenAPI, and BaaS uses the session endpoints and the chat WebSocket to run
 scheduled and collaborative tasks. A feature whose endpoint you don't implement
 is unavailable for your bots.
 
+This is the complete list of per-bot runtime endpoints the platform calls on an
+external engine today. Configuration and file endpoints are in
+[Step 3](#step-3-accept-bot-configuration) and
+[Step 5](#step-5-implement-the-file-endpoints).
+
+### Engine information
+
+| Endpoint | Called by | Purpose and contract |
+|---|---|---|
+| `GET /api/engine/status` | Backend | Engine status. Returned to the caller as is (no envelope required). |
+| `GET /api/engine/capabilities` | Backend | `{"success": true, "data": {"supported": [...]}}`: the features your engine supports. Also decides whether approval modes are offered. |
+| `GET /api/engine/list` | Backend | The engines available in this runtime. |
+| `POST /api/engine/restart` | Backend | Restart the engine process. Body `{"force": false}`. |
+| `GET /api/openclaw/default-config` | Backend | The engine's factory default configuration. Return `501` if you don't support it. |
+| `GET /api/models` | Backend | Models the bot can use: `{"success": true, "data": {"models": [...], "total": n}}`. |
+| `GET /api/models/{model_id}` | Backend | One model. |
+| `GET /api/nodes` | Backend | Nodes connected to the bot. Query: `status`, `platform`, `limit`, ... |
+| `POST /api/approvals/mode/get` | Backend | Read a session's approval mode. Body `{"session_key", "user_id"}` (raw session key). |
+| `POST /api/approvals/mode/set` | Backend | Set a session's approval mode. Body `{"session_key", "mode", "user_id"}`. |
+
+### Sessions
+
+| Endpoint | Called by | Purpose and contract |
+|---|---|---|
+| `GET /api/sessions` | Backend, BaaS | List sessions. Query: `user_id`, `agent_id`, `limit`, `offset`, and optionally `session_key`, `engine`. |
+| `POST /api/sessions` | Backend, BaaS | Create a session. Body: `title`, `user_id`, and optionally `model`, `cwd`, `agent_id`, `engine`, `uuid`. When `uuid` is present, **use it as the session ID** and return it unchanged in `data.id`. |
+| `GET /api/sessions/{session_id}` | Backend, BaaS | Read one session. Return `404` if it doesn't exist. |
+| `POST /api/sessions/{session_id}/update` | Backend | Update a session. The fields to change arrive as **query parameters**, not in the body. |
+| `DELETE /api/sessions/{session_id}` | Backend | Delete a session. |
+| `GET /api/sessions/{session_id}/messages` | Backend, BaaS | A session's messages, newest window first. Query: `limit`, `offset`. |
+| `DELETE /api/sessions/{session_id}/messages` | Backend | Clear a session's messages. |
+| `GET /api/session-favorites` | Backend | List a user's favorite sessions. Query: `user_id`, `agent_id`, `limit`, `offset`. |
+| `PUT /api/session-favorites/{session_id}` | Backend | Mark a session as favorite. Query: `user_id`. |
+| `DELETE /api/session-favorites/{session_id}` | Backend | Remove a favorite. Query: `user_id`. |
+
+A session object has `id`, `title`, `user_id`, `agent_id`, `model`,
+`gmt_created`, `gmt_modified`, `message_count` and `last_message`. A message
+object has `id`, `session_id`, `role`, `content`, `metadata`, `gmt_created`
+and `history_meta`.
+
+### Session files
+
+| Endpoint | Called by | Purpose and contract |
+|---|---|---|
+| `POST /api/resource-materializations` | Backend | Place a file the user attached into the session's workspace. Body includes `resource_id`, `session_id`, `workspace_relative_path`, `filename`, `size_bytes`, `content_hash`. Answer `{"success": true, "data": {"accepted": true}}`. |
+| `GET /api/resource-materializations/{resource_id}/content` | Backend | Stream a materialized file. Query: `disposition`. |
+| `GET /api/session-files/{resource_id}/content` | Backend | Stream a file the bot produced in a session. Query: `sessionKey` (raw), `disposition`. |
+
+### Scheduled tasks (cron)
+
+For a published bot running on several instances, Backend sends each call to
+every instance.
+
+| Endpoint | Called by | Purpose |
+|---|---|---|
+| `GET /api/cron` | Backend | List scheduled tasks. |
+| `GET /api/cron/running` | Backend | List tasks that are running now. |
+| `GET /api/cron/status` | Backend | Scheduler status. |
+| `POST /api/cron` | Backend | Create a task. |
+| `GET /api/cron/{task_id}` | Backend | Read a task. |
+| `PUT /api/cron/{task_id}` | Backend | Update a task. On a published bot, only enabling and disabling. |
+| `DELETE /api/cron/{task_id}` | Backend | Delete a task. |
+| `POST /api/cron/{task_id}/run` | Backend | Run a task now. Query: `force` (optional). |
+| `GET /api/cron/{task_id}/runs` | Backend | A task's run history. Query: `limit`. |
+
+### Chat WebSocket: `/api/ws`
+
+Users chat with the bot from the workbench over this WebSocket, and BaaS runs
+tasks over it. Messages are JSON frames:
+
+- Request: `{"type": "req", "id", "method", "params"}`
+- Response: `{"type": "res", "id", "ok", "payload", "error": {"code", "message", "retryable"}}`
+- Event: `{"type": "event", "event", "payload"}`
+
+| Method (client → engine) | Purpose and contract |
+|---|---|
+| `connect` | Handshake. Params: `minProtocol`, `maxProtocol` (currently `3`), `client`. Answer `ok: true` with `payload.server` and `payload.features`. |
+| `chat.send` | Send a message and run the agent. Params: `sessionKey`, `message`, and optionally `permissionMode`, `timeoutMs`, `attachments`, `appId`, `traceId`, plus metadata keys such as `eval_id`. |
+| `chat.inject` | Add a message to a running session without starting a new run. Same params as `chat.send`. |
+| `chat.abort` | Stop the current run of a session. Params: `sessionKey`, optionally `runId`. |
+| `interaction.resolve` | Answer a question or approval the agent asked for. Params: `interactionId`, `decision`, and `answer` / `values` / `selectedOptions` as needed. |
+| `mode_transition.resolve` | Answer a mode-switch request. Params: `transitionId`, `decision`. |
+
+| Event (engine → client) | Contract |
+|---|---|
+| `chat` | `payload.state` is `delta`, `final` or `error`. Deltas carry the new text; `final` carries `message.content`; `error` carries `errorMessage` and `errorCode`. The final event of an injected message has a `runId` starting with `inject-`. |
+| `agent` | Streaming detail: `payload.stream` is `assistant`, `tool` or `lifecycle`. |
+| `interaction.requested`, `interaction.resolved` | The agent needs, or got, a user's answer. Carry `interactionId`. |
+| `tick` | Keep-alive. Send one about every 30 seconds; the platform turns off protocol-level ping. |
+
+Every event must carry `payload.sessionKey`. The workbench chat client may send
+further methods (such as `chat.history`, `sessions.*`, `models.list`). Their
+exact list and frame details are **To be confirmed with Backend** (O6).
+
+### Optional: A2A transport
+
+If BaaS has A2A turned on for task runs, it uses these instead of the
+WebSocket. You don't need them unless the Avernet team asks you to.
+
 | Endpoint | Purpose |
 |---|---|
-| `GET /health` | Liveness. Return `{"status": "ok"}`. |
-| `GET /api/engine/status` | Engine status for the bot. |
-| `GET /api/engine/capabilities` | `{"success": true, "data": {"supported": [...]}}`: the features your engine supports. |
-| `GET /api/models`, `GET /api/models/{model_id}` | Models the bot can use. |
-| `GET /api/sessions`, `POST /api/sessions` | List and create chat sessions. |
-| `GET`/`DELETE /api/sessions/{session_id}` | Read and delete one session. |
-| `POST /api/sessions/{session_id}/update` | Update session metadata. |
-| `GET`/`DELETE /api/sessions/{session_id}/messages` | Read and clear a session's messages. |
-| `WebSocket /api/ws` | Real-time chat (send messages, stream replies, abort). |
+| `GET /.well-known/agent-card.json` | Agent card. Must list a `JSONRPC` interface with protocol version `1.x`. |
+| `POST /rpc` | JSON-RPC: `SendStreamingMessage` (SSE response; `contextId` is the session key), `CancelTask`, `InjectContext`, `ResolveInteraction`. |
 
-**Session IDs.** Session IDs can contain colons (for example
-`agent:default:default:c_01M2F9:user:272471`). Some proxies reject colons in a
-path, so the platform may send the ID **base64url-encoded without padding**.
-Accept both forms on every session route.
+### Session IDs
 
-**Task runs from BaaS.** When BaaS runs a task on a bot, it picks the session ID
-itself, in the form `agent:main:default:{run_id}:user:{user_id}`. It first asks
-for that session (`GET /api/sessions/{session_id}`). If it doesn't exist, BaaS
-creates it with `POST /api/sessions`, **passing that session ID**, then chats
-over the WebSocket. So `POST /api/sessions` must accept a session ID chosen by
-the caller.
+Session IDs can contain colons (for example
+`agent:main:default:{run_id}:user:{user_id}`), and they reach your engine in
+different forms depending on the caller. **Accept all of them**:
 
-The platform's reference implementation of this surface is the Avernet engine
-adapter (`engine/adapter/`; see its
-[Open-Source Guide](../../../../engine/adapter/docs/open-source-guide.md)). The
-exact request and response shapes of each runtime endpoint, and the chat
-WebSocket frame protocol, are **To be confirmed with Backend**. Until a
-written spec exists, use the engine adapter as the reference.
+| Where | Form |
+|---|---|
+| Path segment, from Backend's public API | URL-safe base64 without padding |
+| Path segment, from BaaS | Standard base64 with padding (may contain `+`, `/`, `=`) |
+| Path segment, from Backend's expert chat | Percent-encoded (`:` as `%3A`) |
+| Request body or query (`session_key`, `sessionKey`) | Raw |
+
+When BaaS runs a task, it picks the session ID itself, in the form
+`agent:main:default:{run_id}:user:{user_id}`. It reads the session first; if
+that fails, it creates it with `POST /api/sessions` and the ID in `uuid`, then
+chats over the WebSocket.
+
+### Also called today
+
+| Endpoint | Called by | Note |
+|---|---|---|
+| `POST /api/mcp/call-tool` | Backend | Resolves a Yuque document link through the bot's MCP tools. Body `{"tool", "args": ["url=..."]}`. |
+| `POST /api/cron/auto-initiate/run-single` | Backend | Starts a work-item task. Used by coding bots. |
+| `/api/v1/bot/cron`, `/api/v1/bot/cron/{task_id}`, `.../run`, `.../runs` | Avernet's repair tooling | Today's teclaw names for the cron operations above. Whether they stay is **To be confirmed with Backend**. |
+
+The platform's reference implementation of the standard runtime endpoints is
+the Avernet engine adapter (`engine/adapter/`; see its
+[Open-Source Guide](../../../../engine/adapter/docs/open-source-guide.md)).
 
 ---
 
@@ -605,8 +711,14 @@ during joint testing.
 - [ ] Upload, read, list and remove work on `/workspace` and `/identity`.
 - [ ] `read` returns `404` for a missing file.
 - [ ] `remove` deletes a whole directory.
-- [ ] Session routes accept both raw and base64url-encoded session IDs.
-- [ ] `POST /api/sessions` creates a session with a caller-chosen ID.
+- [ ] Session routes accept every session-ID form listed in Step 6 (raw,
+      percent-encoded, URL-safe base64 without padding, standard base64).
+- [ ] `POST /api/sessions` with `uuid` creates the session with that ID and
+      returns it in `data.id`.
+- [ ] Every runtime endpoint in Step 6 answers, or returns `501` for a feature
+      you don't support.
+- [ ] The chat WebSocket at `/api/ws` completes `connect`, streams `chat`
+      events for `chat.send`, and stops on `chat.abort`.
 
 ---
 
