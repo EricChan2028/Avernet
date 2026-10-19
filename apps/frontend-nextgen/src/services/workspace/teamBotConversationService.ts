@@ -56,6 +56,8 @@ function readTemplateName(dto: CollaboratingBotDto, templateType: string | undef
 function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
   const realBotId = dto.bot_id.trim();
   const entityId = dto.entity_id?.trim() || undefined;
+  // Runtime APIs' addressed-owner context matches the Bot record owner. The
+  // DTO entity_id is only the team-directory scope used in the composite ID.
   const ownerId = dto.owner_id?.trim() || undefined;
   const botId = entityId ? `${realBotId}:${entityId}` : realBotId;
   const declaredTemplateType = readTemplateType(dto);
