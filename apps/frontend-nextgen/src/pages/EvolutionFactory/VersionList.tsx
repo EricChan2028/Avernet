@@ -1,15 +1,42 @@
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
+import { Empty } from '@/components/ui/Empty';
 import { Input } from '@/components/ui/Input';
+import { Pagination } from '@/components/ui/Pagination';
 import { Spin } from '@/components/ui/Spin';
 import type { EvolutionVersion } from '@/domain/evolution/types';
 import { activeStatus, formatTime, type Task } from '@/domain/evolution/types';
 import { history, useLocation } from '@umijs/max';
+import { Package, RefreshCw, Search } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Choice, ErrorBox, useResource } from './shared';
+import { ErrorBox, FilterSelect, ListSkeleton, PlaceholderPanel, TablePanel, useResource } from './shared';
 import { useEvolutionContext } from './useEvolutionContext';
 import { Comparison, stableVersion, VersionActions, versionLabel, versionStatus } from './VersionActions';
 import { VersionReview } from './VersionReview';
 export { stableVersion, versionStatus } from './VersionActions';
+
+/** 整页表格与 Bot 管理列表面板同一几何规范（h-18 行 + sticky 操作列 + 44px 表头）。 */
+const COLUMN_WIDTHS = [
+  'w-[90px]',
+  'w-[170px]',
+  'w-[clamp(180px,15vw,240px)]',
+  'w-[130px]',
+  'w-[150px]',
+  'w-[140px]',
+  'w-[130px]',
+  'w-[160px]',
+  'w-[200px]',
+];
+const taskLinkClass = 'h-7 rounded-md px-1.5 text-[13px] font-normal text-primary hover:bg-primary/10 hover:text-primary';
+
+/** 版本状态 → 语义徽标：已接受（已登记）绿、未接受/晋升失败红、Pack 缺位黄、其余中性灰。 */
+function versionTone(label: string) {
+  if (label === '晋升失败' || label === '未接受') return 'error' as const;
+  if (label.includes('未登记')) return 'warning' as const;
+  if (label === '已接受') return 'success' as const;
+  return 'neutral' as const;
+}
 
 export default function VersionList({ task, revision = 0 }: { task?: Task; revision?: number }) {
   const context = useEvolutionContext();
@@ -147,142 +174,210 @@ export default function VersionList({ task, revision = 0 }: { task?: Task; revis
         {reviewModal}
       </aside>
     );
+  const hasActiveFilter = Boolean(query) || filter !== 'all' || botFilter !== 'all';
+  // 位于 task 早退分支之后，不能用 hook —— 直接随渲染推导。
+  const botOptions = [
+    { value: 'all', label: '全部' },
+    ...[...new Map(
+      (result.data?.items ?? []).map((v) => [
+        JSON.stringify([v.userId, v.botId]),
+        { value: JSON.stringify([v.userId, v.botId]), label: `${v.botId} / ${v.userId}` },
+      ]),
+    ).values()] as { value: string; label: string }[],
+  ];
+  // viewDiff 每渲染重建（依赖 refs 与 setState），故列定义不做 memo，直接随渲染生成。
+  const columns: DataTableColumn<EvolutionVersion>[] = [
+      {
+        id: 'version',
+        header: '版本',
+        width: COLUMN_WIDTHS[0],
+        cell: (v) => <span className="text-[13px] font-medium text-foreground">{versionLabel(v)}</span>,
+      },
+      {
+        id: 'bot',
+        header: 'Bot / Owner',
+        width: COLUMN_WIDTHS[1],
+        className: 'break-all text-[13px]',
+        // botId 保持为 td 的直接文本节点（getNodeText 断言依赖），Owner 退为下一行小字。
+        cell: (v) => (
+          <>
+            {v.botId}
+            <p className="mt-0.5 text-xs text-content-icon">{v.userId}</p>
+          </>
+        ),
+      },
+      {
+        id: 'task',
+        header: '来源任务',
+        width: COLUMN_WIDTHS[2],
+        cell: (v) => (
+          <Button
+            type="button"
+            variant="ghost"
+            style={{ height: 'auto', whiteSpace: 'normal' }}
+            className={taskLinkClass}
+            onClick={() => history.push(`/evolution-factory/tasks/${encodeURIComponent(v.taskId)}`)}
+          >
+            <span className="break-all text-left">{String(v.taskName || v.taskId)}</span>
+          </Button>
+        ),
+      },
+      {
+        id: 'status',
+        header: '状态',
+        width: COLUMN_WIDTHS[3],
+        cell: (v) => {
+          const label = versionStatus(v);
+          return <Badge tone={versionTone(label)}>{label}</Badge>;
+        },
+      },
+      {
+        id: 'bench',
+        header: 'Test Bench',
+        width: COLUMN_WIDTHS[4],
+        cell: (v) => <Comparison version={v} />,
+      },
+      {
+        id: 'review',
+        header: 'Review / Spec',
+        width: COLUMN_WIDTHS[5],
+        cell: (v) => (
+          <span className="text-xs text-muted-foreground">
+            {v.reviewStatus || '—'} / {v.specVersion || '—'}
+          </span>
+        ),
+      },
+      {
+        id: 'pack',
+        header: 'Pack',
+        width: COLUMN_WIDTHS[6],
+        cell: (v) => <span className="break-all text-xs text-muted-foreground">{v.pack?.packId || '未登记'}</span>,
+      },
+      {
+        id: 'time',
+        header: '时间',
+        width: COLUMN_WIDTHS[7],
+        cell: (v) => <span className="text-xs text-muted-foreground">{formatTime(v.createdAt)}</span>,
+      },
+      {
+        id: 'actions',
+        header: '操作',
+        width: COLUMN_WIDTHS[8],
+        align: 'end',
+        className: 'sticky right-0 z-10 bg-card group-hover:bg-muted/40',
+        headerClassName: 'sticky right-0 z-10 bg-muted/50',
+        cell: (v) => (
+          <div onClick={(e) => e.stopPropagation()}>
+            <VersionActions version={v} onDiff={(v) => void viewDiff(v)} />
+          </div>
+        ),
+      },
+  ];
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-3">
-        <Input
-          className="max-w-[440px]"
-          value={query}
-          placeholder="版本、Bot、任务或 SHA"
-          onChange={(e) => {
-            setQuery(e.target.value);
+    <div className="min-w-0">
+      {/* 筛选行：搜索 + 带 Bot / 版本类型下拉 + 右侧刷新与创建 Pack，与 Bot 管理工具行同 idiom。 */}
+      <div className="mb-4 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-3">
+        <div className="relative w-full sm:w-[240px] sm:shrink-0">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            className="pl-9"
+            aria-label="搜索进化版本"
+            placeholder="版本、Bot、任务或 SHA"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setPage(1);
+            }}
+          />
+        </div>
+        <FilterSelect
+          label="筛选 Bot"
+          value={botFilter}
+          onChange={(v) => {
+            setBotFilter(v);
             setPage(1);
           }}
+          options={botOptions}
+          triggerClassName="w-full sm:w-[180px]"
         />
-        <div className="w-full sm:w-[240px]">
-          <Choice
-            label="筛选 Bot"
-            value={botFilter}
-            onChange={(value) => {
-              setBotFilter(value);
-              setPage(1);
-            }}
-            options={[
-              { value: 'all', label: '全部 Bot' },
-              ...[
-                ...new Map(
-                  (result.data?.items ?? []).map((v) => [
-                    JSON.stringify([v.userId, v.botId]),
-                    { value: JSON.stringify([v.userId, v.botId]), label: `${v.botId} / ${v.userId}` },
-                  ]),
-                ).values(),
-              ],
-            ]}
-          />
+        <FilterSelect
+          label="版本类型"
+          value={filter}
+          onChange={(value) => {
+            setFilter(value);
+            setPage(1);
+          }}
+          options={[
+            { value: 'all', label: '全部' },
+            { value: 'initial', label: '初始版本' },
+            { value: 'accepted', label: '已接受' },
+            { value: 'rejected', label: '未接受' },
+            { value: 'snapshot', label: '主动快照' },
+          ]}
+        />
+        <div className="ml-auto flex w-full items-center justify-end gap-2.5 sm:w-auto">
+          <Button type="button" variant="outline" size="sm" leftIcon={<RefreshCw size={14} />} onClick={result.reload}>
+            刷新
+          </Button>
+          <Button
+            type="button"
+            leftIcon={<Package size={14} />}
+            onClick={() => history.push('/evolution-factory/new?type=pack')}
+          >
+            创建 Pack
+          </Button>
         </div>
-        <div className="w-full sm:w-[160px]">
-          <Choice
-            label="版本类型"
-            value={filter}
-            onChange={(value) => {
-              setFilter(value);
-              setPage(1);
-            }}
-            options={[
-              { value: 'all', label: '全部版本' },
-              { value: 'initial', label: '初始版本' },
-              { value: 'accepted', label: '已接受' },
-              { value: 'rejected', label: '未接受' },
-              { value: 'snapshot', label: '主动快照' },
-            ]}
-          />
-        </div>
-        <Button className="ml-auto" variant="outline" onClick={result.reload}>
-          刷新
-        </Button>
-        <Button onClick={() => history.push('/evolution-factory/new?type=pack')}>创建 Pack</Button>
       </div>
       <ErrorBox message={context.error || result.error} retry={result.reload} />
-      {result.loading ? (
-        <Spin tip="加载进化版本…" />
-      ) : (
-        <div className="overflow-x-auto rounded-xl border border-border">
-          <table className="w-full min-w-[1000px] text-left text-sm">
-            <thead className="bg-muted/40">
-              <tr>
-                {['版本', 'Bot / Owner', '来源任务', '状态', 'Test Bench', 'Review / Spec', 'Pack', '时间', '操作'].map(
-                  (t) => (
-                    <th className={`whitespace-nowrap p-3 ${t === '操作' ? 'sticky right-0 bg-muted' : ''}`} key={t}>
-                      {t}
-                    </th>
-                  ),
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {items.slice((page - 1) * pageSize, page * pageSize).map((v) => (
-                <tr key={v.versionId} className="border-t border-border">
-                  <td className="p-3">{versionLabel(v)}</td>
-                  <td className="max-w-[200px] break-all p-3">
-                    {v.botId}
-                    <p className="text-xs text-muted-foreground">{v.userId}</p>
-                  </td>
-                  <td className="max-w-[240px] break-all p-3">
-                    <Button
-                      variant="ghost"
-                      style={{ height: 'auto', whiteSpace: 'normal' }}
-                      className="text-primary"
-                      onClick={() => history.push(`/evolution-factory/tasks/${encodeURIComponent(v.taskId)}`)}
-                    >
-                      {String(v.taskName || v.taskId)}
-                    </Button>
-                  </td>
-                  <td className="whitespace-nowrap p-3">{versionStatus(v)}</td>
-                  <td className="p-3">
-                    <Comparison version={v} />
-                  </td>
-                  <td className="p-3">
-                    {v.reviewStatus || '—'} / {v.specVersion || '—'}
-                  </td>
-                  <td className="max-w-[140px] break-all p-3 text-xs">{v.pack?.packId || '未登记'}</td>
-                  <td className="whitespace-nowrap p-3 text-xs">{formatTime(v.createdAt)}</td>
-                  <td className="sticky right-0 min-w-[180px] bg-card p-3">
-                    <VersionActions version={v} onDiff={(v) => void viewDiff(v)} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!items.length && !result.error && <p className="p-6 text-center text-muted-foreground">暂无进化版本</p>}
-        </div>
-      )}
-      <div className="flex flex-wrap items-center justify-end gap-3 text-xs text-muted-foreground">
-        <span>
-          共 {items.length} 条 · 第 {page} 页
-        </span>
-        <div className="w-[110px]">
-          <Choice
-            label="每页条数"
-            value={String(pageSize)}
-            onChange={(v) => {
-              setPageSize(Number(v));
+      {result.loading || context.loading ? (
+        <TablePanel>
+          <ListSkeleton widths={COLUMN_WIDTHS} ariaLabel="进化版本加载中" />
+        </TablePanel>
+      ) : result.error ? (
+        <PlaceholderPanel>
+          <Empty
+            title="进化版本加载失败"
+            description={result.error}
+            action={
+              <Button type="button" variant="secondary" onClick={result.reload}>
+                重试
+              </Button>
+            }
+          />
+        </PlaceholderPanel>
+      ) : items.length ? (
+        <>
+          <TablePanel>
+            <DataTable
+              columns={columns}
+              rows={items.slice((page - 1) * pageSize, page * pageSize)}
+              getRowKey={(v) => v.versionId}
+              rowHeight="h-18"
+              ariaLabel="进化版本列表"
+              minWidth="min-w-[1370px]"
+            />
+          </TablePanel>
+          <Pagination
+            current={page}
+            pageSize={pageSize}
+            total={items.length}
+            onChange={setPage}
+            onPageSizeChange={(value) => {
+              setPageSize(value);
               setPage(1);
             }}
-            options={[10, 20, 50].map((n) => ({ value: String(n), label: `${n}条/页` }))}
+            layout="between"
+            className="mt-4"
           />
-        </div>
-        <Button size="sm" variant="outline" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>
-          上一页
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={page * pageSize >= items.length}
-          onClick={() => setPage((p) => p + 1)}
-        >
-          下一页
-        </Button>
-      </div>
+        </>
+      ) : (
+        <PlaceholderPanel>
+          <Empty
+            title={hasActiveFilter ? '没有符合条件的进化版本' : '暂无进化版本'}
+            description={hasActiveFilter ? '尝试清除搜索词或调整筛选条件。' : '发起一次进化任务，验证通过后即可沉淀稳定版本。'}
+          />
+        </PlaceholderPanel>
+      )}
       {reviewModal}
     </div>
   );
