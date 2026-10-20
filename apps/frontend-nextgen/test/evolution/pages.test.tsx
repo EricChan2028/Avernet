@@ -321,7 +321,12 @@ it('can retry failed preparation with a pending business step using the existing
   render(<EvolutionFactory />);
   fireEvent.click(await screen.findByRole('button', { name: '重试' }));
   await waitFor(() => expect(api.stepAction).toHaveBeenCalledWith('init-task', 'init-step', 'retry'));
-  expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument();
+  // 等 reload 回到稳态再断言：mock 仍返回同一份数据、init 依旧失败 ——
+  // 重试入口继续指向失败的初始化；停止入口指向最后的 pending 业务步
+  //（canCancelStep 仅在 skill_init 活跃时挡住业务步，failed 不会，见 createTask.test）。
+  await waitFor(() => expect(api.tasks.mock.calls.length).toBeGreaterThanOrEqual(2));
+  expect(await screen.findByRole('button', { name: '重试' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '停止' })).toBeInTheDocument();
 });
 
 it('renders start/end from raw API Step date strings without a creation-time fallback', async () => {
