@@ -39,7 +39,6 @@ const BotTable: React.FC<BotTableProps> = ({
   onGeneralConfig,
 }) => {
   const showOwner = bots.some((bot) => bot.spaceKind === 'team');
-  const showDescriptionColumn = bots.some((bot) => (bot.description?.trim().length ?? 0) > 28);
   const [expandedProgressIds, setExpandedProgressIds] = React.useState<Set<string>>(() => new Set());
   const [openMenuKey, setOpenMenuKey] = React.useState<string>();
   const toggleProgress = React.useCallback((botId: string) => {
@@ -50,6 +49,7 @@ const BotTable: React.FC<BotTableProps> = ({
       return next;
     });
   }, []);
+  const showDescriptionColumn = bots.some((bot) => (bot.description?.trim().length ?? 0) > 28);
   const engineVersions = useBotTableEngineVersions({
     bots,
     userId: containerUserId,
@@ -118,6 +118,7 @@ const BotTable: React.FC<BotTableProps> = ({
         getRowKey={(bot) => bot.cardId ?? bot.entityKey}
         onRowClick={handleRowClick}
         isRowClickable={(bot) => getBotEntryAvailability(bot).enabled}
+        rowHeight="h-18"
         renderExpandedRow={(bot) =>
           bot.deployment === 'local' &&
           ['deploying', 'failed', 'offline'].includes(bot.lifecycle) &&
