@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from 'vitest';
 import { repairFixture } from './repair-batch-fixtures.js';
+import { automationHistoryMigration } from '@avernet/clawweb-shared/server/schema-automation-history';
 import { repairReleaseMigrations } from '@avernet/clawweb-shared/server/schema-repair-release';
 import { AppConfigRepository } from '../../repositories/app-config-repository.js';
 import { createAutoAnalysisSettings } from '../task-guard/auto-analysis-settings.js';
@@ -16,6 +17,8 @@ afterEach(async () => { for (const f of fixtures.splice(0)) await f.db.close(); 
 async function fixture(autoDraft = false, count = 3, full = false) {
   const f = await repairFixture(count); fixtures.push(f);
   for (const m of repairReleaseMigrations) for (const sql of m.sql) await f.db.exec(f.db.dialect.renderDdl(sql));
+  await automationHistoryMigration.migrate!(f.db);
+  for (const sql of automationHistoryMigration.sql) await f.db.exec(f.db.dialect.renderDdl(sql));
   f.raw.exec(`CREATE TABLE cm_app_config (id INTEGER PRIMARY KEY, config_key TEXT UNIQUE, config_yaml TEXT, version INTEGER, enabled INTEGER,
     description TEXT, updated_by TEXT, gmt_create INTEGER, gmt_modified INTEGER);
     CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, flow_id TEXT UNIQUE, workflow_id TEXT, status TEXT, started_at INTEGER,
@@ -255,6 +258,12 @@ it('recovers a confirmed failed automatic batch using a durable request key afte
   f.setRemoteStatus({ status: 'failed', rawStatus: 'failed', errorMessage: 'controlled failure' });
   await f.workbench.report({ workflowId: 'wf-1', taskId: task.taskId, revision: 1, expectedStateVersion: 0, status: 'failed', error: { code: 'AIS_FAILED' } });
   f.advance(); await f.service.tick();
+  const before = await f.service.status('wf-1');
+  expect(before.retryableJobs?.filter(row => row.kind === 'auto_draft')).toEqual([expect.objectContaining({ id: job.id, taskId: task.taskId })]);
+  f.setOwner(null);
+  expect((await f.service.status('wf-1')).retryableJobs?.some(row => row.kind === 'auto_draft')).toBe(false);
+  await expect(f.service.retryFailures('wf-1')).rejects.toThrow('OWNER_MISSING');
+  f.setOwner('owner');
   await f.service.retryFailures('wf-1'); f.advance(); await f.restart().tick();
   const retried = await f.workbench.task(task.taskId);
   expect(retried.latestAttempt.revision).toBe(2);
@@ -405,4 +414,126 @@ it('also pauses a previously queued new automatic task while another draft await
  expect(f.calls).toHaveLength(1);
  expect(await repo.get(queued.id)).toMatchObject({reason:'DRAFT_IN_PROGRESS'});
  expect((await f.workbench.candidates('wf-1')).tasks.map(t=>t.taskId)).toEqual([task.taskId]);
+});
+
+it('projects run locators and evidence completeness without submitting any work', async () => {
+  const f = await fixture();
+  const repo = new WorkflowAutomationRepository(f.db);
+  const now = Date.parse('2026-11-01T02:00:00Z');
+  const waiting = await repo.ensure('wf-1', 'auto_run', 'waiting', { flowId: 'waiting-flow' }, now);
+  const partial = await repo.ensure('wf-1', 'auto_run', 'partial', { flowId: 'partial-flow' }, now);
+  await repo.patch((await repo.claim(waiting.id, now))!, { status: 'waiting' }, now, true);
+  await repo.patch((await repo.claim(partial.id, now))!, { status: 'done', reason: 'PARTIAL_ANALYSIS', data: { flowId: 'partial-flow', analysisId: 'analysis-1', complete: false } }, now, true);
+  const before = await repo.recent('wf-1');
+  const state = await f.service.status('wf-1');
+  expect(state.jobs).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: waiting.id, flowId: 'waiting-flow', status: 'waiting', createdAtMs: now }),
+    expect.objectContaining({ id: partial.id, flowId: 'partial-flow', analysisId: 'analysis-1', complete: false, reason: 'PARTIAL_ANALYSIS' }),
+  ]));
+  expect(state.retryableJobs).toEqual([]);
+  expect(await repo.recent('wf-1')).toEqual(before);
+  expect(f.ports.analysis.start).not.toHaveBeenCalled();
+  expect(f.ports.notify).not.toHaveBeenCalled();
+  expect(f.calls).toHaveLength(0);
+});
+it('lists exactly the analysis and notice jobs recovery can change, excluding active leases and unknown outcomes', async () => {
+  const f = await fixture();
+  const repo = new WorkflowAutomationRepository(f.db);
+  const now = Date.parse('2026-11-01T02:00:00Z');
+  async function job(key: string, kind: 'auto_run' | 'auto_notice', status: 'blocked' | 'uncertain' | 'waiting', reason: string, leased = false) {
+    const record = await repo.ensure('wf-1', kind, key, { flowId: key }, now);
+    await repo.patch((await repo.claim(record.id, now))!, { status, reason }, now, !leased);
+    return record.id;
+  }
+  const analysis = await job('failed-analysis', 'auto_run', 'blocked', 'ANALYSIS_FAILED');
+  const notice = await job('failed-notice', 'auto_notice', 'blocked', 'NOTIFICATION_REJECTED');
+  const owner = await job('missing-owner', 'auto_run', 'blocked', 'OWNER_MISSING');
+  const denied = await job('denied-owner', 'auto_notice', 'blocked', 'OWNER_PERMISSION_DENIED');
+  await job('leased', 'auto_run', 'blocked', 'ANALYSIS_FAILED', true);
+  await job('unknown', 'auto_run', 'uncertain', 'ANALYSIS_OUTCOME_UNKNOWN');
+  await job('running', 'auto_run', 'waiting', '');
+  await job('stale', 'auto_notice', 'blocked', 'CANDIDATE_SUPERSEDED');
+  const before = await repo.recent('wf-1');
+  const state = await f.service.status('wf-1');
+  const ids = state.retryableJobs!.map(row => row.id).sort();
+  expect(ids).toEqual([analysis, notice, owner, denied].sort());
+  expect(await repo.recent('wf-1')).toEqual(before);
+  await f.service.retryFailures('wf-1');
+  const changed = (await repo.recent('wf-1')).filter(row => row.status !== before.find(old => old.id === row.id)!.status);
+  expect(changed.map(row => row.id).sort()).toEqual(ids);
+  expect((await f.service.status('wf-1')).retryableJobs).toEqual([]);
+  expect(f.ports.analysis.start).not.toHaveBeenCalled();
+  expect(f.ports.notify).not.toHaveBeenCalled();
+});
+it('uses the same fifty-job recovery limit even when recent records are truncated', async () => {
+  const f = await fixture();
+  const repo = new WorkflowAutomationRepository(f.db);
+  const now = Date.parse('2026-11-01T02:00:00Z');
+  const records = [];
+  for (let i = 0; i < 55; i++) {
+    const record = await repo.ensure('wf-1', 'auto_run', `failure-${i}`, { flowId: `flow-${i}` }, now);
+    await repo.patch((await repo.claim(record.id, now))!, { status: 'blocked', reason: 'ANALYSIS_FAILED' }, now, true);
+    records.push(record);
+  }
+  const state = await f.service.status('wf-1');
+  expect(state.retryableJobs).toHaveLength(50);
+  await f.service.retryFailures('wf-1');
+  const recovered = (await Promise.all(records.map(row => repo.get(row.id)))).filter(row => row!.status === 'retryable');
+  expect(recovered.map(row => row!.id).sort()).toEqual(state.retryableJobs!.map(row => row.id).sort());
+  expect((await f.service.status('wf-1')).retryableJobs).toHaveLength(5);
+});
+
+it('polls draft recovery with bounded reads despite many cancelled historical drafts', async () => {
+  const f = await fixture(true, 1, true);
+  await f.service.tick(); f.advance(); await f.service.tick();
+  const job = (await f.service.status('wf-1')).jobs.find(row => row.kind === 'auto_draft')!;
+  const task = await f.workbench.task(job.taskId!);
+  f.setRemoteStatus({ status: 'failed', rawStatus: 'failed', errorMessage: 'controlled failure' });
+  await f.workbench.report({ workflowId: 'wf-1', taskId: task.taskId, revision: 1, expectedStateVersion: 0, status: 'failed', error: { code: 'AIS_FAILED' } });
+  f.advance(); await f.service.tick();
+  const revision = f.raw.prepare('SELECT * FROM workflow_repair_revisions WHERE task_id=? AND revision=1').get(task.taskId) as Record<string, unknown>;
+  const journal = f.raw.prepare('SELECT * FROM workflow_repair_release_records WHERE record_id=?').get(job.id) as Record<string, unknown>;
+  function insert(table: string, row: Record<string, unknown>) {
+    const entries = Object.entries(row).filter(([key]) => key !== 'record_status');
+    f.raw.prepare(`INSERT INTO ${table} (${entries.map(([key]) => key).join(',')}) VALUES (${entries.map(() => '?').join(',')})`).run(...entries.map(([, value]) => value));
+  }
+  function seed(i: number, phase: string, policyVersion?: number, leased = false, staleRequest = false) {
+    const taskId = `HIST-${i}`, id = digestRepairJson(['history', i]), requestId = `history-request-${i}`;
+    const input = { ...JSON.parse(String(revision.input_json)), taskId };
+    insert('workflow_repair_revisions', { ...revision, task_id: taskId, phase, request_id: requestId, request_key: id, input_json: JSON.stringify(input) });
+    const body = JSON.parse(String(journal.body_json));
+    const data = { ...body.data, realTaskId: taskId, request: { ...body.data.request, requestId: staleRequest ? 'superseded-request' : requestId,
+      automation: { ...body.data.request.automation, ...(policyVersion === undefined ? {} : { policyVersion }) } } };
+    insert('workflow_repair_release_records', { ...journal, record_id: id, request_key: id, created_at_ms: 1, updated_at_ms: 1,
+      body_json: JSON.stringify({ ...body, id, ...(leased ? { leaseUntilMs: Number.MAX_SAFE_INTEGER } : {}), data }) });
+    return id;
+  }
+  f.raw.transaction(() => {
+    for (let i = 0; i < 200; i++) {
+      seed(i, i < 80 ? 'cancelled' : 'failed', i >= 160 && i < 180 ? 0 : undefined, i >= 180, i >= 120 && i < 160);
+      if (i >= 80 && i < 120) insert('workflow_repair_revisions', { ...revision, task_id: `HIST-${i}`, revision: 2, phase: 'cancelled',
+        request_key: digestRepairJson(['newer', i]), input_json: JSON.stringify({ ...JSON.parse(String(revision.input_json)), taskId: `HIST-${i}`, revision: 2 }) });
+    }
+  })();
+  const readTask = vi.spyOn(f.workbench, 'task'), query = vi.spyOn(f.db, 'query');
+  const dispatched = f.calls.length;
+  for (let i = 0; i < 3; i++) {
+    query.mockClear();
+    expect((await f.service.status('wf-1')).retryableJobs?.filter(row => row.kind === 'auto_draft').map(row => row.id)).toEqual([job.id]);
+    expect(query.mock.calls.length).toBeLessThanOrEqual(10);
+  }
+  const recoveryQuery = query.mock.calls.find(([sql]) => sql.includes('SELECT a.body_json, r.revision'))!;
+  const plan = f.raw.prepare(`EXPLAIN QUERY PLAN ${recoveryQuery[0]}`).all(...recoveryQuery[1]!) as { detail: string }[];
+  expect(plan.some(row => row.detail.includes('idx_repair_history_status'))).toBe(true);
+  expect(plan.some(row => /TEMP B-TREE/.test(row.detail))).toBe(false);
+  const eligible = [job.id];
+  f.raw.transaction(() => { for (let i = 200; i < 250; i++) eligible.push(seed(i, 'failed')); })();
+  const targets = (await f.service.status('wf-1')).retryableJobs!.filter(row => row.kind === 'auto_draft');
+  expect(targets).toHaveLength(50);
+  await f.service.retryFailures('wf-1');
+  const remaining = (await f.service.status('wf-1')).retryableJobs!.filter(row => row.kind === 'auto_draft');
+  expect(remaining.map(row => row.id)).toEqual(eligible.filter(id => !targets.some(row => row.id === id)));
+  expect(remaining).toHaveLength(1);
+  expect(readTask).not.toHaveBeenCalled();
+  expect(f.calls).toHaveLength(dispatched);
 });

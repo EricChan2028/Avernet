@@ -176,3 +176,85 @@ itemCount`。超限记录 `SCOPE_TOO_LARGE`，模型异常记录既有失败分�
 
 核心投影的缓存指纹与扫描版本更新为 core-v1，旧的超限 blocked 结果不会阻止
 新投影重新排队。既有请求预算、租约和来源变化核对继续生效。
+
+## Execution record presentation
+
+`AutomationSnapshot.jobs` includes optional `createdAtMs`, `flowId`, `analysisId`,
+`complete`, and the existing `taskId`. Missing historical fields do not imply
+complete evidence or authorize fabricated links. Run records link to the existing
+`/runs/:flowId` view, with `analysisId` when available; draft/notice task records
+reuse the repair workspace. Records without a locator expose their recorded ID,
+status, reason and attempt count inline. `waiting` analysis jobs await the analysis
+result; `done` means analysis ended, and `complete=false` or `PARTIAL_ANALYSIS`
+means evidence is incomplete. None of these states establishes problem resolution.
+Daily scan progress is separate from failure-event analysis history.
+
+The optional `retryableJobs` is a read-only list using the same recovery selectors
+as `retryFailures`, independent of the recent-history limit. Analysis/notice jobs
+must be blocked with one of the existing recoverable reasons and no live lease;
+the existing 50-record selection limit applies. Drafts must satisfy the current
+Owner/policy, batch, original request, failed revision and lease checks. The UI
+lists each target and its type before offering retry; missing or empty lists offer
+no retry action. Recovery rechecks current conditions; a concurrent state change
+can remove eligibility. In-flight and unknown-outcome requests keep reconciling
+their original identities. Status reads do not claim jobs or submit business work.
+
+The settings panel distinguishes failure-event enablement from daily scheduling.
+“保存设置” submits the existing time/impact policy write; labels do not migrate
+or enable a policy on render. “调整建议与要求” opens the existing same-task
+revision editor, whose submit is “生成新版本”. Generation retry retains the
+selected suggestions, instructions and feedback; `GIT_RESULT_UNAVAILABLE` only
+reads the original candidate. Existing automatic-batch and publication guards apply.
+
+## Browsing execution history
+
+`GET /api/task-guard/workflows/:workflowId/automation-records` requires the existing
+workflow view permission. It reads history only: no coverage aggregation, policy,
+Owner, repair-task detail, or recovery eligibility reads run on this endpoint.
+It accepts `period=all|today|7d`, `status=all|pending|dispatching|waiting|retryable|uncertain|done|blocked`,
+`limit` (integer 1–20, default 8), and an opaque `cursor` of at most 512 characters.
+Invalid values return 400. Response: `{ jobs: AutomationJobSummary[], nextCursor: string | null }`.
+No exact total is calculated. The next cursor uses immutable creation time plus
+record ID and anchors the date window to the first page's time. “Today” starts at
+Shanghai midnight; “7d” includes today and the preceding six Shanghai calendar
+days. These are creation dates, not the original workflow run's occurrence date.
+
+Default UI shows eight newest records, regardless of task status. “查看全部记录”
+opens a 20-record page with date and status selectors and previous/next navigation.
+Changing a filter resets the cursor trail. Collapsing restores the unfiltered
+latest eight. Filters do not affect the independent retry-target list or its
+eligibility. Failed history reads can be retried without a business write.
+Only the first page polls; older pages load on demand and are briefly cached.
+Successful task-retry requests invalidate the history cache.
+
+Migration v146 adds a virtual status projection restricted to auto_run, auto_draft
+and auto_notice plus two compound indexes on task/kind/time/record ID and
+task/kind/status/time/record ID. JSON stays authoritative; historical statuses are
+available without rewriting journal bodies. ZDAS uses ALTER TABLE ADD INDEX,
+not the dialect's skipped standalone CREATE INDEX. Normal migration DDL authority
+is required before the new reader is deployed; a managed runtime without DDL
+permission must receive the schema through its existing migration process.
+Creating indexes can take time on existing large tables and is a deployment-time
+operation, never a request-time operation. No migration was run against a shared
+or production database during development.
+
+Each read performs three ordered index-range queries (one per displayed kind),
+returning at most limit+1 scalar projections each, then merges that bounded set.
+It never loads full request/model-input JSON, sorts the complete history, computes
+a total, or uses a deep OFFSET. The index key lengths remain below ZDAS's
+767-byte ceiling with utf8mb4. Regression tests seed 20,000 records and inspect
+SQLite query plans for both unfiltered and rare-status pages, including cursors.
+MySQL/OceanBase live query plans and index build times remain integration checks;
+DDL rendering tests do not establish deployed performance.
+
+### Bounded draft-recovery polling
+
+Status polling and recovery use one batched eligibility query against the current
+failed revision and its original request. Cancelled tasks, tasks with a newer
+revision, stale request IDs, other policy versions and active leases are excluded
+before the 50-draft batch limit. The task/revision primary key and v146 status/time
+index support the join and ordering. Polling never calls the full workbench task
+reader for each historical draft. Owner and current policy authority are still
+checked; recovery keeps the journal CAS/lease check and the subsequent generation
+checks. After recovering a batch, remaining eligible drafts appear in the next
+snapshot. The retry-target list and retry action share this same selector.

@@ -9,6 +9,7 @@ import { digestRepairJson } from '../contracts/repair-batch.js';
 import { WorkflowAutomationRepository, type AutomationJob } from '../repositories/workflow-automation-repository.js';
 import { runAutomaticRound } from './workflow-automation-round.js';
 import { previousShanghaiDay, selectAutomaticScope } from './workflow-automation-selection.js';
+import { WorkflowAutomationHistoryRepository } from '../repositories/workflow-automation-history-repository.js';
 const DAY = 86400000;
 export function automationDue(now: number, dailyTime: string) {
   const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(now));
@@ -241,6 +242,28 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
       await repo.patch(cycle, { reason: error.message, nextAtMs: now() + 30000 }, now(), true);
     }
   }
+  // Status and recovery share eligibility; inspecting status never claims or dispatches work.
+  async function draftRecoveries(workflowId: string, enforceAuthority = false) {
+    const policy = await input.settings.get(workflowId);
+    const failures = await repo.recoverableDrafts(workflowId, now(), policy.version);
+    if (!failures.length) return [];
+    let access;
+    try { access = await authority(workflowId, true); }
+    catch (error) { if (!enforceAuthority && error instanceof RepairAutomationDeniedError) return []; throw error; }
+    const result: Array<{ job: AutomationJob; recovery: { expectedRevision: number; requestId: string } }> = [];
+    for (const { job, revision } of failures) {
+      if (job.data.request.automation.policyVersion !== access.policy.version) continue;
+      result.push({ job, recovery: { expectedRevision: revision, requestId: `${job.id}:retry:${revision}` } });
+    }
+    return result;
+  }
+  function summarize(job: AutomationJob) {
+    return { id: job.id, kind: job.kind, status: job.status, attempts: job.attempts, reason: job.reason, createdAtMs: job.createdAtMs,
+      ...(job.data.realTaskId || job.data.taskId ? { taskId: job.data.realTaskId || job.data.taskId } : {}),
+      ...(job.data.flowId ? { flowId: job.data.flowId } : {}),
+      ...(job.data.analysisId ? { analysisId: job.data.analysisId } : {}),
+      ...(typeof job.data.complete === 'boolean' ? { complete: job.data.complete } : {}) };
+  }
   return {
     async tick() {
       const policies = await input.settings.list(); if (!policies.length) return 0;
@@ -257,24 +280,18 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
       const job = await repo.ensure(row.workflow_id, 'auto_run', event.flowId, { flowId: event.flowId, evidenceCutoffMs: now() }, now());
       await runAnalysis(job);
     },
+    records(workflowId, query) { return new WorkflowAutomationHistoryRepository(input.db).page(workflowId, query, now()); },
     async status(workflowId) {
       const jobs = await repo.recent(workflowId);
       return { schemaVersion: 'workflow-automation/v1', workflowId, coverage: await repo.coverage(workflowId), pauseReason: jobs.find(job => job.kind === 'auto_cycle')?.reason ?? null, lastScannedAtMs: jobs.find(job => job.kind === 'auto_cycle')?.data.scannedThroughMs ?? null,
         ...(jobs.find(job => job.kind === 'auto_cycle')?.data.round ? { round: { ...jobs.find(job => job.kind === 'auto_cycle')!.data.round,
           completedBatches: (await repo.get(jobs.find(job => job.kind === 'auto_cycle')!.data.round.id))?.data.completedBatches ?? 0 } } : {}),
-        jobs: jobs.map(job => ({ id: job.id, kind: job.kind, status: job.status, attempts: job.attempts, reason: job.reason,
-          ...(job.data.realTaskId ? { taskId: job.data.realTaskId } : {}) })) };
+        jobs: jobs.map(summarize),
+        retryableJobs: [...await repo.retryableFailures(workflowId, now()), ...(await draftRecoveries(workflowId)).map(entry => entry.job)].map(summarize) };
     },
     async retryFailures(workflowId) {
       await repo.retryFailures(workflowId, now());
-      const failures = await repo.failedDrafts(workflowId);
-      if (!failures.length) return;
-      const access = await authority(workflowId, true);
-      for (const job of failures) {
-        if (!job.data.batches || !job.data.realTaskId || job.data.request?.automation?.policyVersion !== access.policy.version) continue;
-        const task = await input.workbench.task(job.data.realTaskId);
-        if (task.latestAttempt.phase !== 'failed' || task.latestAttempt.requestId !== job.data.request.requestId) continue;
-        const recovery = { expectedRevision: task.latestAttempt.revision, requestId: `${job.id}:retry:${task.latestAttempt.revision}` };
+      for (const { job, recovery } of await draftRecoveries(workflowId, true)) {
         await repo.recoverDraft(job, { ...job.data, recovery, request: { ...job.data.request, requestId: recovery.requestId } }, now());
       }
     },
