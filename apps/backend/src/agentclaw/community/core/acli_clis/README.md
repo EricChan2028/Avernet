@@ -1,8 +1,9 @@
 # `agentclaw.community.core.acli_clis`
 
 Manage the acli market CLIs a bot runs, through `/openapi/v1/bots/{bot_id}/clis`
-and `/openapi/v1/bots/market/clis`. Spec:
-`apps/backend/specs/2026-10-15-openapi-v1-acli-clis/`.
+and `/openapi/v1/bots/market/clis`, and the same operations on the internal
+`/api/bots/{bot_id}/clis` and `/api/bots/market/clis` for authenticated users.
+Spec: `apps/backend/specs/2026-10-15-openapi-v1-acli-clis/`.
 
 - **AgentPass (Passport) is the only record** of which CLIs a bot has; this
   module stores nothing of its own.
@@ -36,13 +37,16 @@ consumes:
   - "CliCapabilityManifestResolver (core.mcp) — which CLIs are a bot's defaults"
   - "core.caller_identity guard — bot lookup and the edit-lock check shared with the identity switch"
   - "BotRepository, BotCollabLockRepositoryProtocol, CallerIdentityRepositoryProtocol (core.repository)"
+  - "CollaboratorServiceProtocol (core.bot_collaborator) — who may read a bot's CLIs"
   - "DeviceAdapterTransport (plugin_api) — the hop to the engine's /api/cli/acli/* endpoints"
   - "HttpClient (plugin_api) — the general client, for the market's search API"
 consumed_by:
   - "adapters/http/openapi_v1/bots/acli_clis.py — list, add and remove a bot's CLIs"
   - "adapters/http/openapi_v1/market/acli_clis.py — the market search"
+  - "adapters/http/acli_clis/router.py — the internal /api/bots routes for the same operations"
 internal_dependencies:
   - agentclaw.community.core.acli_clis
+  - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.caller_identity
   - agentclaw.community.core.errors
   - agentclaw.community.core.mcp
