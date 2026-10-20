@@ -78,7 +78,7 @@ def parse_result(result: Any, operation: str) -> dict[str, Any]:
         raise RestartBackupError('invalid_response', '重启备份结果无效') from error
     if not isinstance(value, dict) or value.get('version') != 1 or value.get('operation_id') != operation:
         raise RestartBackupError('operation_mismatch', '重启备份操作不匹配')
-    if value.get('status') not in {'legacy', 'not_mounted', 'running', 'committed', 'failed'}:
+    if value.get('status') not in {'legacy', 'not_mounted', 'running', 'committed', 'partial_success', 'failed'}:
         raise RestartBackupError('unknown_status', '未知的重启备份状态')
     return value
 
@@ -100,16 +100,25 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
     def log(phase, status, *, level='info', error_type='-', generation='-', reason='-'):
         getattr(logger, level)(
             "event=aicoding_restart_backup phase=%s status=%s bot_id=%s "
-            "target_id=%s operation_id=%s elapsed_ms=%s generation_id=%s error_type=%s reason=%s",
+            "target_id=%s operation_id=%s elapsed_ms=%s generation_id=%s error_type=%s reason=%s%s",
             phase, status, bot_id, target_id, operation_id,
             int((time.monotonic() - started) * 1000), generation, error_type, reason,
+            ' action=continue_restart data_loss_risk=true' if reason == 'partial_receipt_valid' else '',
         )
 
     def receipt(value):
         event = value.get('backup')
-        if (not isinstance(event, dict) or event.get('status') != 'success'
-                or not event.get('generation_id') or event.get('operation_id') != operation_id):
+        partial = value['status'] == 'partial_success'
+        expected = 'partial_success' if partial else 'success'
+        if (not isinstance(event, dict) or event.get('status') != expected
+                or not isinstance(event.get('generation_id'), str) or not event['generation_id']
+                or event.get('operation_id') != operation_id):
             raise RestartBackupError('invalid_receipt', '缺少有效的最终备份凭据')
+        # Only a published generation with source omissions is partial success;
+        # a storage/compression failure cannot be promoted by its outer status.
+        if partial and (event.get('error_code') != 'source_files_skipped'
+                        or event.get('failed_phase') != 'backup_partial'):
+            raise RestartBackupError('invalid_receipt', '缺少有效的部分备份凭据')
         return event['generation_id']
 
     log('probe', 'started')
@@ -131,11 +140,12 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
                 boot = current_boot
             if status == 'not_mounted' and action != 'start':
                 raise RestartBackupError('mount_changed', '备份期间挂载状态发生变化')
-            generation = receipt(value) if status == 'committed' else '-'
-            if status in {'legacy', 'not_mounted', 'committed'}:
-                log('prepared', status, generation=generation, reason={
+            generation = receipt(value) if status in {'committed', 'partial_success'} else '-'
+            if status in {'legacy', 'not_mounted', 'committed', 'partial_success'}:
+                log('prepared', status, generation=generation,
+                    level='warning' if status == 'partial_success' else 'info', reason={
                     'legacy': 'helper_absent', 'not_mounted': 'no_live_binds',
-                    'committed': 'receipt_valid'}[status])
+                    'committed': 'receipt_valid', 'partial_success': 'partial_receipt_valid'}[status])
                 break
             if status == 'failed':
                 raise RestartBackupError('backup_failed', '备份脚本报告失败，请检查容器备份日志')
@@ -164,9 +174,11 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
                 raise TimeoutError("重启备份超过等待预算")
             if current['status'] != status or (boot and current.get('boot_id') != boot):
                 raise RestartBackupError('receipt_stale', '备份后实例或挂载状态变化')
-            if status == 'committed' and receipt(current) != generation:
+            if status in {'committed', 'partial_success'} and receipt(current) != generation:
                 raise RestartBackupError('generation_changed', '备份凭据变化')
-            log('verify', 'allowed', generation=generation)
+            log('verify', 'allowed', generation=generation,
+                level='warning' if status == 'partial_success' else 'info',
+                reason='partial_receipt_valid' if status == 'partial_success' else '-')
         except Exception as error:
             log('verify', 'failed', level='warning', error_type=type(error).__name__, reason=error_reason(error))
             raise

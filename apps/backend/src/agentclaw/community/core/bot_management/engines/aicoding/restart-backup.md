@@ -118,8 +118,10 @@ An absent `/opt/agentclaw/bin/restart_backup` is a legacy skip only when both th
 new `/opt/agentclaw/restart-backup-v1` installation and the restart barrier are
 absent. The older `.fastdisk.ready` marker is not a backup capability marker.
 A permission error is not absence. Once installed, the runtime helper checks
-actual mounts; `not_mounted` skips backup. Mounted runtimes must stop writers and
-return a committed generation/operation receipt for backup to count as successful.
+actual mounts; `not_mounted` skips backup. Mounted runtimes return a durable generation/operation receipt: `committed`
+for complete backup or `partial_success` for published data with source omissions.
+Current helpers back up live without stopping writers; neither status promises
+a transactionally consistent snapshot.
 Unconfirmed backup still allows restart, with a data-loss warning.
 
 Inventory logs include `source=baas_devices`, query start/failure, device count,
@@ -148,17 +150,18 @@ Additional JSON fields are ignored to allow additive v1 changes.
 | --- | --- |
 | `version` | Integer `1`; incompatible versions must not be silently accepted |
 | `operation_id` | The requested operation ID, identical throughout one operation |
-| `status` | `legacy`, `not_mounted`, `running`, `committed`, or `failed` |
+| `status` | `legacy`, `not_mounted`, `running`, `committed`, `partial_success`, or `failed` |
 | `boot_id` | Nonempty container-boot identity, required except for `legacy` |
-| `backup` | Required for `committed`: object with `status: success`, matching `operation_id`, and nonempty `generation_id` |
+| `backup` | Required for `committed` and `partial_success`: matching `operation_id` and nonempty string `generation_id`. Complete backup requires nested `status: success`; partial backup requires nested `status: partial_success`, `error_code: source_files_skipped`, and `failed_phase: backup_partial`. |
 
 `legacy` is emitted only by the backend's missing-helper probe when both new
 capability markers are absent; it is not a fallback for transport errors.
 `not_mounted` means the installed helper found no canonical data mounts.
 `running` requires polling; it must not transition to a skip state. `committed`
-means writers have been stopped and the backup generation is durable. `failed`
-degrades backup but allows replacement. Before replacement, the status, boot
-identity and committed generation are checked again; changes warn and continue.
+means a complete backup generation is durable. `partial_success` means the
+generation was published but some source files were skipped: it is terminal,
+not an instruction to keep polling. `failed` degrades backup but allows replacement. Before replacement, the status, boot
+identity and either completed generation are checked again; changes warn and continue.
 Changed physical inventories stop receipt probing against those targets.
 
 The paired script repository must implement this same v1 contract. Rollout must
@@ -241,3 +244,35 @@ together. Direct internal constructors that exercise coding backup must supply
 the envelope instead of `arca_restart_transport_provider`; the default represents
 unavailable backup capabilities, not backup success. HTTP inputs, queue payloads,
 provider APIs and backup helper/receipt formats are unchanged.
+
+## Partial-success propagation (2026-10-20)
+
+The paired helper keeps its strict shell invocation and recognizes only a final
+post-publication source-omission event as `partial_success`. Source permissions or
+missing files can therefore yield a usable, incomplete recovery copy instead of
+an unconfirmed failure. Storage, compression, lock, restore-pending and publication
+errors are still failures; they cannot be claimed as valid partial receipts.
+Explicit fastdisk upgrade remains strict in the script and is not changed here.
+
+Both prepare and under-lock verification validate the partial receipt. Status,
+operation, boot identity and generation must remain consistent. Valid partial
+results log WARN with `reason=partial_receipt_valid`, `action=continue_restart`,
+`data_loss_risk=true` and the generation ID; raw paths and exception text are not
+logged. Malformed partial receipts use the existing backup-failure best-effort
+policy, never the confirmed-partial path. Lifecycle target/binding/CAS protections
+are unchanged, as are true-failure continuation and non-coding engine behavior.
+
+This is a v1 enum extension between the container helper and coding strategy.
+Affected consumers include direct ARCA and BaaS-backed coding restarts, published
+instances and callers using the same strategy. No shared lifecycle parameter,
+provider API, database field, Bot status or frontend change is needed. Restore
+still reads the published manifest, retains the previous recovery generation and
+does not automatically merge omitted files from older backups.
+
+Deploy this backend reader before new script bundles. It continues accepting old
+complete/failed receipts, including old partial backups reported as `failed`.
+Old readers do not understand the new enum: best-effort versions may continue via
+unknown-status fallback, while strict versions may block. Existing containers
+keep their pinned helper; rollback must account for containers already emitting
+the new state. Unit/strategy tests cover both providers and malformed/stale
+receipts; Linux root/admin, real GNU tar and NAS still require rollout validation.
