@@ -77,7 +77,6 @@ const BotTable: React.FC<BotTableProps> = ({
   onGeneralConfig,
 }) => {
   const showOwner = bots.some((bot) => bot.spaceKind === 'team');
-  const showDescriptionColumn = bots.some((bot) => (bot.description?.trim().length ?? 0) > 28);
   const [expandedProgressIds, setExpandedProgressIds] = React.useState<Set<string>>(() => new Set());
   const [openMenuKey, setOpenMenuKey] = React.useState<string>();
   const toggleProgress = React.useCallback((botId: string) => {
@@ -93,26 +92,15 @@ const BotTable: React.FC<BotTableProps> = ({
       {
         id: 'info',
         header: 'Bot信息',
-        width: showDescriptionColumn ? 'w-[clamp(192px,16vw,240px)]' : 'w-[clamp(224px,19vw,320px)]',
-        cell: (bot) => (
-          <BotInfoCell
-            bot={bot}
-            compactDescription={!showDescriptionColumn}
-            onClaimLock={onClaimLock}
-            onReleaseLock={onReleaseLock}
-          />
-        ),
+        width: 'w-[clamp(192px,16vw,240px)]',
+        cell: (bot) => <BotInfoCell bot={bot} onClaimLock={onClaimLock} onReleaseLock={onReleaseLock} />,
       },
-      ...(showDescriptionColumn
-        ? [
-            {
-              id: 'description',
-              header: '描述',
-              width: 'w-[clamp(160px,14vw,240px)]',
-              cell: (bot: BotDomain) => <BotDescriptionCell bot={bot} />,
-            },
-          ]
-        : []),
+      {
+        id: 'description',
+        header: '描述',
+        width: 'w-[clamp(160px,14vw,260px)]',
+        cell: (bot: BotDomain) => <BotDescriptionCell bot={bot} />,
+      },
       {
         id: 'status',
         header: '状态',
@@ -133,7 +121,7 @@ const BotTable: React.FC<BotTableProps> = ({
       },
       {
         id: 'tags',
-        header: 'bot 标签',
+        header: 'Bot 标签',
         width: 'w-[clamp(120px,10vw,160px)]',
         cell: (bot) => <BotTagsCell bot={bot} />,
       },
@@ -167,14 +155,15 @@ const BotTable: React.FC<BotTableProps> = ({
         : []),
       {
         id: 'primary-actions',
-        header: '主要操作',
-        width: 'w-[224px]',
+        header: '操作',
+        width: 'w-[284px]',
         align: 'end',
-        className: 'sticky right-12 z-10 bg-card group-hover:bg-muted/40',
+        className: 'sticky right-0 z-10 bg-card group-hover:bg-muted/40',
+        headerClassName: 'sticky right-0 z-10 bg-muted/50',
         cell: (bot) => {
           const entry = getBotEntryAvailability(bot);
           const collaborationAllowsConversation = canOpenConversation?.(bot) ?? true;
-          return (
+          const primaryCell = (
             <BotPrimaryActionsCell
               bot={bot}
               onView={onView}
@@ -185,28 +174,18 @@ const BotTable: React.FC<BotTableProps> = ({
                 entry.enabled ? (collaborationAllowsConversation ? undefined : '申请协作权限后才可对话') : entry.disabledReason
               }
               onOpenLogs={onOpenLogs}
-              onOpenTaskInstances={onOpenTaskInstances}
-              canOpenTaskInstances={canOpenTaskInstances}
-              onHealthCheck={onHealthCheck}
               inventoryActions={getInventoryActions?.(bot)}
-              healthCheckAvailability={getHealthCheckAvailability?.(bot)}
               logAction={getLogAction?.(bot)}
             />
           );
-        },
-      },
-      {
-        id: 'more-actions',
-        header: <span className="sr-only">更多操作</span>,
-        width: 'w-[48px]',
-        align: 'end',
-        className: 'sticky right-0 z-10 bg-card group-hover:bg-muted/40',
-        cell: (bot) => {
-          if (!onAction) return null;
+          // 三个点与四个操作链接同处一个 gap-0.5 flex 行，间距由同一 gap 保证
+          // 与链接之间完全一致（合并原「更多操作」独立列造成的 td padding 空隙）。
+          if (!onAction) return primaryCell;
           const menuKey = bot.cardId ?? bot.entityKey;
           const generalConfigAvailability = getGeneralConfigAvailability?.(bot);
           return (
-            <div className="flex justify-end" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-end gap-0.5" onClick={(event) => event.stopPropagation()}>
+              {primaryCell}
               <BotManagementMenu
                 bot={bot}
                 open={openMenuKey === menuKey}
@@ -215,6 +194,10 @@ const BotTable: React.FC<BotTableProps> = ({
                 lockedByOther={bot.lock?.status === 'other'}
                 onAction={onAction}
                 onManagePublication={onManagePublication}
+                onHealthCheck={onHealthCheck}
+                healthCheckAvailability={getHealthCheckAvailability?.(bot)}
+                onOpenTaskInstances={onOpenTaskInstances}
+                canOpenTaskInstances={canOpenTaskInstances?.(bot)}
                 onChangeSpace={onChangeSpace}
                 onAuthorize={onAuthorize}
                 canGeneralConfig={generalConfigAvailability?.enabled}
@@ -228,7 +211,6 @@ const BotTable: React.FC<BotTableProps> = ({
     ],
     [
       showOwner,
-      showDescriptionColumn,
       onView,
       onEdit,
       onConversation,
@@ -284,6 +266,7 @@ const BotTable: React.FC<BotTableProps> = ({
       getRowKey={(bot) => bot.cardId ?? bot.entityKey}
       onRowClick={handleRowClick}
       isRowClickable={(bot) => getBotEntryAvailability(bot).enabled}
+      rowHeight="h-18"
       renderExpandedRow={(bot) =>
         bot.deployment === 'local' &&
         ['deploying', 'failed', 'offline'].includes(bot.lifecycle) &&
@@ -292,7 +275,7 @@ const BotTable: React.FC<BotTableProps> = ({
         ) : null
       }
       ariaLabel={ariaLabel}
-      minWidth={showOwner ? (showDescriptionColumn ? 'min-w-[1260px]' : 'min-w-[1080px]') : showDescriptionColumn ? 'min-w-[1180px]' : 'min-w-[1000px]'}
+      minWidth={showOwner ? 'min-w-[1212px]' : 'min-w-[1132px]'}
     />
   );
 };
