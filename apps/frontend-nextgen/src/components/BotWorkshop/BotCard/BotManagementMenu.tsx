@@ -1,14 +1,13 @@
 import { Button } from '@/components/ui/Button';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { Popover, PopoverTrigger } from '@/components/ui/Popover';
 import type { EngineVersionUpdateAvailability } from '@/domain/botEngineVersion';
+import { restartPublishStageLabel, restartPublishStageOf } from '@/domain/botWorkshop';
 import type { BotActionAvailability, BotDomain } from '@/services/botWorkshop';
-import { ClipboardList, HeartPulse, MapPin, MoreVertical, ShieldCheck, Users } from 'lucide-react';
+import { MoreVertical } from 'lucide-react';
 import { useState } from 'react';
-import { BotEngineVersionMenuItems } from './BotEngineVersionMenuItems';
-import { BotManagementConfirmDialog } from './BotManagementConfirmDialog';
-import { BotManagementRuntimeItems } from './BotManagementRuntimeItems';
-import { actionIcon, actionLabel, type BotCardManagementAction } from './config';
-import { ActionHelp, MenuSection } from './menuPrimitives';
+import { BotManagementMenuItems } from './BotManagementMenuItems';
+import { actionLabel, type BotCardManagementAction } from './config';
 interface BotManagementMenuProps {
   bot: BotDomain;
   open?: boolean;
@@ -55,8 +54,9 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
   const open = props.open ?? uncontrolledOpen;
   const setOpen = props.onOpenChange ?? setUncontrolledOpen;
   const [confirmAction, setConfirmAction] = useState<BotCardManagementAction>();
-  const isAgentCodingBot = bot.runtime.isAgentCodingBot;
+  const [confirming, setConfirming] = useState(false);
   if (bot.lifecycle === 'deploying') return null;
+  const restartPublishStage = confirmAction === 'restart_publish' ? restartPublishStageOf(bot.lifecycle) : undefined;
   return (
     <>
       <Popover open={open} onOpenChange={setOpen}>
@@ -69,161 +69,74 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
             leftIcon={<MoreVertical className="size-4" />}
           />
         </PopoverTrigger>
-        <PopoverContent align="end" className="w-52 space-y-1 p-2">
-          {/* 配置类：Bot 的配置与形态变更操作（验收修正：配置类同组置顶） */}
-          <MenuSection>
-            {onGeneralConfig ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                leftIcon={<ShieldCheck className="size-4" />}
-                disabled={!canGeneralConfig}
-                onClick={() => {
+        <BotManagementMenuItems
+          bot={bot}
+          collaborationMode={collaborationMode}
+          lockedByOther={lockedByOther}
+          onAction={onAction}
+          onManagePublication={onManagePublication}
+          onHealthCheck={onHealthCheck}
+          healthCheckAvailability={healthCheckAvailability}
+          onOpenTaskInstances={onOpenTaskInstances}
+          canOpenTaskInstances={canOpenTaskInstances}
+          onChangeSpace={onChangeSpace}
+          onAuthorize={onAuthorize}
+          canGeneralConfig={canGeneralConfig}
+          generalConfigDisabledReason={generalConfigDisabledReason}
+          onGeneralConfig={onGeneralConfig}
+          engineVersionUpdateAvailability={engineVersionUpdateAvailability}
+          onOpenEngineInfo={
+            onOpenEngineInfo
+              ? (selected) => {
                   setOpen(false);
-                  onGeneralConfig(bot);
-                }}
-              >
-                {canGeneralConfig ? (
-                  '通用配置'
-                ) : (
-                  <ActionHelp description={generalConfigDisabledReason ?? '当前不可用'}>通用配置</ActionHelp>
-                )}
-              </Button>
-            ) : null}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full justify-start"
-              leftIcon={<MapPin className="size-4" />}
-              disabled={lockedByOther}
-              onClick={() => {
-                setOpen(false);
-                onChangeSpace?.(bot);
-              }}
-            >
-              变更归属空间
-            </Button>
-            {bot.serviceMode === 'non-service' && bot.deployment === 'cloud' && bot.canUpgradeToService ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                leftIcon={actionIcon.upgrade}
-                disabled={lockedByOther}
-                onClick={() => {
+                  onOpenEngineInfo(selected);
+                }
+              : undefined
+          }
+          onUpdateEngineVersion={
+            onUpdateEngineVersion
+              ? (selected) => {
                   setOpen(false);
-                  setConfirmAction('upgrade');
-                }}
-              >
-                {actionLabel.upgrade}
-              </Button>
-            ) : null}
-          </MenuSection>
-          {/* 日常操作（协作与查看） */}
-          <MenuSection divider>
-            {collaborationMode && onAuthorize ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                leftIcon={<Users className="size-4" />}
-                onClick={() => {
-                  setOpen(false);
-                  onAuthorize(bot);
-                }}
-              >
-                {collaborationMode === 'authorize' ? '授权' : '申请操作权限'}
-              </Button>
-            ) : null}
-            {onOpenTaskInstances && (isAgentCodingBot || canOpenTaskInstances) ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                leftIcon={<ClipboardList className="size-4" />}
-                aria-label={`查看 ${bot.name} 任务实例`}
-                onClick={() => {
-                  setOpen(false);
-                  onOpenTaskInstances(bot);
-                }}
-              >
-                任务实例
-              </Button>
-            ) : null}
-            {healthCheckAvailability?.visible && onHealthCheck ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                leftIcon={<HeartPulse className="size-4" />}
-                aria-label={`${bot.name} 健康检查`}
-                disabled={lockedByOther || !healthCheckAvailability.enabled}
-                onClick={() => {
-                  setOpen(false);
-                  onHealthCheck(bot);
-                }}
-              >
-                <ActionHelp
-                  description={
-                    lockedByOther
-                      ? '该 Bot 正被他人编辑，请先抢锁'
-                      : healthCheckAvailability.disabledReason ?? '对该 Bot 的引擎与协作链路执行一次集成健康检查。'
-                  }
-                >
-                  健康检查
-                </ActionHelp>
-              </Button>
-            ) : null}
-            {bot.deployment === 'local' && bot.actions.includes('open_folder') ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                onClick={() => {
-                  setOpen(false);
-                  void onAction('open_folder', bot);
-                }}
-              >
-                打开本地目录
-              </Button>
-            ) : null}
-          </MenuSection>
-          <BotEngineVersionMenuItems
-            bot={bot}
-            availability={engineVersionUpdateAvailability}
-            onOpenInfo={
-              onOpenEngineInfo
-                ? (selected) => {
-                    setOpen(false);
-                    onOpenEngineInfo(selected);
-                  }
-                : undefined
-            }
-            onUpdate={
-              onUpdateEngineVersion
-                ? (selected) => {
-                    setOpen(false);
-                    onUpdateEngineVersion(selected);
-                  }
-                : undefined
-            }
-          />
-          {/* 发布与运行态操作：按相同的权限和实例规则集中处理。 */}
-          <BotManagementRuntimeItems
-            bot={bot}
-            lockedByOther={lockedByOther}
-            onClose={() => setOpen(false)}
-            onConfirm={setConfirmAction}
-            onManagePublication={onManagePublication}
-          />
-        </PopoverContent>
+                  onUpdateEngineVersion(selected);
+                }
+              : undefined
+          }
+          onMenuClose={() => setOpen(false)}
+          onRequestConfirm={setConfirmAction}
+        />
       </Popover>
-      <BotManagementConfirmDialog
-        bot={bot}
-        action={confirmAction}
-        onAction={onAction}
+      <ConfirmDialog
+        open={Boolean(confirmAction)}
+        loading={confirming}
+        title={confirmAction === 'delete' ? '确认删除 Bot' : confirmAction ? actionLabel[confirmAction] : '确认'}
+        description={
+          confirmAction === 'delete'
+            ? `删除「${bot.name}」后无法恢复。`
+            : confirmAction === 'upgrade'
+            ? '开启后不可逆，确认将此 Bot 转换为服务 Bot？'
+            : confirmAction === 'engine_restart'
+            ? '仅重启引擎进程，不重建容器。'
+            : confirmAction === 'restart_publish'
+            ? restartPublishStage
+              ? `将重启该服务在${restartPublishStageLabel[restartPublishStage]}环境发布的运行时，进行中的服务会话可能短暂中断；草稿机器与草稿数据不受影响。`
+              : '当前发布状态不支持重启发布，请刷新 Bot 列表后重试。'
+            : '将重新拉起整个 Bot 容器，现有会话可能中断。'
+        }
+        confirmText={confirmAction === 'delete' ? '删除' : '确认'}
+        confirmVariant={confirmAction === 'delete' ? 'destructive' : 'primary'}
         onCancel={() => setConfirmAction(undefined)}
+        onConfirm={async () => {
+          if (!confirmAction) return;
+          setConfirming(true);
+          try {
+            await onAction(confirmAction, bot);
+            setConfirmAction(undefined);
+          } catch {
+            // 失败提示已由 Hook toast 统一负责；保留弹窗供用户取消或重试，同时避免 rethrow 变成未处理拒绝。
+          } finally {
+            setConfirming(false);
+          }
+        }}
       />
     </>
   );
