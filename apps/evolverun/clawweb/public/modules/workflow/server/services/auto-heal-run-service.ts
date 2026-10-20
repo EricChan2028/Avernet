@@ -2,6 +2,8 @@
 import { randomUUID } from "node:crypto";
 import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import type { FlowRunRepository } from "../repositories/flow-run-repository.js";
+import type { FacadeBindingRepository } from "../repositories/facade-binding-repository.js";
+import { resolveRerunCommand } from "./rerun-command.js";
 
 export type LifecycleStage = "draft" | "verify" | "online";
 
@@ -22,12 +24,18 @@ export interface AutoHealRunDependencies {
   flowRunRepo: FlowRunRepository | null;
   botPermRepo: BotWorkflowPermissionRepository | null;
   sendIntervention: AutoHealRunSender;
+  /** Supplies the slash command for runs whose input_json records no command. */
+  facadeRepo?: FacadeBindingRepository | null;
 }
 
 export interface AutoHealRunInput {
   workflowId: string;
   sourceFlowId: string;
   actorId: string;
+  /**
+   * Recorded for the acceptance audit only. The trigger is the slash command
+   * resolved from the source run, so these params do not reach the Bot.
+   */
   params?: Record<string, unknown>;
   isAdmin?: boolean;
   userName?: string;
@@ -36,7 +44,10 @@ export interface AutoHealRunInput {
 export interface AutoHealRunResult {
   ok: true;
   workflowId: string;
-  flowId: string;
+  /** BaaS message id for this delivery. It is NOT a ClawMind flow id: no
+   *  flow_runs row exists yet, and one may never appear if the Bot times out.
+   *  Never persist this into a flow id column. */
+  messageId: string;
   sessionId: string | null;
 }
 
@@ -113,12 +124,23 @@ export class AutoHealRunService {
       throw new AutoHealRunError("forbidden", "Only the source Bot owner or an admin may run this workflow from this source");
     }
     const lifecycleStage = resolveSourceStage(run.credentials_json);
-    const params = input.params ?? (run.params_json == null || run.params_json === "" ? {} : parseObject(run.params_json));
-    if (!params) throw new AutoHealRunError("invalid_source", "Source run params_json must be a valid object; supply params to override");
     const userName = input.userName || actorId;
-    const payload = { action: "run_workflow", workflowId, params, triggeredBy: "clawweb-dashboard",
-      userId: actorId, userName, source: "auto-heal" };
-    const message = `🚀 [自动修复-重新运行] ${userName}(${actorId}) 请求运行工作流\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📁 工作流: ${workflowId}\n⚡ 操作: 自动修复后重新运行\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n执行命令:\n${JSON.stringify(payload)}`;
+    // Rebuild the original trigger. A facade-triggered run records the command it
+    // received in input_json; a cron- or dashboard-triggered run records only
+    // params, so the workflow's facade binding supplies the command instead.
+    const facadeRepo = this.deps.facadeRepo;
+    const command = await resolveRerunCommand({
+      inputJson: run.input_json,
+      lookupBoundCommand: async () => {
+        const bindings = facadeRepo ? await facadeRepo.findByWorkflowId(workflowId) : [];
+        return bindings[0]?.command ?? null;
+      },
+    });
+    if (!command) {
+      throw new AutoHealRunError("invalid_source",
+        `源运行缺少可执行命令：input_json 无 command，且工作流 "${workflowId}" 未在 facade_bindings 中绑定命令`);
+    }
+    const message = `🚀 [自动修复-重新运行] ${userName}(${actorId}) 请求运行工作流\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📁 工作流: ${workflowId}\n⚡ 操作: 自动修复后重新运行\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n执行命令:\n${command}`;
     let receipt: Awaited<ReturnType<AutoHealRunSender>>;
     try {
       // New invocation, not the source cron/chat session. The service never retries delivery.
@@ -134,7 +156,7 @@ export class AutoHealRunService {
     if (typeof receipt.messageId !== "string" || !receipt.messageId.trim()) {
       throw new AutoHealRunError("delivery_failed", "BaaS did not confirm message acceptance (missing messageId)");
     }
-    return { ok: true, workflowId, flowId: receipt.messageId,
+    return { ok: true, workflowId, messageId: receipt.messageId,
       sessionId: typeof receipt.sessionId === "string" && receipt.sessionId.trim() ? receipt.sessionId : null };
   }
 }

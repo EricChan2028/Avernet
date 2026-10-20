@@ -16,6 +16,7 @@ const hasExecutePermission = vi.fn();
 const hasEditPermission = vi.fn();
 const sendIntervention = vi.fn();
 const onAccepted = vi.fn();
+const findByWorkflowId = vi.fn();
 
 // Exercise the actual Express router without opening sockets or making HTTP requests.
 function request(router: Router, payload: unknown = body, headers: Record<string, string> = { "x-user-id": "owner-1" },
@@ -43,9 +44,11 @@ beforeEach(() => {
   sendIntervention.mockResolvedValue(receipt);
   fallbackSender.mockResolvedValue(receipt);
   onAccepted.mockResolvedValue(undefined);
+  // A cron-triggered run records no command, so the binding supplies it.
+  findByWorkflowId.mockResolvedValue([{ command: body.workflowId }]);
   deps = { flowRunRepo: { findFullByFlowId } as unknown as FlowRunRepository,
     botPermRepo: { hasExecutePermission, hasEditPermission } as unknown as BotWorkflowPermissionRepository,
-    sendIntervention, onAccepted };
+    sendIntervention, onAccepted, facadeRepo: { findByWorkflowId } as never };
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -92,7 +95,7 @@ describe("POST /api/auto-heal/run", () => {
     { cookie: signedIamCookie },
   ])("reuses resolveWorkflowActorId identity sources (%j)", async headers => {
     expect(await request(createAutoHealRunRouter(deps), body, headers)).toEqual({ status: 200,
-      body: { ok: true, workflowId: body.workflowId, flowId: receipt.messageId, sessionId: receipt.sessionId } });
+      body: { ok: true, workflowId: body.workflowId, messageId: receipt.messageId, sessionId: receipt.sessionId } });
     expect(hasExecutePermission).toHaveBeenCalledWith(body.workflowId, "owner-1");
   });
 
@@ -107,10 +110,11 @@ describe("POST /api/auto-heal/run", () => {
     findFullByFlowId.mockResolvedValue({ workflow_id: body.workflowId, origin_bot_id: "default:owner-1",
       credentials_json: '{"BOT_TYPE":"service","STAGE":"not-public"}' }); await failure(422);
   });
-  it.each(["broken-json", "null", "[]", "1"])("rejects corrupt/nonobject stored params with 422 (%s)", async params => {
+  // The trigger is the bound slash command, so stored params no longer gate a re-run.
+  it.each(["broken-json", "null", "[]", "1"])("ignores corrupt stored params (%s)", async params => {
     findFullByFlowId.mockResolvedValue({ workflow_id: body.workflowId, origin_bot_id: "default:owner-1",
       credentials_json: '{"STAGE":"draft"}', params_json: params });
-    await failure(422);
+    expect(await request(createAutoHealRunRouter(deps))).toMatchObject({ status: 200, body: { ok: true } });
   });
   it("fails closed without permission service", async () => { deps.botPermRepo = null; await failure(403); });
   it("fails closed without run storage", async () => { deps.flowRunRepo = null; await failure(503); });
@@ -125,7 +129,8 @@ describe("POST /api/auto-heal/run", () => {
       sessionId: "cron-session", credentials: { STAGE: "online" }, params: {} });
     expect(sendIntervention).toHaveBeenCalledWith(expect.objectContaining({ botId: "default:owner-1",
       lifecycleStage: "draft", sessionId: null }));
-    expect(JSON.parse(sendIntervention.mock.calls[0][0].message.split("\n").at(-1)).params).toEqual({});
+    // The trigger is the bound slash command, not a client-supplied payload.
+    expect(sendIntervention.mock.calls[0][0].message.split("\n").at(-1)).toBe(`/${body.workflowId}`);
   });
 
   it.each([false, true])("preserves detailed BaaS failure, tokenExpired=%s, without retry", async tokenExpired => {
@@ -147,7 +152,7 @@ describe("POST /api/auto-heal/run", () => {
     const params = { replacement: true };
     await request(createAutoHealRunRouter(deps), { ...body, params, actorId: "spoofed" });
     expect(onAccepted).toHaveBeenCalledExactlyOnceWith(
-      { ok: true, workflowId: body.workflowId, flowId: receipt.messageId, sessionId: receipt.sessionId },
+      { ok: true, workflowId: body.workflowId, messageId: receipt.messageId, sessionId: receipt.sessionId },
       { ...body, actorId: "owner-1", params },
     );
     expect(sendIntervention.mock.invocationCallOrder[0]).toBeLessThan(onAccepted.mock.invocationCallOrder[0]);
@@ -172,7 +177,7 @@ describe("POST /api/auto-heal/run", () => {
 
   it("wires the same run router in the public parent, while keeping flowRunRepo optional", async () => {
     const publicDeps = { flowRunRepo: deps.flowRunRepo, botPermRepo: deps.botPermRepo,
-      sendIntervention } as unknown as AutoHealRouteDependencies;
+      sendIntervention, facadeRepo: deps.facadeRepo } as unknown as AutoHealRouteDependencies;
     expect(await request(createAutoHealRouter(publicDeps))).toMatchObject({ status: 200, body: { ok: true } });
     expect(fallbackSender).not.toHaveBeenCalled();
     delete publicDeps.flowRunRepo;
@@ -180,7 +185,8 @@ describe("POST /api/auto-heal/run", () => {
   });
 
   it("selects the existing sender only in the public routing adapter", async () => {
-    const publicDeps = { flowRunRepo: deps.flowRunRepo, botPermRepo: deps.botPermRepo } as unknown as AutoHealRouteDependencies;
+    const publicDeps = { flowRunRepo: deps.flowRunRepo, botPermRepo: deps.botPermRepo,
+      facadeRepo: deps.facadeRepo } as unknown as AutoHealRouteDependencies;
     expect(await request(createAutoHealRouter(publicDeps))).toMatchObject({ status: 200, body: { ok: true } });
     expect(fallbackSender).toHaveBeenCalledWith(expect.objectContaining({ botId: "default:owner-1", lifecycleStage: "draft" }));
   });

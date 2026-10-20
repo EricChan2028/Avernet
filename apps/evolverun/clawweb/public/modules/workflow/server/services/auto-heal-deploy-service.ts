@@ -54,7 +54,8 @@ export type AutoHealDeployResult = {
   deployNumber: number;
   version: number;
   tagName: string;
-  runId?: string | null;
+  /** BaaS message id from the post-deploy re-run, not a ClawMind flow id. */
+  messageId?: string | null;
 };
 
 function isReservedWorkflowId(id: string): boolean {
@@ -259,10 +260,10 @@ export class AutoHealDeployService {
       throw makeError(500, "Internal Server Error", `部署 tag 已推送，但部署记录写入失败: ${msg}`);
     }
 
-    let runId: string | null | undefined;
+    let messageId: string | null | undefined;
     if (input.autoRun !== false && this.triggerRun) {
       try {
-        runId = await this.triggerRun(workflowId, actorId, input.sourceFlowId ?? null);
+        messageId = await this.triggerRun(workflowId, actorId, input.sourceFlowId ?? null);
       } catch (runErr) {
         const msg = runErr instanceof Error ? runErr.message : String(runErr);
         console.warn(`[auto-heal] deploy succeeded but auto-run failed for ${workflowId}: ${msg}`);
@@ -277,7 +278,7 @@ export class AutoHealDeployService {
       deployNumber: gitResult.deployNumber,
       version: newVersion,
       tagName: gitResult.tagName,
-      runId: runId ?? null,
+      messageId: messageId ?? null,
     };
   }
 }
