@@ -38,7 +38,8 @@ export function MonitoringEnrollment({ bot, onRefresh }: { bot: BotOption; onRef
     <button type="button" className="enroll-primary" ref={join} disabled={busy} onClick={() => void enroll()}>{busy ? '请稍候…' : '加入监控'}</button>
     {error && <p role="alert">{error}</p>}
     {notice && <dialog ref={dialog} className="join-dialog" aria-labelledby="monitoring-join-title" onCancel={e => { e.preventDefault(); close(); }}>
-      <h2 id="monitoring-join-title">加入监控暂未开放</h2><p>加入监控功能正在开发中，敬请期待。</p>
+      <h2 id="monitoring-join-title">暂不支持添加监控Bot</h2><p>当前暂不支持在页面中自行添加监控Bot。</p>
+      <p>如有需要请联系@沐荛添加监控Bot</p>
       <div className="join-actions"><button type="button" autoFocus onClick={close}>知道了</button></div>
     </dialog>}
   </section>;

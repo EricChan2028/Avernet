@@ -1,4 +1,10 @@
 /** Service API: CV reports immutable events; the UI reads projections. No transport dependencies. */
+import type { RecoveryTaskResult } from "../repair/session-recovery/task-contracts.js";
+/** Callback wire contract shared with the existing recovery sender. */
+export type MonitoringRecoveryResult = RecoveryTaskResult;
+export type RecoveryResultAck = {
+  accepted: true; eventId: string; taskId: string; resultVersion: number; duplicate: boolean;
+};
 export const DIAGNOSIS_VERSION = "claw-monitoring/diagnosis-event/v2";
 export const CHECK_VERSION = "claw-monitoring/bot-check/v2";
 export type Engine = "OC" | "TE";
@@ -81,6 +87,8 @@ export interface MonitoringStore {
   listTargets(): Promise<MonitoringTarget[]>;
   summaries(targets: readonly MonitoringTarget[], window: MonitoringWindow): Promise<(MonitoringSummary | null)[]>;
   insertDiagnosis(event: ResolvedReport<DiagnosisEvent>, receivedAt: number): Promise<boolean>;
+  /** Append once per event/task/version; true means inserted, false means identical replay. */
+  appendRecoveryResult(result: MonitoringRecoveryResult): Promise<boolean>;
   applyCheck(check: ResolvedReport<BotCheck>, receivedAt: number): Promise<boolean>;
   readStatus(target: MonitoringTarget): Promise<{ check: BotCheck | null; count: number }>;
   listDiagnoses(target: MonitoringTarget, query: DiagnosisQuery): Promise<DiagnosisPage>;
@@ -88,6 +96,7 @@ export interface MonitoringStore {
 export interface MonitoringApi {
   bots(): Promise<{ items: MonitoringTarget[] }>;
   reportDiagnosis(input: unknown, key: string | undefined): Promise<DiagnosisAck>;
+  reportRecoveryResult(input: unknown): Promise<RecoveryResultAck>;
   reportCheck(input: unknown): Promise<CheckAck>;
   status(botId: string): Promise<BotStatus>;
   diagnoses(botId: string, query: Record<string, unknown>): Promise<DiagnosisPage>;
@@ -96,6 +105,7 @@ export type MonitoringErrorCode = "INVALID_EVENT" | "INVALID_IDENTITY"
   | "BOT_IDENTITY_UNAVAILABLE" | "BOT_IDENTITY_AMBIGUOUS" | "CHECK_CONFLICT"
   | "TARGET_UNRESOLVED" | "TARGET_AMBIGUOUS" | "TARGET_BINDING_CONFLICT"
   | "UNAUTHENTICATED" | "FORBIDDEN" | "NOT_ENROLLED" | "ALREADY_ENROLLED" | "ENROLLMENT_NOT_IMPLEMENTED"
+  | "INVALID_RESULT" | "RESULT_TARGET_NOT_FOUND" | "RESULT_CONFLICT"
   | "EVENT_CONFLICT" | "PAYLOAD_TOO_LARGE" | "NOT_READY" | "BOT_NOT_FOUND";
 export class MonitoringError extends Error {
   constructor(readonly code: MonitoringErrorCode, message: string) { super(message); }

@@ -438,3 +438,31 @@ describe("diagnosis report -> allowlist -> durable recovery task", () => {
     expect(agent.start).not.toHaveBeenCalled();
   });
 });
+
+
+describe("recovery result receiver HTTP contract", () => {
+  const result = { event_id: alert.eventId, task_id: "SR-http", result_version: 3,
+    status: "completed", phase: "verify", waiting_reason: null, effect: "recovered", result_text: "已恢复", evidence_ids: [] };
+  const report = (body: Record<string, unknown>) => post(body, "session-recovery-results");
+  it("persists and acknowledges identical replay without requiring an extra token", async () => {
+    await post(alert);
+    expect(await report(result)).toMatchObject({ status: 200, body: { accepted: true, eventId: alert.eventId, taskId: "SR-http", resultVersion: 3, duplicate: false } });
+    expect(await report(result)).toMatchObject({ status: 200, body: { duplicate: true } });
+    expect(await report({ ...result, result_text: "conflict" })).toMatchObject({ status: 409, body: { error: { code: "MONITORING_RESULT_CONFLICT" } } });
+    expect(await post(alert)).toMatchObject({ status: 200, body: { duplicate: true } });
+  });
+  it("returns actionable errors without fabricating success", async () => {
+    expect(await report(result)).toMatchObject({ status: 404, body: { error: { code: "MONITORING_RESULT_TARGET_NOT_FOUND" } } });
+    expect(await report({ ...result, result_version: 0 })).toMatchObject({ status: 422, body: { error: { code: "MONITORING_INVALID_RESULT" } } });
+    await post(alert);
+    await db.exec("UPDATE insight_monitoring_diagnose SET self_healing_results = ?", ["broken"]);
+    expect(await report(result)).toMatchObject({ status: 503, body: { error: { code: "MONITORING_NOT_READY" } } });
+  });
+  it.each([true, false])("enforces exact 128 KiB bytes with host parser=%s", async parent => {
+    await stop(); await start(parent); await post(alert);
+    const base = { ...result, result_text: "" };
+    const padding = 128 * 1024 - Buffer.byteLength(JSON.stringify(base));
+    expect((await report({ ...base, result_text: "x".repeat(padding) })).status).toBe(200);
+    expect((await report({ ...base, result_text: "x".repeat(padding + 1) })).status).toBe(413);
+  });
+});

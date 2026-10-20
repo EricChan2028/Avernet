@@ -34,6 +34,17 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe('MonitoringPanel', () => {
+  it.each([
+    ['COMPLETED', '是'], ['NOT_COMPLETED', '否'], [null, '未知'], ['historical-handler', '未知'],
+  ])('displays task completion for %s without treating old handler data as completion', async (handlerName, label) => {
+    api.targetDiagnoses.mockResolvedValue({ ...page(), items: [{ ...item, handlerName }] });
+    render(<MemoryRouter><MonitoringPanel /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /外部服务异常/ }));
+    const field = screen.getByText('任务是否完成').parentElement!;
+    expect(field.querySelector('dd')).toHaveTextContent(label!);
+    expect(screen.queryByText('处理人')).not.toBeInTheDocument();
+    await waitFor(() => expect(sessionRecoveryApi.list).toHaveBeenCalled());
+  });
   it('links the diagnosis to its recovery task and shows its current status without creating a task', async () => {
     vi.mocked(sessionRecoveryApi.list).mockResolvedValue({ items: [
       { task_id: 'SR-first', status: 'waiting_owner', phase: 'plan', effect: 'unknown' },

@@ -3,9 +3,13 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const records = readFileSync('web/pages/InsightCenter/monitoring/monitoring-records.css', 'utf8');
+const selector = readFileSync('web/pages/InsightCenter/monitoring/monitoring-selector.css', 'utf8');
 const pagination = readFileSync('web/pages/InsightCenter/monitoring/monitoring-pagination.css', 'utf8');
 
 describe('Diagnosis summary layout contract', () => {
+  it('centers the enrollment notice acknowledgment button', () => {
+    expect(selector).toMatch(/\.join-actions\s*\{[^}]*display:\s*flex[^}]*justify-content:\s*center/);
+  });
   it('truncates long TC labels on one line without covering the time column', () => {
     const blocks = [...records.matchAll(/\.insight-monitoring \.record-summary>\.summary-tc\s*\{([^}]+)\}/g)]
       .map(match => match[1]);
