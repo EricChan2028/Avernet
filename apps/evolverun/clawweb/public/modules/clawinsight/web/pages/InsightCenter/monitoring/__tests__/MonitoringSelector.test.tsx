@@ -47,6 +47,9 @@ describe('bounded searchable Bot selector', () => {
     api.options.mockImplementation(scope => Promise.resolve({ items: scope === 'mine' ? [] : [bot('002')], nextCursor: null }));
     render(<MonitoringBotSelector {...defaults} isAdmin />);
     await screen.findByText('未找到可查看的 Bot。'); open();
+    expect(screen.getByText('我的 Bot')).toBeInTheDocument();
+    expect(screen.getByText('诊断 Bot')).toBeInTheDocument();
+    expect(screen.queryByText('诊断范围')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '全部 Bot' }));
     await screen.findByText('Bot 002'); expect(defaults.onSelect).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: /^Bot 002/ }));
@@ -104,7 +107,9 @@ describe('enrollment placeholder', () => {
     render(<MonitoringEnrollment bot={bot('001')} onRefresh={refresh} />);
     fireEvent.click(screen.getByRole('button', { name: '加入监控' }));
     await screen.findByRole('dialog');
-    expect(screen.getByText('加入监控功能正在开发中，敬请期待。')).toBeInTheDocument();
+    expect(screen.getByText('暂不支持添加监控Bot')).toBeInTheDocument();
+    expect(screen.getByText('当前暂不支持在页面中自行添加监控Bot。')).toBeInTheDocument();
+    expect(screen.getByText('如有需要请联系@沐荛添加监控Bot')).toBeInTheDocument();
     expect(screen.queryByText(/接口|写入|切换 Bot/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '知道了' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();

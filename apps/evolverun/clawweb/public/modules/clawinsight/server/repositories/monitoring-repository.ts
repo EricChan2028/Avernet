@@ -1,3 +1,5 @@
+import { appendRecoveryResult } from "./monitoring-recovery-results.js";
+import type { MonitoringRecoveryResult } from "../services/monitoring/contracts.js";
 import type { IDatabase, Row } from "@avernet/clawweb-shared/server/db";
 import { CHECK_VERSION, DIAGNOSIS_VERSION, MonitoringError, type BotCheck, type DiagnosisEvent, type DiagnosisItem,
   type DiagnosisPage, type DiagnosisQuery, type MonitoringStore, type MonitoringTarget, type ResolvedReport, type MonitoringWindow } from "../services/monitoring/contracts.js";
@@ -64,7 +66,7 @@ export class MonitoringRepository implements MonitoringStore {
       await this.ready;
       return await fn();
     } catch (error) {
-      if (error instanceof MonitoringError && ["EVENT_CONFLICT", "CHECK_CONFLICT"].includes(error.code)) throw error;
+      if (error instanceof MonitoringError && ["EVENT_CONFLICT", "CHECK_CONFLICT", "RESULT_TARGET_NOT_FOUND", "RESULT_CONFLICT"].includes(error.code)) throw error;
       this.ready = null;
       throw new MonitoringError("NOT_READY", "监控存储暂不可用或表结构不兼容。");
     }
@@ -116,6 +118,9 @@ export class MonitoringRepository implements MonitoringStore {
         return false;
       }
     });
+  }
+  async appendRecoveryResult(result: MonitoringRecoveryResult): Promise<boolean> {
+    return this.run(() => appendRecoveryResult(this.db, result));
   }
   async applyCheck(input: ResolvedReport<BotCheck>, receivedAt: number): Promise<boolean> {
     const resolved = target(input.target);

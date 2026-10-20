@@ -30,7 +30,7 @@ ClawWeb 在现有 `POST /api/insight/v1/internal/monitoring/diagnosis-events` �
 
 需要自动创建的诊断，只有自愈任务持久化成功后才确认上报；不等待 Agent 执行或最终效果。任务保存失败返回 `503`，复用诊断发送端原有持久队列与退避重试。重复诊断也执行同一触发检查；诊断内容冲突先返回 `409`，不会创建自愈任务。固定投递键复用已有任务，响应丢失、重启或并发上报不创建第二个任务。
 
-诊断上报 ACK 继续使用原 `201 / 200` 和 `duplicate` 契约，不添加自愈状态。业务结果由现有自愈任务记录承载，不用诊断 ACK 表示恢复成功。本次自动触发接线不新增结果接收路由或再次调度逻辑。
+诊断上报 ACK 继续使用原 `201 / 200` 和 `duplicate` 契约，不添加自愈状态。业务结果由现有自愈任务记录承载，不用诊断 ACK 表示恢复成功。结果回传由下述接收接口独立归档，不再次调度自愈。
 
 与 2026-09-23《会话自愈对接协议 v2（最小实现版）》相比，创建请求的原必填字段不变；现有接口已增加可选的 `error_location / execution_level`、受理响应的 `task_id`、完整任务结果及其版本和证据，以及继续原任务接口。当前接口不要求新增独立服务 Token；旧文档中仅有 `delivery` 的结果不能代表完整任务结论。
 
@@ -118,18 +118,41 @@ HTTP `202`：
 | `evidence_ids` | 当前结论引用的已留存证据。 |
 | `evidence` | 上述证据的来源、原文位置及脱敏摘要；完整原文由任务页面按审计引用读取。 |
 | `delivery` | Agent 决定、经受控服务发送的初始消息投递明细，取得结果后才提供；其状态不代表效果。 |
-| `delivery.delivery_key` | 原请求投递键。 |
+| `delivery.delivery_key` | 该次消息的投递键；重试消息可能使用新的投递键，不用它代替任务结果版本去重。 |
 | `delivery.status` | `accepted` 通道接受；`failed` 明确投递失败；`unknown` 未取得确定回执。 |
 | `delivery.result_text` | 投递结果说明。 |
-| `delivery.result_payload` | 已取得的脱敏通道元信息；目前使用 `provider_message_id`。 |
+| `delivery.result_payload` | 已取得的脱敏通道元信息；可包含 `provider_message_id`、`session_id`、`message_id` 等字符串或有限数值。 |
 | `delivery.started_at_ms / finished_at_ms` | 处理开始和结束的 Unix 毫秒。 |
 | `delivery.error` | `accepted` 为 `null`；其他状态为脱敏原因。 |
+| `error` | 可选的顶层错误说明，字符串或 `null`。 |
 
 Owner 等待（包括到期释放容器）、阶段变化、审批、通知和人工标注只记录在任务内，不触发回传。
 
 服务先保存事实与结果，再异步回报。回报失败重送原版本，不重发建议、不重做操作。同一任务可多次效果等待超时，每次生成独立结果版本；恢复和最终完成不会覆盖尚未送达的旧结果，按版本顺序回传。`completed + not_intervened` 是 Debug 演练结束；执行异常可以是 `failed + unknown`。
 
-结果回传使用 ClawWeb 已有服务地址和上述固定接口路径。接收接口尚未就绪或回传失败时，任务仍可创建、执行并在任务页面查看；结果保留为待回传。接收接口成功响应后才记录为已回传。
+结果回传使用 ClawWeb 已有服务地址和上述固定接口路径。接收端每次接收一个结果对象，按 `event_id` 找到原诊断行，将对象追加到 `self_healing_results`（MEDIUMTEXT 中的 JSON 数组；SQL NULL 视为空数组）。不创建空诊断行，不改变原诊断结论、`handler_name` 或原接收时间，也不读写闲置的数据库 `task_completed` 列。
+
+同一行内按 `task_id + result_version` 去重：同键同内容成功但不追加（忽略对象键顺序，保留数组顺序）；同键不同内容返回冲突。不同键的结果均保留，允许版本乱序，按接收顺序追加。条件更新保证并发回传不会直接覆盖另一条结果，竞争重试耗尽则返回失败，由现有发送器重试。存量不是合法结果数组时返回失败，不清空或覆盖它。
+
+HTTP `200`（新结果或重复投递）：
+
+```json
+{ "accepted": true, "eventId": "evt-20261010-001", "taskId": "SR-example", "resultVersion": 7, "duplicate": false }
+```
+
+重复结果的 `duplicate` 为 `true`。接收端业务错误格式沿用 monitoring：`{ "error": { "code": "MONITORING_…", "requestId": "…" } }`（内部接口不返回详细 message）。
+
+| HTTP | code | 含义 |
+| --- | --- | --- |
+| 404 | `MONITORING_RESULT_TARGET_NOT_FOUND` | 原诊断行不存在。 |
+| 409 | `MONITORING_RESULT_CONFLICT` | 同任务同版本已保存不同内容。 |
+| 422 | `MONITORING_INVALID_RESULT` | 字段、类型、枚举或版本无效。 |
+| 413 | 沿用请求体中间件 | 超过 128 KiB 请求体限制，不截断证据。 |
+| 503 | `MONITORING_NOT_READY` | 数据库或表结构不可用、存量损坏、容量超限或并发重试耗尽。 |
+
+非 JSON、语法错误和压缩请求沿用现有路由规则。结果对象不接受未知字段；`delivery`、`evidence`、`error` 可省略，其他顶层字段必需。`result_version` 是正整数。没有新增证据条数限制，但总请求体必须满足上述大小限制。
+
+接收接口尚未部署或回传失败时，任务仍可创建、执行并在任务页面查看；结果保留为待回传，成功响应后才记录为已回传。非 2xx（含 404/409/422）会持续重试，需修复拒收原因。部署须确认内部路径已有访问限制，接收端不单独增加发送方未提供的 Token。生产表需已存在可空的 `self_healing_results MEDIUMTEXT`；应用仅校验，不自动执行生产 DDL。联调需确认真实结果体大小、目标数据库兼容性以及内部访问控制。
 
 ## AIS 执行恢复
 

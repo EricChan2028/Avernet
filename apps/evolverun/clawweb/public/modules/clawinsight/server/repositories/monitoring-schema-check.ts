@@ -9,6 +9,7 @@ const diagnosisColumns: Record<string, [string, boolean]> = {
   diagnosed_at_ms: ["BIGINT", false], decision: ["VARCHAR(16)", false], tc_fault_label: ["VARCHAR(128)", true],
   confidence_json: ["VARCHAR(32)", true], business_problem_category: ["VARCHAR(128)", true],
   business_problem_subtype: ["VARCHAR(128)", true], system_diagnosis: ["TEXT", true], business_diagnosis: ["TEXT", true],
+  self_healing_results: ["MEDIUMTEXT", true],
   handler_name: ["VARCHAR(128)", true], human_intervention: ["BIGINT", false], received_at_ms: ["BIGINT", false],
   gmt_create: ["TIMESTAMP", false], gmt_modified: ["TIMESTAMP", false],
 };
@@ -36,7 +37,7 @@ export async function verifyMonitoringSchema(db: IDatabase): Promise<void> {
     for (const [name, [type, nullable]] of Object.entries(expected)) {
       const column = columns.find((c) => c.name === name);
       assert(column);
-      const expectedType = sqlite ? type.replace(/BIGINT|TIMESTAMP/g, "INTEGER") : type;
+      const expectedType = sqlite ? type.replace(/BIGINT|TIMESTAMP/g, "INTEGER").replace("MEDIUMTEXT", "TEXT") : type;
       const actualType = sqlite ? String(column.type).toUpperCase() : `${String(column.data_type).toUpperCase()}${column.max_length != null && type.startsWith("VARCHAR") ? `(${column.max_length})` : ""}`;
       assert(actualType === expectedType);
       assert((sqlite ? !(Number(column.notnull) || Number(column.pk)) : column.nullable === "YES") === nullable);
