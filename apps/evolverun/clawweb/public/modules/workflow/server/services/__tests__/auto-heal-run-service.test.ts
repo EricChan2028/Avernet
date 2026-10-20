@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import type { FlowRunRepository, FlowRunRow } from "../../repositories/flow-run-repository.js";
+import type { FacadeBindingRepository } from "../../repositories/facade-binding-repository.js";
 import { AutoHealRunService, type AutoHealRunDependencies } from "../auto-heal-run-service.js";
 
 const workflowId = "audit-workflow";
@@ -11,6 +12,7 @@ const findFullByFlowId = vi.fn();
 const hasExecutePermission = vi.fn();
 const hasEditPermission = vi.fn();
 const sendIntervention = vi.fn();
+const findByWorkflowId = vi.fn();
 let run: Partial<FlowRunRow>;
 let deps: AutoHealRunDependencies;
 let service: AutoHealRunService;
@@ -21,6 +23,7 @@ beforeEach(() => {
     flow_id: input.sourceFlowId, workflow_id: workflowId, origin_bot_id: "default:owner-1",
     credentials_json: JSON.stringify({ BOT_TYPE: "service", STAGE: "draft", SECRET: "<must-not-escape>" }),
     params_json: JSON.stringify({ audit: true, nested: { limit: 3 } }),
+    // A cron-triggered run records no command; the facade binding supplies it.
     input_json: JSON.stringify({ trigger: "cron" }), origin_session_key: "old-cron-key",
     origin_session_id: "old-cron-session", user_id: "different-trigger-user",
   };
@@ -28,17 +31,20 @@ beforeEach(() => {
   hasExecutePermission.mockResolvedValue(true);
   hasEditPermission.mockResolvedValue(false);
   sendIntervention.mockResolvedValue(receipt);
+  findByWorkflowId.mockResolvedValue([{ command: workflowId }]);
   deps = {
     flowRunRepo: { findFullByFlowId } as unknown as FlowRunRepository,
     botPermRepo: { hasExecutePermission, hasEditPermission } as unknown as BotWorkflowPermissionRepository,
     sendIntervention,
+    facadeRepo: { findByWorkflowId } as unknown as FacadeBindingRepository,
   };
   service = new AutoHealRunService(deps);
 });
 
+/** The Bot receives the slash command on the last line of the message. */
 function sent() {
   const command = sendIntervention.mock.calls.at(-1)![0];
-  return { command, payload: JSON.parse(command.message.split("\n").at(-1)) };
+  return { command, commandLine: command.message.split("\n").at(-1) as string };
 }
 
 async function rejectWithoutSending(code: string, request = input) {
@@ -47,17 +53,18 @@ async function rejectWithoutSending(code: string, request = input) {
 }
 
 describe("source-aware auto-heal run service", () => {
-  it("starts a cron workflow without input.command on its origin draft Bot", async () => {
-    expect(await service.run(input)).toEqual({ ok: true, workflowId, flowId: receipt.messageId, sessionId: receipt.sessionId });
+  it("replays the facade command for a cron run that records no input.command", async () => {
+    expect(await service.run(input)).toEqual({ ok: true, workflowId, messageId: receipt.messageId, sessionId: receipt.sessionId });
     expect(findFullByFlowId).toHaveBeenCalledWith("source-cron");
     expect(hasExecutePermission).toHaveBeenCalledWith(workflowId, "owner-1");
     expect(hasEditPermission).toHaveBeenCalledWith(workflowId, "owner-1");
+    expect(findByWorkflowId).toHaveBeenCalledWith(workflowId);
     expect(sendIntervention).toHaveBeenCalledOnce();
-    const { command, payload } = sent();
+    const { command, commandLine } = sent();
     expect(command).toEqual({ botId: "default:owner-1", lifecycleStage: "draft", sessionId: null,
       sessionKey: expect.stringMatching(/^auto-heal-run:audit-workflow:/), message: expect.any(String) });
-    expect(payload).toEqual({ action: "run_workflow", workflowId, params: { audit: true, nested: { limit: 3 } },
-      triggeredBy: "clawweb-dashboard", userId: "owner-1", userName: "owner-1", source: "auto-heal" });
+    // facade_bindings stores the bare name ("audit-workflow"); the Bot needs the slash form.
+    expect(commandLine).toBe(`/${workflowId}`);
     expect(JSON.stringify(command)).not.toMatch(/must-not-escape|old-cron|SECRET|credentials/);
   });
 
@@ -94,26 +101,50 @@ describe("source-aware auto-heal run service", () => {
     expect(sendIntervention).not.toHaveBeenCalled();
   });
 
-  it.each([null, ""])("uses empty params only for absent defaults (%s)", async params => {
-    run.params_json = params;
+  it("prefers the command recorded on the run over the facade binding", async () => {
+    run.input_json = JSON.stringify({ command: "/kf-direct 什么是任务" });
     await service.run(input);
-    expect(sent().payload.params).toEqual({});
+    expect(sent().commandLine).toBe("/kf-direct 什么是任务");
+    expect(findByWorkflowId).not.toHaveBeenCalled();
   });
 
-  it.each(["broken-json", "null", "[]", "1", '\"text\"'])("rejects invalid stored defaults (%s)", async params => {
-    run.params_json = params;
+  it("appends the recorded message to the facade command", async () => {
+    run.input_json = JSON.stringify({ message: "什么是任务" });
+    await service.run(input);
+    expect(sent().commandLine).toBe(`/${workflowId} 什么是任务`);
+  });
+
+  it("adds the leading slash that facade_bindings omits", async () => {
+    findByWorkflowId.mockResolvedValue([{ command: "ids-log-self-audit" }]);
+    await service.run(input);
+    expect(sent().commandLine).toBe("/ids-log-self-audit");
+  });
+
+  it("does not double the slash when the binding already carries one", async () => {
+    findByWorkflowId.mockResolvedValue([{ command: "/already-slash" }]);
+    await service.run(input);
+    expect(sent().commandLine).toBe("/already-slash");
+  });
+
+  it.each([
+    ["no binding row", []],
+    ["a blank bound command", [{ command: "   " }]],
+    ["an unparseable input_json", [{ command: "audit-workflow" }], "{invalid"],
+  ])("refuses to send an empty trigger (%s)", async (_label, rows, inputJson = '{"trigger":"cron"}') => {
+    findByWorkflowId.mockResolvedValue(rows);
+    run.input_json = inputJson;
+    if (inputJson === "{invalid") {
+      // An unparseable input_json still resolves through the binding.
+      await service.run(input);
+      expect(sent().commandLine).toBe(`/${workflowId}`);
+      return;
+    }
     await rejectWithoutSending("invalid_source");
   });
 
-  it("allows explicit params to replace corrupt stored defaults", async () => {
-    run.params_json = "corrupt-defaults";
-    await service.run({ ...input, params: {} });
-    expect(sent().payload.params).toEqual({});
-  });
-
-  it.each([{}, { replacement: "only" }])("uses explicit params as replacement, not merge (%j)", async params => {
-    await service.run({ ...input, params });
-    expect(sent().payload.params).toEqual(params);
+  it("fails closed when the facade repository is absent", async () => {
+    service = new AutoHealRunService({ ...deps, facadeRepo: null });
+    await rejectWithoutSending("invalid_source");
   });
 
   it("uses distinct sessions even when two requests start at the same time", async () => {
@@ -142,7 +173,9 @@ describe("source-aware auto-heal run service", () => {
     hasExecutePermission.mockResolvedValue(false);
     await service.run({ ...input, actorId: "admin", isAdmin: true });
     expect(sent().command.botId).toBe("default:original-owner");
-    expect(sent().payload.userId).toBe("admin");
+    // The actor is identified in the message header; the trigger itself is the bound command.
+    expect(sent().command.message).toContain("admin(admin)");
+    expect(sent().commandLine).toBe(`/${workflowId}`);
   });
 
   it("accepts edit as well as execute permission", async () => {
@@ -193,6 +226,6 @@ describe("source-aware auto-heal run service", () => {
 
   it("does not invent a session ID when only message acceptance is confirmed", async () => {
     sendIntervention.mockResolvedValue({ ok: true, messageId: "accepted" });
-    expect(await service.run(input)).toEqual({ ok: true, workflowId, flowId: "accepted", sessionId: null });
+    expect(await service.run(input)).toEqual({ ok: true, workflowId, messageId: "accepted", sessionId: null });
   });
 });

@@ -15,6 +15,7 @@ import { resolveWorkflowActorId } from "@avernet/clawweb-shared/server/services/
 import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { sendIntervention } from "@avernet/clawevolve/server/services/baas-intervention";
 import type { FlowRunRepository } from "../repositories/flow-run-repository.js";
+import type { FacadeBindingRepository } from "../repositories/facade-binding-repository.js";
 import { createAutoHealRunRouter, type AutoHealRunSender } from "./auto-heal-run.js";
 import { resolveAutoHealGitSettings } from "../config/auto-heal-git-config.js";
 import { WorkflowSpecRepository } from "../repositories/workflow-spec-repository.js";
@@ -30,6 +31,8 @@ export interface AutoHealRouteDependencies {
   botPermRepo: BotWorkflowPermissionRepository | null;
   flowRunRepo?: FlowRunRepository | null;
   sendIntervention?: AutoHealRunSender;
+  /** Supplies the slash command for source runs whose input_json records none. */
+  facadeRepo?: FacadeBindingRepository | null;
   /** Bootstrap fallbacks; enabled DB Git settings are resolved per request. */
   gitConfig: ClawFlowsGitConfig;
   gitAuthor: GitAuthor;
@@ -46,6 +49,7 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
     flowRunRepo: deps.flowRunRepo ?? null,
     botPermRepo: deps.botPermRepo,
     sendIntervention: deps.sendIntervention ?? sendIntervention,
+    facadeRepo: deps.facadeRepo ?? null,
   }));
 
   router.post(

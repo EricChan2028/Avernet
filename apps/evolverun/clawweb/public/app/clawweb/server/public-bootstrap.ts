@@ -26,6 +26,7 @@ import { MetricsRepository } from "@avernet/workflow/server/repositories/metrics
 import { AlertRepository } from "@avernet/workflow/server/repositories/alert-repository";
 import { FlowControlRepository } from "@avernet/workflow/server/repositories/flow-control-repository";
 import { ExecutionStepLogRepository } from "@avernet/workflow/server/repositories/execution-step-log-repository";
+import { FacadeBindingRepository } from "@avernet/workflow/server/repositories/facade-binding-repository";
 import {
   closeDatabase,
   initDatabase,
@@ -145,6 +146,7 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       const alertRepo = new AlertRepository(db);
       const flowControlRepo = new FlowControlRepository(db);
       const execStepLogRepo = new ExecutionStepLogRepository(db);
+      const facadeRepo = new FacadeBindingRepository(db);
       app.use("/api/workflows", createWorkflowsRouter(
         workflowSpecRepo,
         null,
@@ -167,6 +169,7 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
         botPermRepo,
         workflowSpecRepo,
         execStepLogRepo,
+        facadeRepo,
       ));
       app.use("/api/auto-heal", createAutoHealRouter({
         db,
@@ -177,6 +180,7 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
         gitConfig: autoHealGitConfig,
         gitAuthor: autoHealAuthor,
         triggerRun: createAutoHealTriggerRun(flowRunRepo),
+        facadeRepo,
       }));
 
       const staticDir = resolve(dirname(fileURLToPath(import.meta.url)), "../web");

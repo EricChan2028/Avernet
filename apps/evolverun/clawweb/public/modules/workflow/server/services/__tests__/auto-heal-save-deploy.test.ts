@@ -204,7 +204,7 @@ describe("AutoHealDeployService", () => {
     deployHistoryRepo = new WorkflowDeployHistoryRepository(ctx.db as never);
     specRepo = new WorkflowSpecRepository(ctx.db as never, deployHistoryRepo);
     botPermRepo = new BotWorkflowPermissionRepository(ctx.db as never);
-    triggerRun = vi.fn().mockResolvedValue("flow-123");
+    triggerRun = vi.fn().mockResolvedValue("message-123");
 
     vi.spyOn(gitClient, "cloneClawflows").mockResolvedValue();
     vi.spyOn(gitClient, "writeWorkflowSpecToRepo").mockResolvedValue();
@@ -255,7 +255,7 @@ describe("AutoHealDeployService", () => {
     expect(result.deployNumber).toBe(1);
     expect(result.version).toBe(1);
     expect(result.tagName).toBe("deploy/wf-test/#1");
-    expect(result.runId).toBe("flow-123");
+    expect(result.messageId).toBe("message-123");
 
     const history = await deployHistoryRepo.listHistory("wf-test", 10);
     expect(history.length).toBe(1);
