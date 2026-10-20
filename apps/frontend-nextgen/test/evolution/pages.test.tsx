@@ -426,7 +426,9 @@ it('uses the filtered server total for ordinary list pagination', async () => {
   api.tasks.mockResolvedValue({ tasks: [task], total: 21, page: 1, pageSize: 20, totalPages: 2, canViewAll: false });
   render(<EvolutionFactory />);
   await screen.findByText('范围内诊断');
-  expect(screen.getByText('共 21 条 · 第 1/2 页')).toBeInTheDocument();
+  expect(screen.getByText('共 21 条')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '第 1 页' })).toHaveAttribute('aria-current', 'page');
+  expect(screen.getByRole('button', { name: '第 2 页' })).toBeInTheDocument();
   expect(screen.queryByText(/任务列表返回了筛选范围外的数据/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '下一页' }));
   await waitFor(() =>
