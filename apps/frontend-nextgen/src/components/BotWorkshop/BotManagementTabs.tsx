@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/Button';
 import { cn } from '@/utils/cn';
 
 export type BotManagementTab = 'tc' | 'external';
@@ -24,8 +25,9 @@ export function BotManagementTabs({
           ['external', '外部 Bot'],
         ] as const
       ).map(([tab, label]) => (
-        <button
+        <Button
           key={tab}
+          variant="ghost"
           role="tab"
           type="button"
           aria-selected={value === tab}
@@ -38,7 +40,7 @@ export function BotManagementTabs({
           onClick={() => onChange(tab)}
         >
           {label}
-        </button>
+        </Button>
       ))}
     </div>
   );

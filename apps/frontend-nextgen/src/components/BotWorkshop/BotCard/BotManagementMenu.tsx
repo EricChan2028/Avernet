@@ -1,13 +1,12 @@
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
+import { Popover, PopoverTrigger } from '@/components/ui/Popover';
 import { restartPublishStageLabel, restartPublishStageOf } from '@/domain/botWorkshop';
 import type { BotActionAvailability, BotDomain } from '@/services/botWorkshop';
-import { ArrowUpRight, ClipboardList, HeartPulse, MapPin, MoreVertical, ShieldCheck, Users } from 'lucide-react';
+import { MoreVertical } from 'lucide-react';
 import { useState } from 'react';
-import { canRestartFailedServiceBot, failedServiceDeleteReason, publicationManagementAvailability } from './botManagementPolicy';
-import { actionIcon, actionLabel, type BotCardManagementAction } from './config';
-import { ActionHelp, MenuSection } from './menuPrimitives';
+import { BotManagementMenuItems } from './BotManagementMenuItems';
+import { actionLabel, type BotCardManagementAction } from './config';
 interface BotManagementMenuProps {
   bot: BotDomain;
   open?: boolean;
@@ -50,23 +49,7 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
   const [confirmAction, setConfirmAction] = useState<BotCardManagementAction>();
   const [confirming, setConfirming] = useState(false);
   if (bot.lifecycle === 'deploying') return null;
-  const isAgentCodingBot = bot.runtime.isAgentCodingBot;
-  const isServiceBot = bot.serviceMode === 'service';
-  const restartUnsupported = bot.runtime.engine === 'teclaw';
-  const restartDeclared = bot.actions.includes('restart') || Boolean(bot.disabledActions.restart) || canRestartFailedServiceBot(bot);
-  const restartPublishDeclared =
-    bot.actions.includes('restart_publish') || Boolean(bot.disabledActions.restart_publish);
-  const restartPublishDisabledReason = bot.disabledActions.restart_publish;
-  const restartDisabledReason = bot.disabledActions.restart;
-  const engineRestartDeclared = bot.actions.includes('engine_restart') || Boolean(bot.disabledActions.engine_restart);
-  const showEngineRestart =
-    !isAgentCodingBot && (restartUnsupported || !isServiceBot || engineRestartDeclared);
-  const engineRestartEnabled = bot.actions.includes('engine_restart');
-  const engineRestartDisabledReason = bot.disabledActions.engine_restart;
   const restartPublishStage = confirmAction === 'restart_publish' ? restartPublishStageOf(bot.lifecycle) : undefined;
-  const publication = publicationManagementAvailability(bot);
-  const restartEnabled = bot.actions.includes('restart') || canRestartFailedServiceBot(bot);
-  const deleteReason = failedServiceDeleteReason(bot);
   return (
     <>
       <Popover open={open} onOpenChange={setOpen}>
@@ -79,236 +62,24 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
             leftIcon={<MoreVertical className="size-4" />}
           />
         </PopoverTrigger>
-        <PopoverContent align="end" className="w-52 space-y-1 p-2">
-          {/* 配置类：Bot 的配置与形态变更操作（验收修正：配置类同组置顶） */}
-          <MenuSection>
-            {onGeneralConfig ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                leftIcon={<ShieldCheck className="size-4" />}
-                disabled={!canGeneralConfig}
-                onClick={() => {
-                  setOpen(false);
-                  onGeneralConfig(bot);
-                }}
-              >
-                {canGeneralConfig ? (
-                  '通用配置'
-                ) : (
-                  <ActionHelp description={generalConfigDisabledReason ?? '当前不可用'}>通用配置</ActionHelp>
-                )}
-              </Button>
-            ) : null}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full justify-start"
-              leftIcon={<MapPin className="size-4" />}
-              disabled={lockedByOther}
-              onClick={() => {
-                setOpen(false);
-                onChangeSpace?.(bot);
-              }}
-            >
-              变更归属空间
-            </Button>
-            {bot.serviceMode === 'non-service' && bot.deployment === 'cloud' && bot.canUpgradeToService ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                leftIcon={actionIcon.upgrade}
-                disabled={lockedByOther}
-                onClick={() => {
-                  setOpen(false);
-                  setConfirmAction('upgrade');
-                }}
-              >
-                {actionLabel.upgrade}
-              </Button>
-            ) : null}
-          </MenuSection>
-          {/* 日常操作（协作与查看） */}
-          <MenuSection divider>
-            {collaborationMode && onAuthorize ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                leftIcon={<Users className="size-4" />}
-                onClick={() => {
-                  setOpen(false);
-                  onAuthorize(bot);
-                }}
-              >
-                {collaborationMode === 'authorize' ? '授权' : '申请操作权限'}
-              </Button>
-            ) : null}
-            {onOpenTaskInstances && (isAgentCodingBot || canOpenTaskInstances) ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                leftIcon={<ClipboardList className="size-4" />}
-                aria-label={`查看 ${bot.name} 任务实例`}
-                onClick={() => {
-                  setOpen(false);
-                  onOpenTaskInstances(bot);
-                }}
-              >
-                任务实例
-              </Button>
-            ) : null}
-            {healthCheckAvailability?.visible && onHealthCheck ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                leftIcon={<HeartPulse className="size-4" />}
-                aria-label={`${bot.name} 健康检查`}
-                disabled={lockedByOther || !healthCheckAvailability.enabled}
-                onClick={() => {
-                  setOpen(false);
-                  onHealthCheck(bot);
-                }}
-              >
-                <ActionHelp
-                  description={
-                    lockedByOther
-                      ? '该 Bot 正被他人编辑，请先抢锁'
-                      : healthCheckAvailability.disabledReason ?? '对该 Bot 的引擎与协作链路执行一次集成健康检查。'
-                  }
-                >
-                  健康检查
-                </ActionHelp>
-              </Button>
-            ) : null}
-            {bot.deployment === 'local' && bot.actions.includes('open_folder') ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                onClick={() => {
-                  setOpen(false);
-                  void onAction('open_folder', bot);
-                }}
-              >
-                打开本地目录
-              </Button>
-            ) : null}
-          </MenuSection>
-          {/* 发布与运维（流程与运行态操作 · 需二次确认或受锁保护） */}
-          <MenuSection divider>
-            {bot.serviceMode === 'service' && publication.visible && onManagePublication ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                leftIcon={<ArrowUpRight className="size-4" />}
-                disabled={lockedByOther || !publication.enabled}
-                onClick={() => {
-                  setOpen(false);
-                  onManagePublication(bot);
-                }}
-              >
-                {publication.enabled ? '发布与阶段推进' : <ActionHelp description={publication.disabledReason!}>发布与阶段推进</ActionHelp>}
-              </Button>
-            ) : null}
-            {restartUnsupported || !isServiceBot || restartDeclared ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                leftIcon={actionIcon.restart}
-                disabled={restartUnsupported || lockedByOther || !restartEnabled}
-                onClick={() => {
-                  setOpen(false);
-                  setConfirmAction('restart');
-                }}
-              >
-                <ActionHelp
-                  description={
-                    restartUnsupported
-                      ? 'TeClaw 暂不支持重启容器'
-                      : restartDisabledReason && !bot.actions.includes('restart')
-                      ? restartDisabledReason
-                      : '指重新启动当前 Bot 实例，重新加载当前会话状态、配置或运行流程。'
-                  }
-                >
-                  {actionLabel.restart}
-                </ActionHelp>
-              </Button>
-            ) : null}
-            {restartPublishDeclared ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                leftIcon={actionIcon.restart_publish}
-                disabled={restartUnsupported || lockedByOther || !bot.actions.includes('restart_publish')}
-                onClick={() => {
-                  setOpen(false);
-                  setConfirmAction('restart_publish');
-                }}
-              >
-                <ActionHelp
-                  description={
-                    restartUnsupported
-                      ? 'TeClaw 暂不支持重启发布'
-                      : restartPublishDisabledReason && !bot.actions.includes('restart_publish')
-                      ? restartPublishDisabledReason
-                      : '指重新启动该服务已发布环境（预发/线上）的运行时，不影响草稿机器。'
-                  }
-                >
-                  {actionLabel.restart_publish}
-                </ActionHelp>
-              </Button>
-            ) : null}
-            {showEngineRestart ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                leftIcon={actionIcon.engine_restart}
-                disabled={restartUnsupported || lockedByOther || !engineRestartEnabled}
-                onClick={() => {
-                  setOpen(false);
-                  setConfirmAction('engine_restart');
-                }}
-              >
-                <ActionHelp
-                  description={
-                    restartUnsupported
-                      ? 'TeClaw 暂不支持重启引擎'
-                      : engineRestartDisabledReason && !engineRestartEnabled
-                      ? engineRestartDisabledReason
-                      : '指重新启动 Bot 所依赖的底层运行引擎（如 OpenClaw、ClaudeCode 等）。'
-                  }
-                >
-                  {actionLabel.engine_restart}
-                </ActionHelp>
-              </Button>
-            ) : null}
-          </MenuSection>
-          {/* 危险区（高风险垫底） */}
-          <MenuSection divider>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full justify-start text-destructive"
-              leftIcon={actionIcon.delete}
-              disabled={lockedByOther || !bot.actions.includes('delete')}
-              onClick={() => {
-                setOpen(false);
-                setConfirmAction('delete');
-              }}
-            >
-              {deleteReason ? <ActionHelp description={deleteReason}>{actionLabel.delete}</ActionHelp> : actionLabel.delete}
-            </Button>
-          </MenuSection>
-        </PopoverContent>
+        <BotManagementMenuItems
+          bot={bot}
+          collaborationMode={collaborationMode}
+          lockedByOther={lockedByOther}
+          onAction={onAction}
+          onManagePublication={onManagePublication}
+          onHealthCheck={onHealthCheck}
+          healthCheckAvailability={healthCheckAvailability}
+          onOpenTaskInstances={onOpenTaskInstances}
+          canOpenTaskInstances={canOpenTaskInstances}
+          onChangeSpace={onChangeSpace}
+          onAuthorize={onAuthorize}
+          canGeneralConfig={canGeneralConfig}
+          generalConfigDisabledReason={generalConfigDisabledReason}
+          onGeneralConfig={onGeneralConfig}
+          onMenuClose={() => setOpen(false)}
+          onRequestConfirm={setConfirmAction}
+        />
       </Popover>
       <ConfirmDialog
         open={Boolean(confirmAction)}
