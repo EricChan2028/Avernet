@@ -1532,7 +1532,7 @@ enum GroupContextCommands {
     /// Add a new active context.
     Add {
         #[arg(long)]
-        group_id: String,
+        group_id: Option<String>,
         #[arg(long)]
         session_id: Option<String>,
         #[arg(long)]
@@ -1546,7 +1546,7 @@ enum GroupContextCommands {
         #[arg(long, default_value = r#"{"userIds":[]}"#)]
         visible_to: String,
         #[arg(long)]
-        collect_from: String,
+        collect_from: Option<String>,
         #[arg(long)]
         valid_from: Option<String>,
         #[arg(long)]
@@ -1555,7 +1555,7 @@ enum GroupContextCommands {
     /// Supersede the active context version.
     Update {
         #[arg(long)]
-        group_id: String,
+        group_id: Option<String>,
         #[arg(long)]
         session_id: Option<String>,
         #[arg(long)]
@@ -1570,6 +1570,9 @@ enum GroupContextCommands {
         visible_to: Option<String>,
         #[arg(long)]
         collect_from: Option<String>,
+        /// Owner actor ids transferred to the new active version.
+        #[arg(long)]
+        owners: Option<String>,
         #[arg(long)]
         valid_from: Option<String>,
         #[arg(long)]
@@ -1580,7 +1583,7 @@ enum GroupContextCommands {
     /// List visible or writable active contexts.
     List {
         #[arg(long)]
-        group_id: String,
+        group_id: Option<String>,
         #[arg(long)]
         session_id: Option<String>,
         #[arg(long)]
@@ -1595,7 +1598,7 @@ enum GroupContextCommands {
     /// Get visible active contexts ordered round/session/group.
     Get {
         #[arg(long)]
-        group_id: String,
+        group_id: Option<String>,
         #[arg(long)]
         session_id: Option<String>,
         #[arg(long)]
@@ -2271,12 +2274,39 @@ fn parse_group_context_policy(raw: &str, flag: &str) -> Result<serde_json::Value
     Ok(value)
 }
 
+fn parse_group_context_owners(raw: &str) -> Result<serde_json::Value> {
+    let value = parse_group_context_policy(raw, "owners")?;
+    let invalid_shape =
+        || anyhow!("--owners must be a JSON object containing a non-empty userIds array");
+    let user_ids = value
+        .get("userIds")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(invalid_shape)?;
+    if user_ids.is_empty() {
+        return Err(anyhow!("--owners.userIds must not be empty"));
+    }
+    if user_ids
+        .iter()
+        .any(|user_id| user_id.as_str().is_none_or(|value| value.trim().is_empty()))
+    {
+        return Err(anyhow!(
+            "--owners.userIds must contain non-empty string actor ids"
+        ));
+    }
+    Ok(value)
+}
+
 fn group_context_query(
-    group_id: &str,
+    group_id: Option<&str>,
     session_id: Option<&str>,
     round_id: Option<&str>,
 ) -> Vec<(String, String)> {
-    let mut query = vec![("groupId".to_string(), group_id.to_string())];
+    let mut query = Vec::new();
+    if let Some(value) = group_id {
+        if !value.is_empty() {
+            query.push(("groupId".to_string(), value.to_string()));
+        }
+    }
     if let Some(value) = session_id {
         query.push(("sessionId".to_string(), value.to_string()));
     }
@@ -2334,7 +2364,7 @@ fn group_context_add_body(
     scope_level: String,
     content: String,
     visible_to: String,
-    collect_from: String,
+    collect_from: Option<String>,
     valid_from: Option<String>,
     valid_to: Option<String>,
 ) -> Result<serde_json::Value> {
@@ -2349,10 +2379,12 @@ fn group_context_add_body(
         "visible_to".to_string(),
         parse_group_context_policy(&visible_to, "visible-to")?,
     );
-    body.insert(
-        "collect_from".to_string(),
-        parse_group_context_policy(&collect_from, "collect-from")?,
-    );
+    if let Some(collect_from) = collect_from {
+        body.insert(
+            "collect_from".to_string(),
+            parse_group_context_policy(&collect_from, "collect-from")?,
+        );
+    }
     group_context_insert_optional_timestamp(&mut body, "valid_from", valid_from);
     group_context_insert_optional_timestamp(&mut body, "valid_to", valid_to);
     Ok(serde_json::Value::Object(body))
@@ -2364,6 +2396,7 @@ fn group_context_update_body(
     content: Option<String>,
     visible_to: Option<String>,
     collect_from: Option<String>,
+    owners: Option<String>,
     valid_from: Option<String>,
     valid_to: Option<String>,
     change_reason: Option<String>,
@@ -2387,12 +2420,14 @@ fn group_context_update_body(
             parse_group_context_policy(&collect_from, "collect-from")?,
         );
     }
+    if let Some(owners) = owners {
+        body.insert("owners".to_string(), parse_group_context_owners(&owners)?);
+    }
     group_context_insert_optional_timestamp(&mut body, "valid_from", valid_from);
     group_context_insert_optional_timestamp(&mut body, "valid_to", valid_to);
     group_context_insert_optional_string(&mut body, "change_reason", change_reason);
     Ok(serde_json::Value::Object(body))
 }
-
 
 /// Binary entry. Delegates to [`run`] so the internal overlay can reuse this
 /// module (`#[path]`) and call `run()` directly under its own runtime.
@@ -4368,6 +4403,7 @@ pub async fn run() -> Result<()> {
                     content,
                     visible_to,
                     collect_from,
+                    owners,
                     valid_from,
                     valid_to,
                     change_reason,
@@ -4382,6 +4418,7 @@ pub async fn run() -> Result<()> {
                         content,
                         visible_to,
                         collect_from,
+                        owners,
                         valid_from,
                         valid_to,
                         Some(change_reason),
@@ -4424,7 +4461,11 @@ pub async fn run() -> Result<()> {
                     )
                 }
             };
-            let query = group_context_query(&group_id, session_id.as_deref(), round_id.as_deref());
+            let query = group_context_query(
+                group_id.as_deref(),
+                session_id.as_deref(),
+                round_id.as_deref(),
+            );
             let query_refs = query
                 .iter()
                 .map(|(key, value)| (key.as_str(), value.as_str()))
@@ -5712,6 +5753,102 @@ mod tests {
     }
 
     #[test]
+    fn group_context_query_omits_missing_and_empty_group_id() {
+        for group_id in [None, Some("")] {
+            let query = group_context_query(group_id, Some("sess-001"), None);
+            assert!(!query.iter().any(|(key, _)| key == "groupId"));
+        }
+    }
+
+    #[test]
+    fn group_context_query_includes_non_empty_group_id() {
+        let query = group_context_query(Some("game-room-7"), None, None);
+        assert_eq!(
+            query,
+            vec![("groupId".to_string(), "game-room-7".to_string())]
+        );
+    }
+
+    #[test]
+    fn group_context_commands_accept_non_group_scope_without_group_id() {
+        for (operation, args) in [
+            (
+                "add",
+                vec![
+                    "group-context",
+                    "add",
+                    "--session-id",
+                    "sess-001",
+                    "--name",
+                    "game_rule",
+                    "--scope-level",
+                    "session",
+                    "--content",
+                    "rules",
+                    "--collect-from",
+                    r#"{"userIds":["judge_bot"]}"#,
+                ],
+            ),
+            (
+                "update",
+                vec![
+                    "group-context",
+                    "update",
+                    "--session-id",
+                    "sess-001",
+                    "--name",
+                    "player_state",
+                    "--scope-level",
+                    "session",
+                    "--change-reason",
+                    "metadata",
+                ],
+            ),
+            (
+                "list",
+                vec![
+                    "group-context",
+                    "list",
+                    "--session-id",
+                    "sess-001",
+                    "--scope-level",
+                    "session",
+                ],
+            ),
+            (
+                "get",
+                vec![
+                    "group-context",
+                    "get",
+                    "--session-id",
+                    "sess-001",
+                    "--name",
+                    "player_state",
+                    "--scope-level",
+                    "session",
+                ],
+            ),
+        ] {
+            let mut input = vec!["bcs-cli"];
+            input.extend(args);
+            let cli = Cli::try_parse_from(input)
+                .unwrap_or_else(|error| panic!("failed to parse {operation}: {error}"));
+            let group_id = match cli.command {
+                Commands::GroupContext {
+                    command:
+                        GroupContextCommands::Add { group_id, .. }
+                        | GroupContextCommands::Update { group_id, .. }
+                        | GroupContextCommands::List { group_id, .. }
+                        | GroupContextCommands::Get { group_id, .. },
+                    ..
+                } => group_id,
+                _ => panic!("expected group-context {operation} command"),
+            };
+            assert_eq!(group_id, None, "unexpected group id for {operation}");
+        }
+    }
+
+    #[test]
     fn group_context_scope_level_flags_are_mutually_exclusive() {
         let err = resolve_group_context_scope_levels(
             vec!["group".to_string()],
@@ -5731,7 +5868,7 @@ mod tests {
             "group".to_string(),
             "rules".to_string(),
             r#"{"userIds":[]}"#.to_string(),
-            r#"{"userIds":["judge_bot"]}"#.to_string(),
+            Some(r#"{"userIds":["judge_bot"]}"#.to_string()),
             Some("2026-10-12T14:56:08+08:00".to_string()),
             Some("1791797768000".to_string()),
         )
@@ -5744,7 +5881,7 @@ mod tests {
             "group".to_string(),
             "rules".to_string(),
             r#"{"userIds":[]}"#.to_string(),
-            r#"{"userIds":["judge_bot"]}"#.to_string(),
+            Some(r#"{"userIds":["judge_bot"]}"#.to_string()),
             None,
             None,
         )
@@ -5752,6 +5889,47 @@ mod tests {
         let object = without_valid.as_object().unwrap();
         assert!(!object.contains_key("valid_from"));
         assert!(!object.contains_key("valid_to"));
+
+        let without_collect_from = group_context_add_body(
+            "game_rule".to_string(),
+            "group".to_string(),
+            "rules".to_string(),
+            r#"{"userIds":[]}"#.to_string(),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let object = without_collect_from.as_object().unwrap();
+        assert!(!object.contains_key("collect_from"));
+        assert!(!object.contains_key("valid_from"));
+        assert!(!object.contains_key("valid_to"));
+    }
+
+    #[test]
+    fn group_context_add_cli_accepts_missing_collect_from() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "group-context",
+            "add",
+            "--group-id",
+            "game-room-7",
+            "--name",
+            "game_rule",
+            "--scope-level",
+            "group",
+            "--content",
+            "rules",
+        ])
+        .expect("collect_from is optional");
+
+        match cli.command {
+            Commands::GroupContext {
+                command: GroupContextCommands::Add { collect_from, .. },
+                ..
+            } => assert_eq!(collect_from, None),
+            _ => panic!("expected group-context add command"),
+        }
     }
 
     #[test]
@@ -5759,6 +5937,7 @@ mod tests {
         let body = group_context_update_body(
             "player_state".to_string(),
             "session".to_string(),
+            None,
             None,
             None,
             None,
@@ -5773,7 +5952,132 @@ mod tests {
         assert!(!object.contains_key("content"));
         assert!(!object.contains_key("visible_to"));
         assert!(!object.contains_key("collect_from"));
+        assert!(!object.contains_key("owners"));
         assert!(!object.contains_key("valid_to"));
+    }
+
+    #[test]
+    fn group_context_update_body_includes_owners_when_provided() {
+        let body = group_context_update_body(
+            "player_state".to_string(),
+            "session".to_string(),
+            Some("v2".to_string()),
+            None,
+            None,
+            Some(r#"{"userIds":["bot-a","bot-b"]}"#.to_string()),
+            None,
+            None,
+            Some("transfer ownership".to_string()),
+        )
+        .unwrap();
+        assert_eq!(
+            body["owners"],
+            serde_json::json!({"userIds": ["bot-a", "bot-b"]})
+        );
+    }
+
+    #[test]
+    fn group_context_add_rejects_owners_flag() {
+        let err = match Cli::try_parse_from([
+            "bcs-cli",
+            "group-context",
+            "add",
+            "--group-id",
+            "game-room-7",
+            "--name",
+            "game_rule",
+            "--scope-level",
+            "group",
+            "--content",
+            "rules",
+            "--collect-from",
+            r#"{"userIds":["judge_bot"]}"#,
+            "--owners",
+            r#"{"userIds":["judge_bot"]}"#,
+        ]) {
+            Ok(_) => panic!("expected parse error"),
+            Err(err) => err,
+        };
+        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn group_context_update_parses_owners_flag() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "group-context",
+            "update",
+            "--group-id",
+            "game-room-7",
+            "--name",
+            "player_state",
+            "--scope-level",
+            "session",
+            "--content",
+            "v2",
+            "--owners",
+            r#"{"userIds":["bot-a","bot-b"]}"#,
+            "--change-reason",
+            "transfer ownership",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::GroupContext {
+                command:
+                    GroupContextCommands::Update {
+                        owners,
+                        change_reason,
+                        ..
+                    },
+                ..
+            } => {
+                assert_eq!(owners.as_deref(), Some(r#"{"userIds":["bot-a","bot-b"]}"#));
+                assert_eq!(change_reason, "transfer ownership");
+            }
+            _ => panic!("expected group-context update command"),
+        }
+    }
+
+    #[test]
+    fn group_context_update_rejects_invalid_owners_shapes() {
+        for (raw, expected_error) in [
+            ("[]", "--owners must be a JSON object"),
+            (
+                r#"{"foo":"bar"}"#,
+                "--owners must be a JSON object containing a non-empty userIds array",
+            ),
+            (
+                r#"{"userIds":"bot-a"}"#,
+                "--owners must be a JSON object containing a non-empty userIds array",
+            ),
+            (r#"{"userIds":[]}"#, "--owners.userIds must not be empty"),
+            (
+                r#"{"userIds":["", " "]}"#,
+                "--owners.userIds must contain non-empty string actor ids",
+            ),
+            (
+                r#"{"userIds":[1]}"#,
+                "--owners.userIds must contain non-empty string actor ids",
+            ),
+        ] {
+            let error = group_context_update_body(
+                "player_state".to_string(),
+                "session".to_string(),
+                None,
+                None,
+                None,
+                Some(raw.to_string()),
+                None,
+                None,
+                Some("transfer ownership".to_string()),
+            )
+            .unwrap_err();
+            let error = error.to_string();
+            assert!(
+                error.contains(expected_error),
+                "owners={raw}, expected {expected_error}, got {error}"
+            );
+        }
     }
 
     fn write_session_file(temp_dir: &TempDir, value: serde_json::Value) {
@@ -7891,7 +8195,7 @@ mod tests {
             "session".into(),
             "content".into(),
             r#"{"userIds":["bot1"]}"#.into(),
-            r#"{"userIds":["bot2"]}"#.into(),
+            Some(r#"{"userIds":["bot2"]}"#.to_string()),
             Some("1791797768".into()),
             Some("2026-10-12T14:56:08+08:00".into()),
         )
