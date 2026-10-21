@@ -1,14 +1,20 @@
 import { mapCommunityReplyDto, mapCommunityTopicDto } from '@/domain/community/mapper';
-import type { CommunityReplyPager, CommunityTopicQuery, CreateCommunityTopicInput } from '@/domain/community/types';
+import type {
+  CommunityReplyPager,
+  CommunityTopicQuery,
+  CreateCommunityReplyInput,
+  CreateCommunityTopicInput,
+} from '@/domain/community/types';
 import {
   closeCommunityTopic,
+  createCommunityReply,
   createCommunityTopic,
   getCommunityTopic,
   listCommunityReplies,
   listCommunityTopics,
 } from '@/services/backendApi/community/communityController';
 import { isEnvelopeSuccess } from '@/services/backendApi/types';
-import type { CommunityGateway } from './communityGateway';
+import type { CommunityGateway, GetCommunityTopicOptions } from './communityGateway';
 
 function requireData<T>(response: { code?: string | number; success?: boolean; message?: string; data?: T }): T {
   if (!isEnvelopeSuccess(response) || response.data === undefined) {
@@ -23,8 +29,14 @@ export class CommunityApiGateway implements CommunityGateway {
     return { total: data.total, items: data.items.map(mapCommunityTopicDto).filter((item) => item.id) };
   }
 
-  async getTopic(topicId: string, signal?: AbortSignal) {
-    return mapCommunityTopicDto(requireData(await getCommunityTopic(topicId, signal)));
+  async getTopic(
+    topicId: string,
+    options: GetCommunityTopicOptions = {},
+    signal?: AbortSignal,
+  ) {
+    return mapCommunityTopicDto(
+      requireData(await getCommunityTopic(topicId, options, signal)),
+    );
   }
 
   async listReplies(topicId: string, pager?: CommunityReplyPager, signal?: AbortSignal) {
@@ -37,7 +49,13 @@ export class CommunityApiGateway implements CommunityGateway {
     // TopicCreated only carries {topic_id, topic_type}; refetch the full TopicDetail
     // to populate title/body/author for the list prepend.
     const created = requireData(await createCommunityTopic(input, signal));
-    return this.getTopic(created.topic_id, signal);
+    return this.getTopic(created.topic_id, undefined, signal);
+  }
+
+  async createReply(input: CreateCommunityReplyInput, signal?: AbortSignal) {
+    const created = requireData(await createCommunityReply(input, signal));
+    if (!created.post_id) throw new Error('回复发布失败');
+    return created.post_id;
   }
 
   async closeTopic(topicId: string, authorId: string, signal?: AbortSignal) {

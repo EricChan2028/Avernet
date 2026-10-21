@@ -1,25 +1,22 @@
 import { notifyError, notifySuccess } from '@/components/ui/notify';
 import { enrichOwnership } from '@/domain/community/ownership';
-import type { CommunityAuthor, CommunityTopic } from '@/domain/community/types';
+import { communityErrorMessage } from '@/domain/community/errors';
+import { COMMUNITY_PAGE_SIZE } from '@/domain/community/constants';
+import type { CommunityAuthor, CommunityTopic, CreateCommunityTopicDraft } from '@/domain/community/types';
 import { communityService } from '@/services/community';
 import { useCommunityStore } from '@/stores/communityStore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useBotAuthorEnricher } from './useBotAuthorEnricher';
+import { useCommunityReplies } from './useCommunityReplies';
 import { useHumanIdentity } from './useHumanIdentity';
 
-/** 主题列表分页大小（首屏 + 加载更多统一）。 */
-export const COMMUNITY_PAGE_SIZE = 10;
-/** 回帖分页大小（详情页翻页）。楼层号 = (replyPage-1)*COMMUNITY_REPLY_PAGE_SIZE + index + 1。当前为验证分页临时调小为 5，验证后改回 20。 */
-export const COMMUNITY_REPLY_PAGE_SIZE = 5;
-
-function errorMessage(error: unknown, fallback: string) {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
+export { COMMUNITY_PAGE_SIZE, COMMUNITY_REPLY_PAGE_SIZE } from '@/domain/community/constants';
 
 export function useCommunity() {
   const store = useCommunityStore();
   const { identity } = useHumanIdentity();
-  const currentUserId = identity?.userId.trim() ?? ''; // BOT 作者名兜底：后端 §4.1 不返 BOT作者 display_name 时，用本人 owned bots 的 bot_name 兜底（doc §8 验收）。
+  const currentUserId = identity?.userId.trim() ?? '';
+  // BOT 作者名兜底：后端 §4.1 不返 BOT作者 display_name 时，用本人 owned bots 的 bot_name 兜底。
   const { enrichTopicBotAuthor, botNameById } = useBotAuthorEnricher(currentUserId);
 
   const [publishing, setPublishing] = useState(false);
@@ -28,12 +25,29 @@ export function useCommunity() {
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
-  // 详情回帖分页
-  const [replyPage, setReplyPage] = useState(1);
-  const [replyTotal, setReplyTotal] = useState(0);
-  const [replyLoading, setReplyLoading] = useState(false);
-  const [replyError, setReplyError] = useState<string | null>(null);
   const requestRef = useRef(0);
+
+  const fetchTopicWithViewer = useCallback(
+    async (topicId: string) => {
+      const options = currentUserId
+        ? { viewerAuthorId: currentUserId, viewerAuthorType: 'HUMAN' as const }
+        : {};
+      const topic = await communityService.getTopic(topicId, options);
+      store.setSelectedTopic(enrichOwnership(enrichTopicBotAuthor(topic), currentUserId));
+      return topic;
+    },
+    [currentUserId, enrichTopicBotAuthor, store.setSelectedTopic],
+  );
+
+  const replies = useCommunityReplies({
+    currentUserId,
+    authorName: identity?.displayName || '我',
+    authorAvatarUrl: identity?.avatarUrl,
+    selectedTopic: store.selectedTopic,
+    setReplies: store.setReplies,
+    refreshTopic: fetchTopicWithViewer,
+  });
+  const { resetReplies, openFirstReplyPage } = replies;
 
   const load = useCallback(async () => {
     const requestId = ++requestRef.current;
@@ -55,11 +69,21 @@ export function useCommunity() {
         setHasMore(items.length > 0 && items.length < page.total);
       }
     } catch (error) {
-      if (requestId === requestRef.current) store.setError(errorMessage(error, '社区加载失败，请稍后重试'));
+      if (requestId === requestRef.current) {
+        store.setError(communityErrorMessage(error, '社区加载失败，请稍后重试'));
+      }
     } finally {
       if (requestId === requestRef.current) store.setLoading(false);
     }
-  }, [currentUserId, store.query, store.scope, store.setError, store.setLoading, store.setTopics]);
+  }, [
+    currentUserId,
+    enrichTopicBotAuthor,
+    store.setError,
+    store.setLoading,
+    store.setTopics,
+    store.query,
+    store.scope,
+  ]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 200);
@@ -70,17 +94,17 @@ export function useCommunity() {
   useEffect(() => {
     if (Object.keys(botNameById).length === 0 || store.topics.length === 0) return;
     let changed = false;
-    const enriched = store.topics.map((t) => {
-      if (t.author.type !== 'bot') return t;
-      const name = botNameById[t.author.id];
-      if (name && name !== t.author.displayName) {
+    const enriched = store.topics.map((topic) => {
+      if (topic.author.type !== 'bot') return topic;
+      const name = botNameById[topic.author.id];
+      if (name && name !== topic.author.displayName) {
         changed = true;
-        return { ...t, author: { ...t.author, displayName: name } };
+        return { ...topic, author: { ...topic.author, displayName: name } };
       }
-      return t;
+      return topic;
     });
     if (changed) store.setTopics(enriched, store.total);
-  }, [botNameById, store.topics, store.total, store.setTopics]);
+  }, [botNameById, store.setTopics, store.topics, store.total]);
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore) return;
@@ -100,7 +124,7 @@ export function useCommunity() {
       const loaded = previousCount + appended.length;
       setHasMore(appended.length > 0 && loaded < page.total);
     } catch (error) {
-      setLoadMoreError(errorMessage(error, '加载更多失败，请稍后重试'));
+      setLoadMoreError(communityErrorMessage(error, '加载更多失败，请稍后重试'));
     } finally {
       setLoadingMore(false);
     }
@@ -115,47 +139,27 @@ export function useCommunity() {
     store.topics.length,
   ]);
 
-  const fetchReplies = useCallback(
-    async (topicId: string, page: number) => {
-      setReplyLoading(true);
-      setReplyError(null);
-      try {
-        const result = await communityService.listReplies(topicId, { page, pageSize: COMMUNITY_REPLY_PAGE_SIZE });
-        store.setReplies(result.items);
-        setReplyTotal(result.total);
-        setReplyPage(page);
-      } catch (error) {
-        setReplyError(errorMessage(error, '回复加载失败'));
-      } finally {
-        setReplyLoading(false);
-      }
-    },
-    [store.setReplies],
-  );
-
   const openTopic = useCallback(
     async (topic: CommunityTopic) => {
       const owned = enrichOwnership(topic, currentUserId);
       store.setSelectedTopic(owned);
       store.setDetailLoading(true);
       store.setDetailError(null);
-      setReplyError(null);
-      setReplyTotal(0);
-      setReplyPage(1);
+      resetReplies();
       try {
-        const detail = await communityService.getTopic(topic.id);
-        store.setSelectedTopic(enrichOwnership(enrichTopicBotAuthor(detail), currentUserId));
-        await fetchReplies(topic.id, 1);
+        await fetchTopicWithViewer(topic.id);
+        await openFirstReplyPage(topic.id);
       } catch (error) {
-        store.setDetailError(errorMessage(error, '主题详情加载失败'));
+        store.setDetailError(communityErrorMessage(error, '主题详情加载失败'));
       } finally {
         store.setDetailLoading(false);
       }
     },
     [
       currentUserId,
-      enrichTopicBotAuthor,
-      fetchReplies,
+      fetchTopicWithViewer,
+      openFirstReplyPage,
+      resetReplies,
       store.setDetailError,
       store.setDetailLoading,
       store.setSelectedTopic,
@@ -164,17 +168,8 @@ export function useCommunity() {
 
   const closeDetail = useCallback(() => store.setSelectedTopic(null), [store.setSelectedTopic]);
 
-  const goToReplyPage = useCallback(
-    async (page: number) => {
-      const topic = store.selectedTopic;
-      if (!topic) return;
-      await fetchReplies(topic.id, page);
-    },
-    [fetchReplies, store.selectedTopic],
-  );
-
   const publishTopic = useCallback(
-    async (title: string, body: string) => {
+    async (draft: CreateCommunityTopicDraft) => {
       setPublishing(true);
       try {
         const author: CommunityAuthor = {
@@ -184,8 +179,7 @@ export function useCommunity() {
           avatarUrl: identity?.avatarUrl,
         };
         const topic = await communityService.createTopic({
-          title,
-          body,
+          ...draft,
           authorId: author.id,
           authorName: author.displayName,
           authorAvatarUrl: author.avatarUrl,
@@ -195,7 +189,7 @@ export function useCommunity() {
         notifySuccess('主题发布成功');
         return true;
       } catch (error) {
-        notifyError(errorMessage(error, '主题发布失败'), { title: '发布失败' });
+        notifyError(communityErrorMessage(error, '主题发布失败'), { title: '发布失败' });
         return false;
       } finally {
         setPublishing(false);
@@ -216,17 +210,18 @@ export function useCommunity() {
       notifySuccess('主题已结帖');
       return true;
     } catch (error) {
-      notifyError(errorMessage(error, '结帖失败'), { title: '结帖失败' });
+      notifyError(communityErrorMessage(error, '结帖失败'), { title: '结帖失败' });
       return false;
     } finally {
       setClosing(false);
     }
   }, [currentUserId, store.markTopicClosed, store.selectedTopic]);
 
-  const replyPageCount = Math.max(1, Math.ceil(Math.max(0, replyTotal) / COMMUNITY_REPLY_PAGE_SIZE));
 
   return {
     ...store,
+    ...replies,
+    currentUserId,
     load,
     loadMore,
     hasMore,
@@ -234,12 +229,6 @@ export function useCommunity() {
     loadMoreError,
     openTopic,
     closeDetail,
-    goToReplyPage,
-    replyPage,
-    replyPageCount,
-    replyTotal,
-    replyLoading,
-    replyError,
     publishTopic,
     closeTopic,
     publishing,

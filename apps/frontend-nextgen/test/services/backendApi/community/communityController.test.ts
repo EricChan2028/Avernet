@@ -1,5 +1,6 @@
 import {
   closeCommunityTopic,
+  createCommunityReply,
   createCommunityTopic,
   getCommunityTopic,
   listCommunityReplies,
@@ -42,6 +43,7 @@ describe('communityController', () => {
     await listCommunityReplies('topic/1', { page: 2, pageSize: 15 });
     expect(mockedRequest).toHaveBeenNthCalledWith(1, '/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1', {
       method: 'GET',
+      params: {},
       signal: undefined,
     });
     expect(mockedRequest).toHaveBeenNthCalledWith(2, '/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1/posts', {
@@ -58,6 +60,63 @@ describe('communityController', () => {
       params: { page: 1, page_size: 20 },
       signal: undefined,
     });
+  });
+
+  test('普通回复不携带 reply_to_post_id，沿用 HUMAN 作者声明和幂等键', async () => {
+    await createCommunityReply({
+      topicId: 'topic/1',
+      body: '回复',
+      authorId: 'u1',
+      authorName: '张三',
+    });
+
+    expect(mockedRequest).toHaveBeenCalledWith(
+      '/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1/posts',
+      expect.objectContaining({
+        method: 'POST',
+        data: expect.objectContaining({
+          client_request_id: expect.any(String),
+          author_type: 'HUMAN',
+          author_id: 'u1',
+          body: '回复',
+          author_display_name: '张三',
+        }),
+        signal: undefined,
+      }),
+    );
+    expect(mockedRequest.mock.calls[0][1].data).not.toHaveProperty('reply_to_post_id');
+  });
+
+  test('楼层回复携带被引用 Post id', async () => {
+    await createCommunityReply({
+      topicId: 'topic/1',
+      body: '回复楼层',
+      authorId: 'u1',
+      replyToPostId: ' post-1 ',
+    });
+
+    expect(mockedRequest.mock.calls[0][0]).toBe('/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1/posts');
+    expect(mockedRequest.mock.calls[0][1].data).toMatchObject({
+      body: '回复楼层',
+      reply_to_post_id: 'post-1',
+    });
+  });
+
+  test('投票回复下发结构化 poll_selection，且不携带楼层引用', async () => {
+    await createCommunityReply({
+      topicId: 'topic/1',
+      body: '投票选择：方案 A',
+      authorId: 'u1',
+      pollSelection: [0],
+    });
+
+    const arg = mockedRequest.mock.calls[0];
+    expect(arg?.[0]).toBe('/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1/posts');
+    expect(arg?.[1].data).toMatchObject({
+      body: '投票选择：方案 A',
+      poll_selection: { option_indices: [0] },
+    });
+    expect(arg?.[1].data).not.toHaveProperty('reply_to_post_id');
   });
 
   test('发布主题走 /openapi/v1/collaboration/tasks/bbs/topics，HUMAN 写体含 client_request_id/title/body/author_id + 作者快照 author_display_name/author_avatar_url；结帖 body 含 author_id', async () => {
@@ -95,6 +154,32 @@ describe('communityController', () => {
     });
   });
 
+  test('创建投票主题下发 topic_type=POLL 和 topic_config.poll 配置', async () => {
+    await createCommunityTopic({
+      title: '投票主题',
+      body: '请选择',
+      authorId: 'u1',
+      authorName: '张三',
+      topicType: 'poll',
+      poll: {
+        selection: 'multi',
+        options: ['方案 A', '方案 B'],
+        deadlineAt: '2026-10-20T12:00:00Z',
+      },
+    });
+
+    expect(mockedRequest.mock.calls[0][1].data).toMatchObject({
+      topic_type: 'POLL',
+      topic_config: {
+        poll: {
+          selection: 'MULTI',
+          options: ['方案 A', '方案 B'],
+          deadline_at: '2026-10-20T12:00:00Z',
+        },
+      },
+    });
+  });
+
   test('authorAvatarUrl 缺勤时不发 author_avatar_url 快照；author_display_name 仍下发（§2.1 不传则 null）', async () => {
     await createCommunityTopic({ title: '标题', body: '正文', authorId: 'u1', authorName: '张三' });
     const arg = mockedRequest.mock.calls[0];
@@ -106,5 +191,18 @@ describe('communityController', () => {
     await createCommunityTopic({ title: '标题', body: '正文', authorId: 'u1', authorName: '   ' });
     const arg = mockedRequest.mock.calls[0];
     expect(arg?.[1].data).not.toHaveProperty('author_display_name');
+  });
+
+  test('详情请求透传 viewer 身份参数', async () => {
+    await getCommunityTopic('topic/1', {
+      viewerAuthorId: ' user-1 ',
+      viewerAuthorType: 'HUMAN',
+    });
+
+    expect(mockedRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1', {
+      method: 'GET',
+      params: { viewer_author_id: 'user-1', viewer_author_type: 'HUMAN' },
+      signal: undefined,
+    });
   });
 });

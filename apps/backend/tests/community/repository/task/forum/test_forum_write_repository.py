@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.errors import Conflict, NotFound
 from agentclaw.community.core.task.forum.models import (
+    ForumPollConfig,
+    ForumPollSelection,
+    ForumTopicConfig,
     TOPIC_STATUS_CLOSED,
     TOPIC_STATUS_LOCKED,
     TOPIC_TYPE_NOTICE,
@@ -28,6 +32,7 @@ def _create_topic(
     author_id="bot-a",
     request_id="req-topic",
     topic_type="DISCUSSION",
+    topic_config=None,
 ):
     return repo.create_topic(
         author_type=author_type,
@@ -36,6 +41,7 @@ def _create_topic(
         title="Topic title",
         body="Topic description",
         topic_type=topic_type,
+        topic_config=topic_config,
     )
 
 
@@ -47,6 +53,8 @@ def _create_reply(
     author_id="bot-b",
     request_id="req-reply-1",
     body="First reply",
+    reply_to_post_id=None,
+    poll_selection=None,
 ):
     return repo.create_reply(
         topic_id=topic_id,
@@ -54,6 +62,8 @@ def _create_reply(
         author_id=author_id,
         client_request_id=request_id,
         body=body,
+        reply_to_post_id=reply_to_post_id,
+        poll_selection=poll_selection,
     )
 
 
@@ -71,6 +81,67 @@ def test_create_topic_persists_topic_description_without_root_post(db):
     assert result.topic.status == "OPEN"
     with db.orm_session() as session:
         assert session.query(ForumPostModel).count() == 0
+
+
+def test_create_topic_persists_and_returns_poll_configuration(db):
+    repo = ForumRepository(db)
+    deadline = datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc)
+    config = ForumTopicConfig(
+        poll=ForumPollConfig(
+            selection="MULTI",
+            options=("Option A", "Option B"),
+            deadline_at=deadline,
+        )
+    )
+
+    result = _create_topic(
+        repo,
+        request_id="req-poll",
+        topic_type=TOPIC_TYPE_POLL,
+        topic_config=config,
+    )
+
+    assert result.topic.topic_config == config
+    assert repo.get_topic(result.topic.topic_id).topic_config == config
+    listed = repo.list_topics(
+        keyword=None, status=None, topic_type=TOPIC_TYPE_POLL, offset=0, limit=10
+    )
+    assert listed.items[0].topic_config == config
+
+    with db.orm_session() as session:
+        row = session.query(ForumTopicModel).filter_by(
+            topic_id=result.topic.topic_id
+        ).one()
+        assert row.topic_config == {
+            "poll": {
+                "selection": "MULTI",
+                "options": ["Option A", "Option B"],
+                "deadline_at": deadline.isoformat(),
+            }
+        }
+
+
+def test_create_topic_poll_replay_returns_original_configuration(db):
+    repo = ForumRepository(db)
+    poll = ForumPollConfig(selection="SINGLE", options=("A", "B"))
+    topic_config = ForumTopicConfig(poll=poll)
+    first = _create_topic(
+        repo,
+        request_id="req-poll",
+        topic_type=TOPIC_TYPE_POLL,
+        topic_config=topic_config,
+    )
+
+    replay = _create_topic(
+        repo,
+        request_id="req-poll",
+        topic_type=TOPIC_TYPE_POLL,
+        topic_config=None,
+    )
+
+    assert replay.created is False
+    assert replay.topic.topic_id == first.topic.topic_id
+    assert replay.topic.topic_config.poll == poll
 
 
 def test_create_topic_is_idempotent_without_comparing_content(db):
@@ -119,8 +190,175 @@ def test_create_reply_persists_author_without_tenant_or_environment_columns(db):
     assert result.post.topic_id == topic.topic_id
     assert result.post.author_type == "HUMAN"
     assert result.post.author_id == "user-b"
+    assert result.post.reply_to_post_id is None
     assert "env" not in ForumPostModel.__table__.columns
     assert "avernet_tenant" not in ForumPostModel.__table__.columns
+
+
+def test_create_reply_persists_reference_to_a_post_in_the_same_topic(db):
+    repo = ForumRepository(db)
+    topic = _create_topic(repo).topic
+    first = _create_reply(repo, topic.topic_id).post
+
+    second = _create_reply(
+        repo,
+        topic.topic_id,
+        request_id="reply-to-first",
+        body="Referenced reply",
+        reply_to_post_id=first.post_id,
+    )
+
+    assert second.post.reply_to_post_id == first.post_id
+    with db.orm_session() as session:
+        row = session.query(ForumPostModel).filter_by(post_id=second.post.post_id).one()
+        assert row.reply_to_post_id == first.post_id
+
+
+def test_create_reply_persists_structured_poll_selection(db):
+    repo = ForumRepository(db)
+    config = ForumTopicConfig(
+        poll=ForumPollConfig(selection="MULTI", options=("Option A", "Option B"))
+    )
+    topic = _create_topic(
+        repo,
+        request_id="req-poll",
+        topic_type=TOPIC_TYPE_POLL,
+        topic_config=config,
+    ).topic
+
+    result = _create_reply(
+        repo,
+        topic.topic_id,
+        request_id="req-poll-vote",
+        body="I choose both options.",
+        poll_selection=ForumPollSelection(option_indices=(0, 1)),
+    )
+
+    assert result.post.poll_selection == ForumPollSelection(option_indices=(0, 1))
+    with db.orm_session() as session:
+        row = session.query(ForumPostModel).filter_by(post_id=result.post.post_id).one()
+        assert row.post_config == {
+            "poll_selection": {"option_indices": [0, 1]}
+        }
+        assert row.body == "I choose both options."
+
+
+def test_create_reply_rejects_unknown_reference(db):
+    repo = ForumRepository(db)
+    topic = _create_topic(repo).topic
+
+    with pytest.raises(NotFound, match="reply_to_post_id not found"):
+        _create_reply(repo, topic.topic_id, reply_to_post_id="missing-post")
+
+    with db.orm_session() as session:
+        assert session.query(ForumPostModel).count() == 0
+
+
+def test_poll_reply_rejects_floor_reference_before_validation(db):
+    repo = ForumRepository(db)
+    topic = _create_topic(
+        repo,
+        topic_type=TOPIC_TYPE_POLL,
+        topic_config=ForumTopicConfig(
+            poll=ForumPollConfig(selection="SINGLE", options=("A", "B"))
+        ),
+    ).topic
+
+    with pytest.raises(Conflict, match="POLL replies must target the Topic"):
+        _create_reply(
+            repo,
+            topic.topic_id,
+            reply_to_post_id="missing-post",
+            poll_selection=ForumPollSelection(option_indices=(0,)),
+        )
+
+    with db.orm_session() as session:
+        assert session.query(ForumPostModel).count() == 0
+
+
+def test_poll_reply_rejects_new_vote_after_deadline(db):
+    repo = ForumRepository(db)
+    expired = datetime.now(timezone.utc) - timedelta(seconds=1)
+    topic = _create_topic(
+        repo,
+        topic_type=TOPIC_TYPE_POLL,
+        topic_config=ForumTopicConfig(
+            poll=ForumPollConfig(
+                selection="SINGLE",
+                options=("A", "B"),
+                deadline_at=expired,
+            )
+        ),
+    ).topic
+
+    with pytest.raises(Conflict, match="poll deadline has passed"):
+        _create_reply(
+            repo,
+            topic.topic_id,
+            poll_selection=ForumPollSelection(option_indices=(0,)),
+        )
+
+    with db.orm_session() as session:
+        assert session.query(ForumPostModel).count() == 0
+
+
+def test_poll_deadline_does_not_break_idempotent_reply_replay(db):
+    repo = ForumRepository(db)
+    future = datetime.now(timezone.utc) + timedelta(days=1)
+    topic = _create_topic(
+        repo,
+        topic_type=TOPIC_TYPE_POLL,
+        topic_config=ForumTopicConfig(
+            poll=ForumPollConfig(
+                selection="SINGLE",
+                options=("A", "B"),
+                deadline_at=future,
+            )
+        ),
+    ).topic
+    first = _create_reply(
+        repo,
+        topic.topic_id,
+        poll_selection=ForumPollSelection(option_indices=(0,)),
+    ).post
+
+    expired = datetime.now(timezone.utc) - timedelta(seconds=1)
+    with db.orm_session() as session:
+        row = session.query(ForumTopicModel).filter_by(
+            topic_id=topic.topic_id
+        ).one()
+        row.topic_config = {
+            "poll": {
+                "selection": "SINGLE",
+                "options": ["A", "B"],
+                "deadline_at": expired.isoformat(),
+            }
+        }
+
+    replay = _create_reply(
+        repo,
+        topic.topic_id,
+        body="ignored",
+        reply_to_post_id="missing-post",
+        poll_selection=ForumPollSelection(option_indices=(0,)),
+    )
+
+    assert replay.created is False
+    assert replay.post.post_id == first.post_id
+
+
+def test_create_reply_rejects_reference_from_another_topic(db):
+    repo = ForumRepository(db)
+    first_topic = _create_topic(repo, request_id="topic-1").topic
+    second_topic = _create_topic(repo, request_id="topic-2").topic
+    first_reply = _create_reply(repo, first_topic.topic_id).post
+
+    with pytest.raises(NotFound, match="reply_to_post_id not found"):
+        _create_reply(
+            repo,
+            second_topic.topic_id,
+            reply_to_post_id=first_reply.post_id,
+        )
 
 
 def test_create_reply_is_idempotent_per_topic_author_and_request(db):
@@ -210,6 +448,26 @@ def test_create_reply_rejects_non_open_topic(db, status):
 
     with pytest.raises(Conflict, match=status.lower()):
         _create_reply(repo, topic.topic_id)
+
+
+def test_idempotent_reply_replay_skips_reference_validation_after_topic_is_locked(db):
+    repo = ForumRepository(db)
+    topic = _create_topic(repo).topic
+    first = _create_reply(repo, topic.topic_id).post
+    with db.orm_session() as session:
+        session.query(ForumTopicModel).filter_by(
+            topic_id=topic.topic_id
+        ).one().status = TOPIC_STATUS_LOCKED
+
+    replay = _create_reply(
+        repo,
+        topic.topic_id,
+        body="ignored",
+        reply_to_post_id="missing-post",
+    )
+
+    assert replay.created is False
+    assert replay.post.post_id == first.post_id
 
 
 def test_idempotent_reply_replay_still_succeeds_after_topic_is_locked(db):

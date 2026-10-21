@@ -12,6 +12,7 @@ jest.mock('@/services/community', () => ({
     listTopics: jest.fn(),
     getTopic: jest.fn(),
     listReplies: jest.fn(),
+    createReply: jest.fn(),
     createTopic: jest.fn(),
     closeTopic: jest.fn(),
   },
@@ -36,6 +37,7 @@ const topic: CommunityTopic = {
   title: '社区主题',
   body: '主题正文',
   status: 'open',
+  topicType: 'discussion',
   author: { type: 'human', id: '900003', displayName: '顾客' },
   replyCount: 1,
   latestActivityAt: '2026-10-06T06:20:00Z',
@@ -105,19 +107,58 @@ describe('useCommunity', () => {
 
     let succeeded = false;
     await act(async () => {
-      succeeded = await result.current.publishTopic('标题', '正文');
+      succeeded = await result.current.publishTopic({ title: '标题', body: '正文' });
     });
 
     expect(succeeded).toBe(true);
     expect(mockedService.createTopic).toHaveBeenCalledWith({
       title: '标题',
       body: '正文',
+      topicType: undefined,
+      poll: undefined,
       authorId: '900003',
       authorName: '当前用户',
       authorAvatarUrl: 'avatar.png',
     });
     expect(result.current.topics[0]).toEqual(topic);
     expect(notifySuccess).toHaveBeenCalledWith('主题发布成功');
+  });
+
+  test('发布投票主题时透传 Topic 级 poll 配置', async () => {
+    mockedService.listTopics.mockResolvedValue({ items: [], total: 0 });
+    mockedService.createTopic.mockResolvedValue(topic);
+    const { result } = renderHook(() => useCommunity());
+    await flushDebouncedLoad();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let succeeded = false;
+    await act(async () => {
+      succeeded = await result.current.publishTopic({
+        title: '选择协作方案',
+        body: '请说明理由',
+        topicType: 'poll',
+        poll: {
+          selection: 'multi',
+          options: ['方案 A', '方案 B'],
+          deadlineAt: '2026-10-20T12:00:00Z',
+        },
+      });
+    });
+
+    expect(succeeded).toBe(true);
+    expect(mockedService.createTopic).toHaveBeenCalledWith({
+      title: '选择协作方案',
+      body: '请说明理由',
+      topicType: 'poll',
+      poll: {
+        selection: 'multi',
+        options: ['方案 A', '方案 B'],
+        deadlineAt: '2026-10-20T12:00:00Z',
+      },
+      authorId: '900003',
+      authorName: '当前用户',
+      authorAvatarUrl: 'avatar.png',
+    });
   });
 
   test('打开详情加载主题与第 1 页回复（page=1/pageSize=COMMUNITY_REPLY_PAGE_SIZE），结帖带 author_id：优先主题作者', async () => {
@@ -163,6 +204,69 @@ describe('useCommunity', () => {
     expect(mockedService.closeTopic).not.toHaveBeenCalled();
   });
 
+  test('普通回复不携带 replyToPostId，成功后刷新当前页', async () => {
+    mockedService.getTopic.mockResolvedValue(topic);
+    mockedService.createReply.mockResolvedValue('reply-created');
+    const { result } = renderHook(() => useCommunity());
+    await flushDebouncedLoad();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.openTopic(topic);
+    });
+
+    let created = false;
+    await act(async () => {
+      created = await result.current.publishReply('  继续讨论  ');
+    });
+
+    expect(created).toBe(true);
+    expect(mockedService.createReply).toHaveBeenCalledWith({
+      topicId: topic.id,
+      body: '  继续讨论  ',
+      authorId: '900003',
+      authorName: '当前用户',
+      authorAvatarUrl: 'avatar.png',
+      replyToPostId: undefined,
+    });
+    expect(result.current.replyTargetPostId).toBeNull();
+    expect(mockedService.listReplies).toHaveBeenLastCalledWith(topic.id, {
+      page: 1,
+      pageSize: COMMUNITY_REPLY_PAGE_SIZE,
+    });
+    expect(notifySuccess).toHaveBeenCalledWith('主题回复成功');
+  });
+
+  test('点击楼层回复时记录 Post id，并提交 replyToPostId', async () => {
+    mockedService.getTopic.mockResolvedValue(topic);
+    mockedService.createReply.mockResolvedValue('reply-created');
+    const { result } = renderHook(() => useCommunity());
+    await flushDebouncedLoad();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.openTopic(topic);
+    });
+    act(() => {
+      result.current.startReply('reply-1');
+    });
+
+    expect(result.current.replyTargetPostId).toBe('reply-1');
+
+    let created = false;
+    await act(async () => {
+      created = await result.current.publishReply('给楼层的回复');
+    });
+
+    expect(created).toBe(true);
+    expect(mockedService.createReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        replyToPostId: 'reply-1',
+      }),
+    );
+    expect(notifySuccess).toHaveBeenCalledWith('回复楼层成功');
+  });
+
   test('goToReplyPage 切换回帖分页', async () => {
     mockedService.getTopic.mockResolvedValue(topic);
     const { result } = renderHook(() => useCommunity());
@@ -198,6 +302,7 @@ describe('useCommunity', () => {
       title: 'Bot 发的主题',
       body: '正文',
       status: 'open',
+      topicType: 'discussion',
       author: { type: 'bot', id: 'bot-x', displayName: 'bot-x' },
       replyCount: 0,
       latestActivityAt: '2026-10-08T08:00:00Z',
@@ -222,7 +327,7 @@ describe('useCommunity', () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     await act(async () => {
-      expect(await result.current.publishTopic('标题', '正文')).toBe(false);
+      expect(await result.current.publishTopic({ title: '标题', body: '正文' })).toBe(false);
     });
 
     expect(result.current.topics).toEqual([topic]);

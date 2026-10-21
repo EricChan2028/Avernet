@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from datetime import datetime
+
 from injector import inject
 
 from agentclaw.community.core.errors import Conflict, NotFound, ValidationError
@@ -22,12 +25,22 @@ from agentclaw.community.core.task.forum.models import (
     MAX_AUTHOR_DISPLAY_NAME_LENGTH,
     MAX_AUTHOR_AVATAR_URL_LENGTH,
     MAX_ID_LENGTH,
+    MAX_POLL_OPTION_COUNT,
+    MAX_POLL_OPTION_LENGTH,
+    MIN_POLL_OPTION_COUNT,
     MAX_SEARCH_KEYWORD_LENGTH,
     MAX_TITLE_LENGTH,
+    POLL_SELECTIONS,
+    POLL_SELECTION_MULTI,
+    POLL_SELECTION_SINGLE,
     TOPIC_STATUSES,
     TOPIC_STATUS_CLOSED,
     TOPIC_STATUS_LOCKED,
+    TOPIC_TYPE_POLL,
     TOPIC_TYPES,
+    ForumPollConfig,
+    ForumPollSelection,
+    ForumTopicConfig,
     ForumPostPage,
     ForumReplyCreateResult,
     ForumTopicCreateResult,
@@ -83,12 +96,36 @@ class ForumService(ForumServiceProtocol):
             author_id=normalized_author,
         )
 
-    def get_topic(self, *, topic_id: str) -> ForumTopicRecord:
+    def get_topic(
+        self,
+        *,
+        topic_id: str,
+        viewer_author_type: str | None = None,
+        viewer_author_id: str | None = None,
+    ) -> ForumTopicRecord:
         normalized_topic_id = self._required_text(topic_id, "topic_id", MAX_ID_LENGTH)
+        if (viewer_author_type is None) != (viewer_author_id is None):
+            raise ValidationError(
+                "viewer_author_type and viewer_author_id must be provided together"
+            )
         topic = self._repository.get_topic(normalized_topic_id)
         if topic is None:
             raise NotFound("topic not found")
-        return topic
+        if viewer_author_type is None:
+            return topic
+
+        normalized_viewer_type = self._author_type(viewer_author_type)
+        normalized_viewer_id = self._required_text(
+            viewer_author_id, "viewer_author_id", MAX_AUTHOR_ID_LENGTH
+        )
+        viewer = self._repository.get_topic_viewer_state(
+            topic_id=normalized_topic_id,
+            author_type=normalized_viewer_type,
+            author_id=normalized_viewer_id,
+        )
+        if viewer is None:
+            raise NotFound("topic not found")
+        return replace(topic, viewer=viewer)
 
     def list_posts(self, *, topic_id: str, page: int, page_size: int) -> ForumPostPage:
         normalized_topic_id = self._required_text(topic_id, "topic_id", MAX_ID_LENGTH)
@@ -108,6 +145,7 @@ class ForumService(ForumServiceProtocol):
         title: str,
         body: str,
         topic_type: str | None = None,
+        topic_config: ForumTopicConfig | None = None,
         author_display_name: str | None = None,
         author_avatar_url: str | None = None,
     ) -> ForumTopicCreateResult:
@@ -121,6 +159,17 @@ class ForumService(ForumServiceProtocol):
         normalized_title = self._required_text(title, "title", MAX_TITLE_LENGTH)
         normalized_body = self._required_text(body, "body", MAX_BODY_LENGTH)
         normalized_topic_type = self._topic_type(topic_type) or "DISCUSSION"
+        normalized_config = self._topic_config(topic_config)
+        if normalized_topic_type == TOPIC_TYPE_POLL and (
+            normalized_config is None or normalized_config.poll is None
+        ):
+            raise ValidationError(
+                "topic_config.poll is required when topic_type is POLL"
+            )
+        if normalized_topic_type != TOPIC_TYPE_POLL and normalized_config is not None:
+            raise ValidationError(
+                "topic_config is only allowed when topic_type is POLL"
+            )
         normalized_display_name = self._optional_text(
             author_display_name, "author_display_name",
             MAX_AUTHOR_DISPLAY_NAME_LENGTH,
@@ -136,6 +185,7 @@ class ForumService(ForumServiceProtocol):
             title=normalized_title,
             body=normalized_body,
             topic_type=normalized_topic_type,
+            topic_config=normalized_config,
             author_display_name=normalized_display_name,
             author_avatar_url=normalized_avatar,
         )
@@ -148,6 +198,8 @@ class ForumService(ForumServiceProtocol):
         author_id: str,
         client_request_id: str,
         body: str,
+        reply_to_post_id: str | None = None,
+        poll_selection: ForumPollSelection | None = None,
         author_display_name: str | None = None,
         author_avatar_url: str | None = None,
     ) -> ForumReplyCreateResult:
@@ -168,12 +220,30 @@ class ForumService(ForumServiceProtocol):
             author_avatar_url, "author_avatar_url",
             MAX_AUTHOR_AVATAR_URL_LENGTH,
         )
+        normalized_reply_to_post_id = self._optional_text(
+            reply_to_post_id, "reply_to_post_id", MAX_ID_LENGTH
+        )
+        topic = self._repository.get_topic(normalized_topic_id)
+        if topic is None:
+            raise NotFound("topic not found")
+        if (
+            topic.topic_type == TOPIC_TYPE_POLL
+            and normalized_reply_to_post_id is not None
+        ):
+            raise ValidationError(
+                "POLL replies must target the Topic; reply_to_post_id is not allowed"
+            )
+        normalized_poll_selection = self._reply_poll_selection(
+            poll_selection, topic
+        )
         return self._repository.create_reply(
             topic_id=normalized_topic_id,
             author_type=normalized_author_type,
             author_id=normalized_author_id,
             client_request_id=request_id,
             body=normalized_body,
+            reply_to_post_id=normalized_reply_to_post_id,
+            poll_selection=normalized_poll_selection,
             author_display_name=normalized_display_name,
             author_avatar_url=normalized_avatar,
         )
@@ -217,6 +287,104 @@ class ForumService(ForumServiceProtocol):
                 f"{field} must contain no more than {max_length} characters"
             )
         return normalized
+
+    @staticmethod
+    def _reply_poll_selection(
+        value: ForumPollSelection | None, topic: ForumTopicRecord
+    ) -> ForumPollSelection | None:
+        if topic.topic_type != TOPIC_TYPE_POLL:
+            if value is None:
+                return None
+            raise ValidationError(
+                "poll_selection is only allowed when topic_type is POLL"
+            )
+        if value is None:
+            raise ValidationError(
+                "poll_selection is required when topic_type is POLL"
+            )
+        if topic.topic_config is None or topic.topic_config.poll is None:
+            raise ValidationError(
+                "poll_selection requires topic_config.poll on the addressed Topic"
+            )
+        poll = topic.topic_config.poll
+        indices = tuple(value.option_indices)
+        if not indices:
+            raise ValidationError(
+                "poll_selection.option_indices must contain at least one option"
+            )
+        if any(
+            not isinstance(index, int)
+            or isinstance(index, bool)
+            or index < 0
+            or index >= len(poll.options)
+            for index in indices
+        ):
+            raise ValidationError(
+                "poll_selection.option_indices contains an invalid option index"
+            )
+        if len(indices) != len(set(indices)):
+            raise ValidationError(
+                "poll_selection.option_indices must not contain duplicates"
+            )
+        if poll.selection == POLL_SELECTION_SINGLE and len(indices) != 1:
+            raise ValidationError(
+                "poll_selection.option_indices must contain exactly one option "
+                "for SINGLE polls"
+            )
+        return ForumPollSelection(option_indices=indices)
+
+    @classmethod
+    def _topic_config(cls, value: ForumTopicConfig | None) -> ForumTopicConfig | None:
+        if value is None:
+            return None
+        if not isinstance(value, ForumTopicConfig):
+            raise ValidationError("topic_config must be a topic configuration object")
+        if set(value.__dict__) - {"poll"}:
+            raise ValidationError("topic_config contains unsupported fields")
+        return ForumTopicConfig(poll=cls._poll_config(value.poll))
+
+    @classmethod
+    def _poll_config(cls, value: ForumPollConfig | None) -> ForumPollConfig | None:
+        if value is None:
+            return None
+        if not isinstance(value, ForumPollConfig):
+            raise ValidationError("poll must be a poll configuration")
+
+        selection = cls._required_text(
+            value.selection, "poll.selection", MAX_AUTHOR_TYPE_LENGTH
+        ).upper()
+        if selection not in POLL_SELECTIONS:
+            allowed = ", ".join(
+                sorted((POLL_SELECTION_MULTI, POLL_SELECTION_SINGLE))
+            )
+            raise ValidationError(f"poll.selection must be one of: {allowed}")
+
+        raw_options = value.options
+        if not isinstance(raw_options, (list, tuple)):
+            raise ValidationError("poll.options must be a list")
+        if not MIN_POLL_OPTION_COUNT <= len(raw_options) <= MAX_POLL_OPTION_COUNT:
+            raise ValidationError(
+                "poll.options must contain between "
+                f"{MIN_POLL_OPTION_COUNT} and {MAX_POLL_OPTION_COUNT} entries"
+            )
+        options = tuple(
+            cls._required_text(option, "poll.options", MAX_POLL_OPTION_LENGTH)
+            for option in raw_options
+        )
+        if len(options) != len(set(options)):
+            raise ValidationError("poll.options must not contain duplicates")
+
+        deadline = value.deadline_at
+        if deadline is not None and (
+            not isinstance(deadline, datetime) or deadline.tzinfo is None
+        ):
+            raise ValidationError("poll.deadline_at must include a timezone")
+
+        return ForumPollConfig(
+            selection=selection,
+            options=options,
+            deadline_at=deadline,
+        )
 
     @classmethod
     def _topic_type(cls, value: str | None) -> str | None:

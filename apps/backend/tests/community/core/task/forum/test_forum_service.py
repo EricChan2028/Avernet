@@ -8,18 +8,25 @@ import pytest
 
 from agentclaw.community.core.errors import Conflict, NotFound, ValidationError
 from agentclaw.community.core.task.forum.models import (
+    ForumPollConfig,
+    ForumPollSelection,
+    ForumTopicAnalysisRecord,
+    ForumTopicConfig,
     ForumPostRecord,
     ForumTopicPage,
     ForumReplyCreateResult,
     ForumTopicCreateResult,
     ForumTopicRecord,
+    ForumTopicViewerRecord,
 )
 from agentclaw.community.core.task.forum.services.forum_service import ForumService
 
 
 class FakeForumRepository:
-    def __init__(self) -> None:
+    def __init__(self, topic=None) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.topic = topic
+        self._default_topic = _topic_record()
 
     def create_topic(self, **kwargs):
         now = datetime(2026, 9, 20, tzinfo=timezone.utc)
@@ -32,6 +39,7 @@ class FakeForumRepository:
                 title=kwargs["title"],
                 body=kwargs["body"],
                 status="OPEN",
+                analysis=ForumTopicAnalysisRecord(),
                 created_at=now,
                 updated_at=now,
             ),
@@ -55,7 +63,45 @@ class FakeForumRepository:
         )
 
     def get_topic(self, topic_id):
-        raise AssertionError("this service test does not execute reads")
+        self.calls.append({"operation": "get_topic", "topic_id": topic_id})
+        return self._default_topic if self.topic is None else self.topic
+
+    def get_topic_viewer_state(
+        self, *, topic_id: str, author_type: str, author_id: str
+    ):
+        self.calls.append(
+            {
+                "operation": "get_topic_viewer_state",
+                "topic_id": topic_id,
+                "author_type": author_type,
+                "author_id": author_id,
+            }
+        )
+        return ForumTopicViewerRecord(
+            has_voted=True,
+            vote_post_id="post-vote",
+            poll_selection=ForumPollSelection(option_indices=(0,)),
+        )
+
+
+def _topic_record(
+    topic_type="DISCUSSION",
+    topic_config=None,
+):
+    now = datetime(2026, 9, 20, tzinfo=timezone.utc)
+    return ForumTopicRecord(
+        topic_id="topic-1",
+        author_type="BOT",
+        author_id="bot-a",
+        title="Topic title",
+        body="Topic description",
+        status="OPEN",
+        analysis=ForumTopicAnalysisRecord(),
+        created_at=now,
+        updated_at=now,
+        topic_type=topic_type,
+        topic_config=topic_config,
+    )
 
 
 def test_create_topic_normalizes_input_and_author_identity():
@@ -78,25 +124,163 @@ def test_create_topic_normalizes_input_and_author_identity():
             "title": "Topic title",
             "body": "Topic description",
             "topic_type": "DISCUSSION",
+            "topic_config": None,
             "author_display_name": None,
             "author_avatar_url": None,
         }
     ]
 
 
-def test_create_topic_normalizes_explicit_topic_type():
+def test_create_topic_normalizes_explicit_notice_topic_type():
     repo = FakeForumRepository()
+
+    ForumService(repo).create_topic(
+        author_type="BOT",
+        author_id="bot-a",
+        client_request_id="req-notice",
+        title="Notice",
+        body="Announcement",
+        topic_type=" notice ",
+    )
+
+    assert repo.calls[0]["topic_type"] == "NOTICE"
+
+
+def test_create_topic_normalizes_and_forwards_topic_config():
+    repo = FakeForumRepository()
+    deadline = datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc)
 
     ForumService(repo).create_topic(
         author_type="BOT",
         author_id="bot-a",
         client_request_id="req-poll",
         title="Poll",
-        body="Choose",
+        body="Choose options",
         topic_type=" poll ",
+        topic_config=ForumTopicConfig(
+            poll=ForumPollConfig(
+                selection=" single ",
+                options=(" Option A ", "Option B"),
+                deadline_at=deadline,
+            )
+        ),
     )
 
     assert repo.calls[0]["topic_type"] == "POLL"
+    assert repo.calls[0]["topic_config"] == ForumTopicConfig(
+        poll=ForumPollConfig(
+            selection="SINGLE",
+            options=("Option A", "Option B"),
+            deadline_at=deadline,
+        )
+    )
+
+
+def test_create_topic_requires_topic_config_for_poll_topic():
+    repo = FakeForumRepository()
+
+    with pytest.raises(ValidationError, match="topic_config.poll is required"):
+        ForumService(repo).create_topic(
+            author_type="BOT",
+            author_id="bot-a",
+            client_request_id="req-poll",
+            title="Poll",
+            body="Choose",
+            topic_type="POLL",
+            topic_config=None,
+        )
+
+    assert repo.calls == []
+
+
+def test_create_topic_requires_poll_section_for_poll_topic():
+    repo = FakeForumRepository()
+
+    with pytest.raises(ValidationError, match="topic_config.poll is required"):
+        ForumService(repo).create_topic(
+            author_type="BOT",
+            author_id="bot-a",
+            client_request_id="req-poll",
+            title="Poll",
+            body="Choose",
+            topic_type="POLL",
+            topic_config=ForumTopicConfig(),
+        )
+
+    assert repo.calls == []
+
+
+def test_create_topic_rejects_topic_config_for_non_poll_topic():
+    repo = FakeForumRepository()
+    topic_config = ForumTopicConfig(
+        poll=ForumPollConfig(selection="SINGLE", options=("A", "B"))
+    )
+
+    with pytest.raises(ValidationError, match="topic_config is only allowed"):
+        ForumService(repo).create_topic(
+            author_type="BOT",
+            author_id="bot-a",
+            client_request_id="req-discussion",
+            title="Discussion",
+            body="Description",
+            topic_type="DISCUSSION",
+            topic_config=topic_config,
+        )
+
+    assert repo.calls == []
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        ("A",),
+        ("A", "B") * 11,
+        ("A", ""),
+        ("A", "B", "A"),
+    ],
+)
+def test_create_topic_rejects_invalid_poll_options(options):
+    repo = FakeForumRepository()
+    topic_config = ForumTopicConfig(
+        poll=ForumPollConfig(selection="SINGLE", options=options)
+    )
+
+    with pytest.raises(ValidationError, match="poll.options"):
+        ForumService(repo).create_topic(
+            author_type="BOT",
+            author_id="bot-a",
+            client_request_id="req-poll",
+            title="Poll",
+            body="Choose",
+            topic_type="POLL",
+            topic_config=topic_config,
+        )
+
+    assert repo.calls == []
+
+
+def test_create_topic_rejects_naive_poll_deadline():
+    repo = FakeForumRepository()
+    topic_config = ForumTopicConfig(
+        poll=ForumPollConfig(
+            selection="SINGLE",
+            options=("A", "B"),
+            deadline_at=datetime(2026, 10, 20, 12, 0),
+        )
+    )
+
+    with pytest.raises(ValidationError, match="poll.deadline_at"):
+        ForumService(repo).create_topic(
+            author_type="BOT",
+            author_id="bot-a",
+            client_request_id="req-poll",
+            title="Poll",
+            body="Choose",
+            topic_type="POLL",
+            topic_config=topic_config,
+        )
+
+    assert repo.calls == []
 
 
 def test_create_reply_supports_human_author():
@@ -111,6 +295,7 @@ def test_create_reply_supports_human_author():
     )
 
     assert repo.calls == [
+        {"operation": "get_topic", "topic_id": "topic-1"},
         {
             "operation": "create_reply",
             "topic_id": "topic-1",
@@ -118,10 +303,149 @@ def test_create_reply_supports_human_author():
             "author_id": "user-1",
             "client_request_id": "req-2",
             "body": "Reply",
+            "reply_to_post_id": None,
+            "poll_selection": None,
             "author_display_name": None,
             "author_avatar_url": None,
-        }
+        },
     ]
+
+
+def test_create_reply_forwards_structured_poll_selection():
+    repo = FakeForumRepository(
+        topic=_topic_record(
+            topic_type="POLL",
+            topic_config=ForumTopicConfig(
+                poll=ForumPollConfig(selection="MULTI", options=("A", "B"))
+            ),
+        )
+    )
+    selection = ForumPollSelection(option_indices=(0, 1))
+
+    ForumService(repo).create_reply(
+        topic_id="topic-1",
+        author_type="BOT",
+        author_id="bot-a",
+        client_request_id="req-vote",
+        body="I choose both options.",
+        poll_selection=selection,
+    )
+
+    assert repo.calls[-1]["poll_selection"] == selection
+
+
+def test_create_reply_rejects_floor_reply_for_poll_topic():
+    repo = FakeForumRepository(
+        topic=_topic_record(
+            topic_type="POLL",
+            topic_config=ForumTopicConfig(
+                poll=ForumPollConfig(selection="SINGLE", options=("A", "B"))
+            ),
+        )
+    )
+
+    with pytest.raises(ValidationError, match="POLL replies must target the Topic"):
+        ForumService(repo).create_reply(
+            topic_id="topic-1",
+            author_type="BOT",
+            author_id="bot-a",
+            client_request_id="req-vote",
+            body="Floor votes are unsupported",
+            reply_to_post_id="post-1",
+            poll_selection=ForumPollSelection(option_indices=(0,)),
+        )
+
+    assert repo.calls == [{"operation": "get_topic", "topic_id": "topic-1"}]
+
+
+@pytest.mark.parametrize(
+    ("selection_rule", "option_indices", "message"),
+    [
+        ("SINGLE", (0, 1), "exactly one option"),
+        ("SINGLE", (2,), "invalid option index"),
+        ("MULTI", (0, 0), "must not contain duplicates"),
+        ("MULTI", (), "at least one option"),
+    ],
+)
+def test_create_reply_rejects_invalid_poll_selection(
+    selection_rule, option_indices, message
+):
+    repo = FakeForumRepository(
+        topic=_topic_record(
+            topic_type="POLL",
+            topic_config=ForumTopicConfig(
+                poll=ForumPollConfig(
+                    selection=selection_rule,
+                    options=("A", "B"),
+                )
+            ),
+        )
+    )
+
+    with pytest.raises(ValidationError, match=message):
+        ForumService(repo).create_reply(
+            topic_id="topic-1",
+            author_type="BOT",
+            author_id="bot-a",
+            client_request_id="req-vote",
+            body="Vote",
+            poll_selection=ForumPollSelection(option_indices=option_indices),
+        )
+
+    assert repo.calls[-1] == {"operation": "get_topic", "topic_id": "topic-1"}
+
+
+def test_create_reply_rejects_poll_selection_for_non_poll_topic():
+    repo = FakeForumRepository(topic=_topic_record(topic_type="DISCUSSION"))
+
+    with pytest.raises(ValidationError, match="poll_selection is only allowed"):
+        ForumService(repo).create_reply(
+            topic_id="topic-1",
+            author_type="BOT",
+            author_id="bot-a",
+            client_request_id="req-vote",
+            body="Discussion reply",
+            poll_selection=ForumPollSelection(option_indices=(0,)),
+        )
+
+    assert repo.calls[-1] == {"operation": "get_topic", "topic_id": "topic-1"}
+
+
+def test_create_reply_requires_selection_for_poll_topic():
+    repo = FakeForumRepository(
+        topic=_topic_record(
+            topic_type="POLL",
+            topic_config=ForumTopicConfig(
+                poll=ForumPollConfig(selection="SINGLE", options=("A", "B"))
+            ),
+        )
+    )
+
+    with pytest.raises(ValidationError, match="poll_selection is required"):
+        ForumService(repo).create_reply(
+            topic_id="topic-1",
+            author_type="BOT",
+            author_id="bot-a",
+            client_request_id="req-vote",
+            body="Choose one",
+        )
+
+    assert repo.calls == [{"operation": "get_topic", "topic_id": "topic-1"}]
+
+
+def test_create_reply_normalizes_optional_reference():
+    repo = FakeForumRepository()
+
+    ForumService(repo).create_reply(
+        topic_id="topic-1",
+        author_type="HUMAN",
+        author_id="user-1",
+        client_request_id="req-referenced",
+        body="Reply",
+        reply_to_post_id=" post-1 ",
+    )
+
+    assert repo.calls[-1]["reply_to_post_id"] == "post-1"
 
 
 @pytest.mark.parametrize(
@@ -250,6 +574,40 @@ def test_get_topic_raises_not_found_for_invisible_topic():
         ForumService(repo).get_topic(topic_id=" missing ")
 
 
+def test_get_topic_attaches_viewer_state_when_viewer_is_declared():
+    repo = FakeForumRepository()
+    viewer = ForumTopicViewerRecord(
+        has_voted=True,
+        vote_post_id="post-vote",
+        poll_selection=ForumPollSelection(option_indices=(0,)),
+    )
+
+    result = ForumService(repo).get_topic(
+        topic_id=" topic-1 ",
+        viewer_author_type=" human ",
+        viewer_author_id=" user-1 ",
+    )
+
+    assert result.viewer == viewer
+    assert repo.calls[-1] == {
+        "operation": "get_topic_viewer_state",
+        "topic_id": "topic-1",
+        "author_type": "HUMAN",
+        "author_id": "user-1",
+    }
+
+
+def test_get_topic_requires_viewer_type_and_viewer_id_to_be_declared_together():
+    repo = FakeForumRepository()
+
+    with pytest.raises(ValidationError, match="viewer_author_type and viewer_author_id"):
+        ForumService(repo).get_topic(
+            topic_id="topic-1", viewer_author_type="HUMAN", viewer_author_id=None
+        )
+
+    assert repo.calls == []
+
+
 def test_list_posts_validates_pagination_before_repository_call():
     repo = FakeForumRepository()
 
@@ -284,6 +642,7 @@ def _close_test_topic(
         title="Topic title",
         body="Topic description",
         status=status,
+        analysis=ForumTopicAnalysisRecord(),
         created_at=now,
         updated_at=now,
     )
