@@ -86,7 +86,7 @@ describe('BotTable 表格结构', () => {
     expect(onConversation).not.toHaveBeenCalled();
   });
 
-  test('短描述收进 Bot 信息，容器信息仍独立于 Bot 标签', () => {
+  test('描述恒显独立列，容器信息仍独立于 Bot 标签', () => {
     renderTable(bot);
 
     expect(screen.getAllByRole('columnheader').map((header) => header.textContent)).toEqual([

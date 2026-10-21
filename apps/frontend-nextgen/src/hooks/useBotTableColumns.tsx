@@ -15,7 +15,6 @@ import { useMemo } from 'react';
 export function useBotTableColumns(options: BotTableColumnOptions): DataTableColumn<BotDomain>[] {
   const {
     showOwner,
-    showDescriptionColumn,
     expandedProgressIds,
     toggleProgress,
     openMenuKey,
@@ -54,26 +53,15 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
       {
         id: 'info',
         header: 'Bot信息',
-        width: showDescriptionColumn ? 'w-[clamp(192px,16vw,240px)]' : 'w-[clamp(224px,19vw,320px)]',
-        cell: (bot) => (
-          <BotInfoCell
-            bot={bot}
-            compactDescription={!showDescriptionColumn}
-            onClaimLock={onClaimLock}
-            onReleaseLock={onReleaseLock}
-          />
-        ),
+        width: 'w-[clamp(192px,16vw,240px)]',
+        cell: (bot) => <BotInfoCell bot={bot} onClaimLock={onClaimLock} onReleaseLock={onReleaseLock} />,
       },
-      ...(showDescriptionColumn
-        ? [
-            {
-              id: 'description',
-              header: '描述',
-              width: 'w-[clamp(160px,14vw,260px)]',
-              cell: (bot: BotDomain) => <BotDescriptionCell bot={bot} />,
-            },
-          ]
-        : []),
+      {
+        id: 'description',
+        header: '描述',
+        width: 'w-[clamp(160px,14vw,260px)]',
+        cell: (bot: BotDomain) => <BotDescriptionCell bot={bot} />,
+      },
       {
         id: 'status',
         header: '状态',
@@ -198,7 +186,6 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
     ],
     [
       showOwner,
-      showDescriptionColumn,
       onView,
       onEdit,
       onConversation,

@@ -7,14 +7,11 @@ export interface BotInfoCellProps {
   bot: BotDomain;
   onClaimLock?: (bot: BotDomain) => Promise<void>;
   onReleaseLock?: (bot: BotDomain) => Promise<void>;
-  /** 描述未单独成列时，随 Bot 信息紧凑展示。 */
-  compactDescription?: boolean;
 }
 
 /** 名称不再是独立按钮：整行已可点击进入详情，避免行内嵌套可交互元素。 */
-const BotInfoCell: React.FC<BotInfoCellProps> = ({ bot, onClaimLock, onReleaseLock, compactDescription = false }) => {
+const BotInfoCell: React.FC<BotInfoCellProps> = ({ bot, onClaimLock, onReleaseLock }) => {
   const avatarUrl = bot.avatarUrl || generateBotAvatar(bot.id || bot.name);
-  const description = bot.description?.trim();
   return (
     <div className="flex min-w-0 items-center gap-3">
       <span
@@ -31,9 +28,6 @@ const BotInfoCell: React.FC<BotInfoCellProps> = ({ bot, onClaimLock, onReleaseLo
           </span>
         </div>
         <span className="truncate text-xs text-content-icon">{bot.entityKey}</span>
-        {compactDescription && description ? (
-          <span className="truncate text-xs text-muted-foreground">{description}</span>
-        ) : null}
       </div>
     </div>
   );
