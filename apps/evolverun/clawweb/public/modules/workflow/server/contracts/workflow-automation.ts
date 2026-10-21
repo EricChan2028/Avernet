@@ -4,9 +4,10 @@ export type MinimumImpact = 'medium' | 'high';
 export type WorkflowAutomationPolicy = {
   workflowId: string; enabled: boolean; autoDraft: boolean; dailyTime: string; timezone: 'Asia/Shanghai';
   minimumImpact?: MinimumImpact; scopeVersion?: 'legacy' | 'all-qualified/v1';
+  notificationRecipients?: string[]; notificationVersion?: number;
   updatedAtMs: number; version: number; dailyConfigured: boolean; source: 'database' | 'environment' | 'default';
 };
-export type AutomationPolicyWrite = { enabled: boolean; autoDraft: boolean; dailyTime: string; expectedVersion: number; minimumImpact?: MinimumImpact };
+export type AutomationPolicyWrite = { enabled: boolean; autoDraft: boolean; dailyTime: string; expectedVersion: number; minimumImpact?: MinimumImpact; dailyConfigured?: boolean; notificationRecipients?: string[]; expectedNotificationVersion?: number };
 export type AutomationOrigin = { kind: 'daily'; intentId: string; policyVersion: number; evidenceCutoffMs: number; roundId?: string; batchIndex?: number; batchCount?: number; totalItems?: number };
 export type AnalysisObservation = { status: 'absent' | 'running' | 'completed' | 'failed' | 'uncertain'; analysisId?: string; complete?: boolean };
 export type AutomationNotification = { key: string; workflowId: string; recipientId: string; title: string; text: string; path: string };
@@ -34,7 +35,7 @@ export type AutomationSnapshot = {
   /** Same eligibility and batch limit as retryFailures; independent of the recent-record limit. */
   retryableJobs?: AutomationJobSummary[];
 };
-export type AutomationRecordQuery = { period?: 'all' | 'today' | '7d'; status?: 'all' | 'pending' | 'dispatching' | 'waiting' | 'retryable' | 'uncertain' | 'done' | 'blocked'; limit?: number; cursor?: string };
+export type AutomationRecordQuery = { kind?: 'all' | 'analysis' | 'optimization' | 'notification'; period?: 'all' | 'today' | '7d'; status?: 'all' | 'pending' | 'dispatching' | 'waiting' | 'retryable' | 'uncertain' | 'done' | 'blocked' | 'attention'; limit?: number; cursor?: string };
 export type AutomationRecordPage = { jobs: AutomationJobSummary[]; nextCursor: string | null };
 /** Service API for trusted scheduler/event adapters; browser delivery never invokes automatic publication. */
 export interface WorkflowAutomationService {

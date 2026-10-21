@@ -13,6 +13,63 @@ concurrency. Defaults are off; existing environment/legacy failure-event setting
 remain compatible, but do not acquire a daily schedule until explicitly saved.
 There are no new environment variables or tables.
 
+`notificationRecipients` is an optional list of up to 20 account IDs. Empty or
+absent means the current workflow Owner; a configured list replaces that default.
+IDs are trimmed and deduplicated. They are stored in a separate
+`workflow_repair_notify_<workflow hash>` row in the existing `cm_app_config` table.
+Recipient-only PUTs use `expectedNotificationVersion` and return `notificationVersion`;
+they preserve the scheduling policy and its version, so editing recipients cannot
+invalidate an in-flight automatic dispatch. Mixed recipient/scheduling writes are
+rejected; the UI submits each named section separately. Existing scheduling writes
+do not alter recipients. The optional `dailyConfigured` write explicitly preserves an
+unconfigured schedule when changing a switch or recipients; older v1 policies
+without the field retain their existing configured schedule. Notification-only
+edits neither enable analysis nor activate a daily schedule.
+
+The management page separates automatic analysis, the dependent automatic draft
+step, and evolution-task notifications. Switches save immediately; the analysis
+plan and recipients have separately named save actions. Pending writes show an
+immediate progress message, prevent duplicate submissions, and do not save
+unrelated local edits. Errors retain local input, and success requires the API
+response rather than an optimistic success message.
+
+## Evolution-task completion notices
+
+The shared Host wires `queueRepairCompletion` through the workbench's optional
+transactional completion observer. Both manual generation and its retries/feedback
+queue one notice per task revision on successful reviewable output, no-change,
+failed generation or failed checks. Queue persistence commits with the result;
+remote notification delivery is not part of the result transaction. Historical
+results are not backfilled. Automatic successful batches keep their existing
+coordinator notification, once the complete chain is reviewable; intermediate
+batches do not generate repeated success notices. Automatic failures also notify.
+
+The existing monitor drains `auto_notice` independently of automatic-analysis
+enablement or daily configuration, including workflows with no saved policy.
+Owner resolution remains current for default notices. Configured recipients use
+individual deterministic journal records and existing leases, so a confirmed
+success is not repeated when another recipient needs a retry. Unknown outcomes
+remain unknown, without blind resend. The existing Host notification port and
+DingTalk provider are reused; no new notification channel, table, or migration
+is introduced. Missing provider configuration remains visible in the existing
+notification/retry records and does not trigger AIS again.
+
+Public ClawWeb passes notification-only settings/ports to the shared runtime and
+its existing 15-second timer calls `monitor.reconcile()`, including when no AIS
+execution adapter is configured. It uses the existing Insight notification sender,
+current Owner and workflow permission repositories. This does not install or enable
+automatic analysis/draft scheduling. OCB continues to supply full automation ports;
+the shared monitor chooses that existing automation consumer or the notification-only
+consumer, never both. Shutdown clears the existing timer; no second scheduler is added.
+
+The same queue consumer serves both Hosts. Expanding a configured recipient list
+only persists deterministic child records; it does not recursively send them.
+Each drain selects at most five due records and processes them concurrently, with
+the existing 20-second timeout per provider call. Thus provider waiting consumes
+one timeout window per batch, not one window per recipient and parent. This is a
+transport-wait bound, not a database-latency guarantee. Pending children survive
+restart; successful children and unknown outcomes are not blindly sent again.
+
 Avernet owns policy, state, selection, recovery, contracts, and UI. The OCB
 composition adapter resolves the current Owner, checks edit permission, invokes
 the existing run-analysis starter and Git baseline service, and sends through the
@@ -211,7 +268,8 @@ reads the original candidate. Existing automatic-batch and publication guards ap
 `GET /api/task-guard/workflows/:workflowId/automation-records` requires the existing
 workflow view permission. It reads history only: no coverage aggregation, policy,
 Owner, repair-task detail, or recovery eligibility reads run on this endpoint.
-It accepts `period=all|today|7d`, `status=all|pending|dispatching|waiting|retryable|uncertain|done|blocked`,
+It accepts `period=all|today|7d`, `kind=all|analysis|optimization|notification` (omitted means all, for older callers),
+`status=all|pending|dispatching|waiting|retryable|uncertain|done|blocked|attention`,
 `limit` (integer 1–20, default 8), and an opaque `cursor` of at most 512 characters.
 Invalid values return 400. Response: `{ jobs: AutomationJobSummary[], nextCursor: string | null }`.
 No exact total is calculated. The next cursor uses immutable creation time plus
@@ -219,7 +277,11 @@ record ID and anchors the date window to the first page's time. “Today” star
 Shanghai midnight; “7d” includes today and the preceding six Shanghai calendar
 days. These are creation dates, not the original workflow run's occurrence date.
 
-Default UI shows eight newest records, regardless of task status. “查看全部记录”
+The settings UI separates “自动分析” and “自动优化” task records. Each shows eight
+newest records, regardless of task status. Kind filtering happens in SQL before
+paging, so notification traffic cannot hide real tasks. These are automatic-task
+records, not a complete manual evolution history; manual execution is shown in
+the corresponding evolution task. “查看全部记录”
 opens a 20-record page with date and status selectors and previous/next navigation.
 Changing a filter resets the cursor trail. Collapsing restores the unfiltered
 latest eight. Filters do not affect the independent retry-target list or its
@@ -227,6 +289,15 @@ eligibility. Failed history reads can be retried without a business write.
 History pages load on demand and are briefly cached; they do not poll or refresh
 on window focus. The refresh button explicitly reloads the current page.
 Successful task-retry requests invalidate the history cache.
+
+Successful notification journals remain stored but are not displayed in the main
+task list. A collapsed “通知发送异常，需处理” section queries only notifications with
+`status=attention` (retryable, uncertain or blocked; a query filter, not a new state).
+Its eight-record cursor pages expose every exception without a history cutoff.
+Task rows show time, result, a shortened target reference and the existing detail
+link; full technical IDs and attempt counts are available under “查看详情”. Neither
+display filtering nor paging changes notification delivery, retry eligibility or
+business execution. The independent retry list still names every actual target.
 
 History reads require only the existing v142 journal schema. Status is read from
 body_json; no generated column, new index, backfill or DDL permission is required.
