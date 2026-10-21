@@ -1,7 +1,8 @@
 //! Provider identity: how `register` obtains the Bot's `provider_bot_ref`.
 //!
-//! The resolver is selected with `register --provider-auth <id>` and must
-//! match how the Provider authenticates its Bots. The default `static-bearer`
+//! An explicit --provider-auth selects the resolver; otherwise Token auth_mode
+//! selects it, with a distribution default for historical Tokens without metadata.
+//! Distributions map that mode to their credential source. The `static-bearer`
 //! resolver uses `--provider-bot-ref`; distributions add resolvers for other
 //! Provider types (for example one that reads a trusted agent identity).
 
@@ -21,7 +22,7 @@ pub struct IdentityContext<'a> {
 
 #[async_trait::async_trait]
 pub trait IdentityResolver: Send + Sync {
-    /// Value accepted by `--provider-auth`.
+    /// Stable resolver ID, also used by saved runtime configuration.
     fn id(&self) -> &str;
     /// Environment checks run before any configuration or network access.
     fn preflight(&self) -> Result<()> { Ok(()) }
