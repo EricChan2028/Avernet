@@ -1,4 +1,4 @@
-"""Application service for frontend-only user-list eligibility checks."""
+"""Application service for user-list checks and authorized corrections."""
 
 from __future__ import annotations
 

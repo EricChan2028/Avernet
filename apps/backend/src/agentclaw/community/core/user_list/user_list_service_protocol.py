@@ -25,7 +25,12 @@ class UserListServiceProtocol(Protocol):
         user_list_type: str,
         in_whitelist: bool,
         env: str | None = None,
-    ) -> bool: ...
+    ) -> bool:
+        """Correct membership after the caller has passed operator authorization.
+
+        HTTP adapters must reject non-operators before invoking this write.
+        """
+        ...
 
 
 __all__ = ["UserListServiceProtocol"]

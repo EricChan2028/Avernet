@@ -32,6 +32,7 @@ def sync_agentclaw_artifact(
     version: str,
     build_ignore_paths: tuple[str, ...],
     run_command: Callable[..., Any],
+    enabled: bool = True,
 ) -> None:
     """Converge the complete CLI snapshot independently of the engine root."""
     source = source_home / ".agentclaw"
@@ -39,6 +40,10 @@ def sync_agentclaw_artifact(
     started = time.monotonic()
     fields = "device_id=%s version=%s source=%s target=%s"
     context = (device_id, version, source, target)
+    if not enabled:
+        logger.info("service_bot.agentclaw.skip " + fields + " reason=feature_disabled elapsed_ms=%s",
+                    *context, round((time.monotonic() - started) * 1000))
+        return
     logger.info("service_bot.agentclaw.request " + fields + " symlink_policy=preserve", *context)
     try:
         _validate_directories(target_dir.parent)

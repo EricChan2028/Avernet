@@ -74,3 +74,18 @@ def test_correction_forwards_explicit_environment():
 
     assert result is True
     assert repository.calls == [("target", "caller_identity", True, "prod")]
+
+
+def test_runtime_artifact_list_can_be_corrected_after_boundary_authorization():
+    repository = _Repository()
+    service = UserListService(repository=repository)
+    for enabled in (True, False):
+        result = service.correct_membership(
+            actor_id="operator", entity_id="*",
+            user_list_type="service_bot_runtime_artifact", in_whitelist=enabled, env="prod",
+        )
+        assert result is enabled
+    assert repository.calls == [
+        ("*", "service_bot_runtime_artifact", True, "prod"),
+        ("*", "service_bot_runtime_artifact", False, "prod"),
+    ]
