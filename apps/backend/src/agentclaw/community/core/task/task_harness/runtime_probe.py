@@ -12,8 +12,10 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Literal
 
+from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.domain.models import TaskNode
 
 logger = logging.getLogger("task.harness.runtime_probe")
@@ -90,10 +92,86 @@ def _digest(value: Any) -> str:
     return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
 
 
-def _last_message_cursor(messages: Any) -> Any:
+def _message_order_value(value: Any) -> tuple[int, Any, str, int]:
+    """Return a comparable, type-safe ordering tuple.
+
+    Runtime APIs do not guarantee message ordering (TeamClaw returns newest
+    first in at least one production path). Numeric and RFC3339-like fields are
+    compared field by field; their source position is only a tie-breaker for
+    otherwise equal ordering fields.
+    """
+    if isinstance(value, bool):
+        return (1, 0, "", 0)
+    if isinstance(value, (int, float)):
+        num = int(value) if float(value).is_integer() else float(value)
+        return (1, num, "", 0)
+    if value is None:
+        return (0, 0, "", 0)
+    text = str(value).strip()
+    if not text:
+        return (0, 0, "", 0)
+    try:
+        number = float(text)
+    except ValueError:
+        number = None
+    if number is not None:
+        n = int(number) if number.is_integer() else number
+        return (1, n, "", 0)
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        parsed = None
+    if parsed is not None:
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return (1, parsed.timestamp(), text, 0)
+    return (0, 0, text, 0)
+
+
+def _message_sort_key(entry: tuple[int, dict[str, Any]]) -> tuple[Any, ...]:
+    index, message = entry
+    best = (0, 0, "", 0)
+    source = ""
+    for key in (
+        "seq", "gmt_seq", "version", "updated_at", "gmt_modified",
+        "created_at", "gmt_create", "message_id", "id",
+    ):
+        value = _message_order_value(message.get(key))
+        # Prefer the highest independently comparable field. Multiple equal
+        # timestamps must still be deterministic, so retain the field name and
+        # source position only as later tuple components.
+        if value > best:
+            best = value
+            source = key
+        elif value == best and key < source:
+            source = key
+    # Numeric/temporal fields dominate; lexical identifiers are included with a
+    # lower rank so records without timestamps remain stable when possible.
+    lexical = str(
+        message.get("message_id")
+        or message.get("id")
+        or ""
+    )
+    return (*best, source, lexical, index)
+
+
+def _last_message(messages: Any) -> Any | None:
     if not isinstance(messages, list) or not messages:
         return None
-    last = messages[-1]
+    records = [
+        (index, message)
+        for index, message in enumerate(messages)
+        if isinstance(message, dict)
+    ]
+    if not records:
+        return messages[-1]
+    return max(records, key=_message_sort_key)[1]
+
+
+def _last_message_cursor(messages: Any) -> Any:
+    last = _last_message(messages)
+    if last is None:
+        return None
     if not isinstance(last, dict):
         return {"last": str(last), "count": len(messages)}
     selected = {
@@ -146,6 +224,27 @@ def _group_cursor(group: dict[str, Any]) -> Any:
     }
 
 
+def _bot_identity_from_node(node: TaskNode) -> str | None:
+    """Resolve the bot-addressed identity used by runtime session message reads.
+
+    The Probe owns session-level heartbeats, but ``OpenApiBotAdapter`` must
+    address the same runtime handle as the dispatch path. Single-bot
+    successors store ``assignee`` and (for newer rows) ``assignee_owner_id``;
+    root Relay nodes may already persist the historical composite address.
+    ``compose_bot_identity`` preserves that single identity convention
+    instead of inventing a second bot-addressing protocol.
+
+    Returns ``None`` only when the node truly has no assignee; callers may
+    surface a probe error rather than silently falling back to a default.
+    """
+    props = getattr(node.run_info, "extend_props", {}) or {}
+    assignee = str(getattr(node.run_info, "assignee", "") or "").strip()
+    if not assignee:
+        return None
+    owner_id = str(props.get("assignee_owner_id") or "").strip()
+    return compose_bot_identity(assignee, owner_id or None)
+
+
 class TaskRuntimeLivenessProbe:
     """Read runtime status and heartbeats through existing internal ports."""
 
@@ -164,6 +263,7 @@ class TaskRuntimeLivenessProbe:
         run_id = str(props.get("run_id") or "").strip() or None
         session_id = str(props.get("session_id") or "").strip() or None
         group_id = str(props.get("group_id") or "").strip() or None
+        bot_id = _bot_identity_from_node(node)
 
         # Single-bot can be turned into a manager-worker group. The authoritative
         # runtime handle decides the probe, not only the persisted run_mode.
@@ -179,11 +279,62 @@ class TaskRuntimeLivenessProbe:
                 run_id=run_id,
                 session_id=session_id,
                 previous_cursor=previous_cursor,
+                bot_id=bot_id,
+            )
+        if session_id:
+            return await self._probe_session_messages(
+                session_id=session_id,
+                previous_cursor=previous_cursor,
+                bot_id=bot_id,
             )
         return RuntimeProbeResult(
             state="unknown",
             source="node",
             detail={"reason": "no_dispatch_handle"},
+        )
+
+    async def _probe_session_messages(
+        self,
+        *,
+        session_id: str,
+        previous_cursor: str | None,
+        bot_id: str | None,
+    ) -> RuntimeProbeResult:
+        """Probe a root execution conversation when only a session id exists.
+
+        The task node remains RUNNING, so message growth is the liveness
+        signal. No run handle is inferred and no conversation is created.
+        """
+        if self._bot is None:
+            return RuntimeProbeResult(
+                state="unknown",
+                source="openapi_bot.session",
+                detail={"reason": "port_missing"},
+            )
+        try:
+            messages = await self._bot.get_session_messages(
+                session_id, limit=20, bot_id=bot_id
+            )
+        except Exception as exc:  # noqa: BLE001
+            return RuntimeProbeResult(
+                state="unknown",
+                source="openapi_bot.session",
+                error=f"{type(exc).__name__}: {exc}"[:500],
+                detail={
+                    "session_id": session_id,
+                    "bot_id_missing": not bot_id,
+                },
+            )
+        cursor = _join_cursors(
+            {"session_id": session_id, "count": len(messages) if isinstance(messages, list) else None},
+            _last_message_cursor(messages),
+        )
+        return self._active_result(
+            source="openapi_bot.session",
+            status="active",
+            cursor=cursor,
+            previous_cursor=previous_cursor,
+            detail={"session_id": session_id},
         )
 
     def _active_result(
@@ -211,6 +362,7 @@ class TaskRuntimeLivenessProbe:
         run_id: str,
         session_id: str | None,
         previous_cursor: str | None,
+        bot_id: str | None,
     ) -> RuntimeProbeResult:
         if self._bot is None:
             return RuntimeProbeResult(
@@ -246,7 +398,9 @@ class TaskRuntimeLivenessProbe:
         message_error: str | None = None
         if session_id:
             try:
-                messages = await self._bot.get_session_messages(session_id, limit=20)
+                messages = await self._bot.get_session_messages(
+                    session_id, limit=20, bot_id=bot_id
+                )
                 cursor_value = (
                     cursor_value,
                     _last_message_cursor(messages),

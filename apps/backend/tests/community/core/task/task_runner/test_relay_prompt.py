@@ -86,6 +86,43 @@ def test_relay_prompt_forbids_dispatch_for_terminal_and_bbs_plans() -> None:
     assert "禁止换 event_id 或 token" in prompt
 
 
+def test_relay_prompt_pins_s4a_execution_budget() -> None:
+    prompt = format_relay_execution_instruction(
+        task_id="task-1",
+        node_id="node-1",
+        relay_token="generation-1",
+        backend_url="https://backend.example",
+        objective="完成任务",
+        instruction="执行并上报",
+        acceptances=[],
+    )
+
+    assert "S4a 预算硬边界" in prompt
+    assert "wall_seconds=600" in prompt
+    assert "max_tool_calls=30" in prompt
+    assert "max_consecutive_failures=5" in prompt
+    assert "到达任一上限立即停止业务调用" in prompt
+    assert "并继续 S4b 上报" in prompt
+    assert "禁止卡住不切下一步" in prompt
+    assert "失败记录必须能还原关键问题现场" in prompt
+    assert "failure_type" in prompt
+    assert "actual_goal_digest" in prompt
+    assert "last_operation" in prompt
+    assert "raw_error_excerpt" in prompt
+    assert "evidence_refs" in prompt
+    assert "impacted_acceptances" in prompt
+    assert "impact_and_next_hint" in prompt
+    assert "只记录一个最相关的触发操作" in prompt
+    assert "单份失败 JSON 不超过 2000 字符" in prompt
+    assert "raw_error_excerpt 不超过 500 字符" in prompt
+    assert "evidence_refs 最多 5 个" in prompt
+    assert "发生裁剪时增加 truncation 并保留必需键" in prompt
+    assert "不得转储完整日志、会话、Prompt或全部产物" in prompt
+    assert "DECLINED 时 event.failure_reason 与 S4A_EXECUTION.error_msg 写同一份" in prompt
+    assert "ACCEPTED 但 verdict=FAILED 时顶层 failure_reason 仍为 null" in prompt
+    assert "不得包含 relay_token、密钥、会话凭证或完整原始日志" in prompt
+
+
 def test_relay_prompt_forbids_direct_web_tools() -> None:
     prompt = format_relay_execution_instruction(
         task_id="task-1",
