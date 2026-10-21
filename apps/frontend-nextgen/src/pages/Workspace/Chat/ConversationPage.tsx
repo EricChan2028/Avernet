@@ -15,7 +15,7 @@ import { buildBotChatTarget } from '@/hooks/workspaceIdentityMapper';
 import { buildAgentCodingChatPath } from '@/services/workspace';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { chatBridge } from '@/services/workspace/chatBridge';
-import { useConversationStore } from '@/stores/conversationStore';
+import { useSpaceContextStore } from '@/stores/spaceContextStore';
 import { useChatBridge } from '@tc-chat/adapters';
 import type { BridgeInputRef, PanelHandle } from '@tc-chat/core';
 import type { SenderRef } from '@tc-chat/ui/es/Sender';
@@ -34,6 +34,7 @@ import { useChatHeaderPanels } from './hooks/useChatHeaderPanels';
 import { useConversationDeepLinkSessionHydration } from './hooks/useConversationDeepLinkSessionHydration';
 import { useConversationDirectory } from './hooks/useConversationDirectory';
 import { useConversationHistory } from './hooks/useConversationHistory';
+import { useConversationIdentityReset } from './hooks/useConversationIdentityReset';
 import { useConversationInteractiveChat } from './hooks/useConversationInteractiveChat';
 import { useConversationSelection } from './hooks/useConversationSelection';
 import { useConversationSessionEdits } from './hooks/useConversationSessionEdits';
@@ -41,6 +42,7 @@ import { useConversationSessionPlaceholder } from './hooks/useConversationSessio
 import { useConversationSessions } from './hooks/useConversationSessions';
 import { useConversationUrlSync } from './hooks/useConversationUrlSync';
 import { useManagedBotOthers } from './hooks/useManagedBotOthers';
+import { useSessionSwitchReset } from './hooks/useSessionSwitchReset';
 
 export default function ConversationPage(): JSX.Element {
   const { identity: human } = useHumanIdentity();
@@ -48,16 +50,8 @@ export default function ConversationPage(): JSX.Element {
   const panelRef = useRef<PanelHandle | null>(null);
   const inputRef = useRef<SenderRef | null>(null);
 
-  // 登录用户变化才整仓重置(不随挂载/重渲染触发);首次出现不算切换。
-  const previousUserIdRef = useRef<string | null>(null);
-  const identityChanged = previousUserIdRef.current !== null && previousUserIdRef.current !== userId;
-  useEffect(() => {
-    const previousUserId = previousUserIdRef.current;
-    previousUserIdRef.current = userId;
-    if (previousUserId !== null && previousUserId !== userId) {
-      useConversationStore.getState().reset();
-    }
-  }, [userId]);
+  // 登录用户变化才整仓重置;identityChanged 供切换瞬间停用旧用户会话装配(详见 hook)。
+  const { identityChanged } = useConversationIdentityReset(userId);
 
   const directory = useConversationDirectory(userId);
   // 团队 Bot 独立目录(section=team)与会话模型合并消费:
@@ -152,6 +146,9 @@ export default function ConversationPage(): JSX.Element {
     buildRequestParams: (content) => buildSingleChatBridgeRequest(target?.id ?? null, content),
   });
 
+  // /file 等面板唤起后切会话:输入清空/失效 chip/Escape 收起子面板(详见 useSessionSwitchReset)。
+  useSessionSwitchReset(selectedSession?.sessionId ?? null, interactiveModel.fileFeature.senderRef);
+
   // 只读(others)装配:三元组不完整时 Hook 内部只清态不发请求。
   const selectionIsReadonly = origin === 'others' && store.selectedBotId !== null;
   const readonlyHistory = useConversationHistory({
@@ -197,6 +194,14 @@ export default function ConversationPage(): JSX.Element {
     // 我的 Bot 空态文案内「Bot 管理」链接:跳 Bot 管理页创建 Bot。
     onOpenBotWorkshop: () => history.push('/bot-workshop'),
     onOpenAgentCodingBot: openAgentCodingBot,
+    // 「Bot 管理」菜单项(2026-10-21):带该 Bot 所属空间上下文跳转 Bot 管理页,打开即定位该空间。
+    onOpenBotManagement: (bot) => {
+      const spaceId = bot.spaceId ? Number(bot.spaceId) : undefined;
+      if (spaceId !== undefined) useSpaceContextStore.getState().setCurrentSpaceId(spaceId);
+      history.push('/bot-workshop');
+    },
+    // Bot 正在回复中(2026-10-21):仅当前打开的会话,会话行标题左侧渲染 loading。
+    replyingSessionId: botChat.chat.isRequesting ? (selectedSession?.sessionId ?? null) : null,
   };
 
   // 头部五图标域编排（chat-header-panels）：收藏会话/会话管理/历史消息/资源管理/副屏。
