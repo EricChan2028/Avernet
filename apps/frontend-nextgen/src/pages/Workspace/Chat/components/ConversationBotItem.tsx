@@ -15,7 +15,7 @@ import { isManagedConversationSection } from '@/domain/conversation/types';
 import { useConversationInstanceRow } from '../hooks/useConversationInstanceScope';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { cn } from '@/utils/cn';
-import { ChevronDown, ChevronRight, Plus, Search } from 'lucide-react';
+import { ChevronDown, Plus, Search } from 'lucide-react';
 import React from 'react';
 import { AvatarTile } from '../../components/AvatarTile';
 import type { ConversationSessionListActions } from '../hooks/useConversationSessionActions';
@@ -34,6 +34,9 @@ export interface ConversationBotItemProps {
   expanded: boolean;
   /** 当前 Bot 下选中的 Session(跨 origin 高亮)。 */
   selectedSessionId: string | null;
+  /** 该 Bot 是否为当前舞台所属 Bot(跨 section 判定由装配层完成):名称点亮品牌蓝作行锚点,
+   *  与其下会话胶囊形成「Bot → 会话」两级选中语义(2026-10-22 体验精修)。 */
+  botSelected?: boolean;
   origin: ConversationOrigin;
   /** 生效读取范围(managed mine 用;friend 读 scopeByFriendBotId)。 */
   scope: ConversationSessionScope;
@@ -64,6 +67,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   section,
   expanded,
   selectedSessionId,
+  botSelected = false,
   origin,
   scope,
   sessionKey,
@@ -140,17 +144,28 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
             !interactive && 'opacity-50',
           )}
         >
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center">
+          {/* 头像 32px 实感(2026-10-22 体验精修):槽位保持 36px 不动 → 会话行 52px
+              起排几何契约不受影响;Bot 目录身份感由头像承载,不再依赖铅线分组。 */}
+          <span className="relative flex h-9 w-9 shrink-0 items-center justify-center">
             <AvatarTile
               src={bot.avatarUrl}
               label={bot.displayName}
-              className="h-6 w-6 rounded-full"
+              className="h-8 w-8 rounded-full"
               fallbackContent={
-                <span className="text-[10px] font-semibold leading-none tracking-[0.06em]">
+                <span className="text-xs font-semibold leading-none tracking-[0.06em]">
                   {bot.displayName.slice(0, 1)}
                 </span>
               }
             />
+            {/* 在线信号点(2026-10-22 体验精修二轮):收起竖轨好友 Bot 头像已佩戴
+                (ConversationCollapsedRail.OnlineDot 同款),展开列表此前缺失 → 补齐。
+                语义一致:仅好友 Bot 佩戴(管理/团队 Bot 无好友在线语义),在线才亮。 */}
+            {section === 'friend' && bot.online === true && (
+              <span
+                aria-hidden="true"
+                className="absolute bottom-0 right-0 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-background"
+              />
+            )}
           </span>
           <div
             className={cn(
@@ -161,7 +176,17 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
               hasSessionControls && (actionsPinned ? 'pr-24' : 'group-hover:pr-24 group-focus-within:pr-24'),
             )}
           >
-            <span className="w-full min-w-0 truncate text-sm font-semibold leading-5 text-content-strong">
+            <span
+              className={cn(
+                // 名称 13px 常规字重(2026-10-22 需求):与会话标题同规格,去 Bot 名的
+                // 加粗强调——层级交由头像/缩进/选中态承载,列表更静;
+                // 选中态 text-primary 依旧经由 botSelected 后发覆盖。
+                'w-full min-w-0 truncate text-[13px] font-normal leading-5 text-content-strong',
+                // 舞台所属 Bot 名称点亮品牌蓝(与 shell 主导航激活态同语言,2026-10-22);
+                // 不可用行维持灰名,不与禁用态打架。
+                botSelected && !unavailable && 'text-primary',
+              )}
+            >
               {bot.displayName}
             </span>
             <ConversationBotRuntimeBadge bot={bot} />
@@ -244,11 +269,12 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
             onClick={handleToggle}
             className="h-6 w-6 shrink-0 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
           >
-            {expanded ? (
-              <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
-            ) : (
-              <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
-            )}
+            {/* 展开箭头旋转过渡(2026-10-22 体验精修二轮):单 ChevronDown 图标,
+                收起态 -rotate-90,替代 Right↔Down 双图标硬切换;aria 语义不变。 */}
+            <ChevronDown
+              className={cn('h-3.5 w-3.5 transition-transform duration-150', !expanded && '-rotate-90')}
+              aria-hidden="true"
+            />
           </Button>
         )}
       </div>
@@ -259,7 +285,9 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
       <ConversationBotUnavailableTooltip reason={statusUnavailableReason}>{row}</ConversationBotUnavailableTooltip>
       {expanded && hasSessionControls && !unavailable && (
         // 展开区不再整体缩进:session 行(dmore 平齐化 1:1)自带全宽行槽,交互热区在行内部分级。
-        <div aria-label={`会话列表：${bot.displayName}`}>
+        // 首帧 2px 下落淡入(2026-10-22 体验精修二轮):展开是「自 Bot 行生长出来」,
+        // 而非瞬现的独立列表;reduced-motion 由 global.css 静止。
+        <div aria-label={`会话列表：${bot.displayName}`} className="conversation-area-in">
           {searchInputVisible && (
             <>
               {instanceRow && <instanceRow.capability.InstancePicker botId={bot.botId} />}
@@ -286,7 +314,6 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
           )}
         </div>
       )}
-      <div aria-hidden="true" className="mx-4 mt-1 border-b border-border/60" />
     </div>
   );
 });

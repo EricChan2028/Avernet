@@ -27,7 +27,16 @@ export function ConversationSessionList(props: {
     return <ListErrorState message={sessions.error} />;
   }
   if (sessions.items.length === 0 && !sessions.hasMore) {
-    return <div className="px-4 py-3 text-xs text-muted-foreground">暂无会话</div>;
+    // 空态是行动邀请(2026-10-22 体验精修):不再是一行死灰字,改为浅底圆角引导块,
+    // 指向行尾「+」入口(列表装配层不增建会话回调,入口即引导,不造死胡同 CTA)。
+    return (
+      <div className="mx-4 my-2 flex flex-col items-center gap-1 rounded-lg bg-muted/40 px-3 py-3 text-center">
+        <p className="text-xs font-normal text-content-soft">还没有会话</p>
+        <p className="max-w-[180px] text-[11px] font-normal leading-4 text-content-hint">
+          点击 Bot 行尾的「＋」按钮，创建第一个会话
+        </p>
+      </div>
+    );
   }
   return (
     <>

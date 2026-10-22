@@ -58,6 +58,7 @@ export function ManagedItem({ view, props }: { view: ConversationBotView; props:
       }}
       expanded={store.expandedBotIds[botId] === true}
       selectedSessionId={selectedBot ? store.selectedSessionId : null}
+      botSelected={selectedBot}
       origin={origin}
       scope={scope}
       sessionKey={store.sessionKeyByBotId[botId] ?? ''}
@@ -97,6 +98,7 @@ export function FriendItem({ view, props }: { view: ConversationBotView; props: 
       }}
       expanded={store.expandedBotIds[botId] === true}
       selectedSessionId={selectedBot ? store.selectedSessionId : null}
+      botSelected={selectedBot}
       origin="mine"
       scope={scope}
       sessionKey={store.sessionKeyByBotId[botId] ?? ''}

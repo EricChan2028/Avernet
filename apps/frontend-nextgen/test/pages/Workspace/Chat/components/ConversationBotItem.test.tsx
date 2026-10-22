@@ -5,6 +5,7 @@ import { ConversationBotItem } from '@/pages/Workspace/Chat/components/Conversat
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ReactElement } from 'react';
 
 const bot: ChatBotView = {
   botId: 'bot-1',
@@ -17,7 +18,7 @@ const bot: ChatBotView = {
 const noop = () => undefined;
 
 function renderBotItem(
-  overrides: { expanded?: boolean; onToggle?: () => void; bot?: Partial<ChatBotView> } = {},
+  overrides: { expanded?: boolean; onToggle?: () => void; bot?: Partial<ChatBotView>; botSelected?: boolean } = {},
 ) {
   const onToggle = overrides.onToggle ?? jest.fn();
   const utils = render(
@@ -26,6 +27,7 @@ function renderBotItem(
       section="managed"
       expanded={overrides.expanded ?? false}
       selectedSessionId={null}
+      botSelected={overrides.botSelected ?? false}
       origin="mine"
       scope="all"
       sessionKey=""
@@ -44,6 +46,85 @@ function renderBotItem(
   );
   return { ...utils, onToggle };
 }
+
+function rerenderBotItem(
+  rerender: (ui: ReactElement) => void,
+  overrides: { expanded?: boolean; botSelected?: boolean } = {},
+) {
+  rerender(
+    <ConversationBotItem
+      bot={bot}
+      section="managed"
+      expanded={overrides.expanded ?? false}
+      selectedSessionId={null}
+      botSelected={overrides.botSelected ?? false}
+      origin="mine"
+      scope="all"
+      sessionKey=""
+      sessions={undefined}
+      onToggle={noop}
+      onOriginChange={noop}
+      onScopeChange={noop}
+      onSearchSession={noop}
+      onCreateSession={noop}
+      onSelectSession={noop}
+      onLoadMore={noop}
+      onToggleFavorite={noop}
+      isFavoritePending={() => false}
+      onOpenAgentCodingBot={noop}
+    />,
+  );
+}
+
+describe('ConversationBotItem 归属增强（2026-10-22 体验精修二轮）', () => {
+  const renderWithSection = (section: 'managed' | 'friend', online: boolean) =>
+    render(
+      <ConversationBotItem
+        bot={{ ...bot, online }}
+        section={section}
+        expanded={false}
+        selectedSessionId={null}
+        origin="mine"
+        scope="all"
+        sessionKey=""
+        sessions={undefined}
+        onToggle={noop}
+        onOriginChange={noop}
+        onScopeChange={noop}
+        onSearchSession={noop}
+        onCreateSession={noop}
+        onSelectSession={noop}
+        onLoadMore={noop}
+        onToggleFavorite={noop}
+        isFavoritePending={() => false}
+        onOpenAgentCodingBot={noop}
+      />,
+    );
+
+  it('好友 Bot 在线时头像佩戴 emerald 信号点（与收起竖轨 OnlineDot 同语义）;离线或非好友 Bot 不佩戴', () => {
+    const { container, unmount } = renderWithSection('friend', true);
+    // 信号点:仅好友 Bot 且 online=true 才亮(收起竖轨同款 bg-emerald-500 + ring-background)。
+    const dot = container.querySelector('span.bg-emerald-500');
+    expect(dot).not.toBeNull();
+    expect(dot).toHaveClass('rounded-full', 'ring-2');
+    unmount();
+    // 离线好友不佩戴;非好友 Bot(管理/团队)无好友在线语义,一律不佩戴。
+    const { container: offline } = renderWithSection('friend', false);
+    expect(offline.querySelector('span.bg-emerald-500')).toBeNull();
+  });
+
+  it('展开箭头旋转过渡:收起 -rotate-90,展开归零(替代 Right↔Down 硬切换)', () => {
+    const { container } = renderBotItem({ expanded: false });
+    const arrowSvg = (container.querySelector('button[aria-hidden="true"]') as HTMLElement).querySelector('svg');
+    expect(arrowSvg).toHaveClass('-rotate-90');
+  });
+
+  it('展开区带 conversation-area-in 进入动效类(reduced-motion 由 global.css 静止)', () => {
+    const { container } = renderBotItem({ expanded: true });
+    const area = container.querySelector('div[aria-label^="会话列表："]');
+    expect(area).toHaveClass('conversation-area-in');
+  });
+});
 
 describe('ConversationBotItem 操作区', () => {
   it('遮盖底撤除:操作区不再叠 sidebar-actions-cover 底色,筛选/加号/行尾箭头保持等宽 2px 间隙', () => {
@@ -64,6 +145,22 @@ describe('ConversationBotItem 操作区', () => {
       el.className.includes('truncate'),
     ) as HTMLElement;
     expect(title?.parentElement).toHaveClass('pr-24');
+  });
+
+  it('当前舞台所属 Bot 名称点亮品牌蓝(行锚点,与会话胶囊两级选中)', () => {
+    const { container, rerender } = renderBotItem({ botSelected: true });
+    const title = Array.from(container.querySelectorAll('span')).find((el) =>
+      el.className.includes('truncate'),
+    ) as HTMLElement;
+    expect(title).toHaveClass('text-primary');
+    // 名称规格与会话标题一致(2026-10-22 需求):13px 常规字重,目录不再加粗强调。
+    expect(title).toHaveClass('text-[13px]', 'font-normal');
+    // 非舞台 Bot 保持常规灰名。
+    rerenderBotItem(rerender, { botSelected: false });
+    const plainTitle = Array.from(container.querySelectorAll('span')).find((el) =>
+      el.className.includes('truncate'),
+    ) as HTMLElement;
+    expect(plainTitle).not.toHaveClass('text-primary');
   });
 });
 
