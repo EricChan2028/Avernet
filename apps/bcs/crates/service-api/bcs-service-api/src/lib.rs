@@ -155,8 +155,8 @@ pub use group_use_cases::{
     GroupProposalPreviewResult, GroupProposalService, GroupQueryService, GroupRemoveMemberCommand,
     GroupRemoveMemberResult, GroupRoutingPolicyCommand, GroupRoutingPolicyResult,
     GroupStatusCommand, GroupTerminateCommand, GroupUpdateLabelCommand,
-    GroupUpdateVisibilityCommand, GroupUpdateWorkspaceCommand, GroupUseCaseError,
-    GroupWorkspaceQueryCommand, GroupWorkspaceResult, ProposalContext,
+    GroupUpdateVisibilityCommand, GroupUseCaseError,
+    ProposalContext,
     ServiceSpecPatchConflictField, SessionHistoryCommand, SessionHistoryResult,
 };
 pub use human_actors::{
@@ -279,7 +279,7 @@ pub use types::{
 };
 
 pub use core::{
-    ActorKind, ActorStatus, AgentCredentials, AuditEntry, BindingChannel, BindingChannels,
+    ActorKind, ActorStatus, AgentCredentials, BindingChannel, BindingChannels,
     BotCandidateSearchCoreResult, BotCandidateSearchCoreService, BotCandidateSearchHit,
     BotCandidateSearchMode, BotCandidateSearchQuery, BotCapabilities, BotConnectParams,
     BotConnectResult, BotControlPlaneCandidate,
@@ -308,7 +308,7 @@ pub use core::{
     StructuredRoutingError, MOCK_TOKEN_PREFIX, mock_token, is_mock_token,
     SystemGroupMessage, SystemMessageDispatchOutcome, SystemMessageDispatcherService,
     SystemMessageEvent, SystemMessageEventKind, SystemMessageProducerService,
-    SystemMessageRecipientResult, Task, TaskStatus, Workspace, backfill_bot_names,
+    SystemMessageRecipientResult, backfill_bot_names,
     backfill_participant_names, deserialize_skills, validate_sender_routes,
 };
 
