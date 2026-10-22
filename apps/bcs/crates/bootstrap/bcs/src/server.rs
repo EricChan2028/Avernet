@@ -1161,6 +1161,7 @@ pub struct BcsServerExtensions {
 
 #[derive(Clone)]
 struct ProviderRepoBundle {
+    memory_store: Option<Arc<MemoryProviderStore>>,
     bot_providers: Arc<dyn bcs_service_api::port::repo::bot_provider::BotProviderRepoPort>,
     provider_repo: Arc<dyn ProviderRepoPort>,
     provider_credentials: Arc<dyn ProviderCredentialRepoPort>,
@@ -1174,6 +1175,7 @@ fn memory_provider_repos(bots: Arc<dyn bcs_service_api::BotRepoPort>, source: bc
     let bot_providers = Arc::new(bcs_bot_store::provider::MemoryBotProviderStore::new(bots, store.clone()));
     let provider_bindings = Arc::new(bcs_bot_store::provider::ProviderBindingProjection::new(store.clone(), bot_providers.clone(), source));
     ProviderRepoBundle {
+        memory_store: Some(store.clone()),
         bot_providers,
         provider_repo: store.clone(),
         provider_credentials: store.clone(),
@@ -1212,6 +1214,7 @@ fn db_provider_repos(
     };
     let provider_bindings = Arc::new(bcs_bot_store::provider::ProviderBindingProjection::new(store.clone(), store.clone(), source));
     ProviderRepoBundle {
+        memory_store: None,
         bot_providers: store.clone(),
         provider_repo: store.clone(),
         provider_credentials: store.clone(),
@@ -2229,10 +2232,13 @@ impl Default for BcsServerState {
         let group_repo = Arc::new(
             MemoryGroupRepo::new().with_event_store(event_repo.clone(), crate::env::resolve_env()),
         );
+        if let Some(store) = &provider_repos.memory_store {
+            store.bind_group_scope_source(group_repo.clone(), Arc::downgrade(&provider_repos.bot_providers));
+        }
         let group_metrics_snapshot: Arc<dyn GroupMetricsSnapshotPort> = group_repo.clone();
         let group_repo_for_session: Arc<dyn GroupRepoPort> = group_repo.clone();
         let sessions = Arc::new(
-            GroupCore::with_repo(group_repo).with_event_record_factory(group_event_factory.clone()),
+            GroupCore::with_repo(group_repo).with_collaboration_registry(bot_registry.clone()).with_policy_gate(provider_repos.memory_store.as_ref().expect("memory Provider store").policy_gate()).with_event_record_factory(group_event_factory.clone()),
         );
         let router = Arc::new(MessageRouter::new());
         let fusion = Arc::new(LocalFusionService::new(config.bots_base_dir.clone()));
@@ -2299,6 +2305,7 @@ impl Default for BcsServerState {
             session_repo.clone();
         let session_management: Arc<dyn SessionManagementService> = Arc::new(
             SessionManagementServiceImpl::new(session_repo.clone(), group_repo_for_session.clone())
+                .with_collaboration_registry(bot_registry.clone())
                 .with_bot_runtime(bot_use_cases.clone())
                 .with_event_record_factory(group_event_factory.clone())
                 .with_opening_message_delivery(message_repo.clone(), frontend_delivery.clone()),
@@ -3876,10 +3883,13 @@ impl BcsServer {
         let group_repo = Arc::new(
             MemoryGroupRepo::new().with_event_store(event_repo.clone(), crate::env::resolve_env()),
         );
+        if let Some(store) = &provider_repos.memory_store {
+            store.bind_group_scope_source(group_repo.clone(), Arc::downgrade(&provider_repos.bot_providers));
+        }
         let group_metrics_snapshot: Arc<dyn GroupMetricsSnapshotPort> = group_repo.clone();
         let group_repo_for_session: Arc<dyn GroupRepoPort> = group_repo.clone();
         let sessions = Arc::new(
-            GroupCore::with_repo(group_repo).with_event_record_factory(group_event_factory.clone()),
+            GroupCore::with_repo(group_repo).with_collaboration_registry(bot_registry.clone()).with_policy_gate(provider_repos.memory_store.as_ref().expect("memory Provider store").policy_gate()).with_event_record_factory(group_event_factory.clone()),
         );
         let router = Arc::new(MessageRouter::new());
         let proposals = Arc::new(ProposalStore::new());
@@ -3953,6 +3963,7 @@ impl BcsServer {
             session_repo.clone();
         let session_management: Arc<dyn SessionManagementService> = Arc::new(
             SessionManagementServiceImpl::new(session_repo.clone(), group_repo_for_session.clone())
+                .with_collaboration_registry(bot_registry.clone())
                 .with_bot_runtime(bot_use_cases.clone())
                 .with_event_record_factory(group_event_factory.clone())
                 .with_opening_message_delivery(message_repo.clone(), frontend_delivery.clone()),
@@ -4488,9 +4499,9 @@ impl BcsServer {
             info!(env = %env, db_plugin = %db_kind, "DB-backed group storage initialized");
             let repo = match db_kind {
                 DbPluginKind::LocalSqlite => {
-                    Arc::new(MySqlGroupStore::sqlite(db_plugin.clone(), env))
+                    Arc::new(MySqlGroupStore::sqlite(db_plugin.clone(), env).with_provider_scope_guard())
                 }
-                DbPluginKind::Mysql => Arc::new(MySqlGroupStore::new(db_plugin.clone(), env)),
+                DbPluginKind::Mysql => Arc::new(MySqlGroupStore::new(db_plugin.clone(), env).with_provider_scope_guard()),
                 DbPluginKind::External(provider) => {
                     panic!(
                         "external database plugin '{}' has no group store wiring",
@@ -4502,7 +4513,7 @@ impl BcsServer {
                 crate::eventing_wiring::event_record_factory(&config, event_repo.clone());
             (
                 Arc::new(
-                    GroupCore::with_repo(repo.clone()).with_event_record_factory(event_factory),
+                    GroupCore::with_repo(repo.clone()).with_collaboration_registry(bot_registry.clone()).with_event_record_factory(event_factory),
                 ),
                 repo.clone() as Arc<dyn GroupMetricsSnapshotPort>,
                 repo as Arc<dyn GroupRepoPort>,
@@ -4712,7 +4723,8 @@ impl BcsServer {
                 friend_auth_sync.clone(),
                 edge_permission_env,
             )
-            .with_friendship_writeback(Some(friendship_writeback)),
+            .with_friendship_writeback(Some(friendship_writeback))
+            .with_collaboration_registry(bot_registry.clone()),
         );
         let connect_service: Arc<dyn bcs_service_api::application::ConnectService> =
             connect_service_impl.clone();
@@ -4738,7 +4750,7 @@ impl BcsServer {
                 edge_grant_store.clone(),
                 bot_config_store.clone(),
                 profile_store.clone(),
-            ));
+            ).with_collaboration_registry(bot_registry.clone()));
         let bot_connections = Arc::new(BotConnectionRegistry::new());
         let mut bot_runtime_for_session =
             Bot::new_with_friend(bot_registry.clone(), friend_svc.clone())
@@ -4819,6 +4831,7 @@ impl BcsServer {
             };
             let session_management: Arc<dyn SessionManagementService> = Arc::new(
                 SessionManagementServiceImpl::new(session_repo.clone(), group_repo.clone())
+                    .with_collaboration_registry(bot_registry.clone())
                     .with_bot_runtime(bot_runtime_for_session.clone())
                     .with_event_record_factory(crate::eventing_wiring::event_record_factory(
                         &config,
@@ -6102,6 +6115,7 @@ mod tests {
 
         let registered = provider_management
             .register_provider(RegisterProviderCommand {
+                collaboration_scope: None,
                 slug: None,
                 name: "Provider".to_string(),
                 webhook_url: Some("https://provider.example.com/bcs/webhook".to_string()),
@@ -6640,6 +6654,7 @@ mod tests {
             .services
             .provider_management
             .register_provider(RegisterProviderCommand {
+                collaboration_scope: None,
                 slug: None,
                 name: "Admin Provider".to_string(),
                 webhook_url: Some(callback_url.clone()),
