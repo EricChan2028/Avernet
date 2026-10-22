@@ -11,7 +11,13 @@ section anywhere in its body — a structural test asserts that — because the
 moment it does, the registry stops meaning anything and every later work item
 adds "just one" special case.
 """
+
 from __future__ import annotations
+
+from dataclasses import replace
+from agentclaw.community.core.bot_config_manifest.schema.apply_policy import (
+    preserved_categories,
+)
 
 from datetime import datetime
 from typing import Any, Callable, Mapping, Sequence
@@ -160,6 +166,7 @@ class ApplyOrchestrator:
         same per-apply ledger a real apply uses. No materialisation, activation
         or removal happens — the write paths are simply never entered.
         """
+        ctx = replace(ctx, preserve_default_categories=preserved_categories(parsed))
         results: list[CategoryResult] = []
         for step in self._steps(phase):
             entries = declared_entries(parsed, step.construct)
@@ -387,7 +394,10 @@ class ApplyOrchestrator:
             construct=construct,
             entries=tuple(
                 EntryResult(
-                    construct, planned.intent.identity, EntryOutcome(planned.outcome)
+                    construct,
+                    planned.intent.identity,
+                    EntryOutcome(planned.outcome),
+                    note=planned.intent.note,
                 )
                 for planned in plan.entries
             ),
