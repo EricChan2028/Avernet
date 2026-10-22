@@ -92,3 +92,18 @@ def test_configured_bbs_dingtalk_sender_returns_card_result(monkeypatch) -> None
     )
 
     assert provider.send(_message()) == "bbs-card-123"
+
+
+def test_bbs_dingtalk_sender_rejects_non_card_channels() -> None:
+    config = BbsDingTalkConfig(
+        ak_id="bbs-ak-id",
+        ak_secret_name="bbs_dingtalk_ak_secret",
+        robot_code="bbs-robot-code",
+        card_template_id="bbs-template.schema",
+    )
+    provider = BbsDingTalkNotifyProvider(
+        config,
+        FakeSecretResolver(Secret("", "bbs-secret")),
+    )
+
+    assert provider.send(_message(), channel="markdown") is None
