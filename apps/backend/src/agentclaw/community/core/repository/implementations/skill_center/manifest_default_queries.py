@@ -28,6 +28,7 @@ from agentclaw.community.core.skill_center.manifest_defaults import (
     ManifestDefaultsConflictError,
 )
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 
 
 class ManifestDefaultQueries:
@@ -45,13 +46,25 @@ class ManifestDefaultQueries:
     ) -> PackageWriteGuard:
         @contextmanager
         def guard():
+            # Resolve ids without retaining a range lock on every tenant/Bot
+            # scanned by a legacy schema. The upload road already serializes
+            # same-Bot creation; existing assets serialize with Default writers
+            # on their primary-key row locks below.
+            with self._db.orm_session() as lookup:
+                target_locators = dict(self._scope(lookup.query(Skill.id, Skill.git_path), Skill).filter(
+                    Skill.bolt_id == bot_id, Skill.user_id == owner_id,
+                    Skill.name == name, Skill.git_path.like("local://%"),
+                ).all())
+                target_ids = sorted(target_locators)
             with self._db.transactional_orm_session() as session:
-                self._scope(session.query(Skill), Skill).filter(
-                    Skill.bolt_id == bot_id,
-                    Skill.user_id == owner_id,
-                    Skill.name == name,
-                    Skill.git_path.like("local://%"),
-                ).with_for_update().all()
+                targets = session.query(Skill).filter(Skill.id.in_(target_ids)).order_by(Skill.id).with_for_update().all() if target_ids else []
+                if len(targets) != len(target_ids) or any(
+                    row.bolt_id != bot_id or row.user_id != owner_id or row.name != name
+                    or row.git_path != target_locators[row.id] or not row.git_path.startswith("local://")
+                    or row.env != get_current_env() or row.avernet_tenant != get_current_avernet_tenant()
+                    for row in targets
+                ):
+                    raise ManifestDefaultsConflictError("Local package identity changed before publication")
                 sets = self._bot_sets(
                     session,
                     bot_id=bot_id,
