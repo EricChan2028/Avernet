@@ -211,8 +211,6 @@ class AsyncChatClient:
             transport_mode,
             parameter_name="transport_mode",
         )
-        # Transport identity is diagnostic-only; request routing is strategy-owned.
-        self._transport: str = "v3-ws"
         self.headers = headers or {}
         self.client_id = client_id or f"client-{uuid.uuid4().hex[:8]}"
         self.client_version = client_version
@@ -275,6 +273,13 @@ class AsyncChatClient:
     def transport_mode(self) -> ChatTransportMode:
         """Transport mode selected once during construction."""
         return self._transport_mode
+
+    @property
+    def transport_name(self) -> str:
+        """Actual transport of the current active connection, for diagnostics/tests."""
+        if self._client is None:
+            return "unknown"
+        return self._chat_transport.transport_name
 
     @property
     def is_reconnecting(self) -> bool:
@@ -360,7 +365,6 @@ class AsyncChatClient:
             raise
 
         self._client = client
-        self._transport = self._chat_transport.transport_name
 
         if self._max_retries > 0 and self._reconnect_monitor is None:
             self._reconnect_monitor = asyncio.create_task(self._reconnect_loop())
@@ -1571,7 +1575,6 @@ class AsyncChatClient:
                     new_client, _hello = await self.create_transport_client()
                     self._bind_client_events(new_client)
                     self._client = new_client
-                    self._transport = self._chat_transport.transport_name
                     self._disconnect_event.clear()
                     reconnected = True
                     logger.info(

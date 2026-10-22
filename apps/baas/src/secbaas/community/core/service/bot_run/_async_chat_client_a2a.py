@@ -68,7 +68,7 @@ class A2aChatTransport(AsyncChatTransportBase):
         if mode not in {"grey", "on"}:
             raise ValueError(f"invalid A2A transport mode: {mode!r}")
         self.mode = mode
-        self._current_name = "v3-ws"
+        self._current_name = "unknown"
         self.fallback_client: Any | None = None
         self.routed_sessions: dict[str, str] = {}
         self._on_fallback_frame = False

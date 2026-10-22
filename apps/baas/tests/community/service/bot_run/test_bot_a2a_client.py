@@ -1497,7 +1497,7 @@ def test_proxypass_route_prefix_survives_to_card_and_rpc():
             )
             assert acc.transport_mode == "on"
             hello = await acc.connect()
-            assert acc._transport == "a2a", (
+            assert acc.transport_name == "a2a", (
                 f"probing must hit prefixed card: hello={hello}"
             )
             content, _events = await acc.send_message(session_key="s", message="hi")
@@ -1825,7 +1825,7 @@ def test_attachment_hitl_answer_routes_via_v3_and_run_resumes():
                 interaction_service=service,
             )
             hello = await acc.connect()
-            assert acc._transport == "a2a", hello
+            assert acc.transport_name == "a2a", hello
 
             async def spy_resolve(**kwargs: Any) -> Any:
                 raise AssertionError("answer leaked to a2a transport")
@@ -2703,7 +2703,7 @@ def test_async_client_grey_mode_falls_back_to_v3_on_probe_failure():
                     max_retries=0,
                 )
                 hello = await acc.connect()
-                assert acc._transport == "v3-ws", (
+                assert acc.transport_name == "v3-ws", (
                     f"探测失败时 grey 必须回退 v3（不炸不断流）: {hello}"
                 )
                 assert acc._client is not None
@@ -2761,7 +2761,7 @@ def test_async_client_grey_malformed_card_falls_back_to_v3(case, payload):
                     max_retries=0,
                 )
                 hello = await acc.connect()
-                assert acc._transport == "v3-ws", (
+                assert acc.transport_name == "v3-ws", (
                     f"畸形卡({case})下 grey 必须回退 v3: {hello}"
                 )
                 await acc.close()

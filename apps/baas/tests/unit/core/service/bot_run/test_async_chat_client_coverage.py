@@ -2231,6 +2231,11 @@ class TestA2aModeValidation:
         assert not hasattr(default_client._chat_transport, "fallback_client")
         assert not hasattr(default_client._chat_transport, "routed_sessions")
 
+        for mode in ("off", "grey", "on"):
+            client = AsyncChatClient(uri="ws://host/ws", transport_mode=mode)
+            assert client.transport_name == "unknown"
+            assert not hasattr(client, "_transport")
+
         for mode in ("grey", "on"):
             client = AsyncChatClient(uri="ws://host/ws", transport_mode=mode)
             assert isinstance(client._chat_transport, A2aChatTransport)
