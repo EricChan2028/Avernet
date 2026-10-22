@@ -122,11 +122,9 @@ class ManifestDefaultQueries:
         locked: bool = True,
     ) -> ManifestDefaults:
         ids: set[int] = set()
-        codes: set[str] = set()
+        codes: set[str] = set(platform_default_codes)
         facts: list = []
         defaults = [s for s in sets if s.is_default]
-        if platform_default_codes and not defaults:
-            raise ManifestDefaultsConflictError("Default provenance is unavailable")
         for row in defaults:
             sid = int(row.id)
             members = set_member_skill_ids(

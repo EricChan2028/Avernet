@@ -34,6 +34,7 @@ from agentclaw.community.core.bot_config_manifest.capabilities import (
 class CapabilityApplyState:
     """The one cross-category fact Skills hands to the later MCP wave."""
 
+    policy_notes: list[str] = field(default_factory=list)
     final_skill_dependency_codes: frozenset[str] | None = None
     default_snapshots: dict[ManifestCategory, ManifestDefaults] = field(
         default_factory=dict

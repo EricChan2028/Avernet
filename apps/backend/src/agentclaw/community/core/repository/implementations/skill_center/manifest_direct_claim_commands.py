@@ -188,7 +188,7 @@ class ManifestDirectClaimCommands:
                         else frozenset(),
                     )
 
-            if server_code in platform_default_codes and not any(
+            if expected_defaults is None and server_code in platform_default_codes and not any(
                 row.is_default for row in sets
             ):
                 raise SkillSetControlPlaneNotFoundError()
@@ -326,7 +326,7 @@ class ManifestDirectClaimCommands:
                         else frozenset(),
                     )
 
-            if server_code in platform_default_codes and not any(
+            if expected_defaults is None and server_code in platform_default_codes and not any(
                 row.is_default for row in sets
             ):
                 raise SkillSetControlPlaneNotFoundError()

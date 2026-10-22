@@ -537,3 +537,44 @@ async def test_blocked_create_cleanup_preserves_confirmed_package_partial():
     with pytest.raises(ManifestPackageWriteCommittedError):
         await upload._service(filesystem, repo=FailingRepo()).upload_local_skill(bot_id="bot", owner_id="owner", actor_id="owner", package=upload._zip({"SKILL.md": upload._skill_md()}), write_guard=guard)
     assert filesystem.files["/private/skills-local/upload-skill/SKILL.md"]
+
+
+def test_platform_policy_without_default_set_preserves_supply_and_clears_override():
+    case = setup_case()
+    db, _, desired, _, _, _ = case
+    with db.transactional_orm_session() as session:
+        session.query(SkillSetMCPServer).delete()
+        session.query(SkillSetSkill).delete()
+        session.query(SkillSet).delete()
+    snapshot = desired.manifest_defaults(bot_id="bot-1", owner_id="entity-1", platform_default_codes=frozenset({"mcp.default"}), engine_type="moltis", check_skill_sources=False)
+    assert snapshot.mcp_codes == frozenset({"mcp.default"})
+    desired.remove_manifest_mcp(bot_id="bot-1", owner_id="entity-1", server_code="mcp.default", platform_default_codes=frozenset({"mcp.default"}), engine_type="moltis", expected_defaults=snapshot)
+    with db.orm_session() as session:
+        assert session.query(BotMCPConfig).filter_by(server_code="mcp.default").count() == 0
+        assert session.query(DefaultSkillsetMcpExclusion).count() == 0
+
+
+def test_excluded_platform_policy_without_default_set_can_be_direct():
+    case = setup_case()
+    db, _, desired, _, _, _ = case
+    with db.transactional_orm_session() as session:
+        session.query(SkillSetMCPServer).delete()
+        session.query(SkillSetSkill).delete()
+        session.query(SkillSet).delete()
+        session.add(DefaultSkillsetMcpExclusion(user_id="entity-1", bot_id="bot-1", skill_set_id=99999, server_code="mcp.default"))
+    snapshot = desired.manifest_defaults(bot_id="bot-1", owner_id="entity-1", platform_default_codes=frozenset({"mcp.default"}), engine_type="moltis", check_skill_sources=False)
+    assert not snapshot.mcp_codes
+    desired.claim_manifest_mcp(bot_id="bot-1", owner_id="entity-1", server_code="mcp.default", config=None, platform_default_codes=frozenset({"mcp.default"}), engine_type="moltis", expected_defaults=snapshot)
+    with db.orm_session() as session:
+        assert session.query(base.BotMCPInstallation).filter_by(server_code="mcp.default").count() == 1
+        assert session.query(DefaultSkillsetMcpExclusion).count() == 1
+
+
+@pytest.mark.asyncio
+async def test_empty_policy_rejection_explains_category_in_existing_notes():
+    case = setup_case()
+    with case[0].transactional_orm_session() as session:
+        session.query(BotSkillInstallationSource).delete()
+    report = await apply_case(case, "  skills: []\n", dry=True)
+    assert report.status is not base.ApplyStatus.SUCCEEDED
+    assert any("skills" in note and "safely" in note for note in report.notes)

@@ -190,6 +190,7 @@ class ApplyOrchestrator:
             started_at=started_at,
             finished_at=datetime.now(),
             categories=categories,
+            notes=tuple(ctx.capability_state.policy_notes),
             # W7: the named sources this apply resolved, read out of the
             # context's session — the orchestrator holds no per-apply state,
             # so this is the only place the report's sources can come from.
@@ -258,6 +259,10 @@ class ApplyOrchestrator:
         try:
             plan = await materialiser.plan(ctx, resolved.intents)
         except Exception as exc:  # noqa: BLE001
+            if construct in ctx.preserve_default_categories:
+                ctx.capability_state.policy_notes.append(
+                    f"{construct.value}: Default-preserving plan could not be established safely; {type(exc).__name__}"
+                )
             logger.exception(
                 "[manifest_apply] plan raised, construct=%s, bot_id=%s",
                 construct.value,
@@ -289,6 +294,10 @@ class ApplyOrchestrator:
             # entry outcomes alone. A caller told only "aborted" would read the
             # documented "left exactly as it was" and stop — when what it should
             # do is re-apply to converge an area that may now be half-written.
+            if construct in ctx.preserve_default_categories:
+                ctx.capability_state.policy_notes.append(
+                    f"{construct.value}: Default-preserving write stopped; inspect partial state before retry"
+                )
             logger.exception(
                 "[manifest_apply] write raised, construct=%s, bot_id=%s",
                 construct.value,
