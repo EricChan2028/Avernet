@@ -252,6 +252,7 @@ export default function ConversationPage(): JSX.Element {
             setMobileListOpen(false);
           }}
         />
+        <div className="relative flex h-full min-h-0 min-w-0 flex-1">
         {selectionIsReadonly ? (
           <ReadOnlyConversationPanel
             bot={readonly.bot}
@@ -284,6 +285,7 @@ export default function ConversationPage(): JSX.Element {
             onSidePaneIsOpenChange={headerPanels.onSidePaneIsOpenChange}
           />
         )}
+        </div>
       </div>
       {engineVersionNotice.dialogs}
     </div>

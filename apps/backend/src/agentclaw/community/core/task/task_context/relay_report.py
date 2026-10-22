@@ -29,6 +29,9 @@ from agentclaw.community.core.task.domain.models import (
 from agentclaw.community.core.task.task_context.task_graph_support import (
     _relay_graph_output,
 )
+from agentclaw.community.core.task.task_context.task_artifact.artifact_publish import (
+    default_publish_service,
+)
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 
 
@@ -248,11 +251,20 @@ def apply_relay_report(
                 node.run_info.actual_goal = patch.actual_goal
                 node.run_info.acceptance_result = patch.local_acceptance_result
                 node.run_info.output.update(patch.output_patch or {})
+                # 产物发布点 ①(spec §5.1):ACCEPTED 写点 fold 之后 capture。
+                default_publish_service().capture_node(
+                    graph,
+                    node,
+                    artifact_patch=getattr(patch, "artifact_patch", None),
+                    now_ms=now,
+                )
             elif (
                 patch.actual_goal is not None
                 or patch.local_acceptance_result is not None
                 or patch.output_patch
+                or getattr(patch, "artifact_patch", None) is not None
             ):
+                # DECLINED 夹带 artifacts 属非法事件(§4):整体拒绝,不静默丢弃。
                 raise TaskStateError("declined execution cannot carry business facts")
             node.run_info.extend_props["execution_decision"] = decision
             node.run_info.progress_reason = command.progress_reason or None
@@ -311,6 +323,11 @@ def apply_relay_report(
                 graph.extend_props["gaps"] = []
                 graph.extend_props["task_acceptance_result"] = _json_value(
                     asdict(acceptance)
+                )
+                # 产物发布点 ②(spec §5.1):completion 写点同闭包 capture,重复内容
+                # 由 select-first 查重吸收。
+                default_publish_service().capture_node(
+                    graph, node, artifact_patch=None, now_ms=now
                 )
                 record_action(
                     NodeAction.PLAN,

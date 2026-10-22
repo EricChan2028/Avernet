@@ -28,6 +28,9 @@ from injector import Binder, Injector, Module, provider, singleton
 from agentclaw.community.core.repository.implementations.task.task_action_log_repository import (
     TaskActionLogRepository,
 )
+from agentclaw.community.core.repository.implementations.task.task_artifact_repository import (
+    TaskArtifactRepository,
+)
 from agentclaw.community.core.repository.implementations.task.task_callback_correlation_repository import (
     TaskCallbackCorrelationRepository,
 )
@@ -54,6 +57,7 @@ from agentclaw.community.core.repository.implementations.task.task_trajectory_re
 )
 from agentclaw.community.core.repository.protocols.task import (
     TaskActionLogRepositoryProtocol,
+    TaskArtifactRepositoryProtocol,
     TaskCallbackCorrelationRepositoryProtocol,
     TaskCallbackRepositoryProtocol,
     TaskGraphRepositoryProtocol,
@@ -72,6 +76,10 @@ from agentclaw.community.core.task.task_context.task_trajectory.analyzer import 
 from agentclaw.community.core.task.task_context.task_trajectory.trajectory_service import (
     TaskTrajectoryService,
     TaskTrajectoryServiceProtocol,
+)
+from agentclaw.community.core.task.task_context.task_artifact.artifact_api_service import (
+    TaskArtifactApiService,
+    TaskArtifactApiServiceProtocol,
 )
 from agentclaw.community.core.task.task_context.task_context_service import TaskContextService
 from agentclaw.community.core.task.task_context.task_graph_service import (
@@ -134,6 +142,24 @@ class TaskPersistenceModule(Module):
         binder.bind(
             TaskCallbackCorrelationRepositoryProtocol,
             to=TaskCallbackCorrelationRepository,
+            scope=singleton,
+        )
+        # Artifact manifest read side (spec 2026-10-20-task-artifact-domain):
+        # rows are written inline in the save_graph transaction; this binding
+        # serves the read queries (dashboard enrichment / trajectory HTML) and
+        # the manual-registration API write (`TaskArtifactApiService` below).
+        binder.bind(
+            TaskArtifactRepositoryProtocol,
+            to=TaskArtifactRepository,
+            scope=singleton,
+        )
+        # Artifact manual-registration API service (POST/GET /tasks/artifacts):
+        # consumes the graph repo (归属/attempt 交叉校验) + the artifact repo
+        # appended just above; co-located with them the way the trajectory
+        # assembler is, so the artifact wiring lives in one place.
+        binder.bind(
+            TaskArtifactApiServiceProtocol,
+            to=TaskArtifactApiService,
             scope=singleton,
         )
 

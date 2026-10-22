@@ -9,6 +9,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
+from agentclaw.community.adapters.http.task.schemas_artifact import (  # noqa: E501
+    TaskArtifactDescriptorDTO,
+    artifact_record_to_descriptor,
+)
+
 from pydantic import BaseModel, ConfigDict, Field
 from agentclaw.community.adapters.http.task.schemas_relay_dispatch import (
     TaskDispatchRequestDTO as TaskDispatchRequestDTO,
@@ -315,6 +320,7 @@ class TaskNodeDTO(BaseModel):
     run_info: RuntimeInfoDTO = Field(
         default_factory=RuntimeInfoDTO, description="节点运行时信息"
     )
+    artifacts: list[TaskArtifactDescriptorDTO] | None = Field(None, description="节点产物清单(读侧富化;null=未富化)")
 
 
 class TaskInfoRecordDTO(BaseModel):
@@ -687,7 +693,9 @@ _INTERNAL_GRAPH_EXT_PROPS = frozenset({"execution_config", "runtime_profile"})
 _INTERNAL_NODE_EXT_PROPS = frozenset({"dispatching", "dispatching_at"})
 
 
-def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGraphDTO:
+def graph_to_dto(graph, *, include_action_log: bool = False, artifacts_by_node: "dict[str, list] | None" = None) -> TaskExecutionGraphDTO:
+    """领域图 → DTO。``artifacts_by_node`` 非 None 时富化节点产物,None 时零行为变化(§7)。"""
+
     nodes: list[TaskNodeDTO] = []
     for n in graph.tasks:
         ar = n.run_info.acceptance_result
@@ -700,6 +708,10 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
             if ar is not None
             else None
         )
+        node_artifacts = None
+        if artifacts_by_node is not None:
+            node_artifacts = [artifact_record_to_descriptor(record)  # noqa: E501
+                              for record in artifacts_by_node.get(n.node_id, [])]
         nodes.append(
             TaskNodeDTO(
                 node_id=n.node_id,
@@ -769,6 +781,7 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
                         else []
                     ),
                 ),
+                artifacts=node_artifacts,
             )
         )
     relations = [
