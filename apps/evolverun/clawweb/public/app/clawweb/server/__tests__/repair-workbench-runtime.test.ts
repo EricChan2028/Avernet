@@ -5,12 +5,15 @@ import express from 'express';
 import { SqliteDatabase, runMigrations } from '@avernet/clawweb-shared/server/db';
 import { createWorkflowRepairRuntime } from '../repair-workbench-runtime.js';
 import { RepairReleaseRepository } from '@avernet/workflow/server/repositories/repair-release-repository';
+import { WorkflowAutomationRepository } from '@avernet/workflow/server/repositories/workflow-automation-repository';
+import { AppConfigRepository } from '@avernet/workflow/server/repositories/app-config-repository';
+import { createAutoAnalysisSettings } from '@avernet/workflow/server/services/task-guard/auto-analysis-settings';
 import type { RepairDeployment } from '@avernet/workflow/server/contracts/repair-release';
 import type { RepairDispatchRequest } from '@avernet/workflow/server/contracts/repair-workbench';
 
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
-async function fixture(dispatch?: (input: RepairDispatchRequest) => Promise<{ jobId: string }>, bound = true) {
+async function fixture(dispatch?: (input: RepairDispatchRequest) => Promise<{ jobId: string }>, bound = true, environment?: string) {
   const raw = new Database(':memory:');
   const db = new SqliteDatabase(raw);
   cleanup.push(() => db.close());
@@ -31,7 +34,7 @@ async function fixture(dispatch?: (input: RepairDispatchRequest) => Promise<{ jo
     await db.exec('INSERT INTO workflow_healing_suggestions (workflow_id,failure_signature,fix_spec,status,proposal_json,impact_run_ids) VALUES (?,?,?,?,?,?)',
       ['wf', `timeout-${index}`, `修复 ${index}`, index === 0 ? 'applied_unverified' : 'pending', bound ? JSON.stringify({schemaVersion:'workflow-patch/v1',workflowId:'wf',baseSpecDigest:configDigest,summary:`修复 ${index}`,operations:[{op:'replace',nodeId:`fetch-${index}`,path:'/executor/timeoutMs',value:90}]}) : null, bound ? JSON.stringify([`run-${index}`]) : null]);
   }
-  const runtime = createWorkflowRepairRuntime(db, { principal: async () => ({ actorId: 'editor', isAdmin: true }),
+  const runtime = createWorkflowRepairRuntime(db, { environment, principal: async () => ({ actorId: 'editor', isAdmin: true }),
     ...(dispatch ? { execution: {
       dispatch,
       async resolveBaseline() { return { workflowId: 'wf', packId: 'pack', repoId: 'managed', specPath: 'workflows/wf.yaml',
@@ -47,7 +50,50 @@ async function fixture(dispatch?: (input: RepairDispatchRequest) => Promise<{ jo
   return { db, runtime, base };
 }
 
+it('serves suggestions and reconciles tasks without starting an AI aggregation worker', async () => {
+  const { db, runtime } = await fixture(async () => ({ jobId: 'controlled-job' }), true, 'prod');
+  const query = vi.spyOn(db, 'query');
+  try {
+    const page = await runtime.service.candidates('wf', { pageSize: 100 });
+    expect(page.items).toHaveLength(39);
+    await runtime.monitor.reconcile();
+    expect(query.mock.calls.some(([sql]) => sql.includes("record_kind = 'proposal_scan'"))).toBe(false);
+    expect(await db.query("SELECT * FROM workflow_repair_release_records WHERE record_kind IN ('proposal_scan','proposal_group')")).toHaveLength(0);
+  } finally { query.mockRestore(); }
+});
+
+it('drains an unrelated manual completion even if background result reconciliation throws', async () => {
+  const { db } = await fixture();
+  const notify = vi.fn(async () => ({ status: 'sent' as const, receipt: 'accepted-by-provider' }));
+  const runtime = createWorkflowRepairRuntime(db, { environment: 'prod', principal: async () => ({ actorId: 'editor', isAdmin: true }),
+    notifications: { settings: createAutoAnalysisSettings({ repo: new AppConfigRepository(db), environmentDefault: '' }),
+      ports: { owner: async () => 'editor', canEdit: async () => true, notify } } });
+  const repo = new WorkflowAutomationRepository(db);
+  const notice = await repo.ensure('wf', 'auto_notice', 'manual-no-change', { kind: 'completion', taskId: 'finished-task', revision: 2,
+    title: '优化任务已完成，无需修改', text: '已完成', path: '/task/finished-task' }, 0);
+  const broken = vi.spyOn(runtime.service, 'reconcile').mockRejectedValue(new Error('background baseline unavailable'));
+  try {
+    await expect(runtime.monitor.reconcile()).rejects.toThrow('background baseline unavailable');
+    expect((await repo.get(notice.id))?.status).toBe('done');
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: '优化任务已完成，无需修改', recipientId: 'editor' }));
+  } finally { broken.mockRestore(); }
+});
+
 describe('real repair Host composition', () => {
+  it('queues manual AIS completion through the real Host even without automatic-analysis configuration', async () => {
+    const { base, db, runtime } = await fixture(async () => ({ jobId: 'controlled-ais' }));
+    const candidates = await (await fetch(`${base}/candidates?workflowId=wf&pageSize=100`)).json();
+    const itemId = candidates.items.find((item: { state: string }) => item.state === 'pending').itemId;
+    const created = await fetch(base, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workflowId: 'wf', itemIds: [itemId], inputDigest: candidates.inputDigest, instructions: '', requestId: 'manual-completion-host' }) });
+    expect(created.status).toBe(202);
+    const task = await created.json();
+    await runtime.service.report({ workflowId: 'wf', taskId: task.taskId, revision: 1, expectedStateVersion: 0, status: 'failed', error: { code: 'AIS_FAILED' } });
+    const notices = await db.query<{ body_json: string }>("SELECT body_json FROM workflow_repair_release_records WHERE record_kind = 'auto_notice'");
+    expect(notices).toHaveLength(1);
+    expect(JSON.parse(notices[0].body_json)).toMatchObject({ status: 'pending', data: { taskId: task.taskId, revision: 1, title: '优化任务生成失败' } });
+    expect((await (await fetch(`${base}/${task.taskId}`)).json()).latestAttempt.phase).toBe('failed');
+  });
   it('reuses read projections across pages and invalidates them when sources change', async () => {
     const { db, runtime } = await fixture();
     const query = vi.spyOn(db, 'query');

@@ -19,17 +19,22 @@ from agentclaw.community.adapters.http.task.bbs.router import (
 from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     CloseTopicRequestUnified,
     CreateReplyRequestUnified,
+    PollSelectionRequest,
     CreateTopicRequestUnified,
+    PollConfigRequest,
+    TopicConfigRequest,
 )
 from agentclaw.community.adapters.http.openapi_v1.contracts import PageParams
 from agentclaw.community.core.errors import Conflict, Forbidden, NotFound
 from agentclaw.community.core.task.forum.models import (
+    ForumPollSelection,
     ForumPostPage,
     ForumPostRecord,
     ForumReplyCreateResult,
     ForumTopicCreateResult,
     ForumTopicPage,
     ForumTopicRecord,
+    ForumTopicAnalysisRecord,
 )
 
 
@@ -48,6 +53,7 @@ def _topic() -> ForumTopicRecord:
         title="Topic title",
         body="Topic description",
         status="OPEN",
+        analysis=ForumTopicAnalysisRecord(),
         created_at=now,
         updated_at=now,
     )
@@ -61,6 +67,8 @@ def _post() -> ForumPostRecord:
         author_type="BOT",
         author_id="bot-a",
         body="Reply body",
+        reply_to_post_id="post_0",
+        reply_to_floor_no=1,
         created_at=now,
         updated_at=now,
     )
@@ -114,7 +122,11 @@ async def test_internal_reads_delegate_to_shared_forum_service():
             return ForumTopicPage(total=1, items=(_topic(),))
 
         def get_topic(self, **kwargs):
-            assert kwargs == {"topic_id": "topic_1"}
+            assert kwargs == {
+                "topic_id": "topic_1",
+                "viewer_author_type": None,
+                "viewer_author_id": None,
+            }
             return _topic()
 
         def list_posts(self, **kwargs):
@@ -134,6 +146,8 @@ async def test_internal_reads_delegate_to_shared_forum_service():
     topic = await get_topic_internal(
         topic_id="topic_1",
         request=_request("GET", "/api/v1/collaboration/tasks/bbs/topics/topic_1"),
+        viewer_author_type=None,
+        viewer_author_id=None,
         service=service,
     )
     posts = await list_posts_internal(
@@ -146,6 +160,9 @@ async def test_internal_reads_delegate_to_shared_forum_service():
     assert topics.data is not None and topics.data.total == 1
     assert topic.data is not None and topic.data.topic_id == "topic_1"
     assert posts.data is not None and posts.data.items[0].post_id == "post_1"
+    assert posts.data.items[0].reply_to_post_id == "post_0"
+    assert posts.data.items[0].reply_to_floor_no == 1
+    assert posts.data.items[0].children == []
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +172,8 @@ async def test_internal_reads_delegate_to_shared_forum_service():
 # surface): the internal /api/v1 surface delegates to the same
 # ``ForumServiceProtocol`` so the author-gating and idempotency semantics cannot
 # drift. ``author_type`` + ``author_id`` are declared in the body; there is no
-# ``bot_id`` path segment and no ``topic_type`` field.
+# ``bot_id`` path segment. ``topic_type`` and Topic-level ``poll`` are
+# forwarded on both HTTP surfaces.
 
 
 @pytest.mark.asyncio
@@ -168,6 +186,8 @@ async def test_internal_topic_create_passes_body_author_as_bot_author():
                 "client_request_id": "request-1",
                 "title": "Topic title",
                 "body": "Topic description",
+                "topic_type": "DISCUSSION",
+                "topic_config": None,
             }
             return ForumTopicCreateResult(topic=_topic(), created=True)
 
@@ -219,7 +239,7 @@ async def test_internal_topic_create_passes_body_author_as_human_author():
     assert payload.code == 201000
     assert payload.data is not None
     assert payload.data.model_dump() == {"topic_id": "topic_1"}
-    # Author is the body-declared human; no topic_type key is forwarded.
+    # Author is the body-declared human; topic type/poll use their defaults.
     assert service.calls == [
         {
             "op": "create_topic",
@@ -228,8 +248,48 @@ async def test_internal_topic_create_passes_body_author_as_human_author():
             "client_request_id": "req-internal-topic",
             "title": " Topic title ",
             "body": " Topic description ",
+            "topic_type": "DISCUSSION",
+            "topic_config": None,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_internal_topic_create_forwards_topic_config():
+    class Service:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def create_topic(self, **kwargs):
+            self.calls.append({"op": "create_topic", **kwargs})
+            return ForumTopicCreateResult(topic=_topic(), created=True)
+
+    service = Service()
+    await create_topic_internal(
+        body=CreateTopicRequestUnified(
+            author_type="BOT",
+            author_id="bot-a",
+            client_request_id="req-poll",
+            title="Poll",
+            body="Choose",
+            topic_type="POLL",
+            topic_config=TopicConfigRequest(
+                poll=PollConfigRequest(
+                    selection="SINGLE",
+                    options=["A", "B"],
+                    deadline_at=datetime(2026, 10, 20, 8, 0, tzinfo=timezone.utc),
+                )
+            ),
+        ),
+        request=_request("POST", "/api/v1/collaboration/tasks/bbs/topics"),
+        response=Response(),
+        service=service,
+    )
+
+    assert service.calls[0]["topic_type"] == "POLL"
+    assert service.calls[0]["topic_config"] is not None
+    assert service.calls[0]["topic_config"].poll is not None
+    assert service.calls[0]["topic_config"].poll.options == ("A", "B")
 
 
 @pytest.mark.asyncio
@@ -268,6 +328,8 @@ async def test_internal_reply_create_passes_body_author_as_bot_author():
                 "author_id": "bot-a",
                 "client_request_id": "request-2",
                 "body": "Reply body",
+                "reply_to_post_id": None,
+                "poll_selection": None,
             }
             return ForumReplyCreateResult(post=_post(), created=False)
 
@@ -287,6 +349,50 @@ async def test_internal_reply_create_passes_body_author_as_bot_author():
 
     assert response.status_code == 200
     assert payload.data is not None and payload.data.post_id == "post_1"
+
+
+@pytest.mark.asyncio
+async def test_internal_reply_create_forwards_structured_poll_selection():
+    class Service:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def create_reply(self, **kwargs):
+            self.calls.append({"op": "create_reply", **kwargs})
+            return ForumReplyCreateResult(post=_post(), created=True)
+
+    service = Service()
+    response = Response()
+
+    payload = await create_reply_internal(
+        body=CreateReplyRequestUnified(
+            author_type="BOT",
+            author_id="bot-a",
+            client_request_id="req-internal-poll-vote",
+            body="I choose option one.",
+            reply_to_post_id=None,
+            poll_selection=PollSelectionRequest(option_indices=[0]),
+        ),
+        topic_id="topic_1",
+        request=_request("POST", "/api/v1/collaboration/tasks/bbs/topics/topic_1/posts"),
+        response=response,
+        service=service,
+    )
+
+    assert response.status_code == 201
+    assert payload.data is not None and payload.data.post_id == "post_1"
+    assert service.calls == [
+        {
+            "op": "create_reply",
+            "topic_id": "topic_1",
+            "author_type": "BOT",
+            "author_id": "bot-a",
+            "client_request_id": "req-internal-poll-vote",
+            "body": "I choose option one.",
+            "reply_to_post_id": None,
+            "poll_selection": ForumPollSelection(option_indices=(0,)),
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -326,8 +432,37 @@ async def test_internal_reply_create_passes_body_author_as_human_author():
             "author_id": "user-a",
             "client_request_id": "req-internal-reply",
             "body": " Reply body ",
+            "reply_to_post_id": None,
+            "poll_selection": None,
         }
     ]
+
+    await create_reply_internal(
+        body=CreateReplyRequestUnified(
+            author_type="HUMAN",
+            author_id="user-a",
+            client_request_id="req-internal-referenced",
+            body=" Reply body ",
+            reply_to_post_id=" post_1 ",
+        ),
+        topic_id="topic_1",
+        request=_request(
+            "POST", "/api/v1/collaboration/tasks/bbs/topics/topic_1/posts"
+        ),
+        response=Response(),
+        service=service,
+    )
+
+    assert service.calls[1] == {
+        "op": "create_reply",
+        "topic_id": "topic_1",
+        "author_type": "HUMAN",
+        "author_id": "user-a",
+        "client_request_id": "req-internal-referenced",
+        "body": " Reply body ",
+        "reply_to_post_id": " post_1 ",
+        "poll_selection": None,
+    }
 
 
 # ---------------------------------------------------------------------------

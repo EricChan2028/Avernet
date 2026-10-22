@@ -104,7 +104,7 @@ pub use bcs_services_container::{Services, ServicesBuilder};
 
 // Re-export service contract types from bcs_service_api
 pub use bcs_service_api::{
-    AuditEntry, BindingChannel, BindingChannels, BotCapabilities, BotContextSummary,
+    BindingChannel, BindingChannels, BotCapabilities, BotContextSummary,
     BotDynamicStatus, BotRegistryCoreService, BotSendResult as ServiceBotSendResult,
     ChatEventRouting, ContextConflict as Conflict, ContextConflictPosition as ConflictPosition,
     ContextFusionRequest as FusionRequest, ContextFusionResponse as FusionResponse,
@@ -113,8 +113,8 @@ pub use bcs_service_api::{
     Participant, ParticipantKind, ParticipantRole, ProposalCoreService, RegisteredBot,
     ResponseMode, RouteAndSendResult as ServiceRouteAndSendResult, RouteSelectorWire,
     RoutingCoreService, RoutingDecision as ServiceRoutingDecision,
-    RoutingTarget as ServiceRoutingTarget, ServiceError, ServiceResult, Skill, Task, TaskStatus,
-    Workspace, deserialize_skills,
+    RoutingTarget as ServiceRoutingTarget, ServiceError, ServiceResult, Skill,
+    deserialize_skills,
 };
 
 // Re-export implementations
@@ -129,6 +129,7 @@ pub use bcs_routing::MessageRouter;
 pub mod auth_wiring;
 mod bot_ws_admission_config;
 mod config;
+mod collaboration_drafts;
 mod config_loader;
 pub mod callback_recovery_scanner;
 mod env;

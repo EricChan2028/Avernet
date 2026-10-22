@@ -4,54 +4,13 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
 import type { CommunityReply, CommunityTopic } from '@/domain/community/types';
-import { ArrowLeft, User } from 'lucide-react';
-import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
-
-function formatDateTime(value: string) {
-  if (!value) return '时间未知';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '时间未知';
-  const pad = (input: number) => String(input).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(
-    date.getMinutes(),
-  )}`;
-}
-
-interface FloorProps {
-  floor: number;
-  author: CommunityTopic['author'];
-  body: string;
-  createdAt: string;
-}
-
-// 布局：头像+名字+楼层 tag 一行（垂直居中）；正文与时间缩进对齐到名字下方。floor 0 = 楼主，N>0 = N楼。
-function Floor({ floor, author, body, createdAt }: FloorProps) {
-  return (
-    <article className="border-b border-border/60 py-4 last:border-b-0">
-      <div className="flex items-center gap-2">
-        <CommunityAuthorAvatar author={author} size={36} />
-        <span className="text-sm font-semibold text-foreground">{author.displayName}</span>
-        <Badge
-          tone={floor === 0 ? 'primary' : 'neutral'}
-          className={
-            floor === 0
-              ? 'gap-1 rounded bg-foreground px-1.5 py-0.5 text-[10px] text-background'
-              : 'h-6 rounded px-2 py-0 text-[10px]'
-          }
-        >
-          {floor === 0 ? <User className="size-3" aria-hidden /> : null}
-          {floor === 0 ? '楼主' : `${floor}楼`}
-        </Badge>
-      </div>
-      <div className="mt-2 pl-[44px] pr-[44px]">
-        <div className="min-h-[120px]">
-          <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed text-foreground">{body}</p>
-        </div>
-        <div className="mt-2 text-xs text-muted-foreground">发表于：{formatDateTime(createdAt)}</div>
-      </div>
-    </article>
-  );
-}
+import { ArrowLeft } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Floor } from './Floor';
+import { PollTypeIcon } from '../PollTypeIcon';
+import { PollPanel } from './PollPanel';
+import { buildReplyGroups } from './model';
+import { ReplyComposer } from './ReplyComposer';
 
 export interface CommunityTopicDetailProps {
   topic: CommunityTopic | null;
@@ -68,6 +27,13 @@ export interface CommunityTopicDetailProps {
   replyPageCount: number;
   replyPageSize: number;
   onGoToReplyPage: (page: number) => void;
+  replyTargetPostId: string | null;
+  replyPublishing: boolean;
+  hasVoted: boolean;
+  onStartReply: (postId: string) => void;
+  onCancelReply: () => void;
+  onSubmitReply: (body: string) => Promise<boolean>;
+  onSubmitVote: (optionIndices: number[]) => Promise<boolean>;
 }
 
 export function CommunityTopicDetail({
@@ -84,8 +50,56 @@ export function CommunityTopicDetail({
   replyPageCount,
   replyPageSize,
   onGoToReplyPage,
+  replyTargetPostId,
+  replyPublishing,
+  hasVoted,
+  onStartReply,
+  onCancelReply,
+  onSubmitReply,
+  onSubmitVote,
 }: CommunityTopicDetailProps) {
-  const floorOf = (index: number) => (replyPage - 1) * replyPageSize + index + 1;
+  const [expandedReplyIds, setExpandedReplyIds] = useState<Record<string, boolean>>({});
+  const replyElementsRef = useRef(new Map<string, HTMLElement | null>());
+
+  const replyOffset = (replyPage - 1) * replyPageSize;
+  const floorGroups = useMemo(
+    () => buildReplyGroups(replies, replyOffset + 1),
+    [replies, replyOffset],
+  );
+  const floorByPostId = useMemo(() => {
+    const floors = new Map<string, number>();
+    floorGroups.forEach(({ reply, floorNo, children }) => {
+      floors.set(reply.id, floorNo);
+      children.forEach(({ reply: childReply }) => floors.set(childReply.id, floorNo));
+    });
+    return floors;
+  }, [floorGroups]);
+  const replyTargetFloor = replyTargetPostId ? floorByPostId.get(replyTargetPostId) ?? null : null;
+
+  const registerReplyElement = useCallback(
+    (postId?: string) =>
+      (element: HTMLElement | null) => {
+        if (postId) replyElementsRef.current.set(postId, element);
+      },
+    [],
+  );
+
+  const locateTargetReply = useCallback((postId: string) => {
+    const element = replyElementsRef.current.get(postId);
+    if (!element) return;
+    element.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    element.classList.add('bg-primary/10');
+    window.setTimeout(() => element.classList.remove('bg-primary/10'), 1200);
+  }, []);
+
+  const toggleThreadReplies = useCallback((postId: string) => {
+    setExpandedReplyIds((previous) => ({ ...previous, [postId]: !previous[postId] }));
+  }, []);
+
+  // 楼中楼是楼层页面内的局部展开状态；翻页后必须回到默认展示前 2 条。
+  useEffect(() => {
+    setExpandedReplyIds({});
+  }, [replyPage]);
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -96,9 +110,23 @@ export function CommunityTopicDetail({
         </Button>
         <div className="min-w-0 flex-1">
           <h2 className="m-0 min-w-0 truncate text-lg font-semibold text-foreground">{topic?.title || '主题详情'}</h2>
+          {!!topic?.analysis?.tags?.length && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {topic.analysis.tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary"
+                >
+                  #{tag}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
           <div className="flex items-center gap-2">
+            {topic?.topicType === 'poll' && <PollTypeIcon className="size-4" />}
+            {topic?.topicType === 'notice' && <Badge tone="warning">通知</Badge>}
             {topic?.status === 'closed' && <Badge tone="outline">已结帖</Badge>}
             {topic?.canClose && (
               <ConfirmDialog
@@ -163,20 +191,58 @@ export function CommunityTopicDetail({
             />
           ) : topic ? (
             <>
-              {/* 楼主楼层仅在第 1 页显示：翻页后逐页是回帖流，不应每页都重复楼主正文。 */}
+              {/* 楼主楼层仅在第 1 页显示：分页语义本身一直以一级楼层为单位。 */}
               {replyPage === 1 && (
-                <Floor floor={0} author={topic.author} body={topic.body} createdAt={topic.createdAt} />
+                <Floor
+                  floor={0}
+                  author={topic.author}
+                  body={topic.body}
+                  createdAt={topic.createdAt}
+                  threadReplies={[]}
+                  expanded={false}
+                  onToggleThreadReplies={() => undefined}
+                  registerElement={registerReplyElement}
+                />
               )}
-              {replies.map((reply, index) => (
+              {topic ? (
+                <PollPanel
+                  topicType={topic.topicType}
+                  status={topic.status}
+                  poll={topic.topicConfig?.poll}
+                  pollStats={topic.analysis?.pollStats}
+                  hasVoted={hasVoted}
+                  publishing={replyPublishing}
+                  onVote={onSubmitVote}
+                />
+              ) : null}
+              {floorGroups.map(({ reply, floorNo, children }) => (
                 <Floor
                   key={reply.id}
-                  floor={floorOf(index)}
+                  floor={floorNo}
+                  postId={reply.id}
+                  replyToPostId={reply.replyToPostId}
+                  replyToFloorNo={reply.replyToFloorNo}
                   author={reply.author}
                   body={reply.body}
                   createdAt={reply.createdAt}
+                  onReply={onStartReply}
+                  threadReplies={children}
+                  expanded={!!expandedReplyIds[reply.id]}
+                  onToggleThreadReplies={() => toggleThreadReplies(reply.id)}
+                  onLocateTarget={locateTargetReply}
+                  registerElement={registerReplyElement}
                 />
               ))}
-              {!replies.length && <p className="py-6 text-center text-sm text-muted-foreground">暂时还没有回复</p>}
+              {topic.status === 'open' && topic.topicType !== 'poll' ? (
+                <ReplyComposer
+                  replyTargetFloor={replyTargetFloor}
+                  replyTargetPostId={replyTargetPostId}
+                  publishing={replyPublishing}
+                  onCancelReply={onCancelReply}
+                  onSubmitReply={onSubmitReply}
+                />
+              ) : null}
+              {!replies.length && !replyLoading && <p className="py-6 text-center text-sm text-muted-foreground">暂时还没有回复</p>}
               {replyLoading && (
                 <p aria-live="polite" className="py-3 text-center text-xs text-muted-foreground">
                   回复加载中...

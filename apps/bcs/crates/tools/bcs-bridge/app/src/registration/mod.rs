@@ -8,7 +8,8 @@ mod client;
 mod token;
 mod replacement;
 mod desktop;
-mod pending;
+mod subbots;
+mod workspace;
 #[cfg(test)]
 mod subbots_tests;
 
@@ -22,11 +23,11 @@ pub use client::RegistrationClient;
 /// Registration route and success format selected by the distribution.
 #[derive(Clone, Copy, Default)]
 pub enum RegistrationApi { #[default] OpenApi, Root }
-pub use token::{Mode, registration_provider};
+pub use token::{Mode, RegistrationIdentity, registration_identity, registration_provider};
 
 use crate::app::BridgeApp;
 use crate::config::{self, PreparedConfig};
-use crate::identity::IdentityContext;
+use crate::identity::{IdentityContext, IdentityResolver};
 use crate::utils;
 
 #[derive(Args)]
@@ -47,15 +48,12 @@ pub struct RegisterArgs {
     /// BCS register API), or gateway webhook delivery
     #[arg(long, value_enum, default_value = "plugin")]
     mode: Mode,
-    /// How the Provider authenticates its Bots; selects how the Bot identity is obtained
+    /// Identity resolver override (default: Token auth_mode, then the distribution legacy resolver)
     #[arg(long)]
-    provider_auth: String,
+    provider_auth: Option<String>,
     /// Bot identity within its Provider, for Provider types that take it explicitly
     #[arg(long)]
     provider_bot_ref: Option<String>,
-    /// Stable identifier under the AgentPass parent; generated and saved when omitted.
-    #[arg(long)]
-    bot_slug: Option<String>,
     /// Registration API prefix (default: [registration] api_url, then the deploy profile)
     #[arg(long)]
     api_url: Option<String>,
@@ -73,7 +71,7 @@ pub struct RegisterArgs {
     /// Engine id
     #[arg(long)]
     engine: String,
-    /// Engine working directory (default: ~/workspace; created if missing)
+    /// Engine working directory (default: ~/.bcn-bridge/bots/<bot_uuid> for subbots, ~/workspace otherwise)
     #[arg(long)]
     cwd: Option<PathBuf>,
     /// Model passed to the engine
@@ -90,12 +88,24 @@ pub struct RegisterArgs {
 }
 
 impl RegisterArgs {
+    fn identity<'a>(&self, app: &'a BridgeApp, scope: &RegistrationIdentity) -> anyhow::Result<&'a dyn IdentityResolver> {
+        match (self.provider_auth.as_deref(), scope.auth_mode.as_deref()) {
+            (Some(id), _) => app.identity(id),
+            (None, Some(mode)) => app.registration_identity(mode),
+            (None, None) => app.identity(app.defaults().provider_auth),
+        }
+    }
+
     /// A repeated profile command keeps the existing identity and never contacts registration.
     pub(crate) fn reuse_profile(&self, path: &Path, app: &BridgeApp) -> anyhow::Result<bool> {
-        if self.provider_auth == "agentpass-subbots" || self.replace_existing || !path.try_exists().context("Cannot inspect profile configuration")? { return Ok(false); }
+        let scope = registration_identity(&self.token, self.mode)?;
+        let identity = self.identity(app, &scope)?;
+        if scope.auth_mode.as_deref().unwrap_or_else(|| identity.runtime_auth()) == "agentpass-subbots" || self.replace_existing || !path.try_exists().context("Cannot inspect profile configuration")? { return Ok(false); }
         let source = config::read_registration_source(path, true)?;
         let Some(previous) = source.previous else { return Ok(false); };
-        let provider_id = registration_provider(&self.token, self.mode)?;
+        let provider_id = scope.provider_id;
+        // Reuse keeps the saved identity policy; automatic resolver detection may
+        // change after local credentials are installed without changing this Bot.
         let bots = previous.get("bot").and_then(toml::Value::as_array).context("Profile has no Bots")?;
         let matches = previous.get("provider_id").and_then(toml::Value::as_str) == Some(provider_id.as_str())
             && previous.get("mode").and_then(toml::Value::as_str) == Some(self.mode.name())
@@ -167,18 +177,22 @@ fn valid_provider_bot_ref(value: &str) -> bool {
 }
 
 pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyhow::Result<()> {
-    let identity = app.identity(&args.provider_auth)?;
+    let scope = registration_identity(&args.token, args.mode)?;
+    let identity = args.identity(app, &scope)?;
+    // Provider mode controls registration semantics; the resolver supplies identity and credentials.
+    // Historical Tokens have no mode metadata, so retain the selected resolver policy.
+    let provider_auth = scope.auth_mode.as_deref().unwrap_or_else(|| identity.runtime_auth());
     identity.preflight()?;
+    let subbots = provider_auth == "agentpass-subbots";
     let bootstrap = if args.replace_existing {
-        if args.provider_auth == "agentpass-subbots" {
+        if provider_auth == "agentpass-subbots" {
             bail!("Subbot registration appends Bots; --replace-existing is unsupported for this mode");
         }
         config::read_registration_source(path, true)?
     } else {
-        let provider = registration_provider(&args.token, args.mode)?;
-        config::read_for_registration(path, &args.provider_auth, &provider, args.mode.name())?
+        config::read_for_registration(path, provider_auth, &scope.provider_id, args.mode.name())?
     };
-    let provider_id = registration_provider(&args.token, args.mode)?;
+    let provider_id = scope.provider_id;
     let api_url = match args.api_url.clone().or(bootstrap.settings.api_url.clone()) {
         Some(url) => url,
         None => app.profile().default_api_url()?,
@@ -190,7 +204,7 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     let saved_bin = saved_bot.and_then(|bot| bot.get("engine_bin")).and_then(toml::Value::as_str).map(Path::new);
     let factory = app.engines().get(&args.engine).with_context(|| format!(
         "Unknown engine '{}'; available engines: {}", args.engine, app.engines().ids().collect::<Vec<_>>().join(", ")))?;
-    if args.provider_auth == "agentpass-subbots" && !factory.supports_caller_env() {
+    if provider_auth == "agentpass-subbots" && !factory.supports_caller_env() {
         bail!("Engine '{}' cannot propagate subbot identity", args.engine);
     }
     let engine_bin = if factory.requires_bin() {
@@ -243,15 +257,9 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
             (None, Some(url))
         }
     };
-    let cwd = match args.cwd.clone() {
-        Some(cwd) => cwd,
-        None => {
-            let workspace = dirs::home_dir().context("Cannot locate home directory; specify --cwd")?.join("workspace");
-            std::fs::create_dir_all(&workspace).context("Cannot create default engine working directory")?;
-            workspace
-        }
-    }.canonicalize().context("Cannot resolve engine working directory")?;
-    if !cwd.is_dir() { bail!("Engine working directory must be a directory"); }
+    let workspace = workspace::Workspace::prepare(args.cwd.as_deref(), subbots)?;
+    if subbots { workspace.check_explicit(&bootstrap.document, path)?; }
+    let cwd = workspace.identity_cwd();
     #[cfg(unix)]
     let _runtime_reservation = if bootstrap.previous.is_some() {
         let directory = dirs::home_dir().context("Cannot locate home directory")?.join(".bcn-bridge");
@@ -309,7 +317,7 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     } else {
         document.entry("state_path").or_insert("bridge-state.sqlite3".into());
     }
-    document.insert("provider_auth".into(), args.provider_auth.clone().into());
+    document.insert("provider_auth".into(), provider_auth.to_owned().into());
     document.insert("api_url".into(), api_url.clone().into());
     match args.mode {
         Mode::Gateway => { if !append { document.insert("listen".into(), args.listen.to_string().into()); } }
@@ -324,7 +332,7 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     document.insert("bot".into(), toml::Value::Array(vec![toml::Value::Table(bot.clone())]));
     // The plugin document cannot fully validate until the Bot identity is known
     // (plugin bots require bot_id); its URL was validated above.
-    if webhook_token.is_some() && args.provider_auth != "agentpass-subbots" { config::runtime(&document, path, webhook_token.as_deref())?; }
+    if webhook_token.is_some() && provider_auth != "agentpass-subbots" { config::runtime(&document, path, webhook_token.as_deref())?; }
     let replacing = bootstrap.previous.is_some();
     let prepared = PreparedConfig::new(path, bootstrap.original.clone())?;
     // Appending changes an existing runtime configuration. A new profile only
@@ -348,23 +356,20 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     if append && existing_bots.iter().any(|item| item.get("agent_code").and_then(toml::Value::as_str) != Some(provider_bot_ref.as_str())) {
         bail!("Appending a Bot requires the same AgentPass parent");
     }
-    let subbots = args.provider_auth == "agentpass-subbots";
-    let slug = if subbots {
-        let request = serde_json::to_string(&serde_json::json!({
-            "provider_id":provider_id, "parent":provider_bot_ref, "api_url":api_url,
-            "mode":args.mode.name(), "name":args.bot_name.trim(), "bot":bot,
-            "webhook":webhook_url,
-        }))?;
-        Some(pending::prepare(path, &request, args.bot_slug.as_deref())?)
-    } else { None };
-    let complete_ref = client::composed_ref(&provider_bot_ref, slug.as_deref())?;
-    if subbots {
-        if existing_bots.iter().any(|item| item.get("provider_bot_ref").and_then(toml::Value::as_str) == Some(complete_ref.as_str())) {
-            bail!("This Bot is already present in the local bridge configuration");
+    // Only a confirmed duplicate ref permits another attempt; unknown outcomes never replay.
+    let mut slugs = subbots.then(|| subbots::Slugs::new(&existing_bots));
+    let mut attempts = 0;
+    let (slug, registration) = loop {
+        let slug = slugs.as_mut().map(subbots::Slugs::next).transpose()?;
+        attempts += 1;
+        match client.register(&args.token, args.bot_name.trim(), &provider_bot_ref, args.mode.name(), webhook_url, &provider_id, slug.as_deref()).await {
+            Ok(registration) => break (slug, registration),
+            Err(error) if subbots && error.is::<client::RegistrationConflict>() && attempts < subbots::REGISTRATION_ATTEMPTS => continue,
+            Err(error) => return Err(error),
         }
-    }
-    if subbots { pending::submitted(path)?; }
-    let registration = client.register(&args.token, args.bot_name.trim(), &provider_bot_ref, args.mode.name(), webhook_url, &provider_id, slug.as_deref()).await?;
+    };
+    let assigned_cwd = workspace.assigned_cwd(&registration.bot_uuid);
+    bot.insert("cwd".into(), assigned_cwd.to_str().context("Engine working directory must be UTF-8")?.into());
     document.insert("provider_id".into(), registration.registration.provider_id.into());
     bot.insert("provider_bot_ref".into(), registration.registration.provider_bot_ref.into());
     if let Some(slug) = &slug {
@@ -379,11 +384,15 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     let resolved = config::RegistrationSettings { api_url: Some(api_url), webhook_url: webhook_url.map(str::to_owned), provider_auth: Some(identity.runtime_auth().to_owned()) };
     document.insert("registration".into(), toml::Value::try_from(resolved).context("Cannot encode API settings")?);
     let text = toml::to_string_pretty(&document).context("Cannot encode registered bridge configuration")?;
+    if subbots {
+        if let Err(error) = workspace.create_assigned(&assigned_cwd, &bootstrap.document, path) {
+            return prepared.save_recovery(&text, &format!("cannot prepare the exclusive Bot workspace: {error:#}; resolve the saved cwd before starting"));
+        }
+    }
     if config::runtime(&document, path, webhook_token.as_deref()).is_err() {
         return prepared.save_recovery(&text, "runtime configuration validation failed");
     }
     prepared.save(&text)?;
-    if subbots { pending::complete(path)?; }
     println!("Bot registered in {} mode. Configuration saved to {}. Start with bcs-bridge start --config {}", args.mode.name(), path.display(), path.display());
     Ok(())
 }

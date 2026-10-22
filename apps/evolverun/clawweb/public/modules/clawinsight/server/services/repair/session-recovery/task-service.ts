@@ -18,7 +18,8 @@ export interface RecoveryAgentExecutor {
   listExecutions(taskId: string): Promise<RecoveryExecutionView[]>;
 }
 export interface RecoveryTaskNotifier {
-  notify(input: { ownerId: string; taskId: string; kind: "plan" | "result"; summary: string }): Promise<void>;
+  /** False means notification is disabled; do not record a delivery attempt. */
+  notify(input: { ownerId: string; taskId: string; kind: "plan" | "result"; summary: string }): Promise<boolean>;
 }
 export interface RecoveryTaskReporter { report(result: RecoveryTaskResult): Promise<void> }
 
@@ -157,7 +158,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
 
   async list(eventId: string, actor: RecoveryActor) {
     if (!eventId || eventId.length > 128) this.fail(422, "event_id 无效");
-    const tasks = await this.deps.tasks.listForEvent(eventId, actor.userId);
+    const tasks = await this.deps.tasks.listForEvent(eventId, actor.userId, actor.isAdmin);
     return tasks.filter(task => this.canOperate(task, actor) || task.shared === true)
       .map(task => ({ task_id: task.taskId, status: task.status, phase: task.phase, effect: task.judgment?.effect ?? "unknown" }));
   }
@@ -165,7 +166,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     const task = await this.required(taskId);
     const canOperate = this.canOperate(task, actor);
     if (!canOperate && task.shared !== true) this.fail(403, "权限不足，请联系任务 Owner 开启分享");
-    const { pending_results: _pending, execution: _execution, authorizationScopeDigest: _scope, aisExecution: _ais, ...view } = task;
+    const { pending_results: _pending, execution: _execution, authorizationScopeDigest: _scope, aisExecution: _ais, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, ...view } = task;
     const executions = await this.deps.agent.listExecutions(taskId);
     return { ...view, pending_results: [], shared: task.shared === true, canOperate, canManageShare: canOperate,
       executions, ...(task.status === "canceled" ? { termination: executions.at(-1)?.termination ?? { status: "stop_pending" as const, aisJobId: executions.at(-1)?.jobId ?? null } } : {}) };
@@ -283,7 +284,11 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
   private async notify(task: RecoveryStoredTask, kind: "plan" | "result", summary: string): Promise<void> {
     // Notification completion is a timeline fact, independent of Owner approval.
     let sent = false;
-    try { await this.deps.notifier.notify({ ownerId: task.request.target.entity_id, taskId: task.taskId, kind, summary }); sent = true; }
+    try {
+      const result = await this.deps.notifier.notify({ ownerId: task.request.target.entity_id, taskId: task.taskId, kind, summary });
+      if (result === false) return;
+      sent = true;
+    }
     catch { console.error("[session-recovery] notification not confirmed", task.taskId, kind); }
     const current = await this.required(task.taskId);
     await this.mutate(task.taskId, current.version, value => ({ ...value, version: value.version + 1,

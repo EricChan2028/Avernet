@@ -1,7 +1,6 @@
 import { Button } from '@/components/ui/Button';
 import { supportsEngineVersion, type EngineVersionUpdateAvailability } from '@/domain/botEngineVersion';
 import type { BotDomain } from '@/domain/botWorkshop';
-import { Info } from 'lucide-react';
 import { actionIcon } from './config';
 import { ActionHelp, MenuSection } from './menuPrimitives';
 
@@ -21,7 +20,7 @@ export function BotEngineVersionMenuItems({ bot, availability, onOpenInfo, onUpd
   return (
     <MenuSection divider>
       {onOpenInfo ? (
-        <Button variant="ghost" size="sm" className="w-full justify-start" leftIcon={<Info className="size-4" />} onClick={() => onOpenInfo(bot)}>
+        <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => onOpenInfo(bot)}>
           引擎信息
         </Button>
       ) : null}

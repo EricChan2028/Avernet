@@ -77,42 +77,6 @@ function rerenderBotItem(
 }
 
 describe('ConversationBotItem 归属增强（2026-10-22 体验精修二轮）', () => {
-  const renderWithSection = (section: 'managed' | 'friend', online: boolean) =>
-    render(
-      <ConversationBotItem
-        bot={{ ...bot, online }}
-        section={section}
-        expanded={false}
-        selectedSessionId={null}
-        origin="mine"
-        scope="all"
-        sessionKey=""
-        sessions={undefined}
-        onToggle={noop}
-        onOriginChange={noop}
-        onScopeChange={noop}
-        onSearchSession={noop}
-        onCreateSession={noop}
-        onSelectSession={noop}
-        onLoadMore={noop}
-        onToggleFavorite={noop}
-        isFavoritePending={() => false}
-        onOpenAgentCodingBot={noop}
-      />,
-    );
-
-  it('好友 Bot 在线时头像佩戴 emerald 信号点（与收起竖轨 OnlineDot 同语义）;离线或非好友 Bot 不佩戴', () => {
-    const { container, unmount } = renderWithSection('friend', true);
-    // 信号点:仅好友 Bot 且 online=true 才亮(收起竖轨同款 bg-emerald-500 + ring-background)。
-    const dot = container.querySelector('span.bg-emerald-500');
-    expect(dot).not.toBeNull();
-    expect(dot).toHaveClass('rounded-full', 'ring-2');
-    unmount();
-    // 离线好友不佩戴;非好友 Bot(管理/团队)无好友在线语义,一律不佩戴。
-    const { container: offline } = renderWithSection('friend', false);
-    expect(offline.querySelector('span.bg-emerald-500')).toBeNull();
-  });
-
   it('展开箭头旋转过渡:收起 -rotate-90,展开归零(替代 Right↔Down 硬切换)', () => {
     const { container } = renderBotItem({ expanded: false });
     const arrowSvg = (container.querySelector('button[aria-hidden="true"]') as HTMLElement).querySelector('svg');
@@ -383,7 +347,7 @@ describe('ConversationBotItem Bot 可用状态(FAILED/PENDING 整行禁用)', ()
     fireEvent.pointerMove(pendingRow, { pointerType: 'mouse' });
     fireEvent.focusIn(pendingRow);
     await waitFor(() =>
-      expect(screen.getByText('该 Bot 正在创建中，暂时无法使用，完成后可刷新重试')).toBeInTheDocument(),
+      expect(screen.getByText('该 Bot 正在创建或重启中，暂时无法使用，完成后可刷新重试')).toBeInTheDocument(),
     );
   });
 

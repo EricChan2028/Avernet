@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DIAGNOSIS_VERSION, type DiagnosisEvent } from "../contracts.js";
+import { DIAGNOSIS_VERSION, DIAGNOSIS_V3_VERSION, type DiagnosisEvent } from "../contracts.js";
 import { createMonitoringRecoveryTrigger, SESSION_RECOVERY_ALLOWLIST_KEY } from "../session-recovery-trigger.js";
 import { SessionRecoveryError } from "../../repair/session-recovery/errors.js";
 
+import { runtimeIdentity } from "./runtime-identity-fixture.js";
 const bot = { bot_id: "default", entity_id: "001234", env: "prod" };
 const event: DiagnosisEvent = {
   schemaVersion: DIAGNOSIS_VERSION, eventId: "event-1", diagnosisId: "event-1", botId: "default",
@@ -106,4 +107,31 @@ describe("monitoring automatic recovery", () => {
     await trigger.trigger({ ...event, entityId: "another-owner" });
     await expect(trigger.trigger(event)).rejects.toMatchObject({ code: "NOT_READY" });
   });
+});
+
+
+it("uses the real recovery parser to normalize v3 locators without forwarding credentials", async () => {
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  const { service, trigger } = setup();
+  await trigger.trigger({ ...event, schemaVersion: DIAGNOSIS_V3_VERSION,
+    runtimeIdentity: { ...runtimeIdentity, OWNER_ID: event.entityId } });
+  expect(service.create).toHaveBeenCalledTimes(1);
+  const [request, actor] = service.create.mock.calls[0];
+  expect(request.target).toEqual({ ...bot, engine: "OC", runtime_identity: {
+    stage: "online", deviceUuid: runtimeIdentity.CLIENT_ID, version: "V16",
+  } });
+  expect(actor).toEqual({ userId: event.entityId, isAdmin: false });
+  expect(request.target.runtime_identity).not.toHaveProperty("TOKEN");
+  expect(request.target.runtime_identity).not.toHaveProperty("EXTENSION");
+  expect(warning).not.toHaveBeenCalled();
+});
+
+it("does not downgrade missing or mismatched v3 identity to old recovery", async () => {
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  const { service, trigger } = setup();
+  for (const identity of [null, { ...runtimeIdentity, BOT_ID: "wrong" }, { ...runtimeIdentity, OWNER_ID: "" }]) {
+    await trigger.trigger({ ...event, schemaVersion: DIAGNOSIS_V3_VERSION, runtimeIdentity: identity });
+  }
+  expect(service.create).not.toHaveBeenCalled();
+  expect(warning).toHaveBeenCalledTimes(3);
 });

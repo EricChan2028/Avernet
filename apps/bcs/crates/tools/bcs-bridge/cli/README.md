@@ -56,12 +56,20 @@ bcs-bridge stop
 
 - The registration token comes from `GET /openapi/v1/collaboration/register/token`;
   the bridge reads its unverified v2 metadata only to select the Provider and
-  check the requested mode. BCS verifies it on registration.
-- `--provider-auth static-bearer` (default): gateway Bots need `--provider-bot-ref`;
+  check the requested connection mode. Without `--provider-auth`, `auth_mode`
+  selects the identity resolver. Historical v2 Tokens without that field use the
+  distribution's legacy resolver (`static-bearer` in the public binary).
+  `--provider-auth <resolver-id>` explicitly selects a local resolver; its name is
+  not compared with the Token's Provider mode. BCS verifies the original Token
+  signature and checks a present mode claim against the current Provider config.
+  Malformed Tokens and unsupported mode metadata still fail locally.
+- For `static_bearer` or `provider_admin` Providers, gateway Bots need `--provider-bot-ref`;
   plugin Bots get a generated `bridge-<uuid>` reference when it is omitted.
+  Resolver selection changes local identity acquisition; it never changes the
+  server Provider configuration or adds an authentication-mode request parameter.
 - `--engine claude-code|codex` (default `claude-code`) looks up `claude` / `codex`
   on `PATH` unless `--engine-bin` is given; `--model` and `--cwd` (default
-  `~/workspace`) are optional.
+  `~/workspace`, or `~/.bcn-bridge/bots/<bot_uuid>` for subbots) are optional.
 - Configuration is written atomically to `~/.bcn-bridge/bridge.toml` (0600), or to
   `--config` / `BRIDGE_CONFIG`. Gateway webhook tokens are never written to it;
   `start` reads them from `BCS_BRIDGE_PROVIDER_TOKENS` (a JSON object of Provider
@@ -133,8 +141,9 @@ fn main() -> std::process::ExitCode {
         .engine(MyEngineFactory)          // add or replace engines
         .profile(MyProfile)               // endpoint defaults
         .credentials(MyCredentials)       // gateway webhook credentials
-        .identity(MyIdentity)             // Bot identity at registration
-        .defaults(CliDefaults { about: "...", engine: "my-engine", model: None, provider_auth: "my-auth" })
+        .identity(MyIdentity)             // identity resolver with id "my-auth"
+        .registration_identity("agentpass", "my-auth") // wire mode -> local resolver
+        .defaults(CliDefaults { about: "...", engine: "my-engine", model: None, provider_auth: "static-bearer" })
         .build()
         .main()
 }
@@ -145,7 +154,7 @@ fn main() -> std::process::ExitCode {
 | `engine::EngineFactory` | core | `claude-code`, `codex` | Create the engine for `engine = "<id>"`; validate `engine_options` |
 | `profile::DeployProfile` | app | `ExplicitProfile` (no built-in endpoints) | Default registration API and Bot WebSocket endpoints |
 | `credentials::CredentialSource` | app | `EnvCredentials` | Webhook Bearer token per Provider (gateway mode) |
-| `identity::IdentityResolver` | app | `StaticBearer` | `provider_bot_ref` for `--provider-auth <id>`, with an optional preflight |
+| `identity::IdentityResolver` | app | `StaticBearer` | `provider_bot_ref` for the Token-selected Provider mode, with an optional preflight |
 
 Distributions can call `.registration_permission_mode("my-engine", "<mode>")`
 on the application builder to write `permission_mode` into newly registered
@@ -257,7 +266,7 @@ For connections to an existing desktop host, see
 [Codex desktop host integration](docs/codex-desktop.md). The `codex-desktop`
 engine uses the host's Unix WebSocket and requires no engine executable.
 
-`IdentityResolver::registration_ref` receives the selected engine, canonical workspace
+`IdentityResolver::registration_ref` receives the selected engine, canonical pre-registration directory
 and optional `--provider-bot-ref`. The default preserves the explicit reference;
 distributions can discover an existing local identity. Resolved references are
 validated before `registration_client` prepares authentication for both identity
@@ -280,6 +289,8 @@ combined with `--profile`.
 
 Repeated registration of an existing profile verifies provider, engine and
 endpoints and reuses the stored Bot without a network registration request.
+Reuse preserves the saved identity policy even if an automatic resolver now
+detects newly installed local credentials.
 Explicitly conflicting workspace/model options are rejected. New profiles may
 reuse local engine options from a verified active instance of the same engine.
 When QwenWork is stopped, saved regular TOML configs directly in ~/.bcn-bridge
@@ -337,20 +348,50 @@ updates retain that endpoint without administrator authentication or network cal
 New bindings still require an explicit webhook URL.
 
 
+For subbots without an explicit `--cwd`, the pre-registration directory passed
+to the identity hook is `~/.bcn-bridge/bots`, not the eventual Bot workspace: the
+server assigns the full Bot UUID only after registration. Engines never run in
+that shared root. An explicit `--cwd` is passed through as its canonical path.
+
 ### AgentPass sibling Bots
 
 Distributions that provide an `agentpass-subbots` identity resolver can register
-multiple Bots under one verified parent. Use `--provider-auth agentpass-subbots`
-and optionally `--bot-slug reviewer`. When omitted, the bridge generates a slug
-and persists it before the first POST so retries keep the same identity.
+multiple Bots under one verified parent. A Token issued for an `agentpass-subbots`
+Provider selects this resolver automatically. Each invocation generates a new
+5-character random lowercase-alphanumeric suffix in memory; there is no `--bot-slug`
+option. Use `--bot-name` for a descriptive label, which need not be unique.
 
 The bridge sends a complete `provider_bot_ref=<parent>:<slug>` on both scoped
 registration routes. It sends neither `bot_slug` nor `expected_auth_mode` as a
-request parameter. The server selects behavior from its Provider configuration,
+request parameter. The server checks any signed auth-mode claim against its Provider configuration,
 parses the last colon and preserves the full ref. Slugs must match
 `[a-z0-9][a-z0-9_-]{0,31}`; the complete ref is limited to 128 bytes.
 
 Successful registration appends a Bot with its own UUID and Static Token to the
-same bridge config. Runtime child processes receive a per-Bot caller context;
+same bridge config. Without `--cwd`, each new subbot gets a private workspace at
+`~/.bcn-bridge/bots/<full-bot-uuid>`; the short slug is not the directory key.
+The root is checked for writability before registration, and the Bot directory is
+created exclusively after the validated response supplies its UUID. Existing
+files, directories and symlinks at that destination are never reused or overwritten.
+An explicit `--cwd` must exist and must not resolve to another Bot's working
+directory in the same configuration (including symlink aliases). Existing Bots'
+slugs, workspaces, files and conversations are not migrated. Non-subbots retain
+`~/workspace` as their default. This is working-directory separation, not an OS sandbox.
+If workspace creation or configuration persistence fails after registration, a
+private recovery configuration retains the returned credentials and intended
+`cwd`; resolve the failure before starting it, rather than registering again.
+
+Runtime child processes receive a per-Bot caller context;
 `bcs-cli` forwards its `X-BCN-Actor-Bot-Id`. A Static Token selects its own Bot,
 while a parent AgentPass token requires an explicit Actor for subbots.
+
+Registration does not persist pending state. Old `.pending.json` files are ignored.
+Saved suffixes and suffixes attempted by the current invocation are skipped
+locally. Only an HTTP 409 with the structured `registration_conflict` error code
+permits another random suffix, with at most three registration requests total.
+There is no additional parent lookup per retry. Other failures (including generic
+409s, timeouts, transport failures, 5xx responses and malformed success responses)
+are never automatically retried, and failures preserve the existing configuration.
+If the result is unknown, a remote Bot may already exist: inspect `agents/me`
+before registering again. A new invocation generates a new suffix and can create
+another Bot with the same display name. Saved runtime configurations remain usable.

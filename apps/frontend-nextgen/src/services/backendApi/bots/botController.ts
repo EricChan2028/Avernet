@@ -33,6 +33,8 @@ export interface OwnedBotDto {
   disabled_actions?: Record<string, string>;
   space_id?: string | number;
   space_name?: string;
+  /** 归属空间(2026-10-21 对齐线上实际返回的嵌套形态;bots 接口实测 space_id/name/kind)。 */
+  space?: { space_id: string; name: string; kind: string } | null;
 }
 
 /** /openapi/v1/bots/metadata/queries 的 body 里单个 bot 查询项。 */

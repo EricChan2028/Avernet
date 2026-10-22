@@ -42,14 +42,14 @@ export type RepairBaseline = {
 export type RepairBatchInput = {
   schemaVersion: typeof REPAIR_BATCH_SCHEMA; taskId: string; revision: number; baseline: RepairBaseline;
   items: RepairItem[]; excludedSources: { count: number; digest: string }; instructions: string;
-  materials?: {schemaVersion:'repair-frozen-materials/v1';recordId:string;sha256:string;bytes:number};
+  materials?: {schemaVersion:'repair-frozen-materials/v1';recordId:string;sha256:string;bytes:number;flowCount?:number};
   automation?: AutomationOrigin;
   integration?: { schemaVersion: 'workflow-proposal-plan/v1'; baselineSpecDigest: string; plans: Array<{ id: string; originalItemIds: string[]; goals: string[]; relation: string; causes?: import('./repair-proposal.js').ProposalCause[]; unknowns?: string[] }> };
   parentCandidateCommit: string | null; feedback: string; previousReportRef: string | null; taskBranch: string;
 };
 export type RepairRevisionPhase = 'drafting' | 'review' | 'blocked' | 'publishing' | 'published' | 'no_change' | 'failed' | 'cancelled';
-/** Optional AIS result record. Core input is the exact application prompt; materials are an index, not file bodies. */
-export type RepairModelInput = { itemId: string; coreInput: string; materials: Record<string, unknown> };
+/** Optional AIS result record. Core input is the exact application prompt; materials are an index, not file bodies. An omitted phase is legacy generation. */
+export type RepairModelInput = { phase?: 'planning' | 'generation'; itemId: string; coreInput: string; materials: Record<string, unknown> };
 export type RepairRevision = {
   workflowId: string; taskId: string; revision: number; phase: RepairRevisionPhase; stateVersion: number;
   requestId: string; requestDigest: string; input: RepairBatchInput;
@@ -100,10 +100,16 @@ export function validateRepairModelInputs(value: unknown, input: RepairBatchInpu
   valid(Array.isArray(value), 'modelInputs');
   const itemIds = new Set(input.items.map(item => item.itemId));
   const seen = new Set<string>();
+  let hasPlanning = false;
   for (const entry of value) {
-    valid(object(entry) && text(entry.itemId, 64) && itemIds.has(entry.itemId) && !seen.has(entry.itemId)
+    valid(object(entry) && text(entry.itemId, 64) && itemIds.has(entry.itemId)
       && text(entry.coreInput, MAX_RESULT_BYTES), 'modelInputs record');
-    seen.add(entry.itemId);
+    valid(entry.phase === undefined || entry.phase === 'planning' || entry.phase === 'generation', 'modelInputs phase');
+    const phase = entry.phase ?? 'generation';
+    const key = `${phase}:${entry.itemId}`;
+    valid(!seen.has(key) && (phase !== 'planning' || !hasPlanning), 'modelInputs record');
+    seen.add(key);
+    if (phase === 'planning') hasPlanning = true;
     const materials = entry.materials;
     valid(object(materials) && materials.schemaVersion === 'repair-local-materials/v1'
       && materials.taskId === input.taskId && materials.revision === input.revision
@@ -176,7 +182,7 @@ export function validateRepairBatchInput(value: unknown): RepairBatchInput {
   valid(gitIdentity(value.taskId, 64) && integer(value.revision, 1), 'revision identity');
   valid(Array.isArray(value.items) && value.items.length > 0 && value.items.length <= MAX_ITEMS, 'items');
   value.items.forEach(validateRepairItem);
-  if(value.materials!==undefined){const ref=value.materials;valid(object(ref)&&ref.schemaVersion==='repair-frozen-materials/v1'&&digest(ref.recordId)&&digest(ref.sha256)&&integer(ref.bytes,1)&&Number(ref.bytes)<=MAX_MATERIAL_BYTES,'frozen materials');}
+  if(value.materials!==undefined){const ref=value.materials;valid(object(ref)&&ref.schemaVersion==='repair-frozen-materials/v1'&&digest(ref.recordId)&&digest(ref.sha256)&&integer(ref.bytes,1)&&Number(ref.bytes)<=MAX_MATERIAL_BYTES&&(ref.flowCount===undefined||integer(ref.flowCount)),'frozen materials');}
   if (value.automation !== undefined) validateAutomationOrigin(value.automation);
   if (value.integration !== undefined) {
     const integration = value.integration;

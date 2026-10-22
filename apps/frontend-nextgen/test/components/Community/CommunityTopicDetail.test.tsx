@@ -2,7 +2,7 @@
 import { CommunityTopicDetail } from '@/components/Community/CommunityTopicDetail';
 import type { CommunityReply, CommunityTopic } from '@/domain/community/types';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const topic: CommunityTopic = {
@@ -10,6 +10,7 @@ const topic: CommunityTopic = {
   title: '社区主题',
   body: '楼主正文',
   status: 'open',
+  topicType: 'discussion',
   author: { type: 'human', id: 'human-1', displayName: '顾客' },
   replyCount: 1,
   latestActivityAt: '',
@@ -44,6 +45,13 @@ function renderDetail(overrides: Partial<DetailProps> = {}) {
     replyPageCount: 1,
     replyPageSize: 20,
     onGoToReplyPage: jest.fn(),
+    replyTargetPostId: null,
+    replyPublishing: false,
+    hasVoted: false,
+    onStartReply: jest.fn(),
+    onCancelReply: jest.fn(),
+    onSubmitReply: jest.fn(async () => true),
+    onSubmitVote: jest.fn(async () => true),
     ...overrides,
   };
   return { props, ...render(<CommunityTopicDetail {...props} />) };
@@ -62,6 +70,73 @@ describe('CommunityTopicDetail', () => {
     expect(screen.queryByText(/Invalid Date/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '返回社区列表' }));
     expect(props.onBack).toHaveBeenCalledTimes(1);
+  });
+
+  test('投票主题只提供结构化投票入口，不展示讨论回帖框', async () => {
+    const user = userEvent.setup();
+    const { props } = renderDetail({
+      topic: {
+        ...topic,
+        topicType: 'poll',
+        topicConfig: {
+          poll: {
+            selection: 'single',
+            options: ['方案 A', '方案 B', '方案 C'],
+            deadlineAt: '2999-10-20T12:00:00Z',
+          },
+        },
+        analysis: {
+          tags: ['AI治理', '投票'],
+          pollStats: {
+            totalVotes: 3,
+            participantCount: 3,
+            options: [
+              { label: '方案 A', votes: 2, percent: 67 },
+              { label: '方案 B', votes: 1, percent: 33 },
+              { label: '方案 C', votes: 0, percent: 0 },
+            ],
+            updatedAt: '2026-10-19T12:00:00Z',
+          },
+        },
+      },
+    });
+
+    expect(screen.getByRole('region', { name: '投票配置' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: '投票主题' })).toBeInTheDocument();
+    expect(screen.getByText('单选')).toBeInTheDocument();
+    expect(screen.getByText('方案 A')).toBeInTheDocument();
+    expect(screen.getByText('2票 · 67%')).toBeInTheDocument();
+    expect(screen.getByText('1票 · 33%')).toBeInTheDocument();
+    expect(screen.getByText('0票 · 0%')).toBeInTheDocument();
+    expect(screen.getByText('单选 • 3 位参与者 • 共3票')).toBeInTheDocument();
+    expect(screen.getByText('#AI治理')).toBeInTheDocument();
+    expect(screen.getByText('#投票')).toBeInTheDocument();
+    expect(screen.getByText(/进行中，截止/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /方案 A/ }));
+    await user.click(screen.getByRole('button', { name: '提交投票' }));
+    await waitFor(() => expect(props.onSubmitVote).toHaveBeenCalledWith([0]));
+
+    expect(screen.queryByRole('textbox', { name: '回复正文' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '投票理由' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '发送回复' })).not.toBeInTheDocument();
+  });
+
+  test('已投票的 POLL 主题禁用继续投票入口', () => {
+    renderDetail({
+      hasVoted: true,
+      topic: {
+        ...topic,
+        topicType: 'poll',
+        topicConfig: { poll: { selection: 'multi', options: ['方案 A', '方案 B'] } },
+      },
+      replies: [],
+    });
+
+    expect(screen.queryByRole('button', { name: '提交投票' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /方案 A/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /方案 B/ })).toBeDisabled();
+    expect(screen.getByText('你已投过票，投票主题不允许继续回复。')).toBeInTheDocument();
   });
 
   test('加载中显示骨架占位、不渲染楼层', () => {
@@ -103,6 +178,167 @@ describe('CommunityTopicDetail', () => {
     renderDetail({ topic: { ...topic, status: 'closed', canClose: false } });
     expect(screen.getByText('已结帖')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '结帖' })).not.toBeInTheDocument();
+  });
+
+  test('引用目标不在当前页时保持平铺并显示引用标签', () => {
+    const referenced: CommunityReply = {
+      ...replies[0],
+      replyToPostId: 'post-0',
+      replyToFloorNo: 1,
+    };
+    renderDetail({ replies: [referenced] });
+
+    expect(screen.getByText('回复 1楼')).toBeInTheDocument();
+    expect(screen.getAllByRole('article')).toHaveLength(2);
+  });
+
+  test('楼中楼渲染在一级楼层下方，回复目标是作者且子回复不占楼层号', () => {
+    const firstChild: CommunityReply = {
+      ...replies[0],
+      id: 'child-1',
+      body: '楼中楼回复一',
+      author: { ...replies[0].author, id: 'bot-child', displayName: '风控分析 Bot' },
+      replyToPostId: 'floor-1',
+      replyToFloorNo: 1,
+    };
+    const secondChild: CommunityReply = {
+      ...replies[0],
+      id: 'child-2',
+      body: '回复楼中楼成员',
+      author: { ...replies[0].author, id: 'bot-grandchild', displayName: '桌面助手' },
+      replyToPostId: 'child-1',
+    };
+    const floor: CommunityReply = {
+      ...replies[0],
+      id: 'floor-1',
+      body: '主楼层正文',
+      author: { ...replies[0].author, id: 'human-floor', displayName: 'ClawMind' },
+      childReplies: [firstChild, secondChild],
+    };
+    const { props } = renderDetail({ replies: [floor] });
+
+    const floorArticle = screen.getByText('主楼层正文').closest('article');
+    expect(floorArticle).not.toBeNull();
+    if (!floorArticle) throw new Error('floor article is missing');
+
+    expect(within(floorArticle).getByText('楼中楼回复一')).toBeInTheDocument();
+    expect(within(floorArticle).getByText('回复楼中楼成员')).toBeInTheDocument();
+    expect(within(floorArticle).getByRole('button', { name: '定位ClawMind' })).toBeInTheDocument();
+    expect(within(floorArticle).getByRole('button', { name: '定位风控分析 Bot' })).toBeInTheDocument();
+    expect(screen.queryByText('2楼')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('article')).toHaveLength(4);
+
+    fireEvent.click(within(floorArticle).getByRole('button', { name: '回复桌面助手' }));
+    expect(props.onStartReply).toHaveBeenCalledWith('child-2');
+
+    const originalScrollIntoView = window.HTMLElement.prototype.scrollIntoView;
+    window.HTMLElement.prototype.scrollIntoView = jest.fn();
+    jest.useFakeTimers();
+    fireEvent.click(within(floorArticle).getByRole('button', { name: '定位ClawMind' }));
+    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({
+      block: 'center',
+      behavior: 'smooth',
+    });
+    expect(floorArticle).toHaveClass('bg-primary/10');
+    act(() => {
+      jest.advanceTimersByTime(1200);
+    });
+    expect(floorArticle).not.toHaveClass('bg-primary/10');
+    jest.useRealTimers();
+    window.HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+  });
+
+  test('楼中楼超过两条默认折叠前两条，可展开和收起', () => {
+    const floor: CommunityReply = {
+      ...replies[0],
+      id: 'floor-1',
+      body: '主楼层正文',
+      childReplies: [1, 2, 3, 4].map((index) => ({
+        ...replies[0],
+        id: `child-${index}`,
+        body: `楼中楼回复${index}`,
+        replyToPostId: 'floor-1',
+        createdAt: `2026-10-06T06:20:0${index}Z`,
+      })),
+    };
+    renderDetail({ replies: [floor] });
+
+    const floorArticle = screen.getByText('主楼层正文').closest('article');
+    expect(floorArticle).not.toBeNull();
+    if (!floorArticle) throw new Error('floor article is missing');
+
+    const scope = within(floorArticle);
+    expect(scope.getByText('楼中楼回复1')).toBeInTheDocument();
+    expect(scope.getByText('楼中楼回复2')).toBeInTheDocument();
+    expect(scope.queryByText('楼中楼回复3')).not.toBeInTheDocument();
+    expect(scope.queryByText('楼中楼回复4')).not.toBeInTheDocument();
+
+    const expand = screen.getByRole('button', { name: '查看全部 4 条回复 ▾' });
+    expect(expand).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(expand);
+    expect(screen.getByText('楼中楼回复3')).toBeInTheDocument();
+    expect(screen.getByText('楼中楼回复4')).toBeInTheDocument();
+
+    const collapse = screen.getByRole('button', { name: '收起 ▴' });
+    expect(collapse).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(collapse);
+    expect(screen.queryByText('楼中楼回复3')).not.toBeInTheDocument();
+    expect(screen.queryByText('楼中楼回复4')).not.toBeInTheDocument();
+  });
+
+  test('翻页后楼中楼展开状态重置为默认两条', () => {
+    const makeFloor = (id: string, page: number): CommunityReply => ({
+      ...replies[0],
+      id,
+      body: `${page}页一级楼层`,
+      childReplies: [1, 2, 3].map((index) => ({
+        ...replies[0],
+        id: `page-${page}-child-${index}`,
+        body: `${page}页楼中楼${index}`,
+        replyToPostId: id,
+      })),
+    });
+    const firstRender = renderDetail({
+      replyPage: 1,
+      replyPageCount: 2,
+      replies: [makeFloor('floor-page-1', 1)],
+    });
+    fireEvent.click(screen.getByRole('button', { name: '查看全部 3 条回复 ▾' }));
+    expect(screen.getByText('1页楼中楼3')).toBeInTheDocument();
+
+    firstRender.rerender(
+      <CommunityTopicDetail
+        {...firstRender.props}
+        replyPage={2}
+        replies={[makeFloor('floor-page-2', 2)]}
+      />,
+    );
+    expect(screen.getByText('2页楼中楼1')).toBeInTheDocument();
+    expect(screen.getByText('2页楼中楼2')).toBeInTheDocument();
+    expect(screen.queryByText('2页楼中楼3')).not.toBeInTheDocument();
+  });
+
+  test('点击楼层回复会记录 Post id，提交时透传正文', async () => {
+    const user = userEvent.setup();
+    const { props } = renderDetail();
+
+    await user.click(screen.getByRole('button', { name: '回复第1楼' }));
+    expect(props.onStartReply).toHaveBeenCalledWith('reply-1');
+
+    await user.type(screen.getByLabelText('回复正文'), '给楼层的回复');
+    await user.click(screen.getByRole('button', { name: '发送回复' }));
+    await waitFor(() => expect(props.onSubmitReply).toHaveBeenCalledWith('给楼层的回复'));
+  });
+
+  test('选中引用后展示目标楼层，取消引用回到直接回复', async () => {
+    const user = userEvent.setup();
+    const { props } = renderDetail({ replyTargetPostId: 'reply-1' });
+
+    expect(screen.getByText('正在回复第 1 楼')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '发送楼层回复' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '取消引用' }));
+    expect(props.onCancelReply).toHaveBeenCalledTimes(1);
   });
 
   test('翻页到第 2 页不再重复展示楼主正文（楼主仅首页显示）', () => {

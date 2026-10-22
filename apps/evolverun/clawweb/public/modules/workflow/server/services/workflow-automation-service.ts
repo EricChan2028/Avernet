@@ -10,6 +10,7 @@ import { WorkflowAutomationRepository, type AutomationJob } from '../repositorie
 import { runAutomaticRound } from './workflow-automation-round.js';
 import { previousShanghaiDay, selectAutomaticScope } from './workflow-automation-selection.js';
 import { WorkflowAutomationHistoryRepository } from '../repositories/workflow-automation-history-repository.js';
+import { createWorkflowNotificationDrain } from './workflow-notification-delivery.js';
 const DAY = 86400000;
 export function automationDue(now: number, dailyTime: string) {
   const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(now));
@@ -22,14 +23,17 @@ async function bounded<T>(action: Promise<T>): Promise<T> {
   try { return await Promise.race([action, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('AUTOMATION_OUTCOME_UNKNOWN')), 20000); })]); }
   finally { if (timer) clearTimeout(timer); }
 }
-export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoAnalysisSettings; ports: WorkflowAutomationPorts;
+export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoAnalysisSettings; ports: WorkflowAutomationPorts; environment?: string;
   workbench: AutomationWorkbench; now?: () => number }): WorkflowAutomationService {
   const now = input.now ?? Date.now;
   const repo = new WorkflowAutomationRepository(input.db);
+  const drainNotifications = createWorkflowNotificationDrain(input);
   const issues = new IssueAggregationRepository(input.db);
   let roundRobin = 0;
+  const environment = input.environment ?? 'prod';
   async function authority(workflowId: string, draft = false) {
     const policy = await input.settings.get(workflowId);
+    if ((policy.executionEnvironment ?? 'prod') !== environment) throw new RepairAutomationDeniedError('EXECUTION_ENVIRONMENT_MISMATCH');
     if (!policy.enabled || draft && (!policy.autoDraft || !policy.dailyConfigured)) throw new RepairAutomationDeniedError('AUTOMATION_DISABLED');
     const actorId = await input.ports.owner(workflowId);
     if (!actorId) throw new RepairAutomationDeniedError('OWNER_MISSING');
@@ -183,32 +187,6 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
     const terminal = ['failed', 'blocked', 'cancelled', 'no_change', 'published'].includes(revision.phase);
     await repo.patch(job, { status: terminal ? 'blocked' : 'waiting', reason: terminal ? 'DRAFT_REQUIRES_MANUAL_REVIEW' : null, data, nextAtMs: now() + 30000 }, now(), true);
   }
-  async function notify(record: AutomationJob) {
-    let job = await repo.claim(record.id, now()); if (!job) return;
-    if (job.status === 'dispatching' || job.status === 'uncertain') {
-      await repo.patch(job, { status: 'uncertain', reason: 'NOTIFICATION_OUTCOME_UNKNOWN', nextAtMs: now() + 300000 }, now(), true); return;
-    }
-    let access;
-    try { access = await authority(job.workflowId); }
-    catch (error) { if (!(error instanceof RepairAutomationDeniedError)) throw error;
-      await repo.patch(job, { status: 'retryable', reason: error.message, nextAtMs: now() + 30000 }, now(), true); return; }
-    const { actorId } = access;
-    if (job.data.kind === 'draft') {
-      const task = await input.workbench.task(job.data.taskId);
-      const reviewable = task.latestAttempt.phase === 'review'
-        || task.latestAttempt.phase === 'no_change' && task.automaticProgress?.publishable === true;
-      if (task.latestAttempt.revision !== job.data.revision || !reviewable) {
-        await repo.patch(job, { status: 'done', reason: 'CANDIDATE_SUPERSEDED' }, now(), true); return;
-      }
-    }
-    if (job.attempts >= 3) { await repo.patch(job, { status: 'blocked', reason: 'NOTIFICATION_REJECTED' }, now(), true); return; }
-    job = await repo.patch(job, { status: 'dispatching', attempts: job.attempts + 1, data: { ...job.data, recipientId: actorId } }, now());
-    let result: Awaited<ReturnType<WorkflowAutomationPorts['notify']>>;
-    try { result = await bounded(input.ports.notify({ key: job.id, workflowId: job.workflowId, recipientId: actorId, title: job.data.title, text: job.data.text, path: job.data.path })); }
-    catch { result = { status: 'uncertain' }; }
-    await repo.patch(job, { status: result.status === 'sent' ? 'done' : result.status, reason: result.status === 'sent' ? null : result.status === 'uncertain' ? 'NOTIFICATION_OUTCOME_UNKNOWN' : 'NOTIFICATION_REJECTED',
-      nextAtMs: now() + 60000, data: { ...job.data, receipt: result.receipt ?? null } }, now(), true);
-  }
   async function workflow(policy: WorkflowAutomationPolicy) {
     const initial = await repo.ensure(policy.workflowId, 'auto_cycle', 'state', { scanFromMs: policy.scopeVersion === 'all-qualified/v1' ? previousShanghaiDay(now()).fromMs : now() - DAY, scannedThroughMs: null, completedDue: null }, now());
     let cycle = await repo.claim(initial.id, now()); if (!cycle) return;
@@ -234,7 +212,6 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
           if (current.autoDraft) cycle = await planDraft(cycle);
           if (cycle.reason !== 'DRAFT_IN_PROGRESS') cycle = await repo.patch(cycle, { data: { ...cycle.data, evaluated, blockingTaskId: null } }, now());
         }
-        for (const job of await repo.ready(policy.workflowId, 'auto_notice', now(), 3)) await notify(job);
       }
       await repo.patch(cycle, { nextAtMs: now() + 10000 }, now(), true);
     } catch (error) {
@@ -243,9 +220,9 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
     }
   }
   // Status and recovery share eligibility; inspecting status never claims or dispatches work.
-  async function draftRecoveries(workflowId: string, enforceAuthority = false) {
+  async function draftRecoveries(workflowId: string, enforceAuthority = false, jobId?: string) {
     const policy = await input.settings.get(workflowId);
-    const failures = await repo.recoverableDrafts(workflowId, now(), policy.version);
+    const failures = await repo.recoverableDrafts(workflowId, now(), policy.version, jobId);
     if (!failures.length) return [];
     let access;
     try { access = await authority(workflowId, true); }
@@ -266,10 +243,17 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
   }
   return {
     async tick() {
-      const policies = await input.settings.list(); if (!policies.length) return 0;
+      const policies = (await input.settings.list()).filter(policy => (policy.executionEnvironment ?? 'prod') === environment);
       const count = Math.min(10, policies.length);
-      for (let i = 0; i < count; i++) await workflow(policies[(roundRobin + i) % policies.length]);
-      roundRobin = (roundRobin + count) % policies.length;
+      for (let i = 0; i < count; i++) {
+        const policy = policies[(roundRobin + i) % policies.length];
+        try { await workflow(policy); }
+        catch (error) { console.warn('[workflow-automation] reconcile failed', { workflowId: policy.workflowId, environment,
+          code: error instanceof RepairAutomationDeniedError ? error.message : 'AUTOMATION_RECONCILE_FAILED' }); }
+      }
+      if (policies.length) roundRobin = (roundRobin + count) % policies.length;
+      // Manual completions and in-flight automatic results notify even with automation disabled/unconfigured.
+      await drainNotifications();
       return count;
     },
     async onRunTerminal(event) {
@@ -289,9 +273,11 @@ export function createWorkflowAutomation(input: { db: IDatabase; settings: AutoA
         jobs: jobs.map(summarize),
         retryableJobs: [...await repo.retryableFailures(workflowId, now()), ...(await draftRecoveries(workflowId)).map(entry => entry.job)].map(summarize) };
     },
-    async retryFailures(workflowId) {
-      await repo.retryFailures(workflowId, now());
-      for (const { job, recovery } of await draftRecoveries(workflowId, true)) {
+    async retryFailures(workflowId, jobId) {
+      const retried = await repo.retryFailures(workflowId, now(), jobId);
+      const drafts = await draftRecoveries(workflowId, true, jobId);
+      if (jobId && !retried && !drafts.length) throw new RepairAutomationDeniedError('TASK_NOT_RETRYABLE');
+      for (const { job, recovery } of drafts) {
         await repo.recoverDraft(job, { ...job.data, recovery, request: { ...job.data.request, requestId: recovery.requestId } }, now());
       }
     },

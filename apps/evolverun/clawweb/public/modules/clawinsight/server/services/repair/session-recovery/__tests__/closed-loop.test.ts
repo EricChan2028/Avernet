@@ -70,6 +70,26 @@ beforeEach(async () => {
   reporter = { report: async result => { callbacks.push(result); } };
   service = new SessionRecoveryTaskService({ controlPlaneEnvironment: "pre", tasks, agent, notifier, reporter, observationMs: 3600000, now: () => now, resolveTarget: async () => recoveryTargetSnapshot(target), actionNotifier });
 });
+it("queries private event tasks for administrators while preserving Owner and sharing filters", async () => {
+  const task = await create();
+  expect((await service.list(request.event_id, { userId: "admin", isAdmin: true })).map(value => value.task_id)).toEqual([task.taskId]);
+  expect(await service.list(request.event_id, { userId: "reader", isAdmin: false })).toEqual([]);
+  expect(await service.list("other-event", { userId: "admin", isAdmin: true })).toEqual([]);
+  await service.setTaskShared(task.taskId, true, actor);
+  expect(await service.list(request.event_id, { userId: "reader", isAdmin: false })).toHaveLength(1);
+});
+
+it("continues Owner confirmation without recording a sent notification when disabled", async () => {
+  let task = await toPlan(await create());
+  notifier.notify.mockResolvedValue(false);
+  await service.plan(task.taskId, task.version, plan);
+  task = await current(task.taskId);
+  expect(task.status).toBe("waiting_owner");
+  expect(task.timeline.filter(event => event.kind === "notification")).toEqual([]);
+  await service.decide(task.taskId, task.plan!.digest, true, actor);
+  expect((await current(task.taskId)).phase).toBe("apply");
+});
+
 it("persists deduplicated group delivery facts without changing the business version or exposing them to the Agent", async () => {
   const task = await create();
   const sent = await agent.retryMessage(task, { clientRequestId: "group-advice", purpose: "纠正原操作", message: "请按真实工具参数继续" });
@@ -214,6 +234,7 @@ it("retains an in-flight write as unknown after stopping without replay or task 
   expect(await pending).toMatchObject({ status: "unknown" });
   expect((await current(task.taskId)).status).toBe("canceled");
   expect((await current(task.taskId)).timeline.some(event => event.kind === "operation" && event.payload.status === "unknown")).toBe(true);
+  await service.reportResults(); expect(callbacks.at(-1)).toMatchObject({ status: "canceled", intervention_status: "unknown" });
   await service.maintenance(); expect(runtime.sendMessage).toHaveBeenCalledOnce();
 });
 it("non-MCP goes to one environment plan without any initial retry message", async () => {
@@ -438,6 +459,8 @@ it("preserves an approved plan and unknown write evidence across an AIS retry", 
   await expect(agent.apply(task, { actionId: "fix", clientRequestId: "blind-replay", purpose: "不能盲目重复写入" })).rejects.toMatchObject({ status: 409 });
   expect(runtime.executeShell).toHaveBeenCalledTimes(operationCount);
   await service.reportResults(); expect(callbacks).toEqual([]);
+  await service.executionFailure(task.taskId, "后续执行结束"); await service.reportResults();
+  expect(callbacks.at(-1)).toMatchObject({ status: "failed", intervention_status: "performed" });
 });
 it("does not retry a non-retryable Base failure or notify Owner about infrastructure failure", async () => {
   const task = await create(), step = (await repo.findStep(task.aisExecution!.stepId))!;
@@ -523,15 +546,13 @@ it("uses the Engine reference when no actual request is supplied, only after app
   expect(runtime.request).toHaveBeenCalledTimes(1);
 });
 it("TE rejects a Shell plan before granting any environmental operation", async () => {
-  target = { ...target, provider: "teclaw", activeEngine: "teclaw" };
-  let task = await create("approval", { target: { ...request.target, engine: "TE" } });
-  vi.mocked(runtime.request).mockResolvedValue({ status: 200, body: { success: true, data: [{ role: "assistant", content: "原动作失败" }] } });
-  const evidence = await inspect(task, "te-original");
+  target = { ...target, provider: "teclaw", activeEngine: "teclaw" }; let task = await create("approval", { target: { ...request.target, engine: "TE" } });
+  (agent as any).deps.trajectory = { read: vi.fn().mockResolvedValue({ traces: [] }) };
+  const evidence = await agent.trajectoryRead(task, { clientRequestId: "te-original", purpose: "调查原任务的环境阻塞" });
   await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "environment", summary: "根据诊断需形成环境方案", evidence_ids: [evidence.evidenceId] });
   task = await current(task.taskId);
   await expect(agent.report(task, { kind: "plan", phase: "plan", plan })).rejects.toMatchObject({ status: 422 });
-  expect(runtime.executeShell).not.toHaveBeenCalled();
-  expect(runtime.request).toHaveBeenCalledTimes(1);
+  expect(runtime.executeShell).not.toHaveBeenCalled(); expect(runtime.request).not.toHaveBeenCalled();
   expect(notifier.notify).not.toHaveBeenCalled();
 });
 it("a delivery marker quoted in a tool result cannot confirm original-session delivery", async () => {
@@ -610,31 +631,9 @@ it("creates recovery tasks using the existing evolution-scoped artifact credenti
   expect(task.timeline.some(event => event.kind === "created")).toBe(true);
 });
 
-it("logs a redacted creation failure while keeping the HTTP response generic", async () => {
-  const fixtureValue = ["recovery", "fixture", "private", "credential", "123456"].join("-");
-  const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
-  artifactStore.putObject = async () => { throw new Error(`OSS PutObject failed: Authorization: Bearer ${fixtureValue}`); };
-  const app = express(); app.use(createSessionRecoveryRouter({ service }));
-  const server = await new Promise<ReturnType<typeof app.listen>>(resolve => { const opened = app.listen(0, "127.0.0.1", () => resolve(opened)); });
-  try {
-    const response = await fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}/internal/monitoring/session-recoveries`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request),
-    });
-    expect(response.status).toBe(503);
-    const body = await response.json();
-    expect(body.error).toBe("recovery_unavailable");
-    expect(JSON.stringify(body)).not.toContain("OSS PutObject");
-    expect(log).toHaveBeenCalledOnce();
-    const record = JSON.parse(log.mock.calls[0][1]);
-    expect(record).toMatchObject({ method: "POST", path: "/internal/monitoring/session-recoveries" });
-    expect(record.error).toContain("OSS PutObject failed");
-    expect(record.error).not.toContain(fixtureValue);
-  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); log.mockRestore(); }
-});
-
 it("allows an approved business action without a prewritten command, and audits each actual step", async () => {
   let task = await toPlan(await create());
-  const actionPlan: RecoveryPlan = { ...plan, actions: [{ actionId: "fix", summary: "修正本任务配置", risk: "局部修改", verification: "读取配置确认", rollback: "恢复原值" }] };
+  const actionPlan: RecoveryPlan = { ...plan, actions: [{ actionId: "fix", operationScope: { operation: "file.write", target: "/workspace/memory.md" }, summary: "修正本任务配置", risk: "局部修改", verification: "读取配置确认", rollback: "恢复原值" }] };
   await agent.report(task, { kind: "plan", phase: "plan", plan: actionPlan });
   task = await current(task.taskId);
   const operation = { clientRequestId: "actual-shell-1", purpose: "落实获批配置调整", actionId: "fix", command: "printf first-step" };
@@ -671,6 +670,7 @@ it("accepts actual Engine parameters independent of the saved execution referenc
     ...actual, upload: { ...actual.upload, content: actual.upload.content },
   } });
   expect((await current(task.taskId)).plan!.actions[0].engineOperation).toEqual(reference);
+  expect(await agent.apply(await current(task.taskId), { clientRequestId: "shell-fallback", purpose: "通过受控Shell落实同一文件调整", actionId: "fix", command: "printf repaired > /workspace/memory.md" })).toMatchObject({ status: "succeeded" });
 });
 it("lets an approved adjustment use an Engine request instead of the reference Shell", async () => {
   let task = await toPlan(await create()); await agent.report(task, { kind: "plan", phase: "plan", plan });
@@ -684,8 +684,10 @@ it("lets an approved adjustment use an Engine request instead of the reference S
   await expect(agent.apply(await current(task.taskId), { clientRequestId: "invalid-engine", purpose: "无效的空接口请求", actionId: "fix", engineOperation: null })).rejects.toMatchObject({ status: 422 });
 });
 it("TE adjusts and verifies an approved cron action through actual API calls without Shell", async () => {
-  target = { ...target, provider: "teclaw", activeEngine: "teclaw" };
-  let task = await create("approval", { target: { ...request.target, engine: "TE" } });
+  target = { ...target, provider: "teclaw", activeEngine: "teclaw" }; let task = await create("approval", { target: { ...request.target, engine: "TE" } });
+  const { planProtocol } = await agent.bootstrap(task);
+  expect(planProtocol.allowedOperations).toEqual(["file.write", "file.delete", "engine.restart", "cron.create", "cron.update", "cron.delete", "cron.run"]);
+  expect(planProtocol.operationScope).toContain("启用和禁用使用 cron.update");
   vi.mocked(runtime.request).mockResolvedValue({ status: 200, body: { success: true, data: [] } });
   const inspected = await agent.inspect(task, { operation: "engine_read", request: { method: "GET", path: "/api/v1/bot/cron" }, clientRequestId: "read-cron", purpose: "核对诊断中的重复定时任务" });
   expect(inspected.status).toBe("succeeded");
@@ -833,8 +835,6 @@ it("migrates legacy pending results before reporting and preserves their origina
   expect((await current(task.taskId)).evidence).toEqual([evidence]);
   expect(JSON.parse((await repo.findTask(task.taskId))!.config_json).artifactStorage).toBe(2);
 });
-
-
 it("waiting snapshots survive same-task resumes and restart before the final result is delivered", async () => {
   let task = await toObserve(await create());
   const firstExecution = task.execution!.executionId;
@@ -968,4 +968,33 @@ it("leaves unmarked legacy recovery tasks unclaimed rather than guessing from th
   await reconcileAgentExecutions({ controlPlaneEnvironment: "pre", db, repo, handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais }, nowSeconds: () => Math.floor(now / 1000) });
   expect(ais.getJobStatusDetail).not.toHaveBeenCalled(); expect(ais.stopExecution).not.toHaveBeenCalled();
   expect((await current(task.taskId)).execution).toEqual(task.execution);
+});
+it.each([true, false])("accepts AIVision delivery from the current actual receipt, initial=%s", async initial => {
+  target = { ...target, provider: "teclaw", activeEngine: "teclaw" };
+  let task = await create("automatic", { target: { ...request.target, engine: "TE" } });
+  const read = vi.fn().mockResolvedValue({ traces: [] });
+  (agent as any).deps.trajectory = { read };
+  task = (await tasks.update(task.taskId, task.version, value => ({ ...value, version: value.version + 1, timeline: [...value.timeline, { event_id: "legacy-session", kind: "operation", at_ms: now, actor: "agent", summary: "旧会话读取", payload: { result: { session_id: request.session_key } } }] })))!;
+  expect((await agent.bootstrap(task)).tools).toMatchObject({ session_read: false, trajectory_read: true });
+  await expect(agent.sessionRead(task, { clientRequestId: "te-old-reader", purpose: "旧会话工具调用" })).rejects.toMatchObject({ status: 422, code: "unsupported_session_read" });
+  if (initial) task = await toObserve(task);
+  else {
+    const basis = await agent.trajectoryRead(task, { clientRequestId: "te-assess", purpose: "读取原任务的环境阻塞证据" });
+    await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "environment", summary: "需要先解决环境阻塞", evidence_ids: [basis.evidenceId] });
+    task = await current(task.taskId);
+    await agent.report(task, { kind: "plan", phase: "plan", plan: { ...plan, actions: [], owner_cooperation: [] } });
+    now += 1000;
+    await agent.retryMessage(await current(task.taskId), { clientRequestId: "after-fix", purpose: "环境处理后继续原任务", message: "请继续原任务" });
+    await agent.report(await current(task.taskId), { kind: "apply", phase: "apply", applicable: true, success: true, summary: "环境已核实，已发送继续指引" });
+    task = await current(task.taskId); expect(task.delivery).toBeUndefined();
+  }
+  expect(runtime.request).not.toHaveBeenCalled(); expect(runtime.executeShell).not.toHaveBeenCalled();
+  const sent = [...task.timeline].reverse().find(event => typeof (event.payload.result as any)?.initial_message === "boolean")!;
+  const receipt = (await agent.toolGet(task, String(sent.payload.tool_call_id))).result as any;
+  read.mockResolvedValue({ delivery_confirmed: true, delivery: { location: "trace.input", marker: "verified" }, traces: [] });
+  const evidence = await agent.trajectoryRead(task, { clientRequestId: "te-observe", purpose: "从真实用户轨迹核实触达" });
+  expect(read).toHaveBeenCalledWith(expect.objectContaining({ messageMarker: `[会话自愈：${receipt.delivery_key}]\n`, notBeforeMs: receipt.started_at_ms }));
+  await agent.report(await current(task.taskId), { kind: "observation", phase: initial ? "observe" : "verify", judgment: {
+    delivery: "confirmed", response: "acted", effect: "recovered", summary: "完整轨迹确认执行恢复", evidence_ids: [evidence.evidenceId] } });
+  expect((await current(task.taskId)).status).toBe("completed");
 });

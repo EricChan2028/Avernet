@@ -1,8 +1,11 @@
 export type BotEnvironment = "dev" | "pre" | "prod";
-export type BotTarget = { environment: BotEnvironment; ownerId: string; botId: string };
+export type BotRuntimeIdentity = { stage: "draft" | "verify" | "online"; deviceUuid?: string; version?: string };
+export type BotTarget = { environment: BotEnvironment; ownerId: string; botId: string; runtimeIdentity?: BotRuntimeIdentity };
 /** Provider metadata is an internal routing contract, not an HTTP request schema. */
 export type ResolvedBotTarget = BotTarget & {
   provider: string; bindingId: string; deviceId: string;
+  /** Exact BaaS instance, validated against the Bot binding by the host. */
+  deviceUuid?: string; providerDeviceId?: string;
   entityId?: string; entityType?: string; sandboxId?: string; arcaInstanceId?: string; botType?: string; activeEngine?: string;
 };
 export interface BotSessionTrajectoryReader {
@@ -11,7 +14,9 @@ export interface BotSessionTrajectoryReader {
    * Results must fit within 128 KiB; next_offset / next_content_offset enable continuation.
    * Without maxBytes, preserve existing full-record reads. Missing uploads are not proof of failure. */
   read(input: { target: ResolvedBotTarget; sessionKey: string; offset: number; limit: number; traceId?: string;
-    maxBytes?: number; observationId?: string; field?: "input" | "output"; contentOffset?: number; contentLimit?: number }): Promise<Record<string, unknown>>;
+    maxBytes?: number; observationId?: string; field?: "input" | "output"; contentOffset?: number; contentLimit?: number;
+    /** Optional exact user-message match in the scoped trace input; never infer it from previews or tool output. */
+    messageMarker?: string; notBeforeMs?: number }): Promise<Record<string, unknown>>;
 }
 export interface BotTargetResolver { resolve(target: BotTarget): Promise<ResolvedBotTarget> }
 /** Trusted callers can supply their already validated/frozen target. */

@@ -5,7 +5,6 @@
 // (Bot 身份只读好友分支由 /workspace/chat 单一 Human 语义整体取代,旧分支 Task 10 退休)。
 // 登录用户变化(非首次出现)时重置会话 Store:缓存按 botId 记忆、无用户来源,
 // 防止上一用户的缓存/选中串号(控制器裁定,不在每次挂载时重置)。
-import type { IdentityView } from '@/domain/collaboration/types';
 import type { ConversationBotSection } from '@/domain/conversation/types';
 import { isManagedConversationSection } from '@/domain/conversation/types';
 import { buildSingleChatBridgeRequest } from '@/hooks/singleChatBridgeRequest';
@@ -14,12 +13,11 @@ import { buildBotChatTarget } from '@/hooks/workspaceIdentityMapper';
 import { buildAgentCodingChatPath } from '@/services/workspace';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { chatBridge } from '@/services/workspace/chatBridge';
-import { useConversationStore } from '@/stores/conversationStore';
 import { useChatBridge } from '@tc-chat/adapters';
 import type { BridgeInputRef, PanelHandle } from '@tc-chat/core';
 import type { SenderRef } from '@tc-chat/ui/es/Sender';
 import { history } from '@umijs/max';
-import { useEffect, useMemo, useRef, type RefObject } from 'react';
+import { useMemo, useRef, type RefObject } from 'react';
 import { ReadOnlyConversationPanel } from '../components/ReadOnlyConversationPanel';
 import { useBotChat } from '../hooks/useBotChat';
 import { ChatHeaderActions } from './components/ChatHeaderActions';
@@ -34,6 +32,7 @@ import { useChatHeaderPanels } from './hooks/useChatHeaderPanels';
 import { useConversationDeepLinkSessionHydration } from './hooks/useConversationDeepLinkSessionHydration';
 import { useConversationDirectory } from './hooks/useConversationDirectory';
 import { useConversationHistory } from './hooks/useConversationHistory';
+import { useConversationIdentityReset } from './hooks/useConversationIdentityReset';
 import { useConversationInteractiveChat } from './hooks/useConversationInteractiveChat';
 import { useConversationMobileSidebar } from './hooks/useConversationMobileSidebar';
 import { useConversationSelection } from './hooks/useConversationSelection';
@@ -41,7 +40,9 @@ import { useConversationSessionEdits } from './hooks/useConversationSessionEdits
 import { useConversationSessionPlaceholder } from './hooks/useConversationSessionPlaceholder';
 import { useConversationSessions } from './hooks/useConversationSessions';
 import { useConversationUrlSync } from './hooks/useConversationUrlSync';
+import { useConversationViewer } from './hooks/useConversationViewer';
 import { useManagedBotOthers } from './hooks/useManagedBotOthers';
+import { useSessionSwitchReset } from './hooks/useSessionSwitchReset';
 
 export default function ConversationPage(): JSX.Element {
   const { identity: human } = useHumanIdentity();
@@ -49,16 +50,8 @@ export default function ConversationPage(): JSX.Element {
   const panelRef = useRef<PanelHandle | null>(null);
   const inputRef = useRef<SenderRef | null>(null);
 
-  // 登录用户变化才整仓重置(不随挂载/重渲染触发);首次出现不算切换。
-  const previousUserIdRef = useRef<string | null>(null);
-  const identityChanged = previousUserIdRef.current !== null && previousUserIdRef.current !== userId;
-  useEffect(() => {
-    const previousUserId = previousUserIdRef.current;
-    previousUserIdRef.current = userId;
-    if (previousUserId !== null && previousUserId !== userId) {
-      useConversationStore.getState().reset();
-    }
-  }, [userId]);
+  // 登录用户变化才整仓重置;identityChanged 供切换瞬间停用旧用户会话装配(详见 hook)。
+  const { identityChanged } = useConversationIdentityReset(userId);
 
   const directory = useConversationDirectory(userId);
   // 团队 Bot 独立目录(section=team)与会话模型合并消费:
@@ -116,20 +109,7 @@ export default function ConversationPage(): JSX.Element {
   );
   const botChat = useBotChat(interactiveBot, selectedSession, panelRef, undefined, userId);
   const sessionEdits = useConversationSessionEdits(userId);
-  // viewer:登录 Human 的身份视图(kind 恒 user,是「查看者」而非可选身份)。
-  const viewer = useMemo<IdentityView | null>(
-    () =>
-      human
-        ? {
-            id: human.userId,
-            kind: 'user',
-            displayName: human.displayName,
-            avatarUrl: human.avatarUrl,
-            online: human.online,
-          }
-        : null,
-    [human],
-  );
+  const viewer = useConversationViewer(human);
   const chatBots = useMemo(
     () => [...managedAndTeamBots.map((view) => view.bot), ...directory.friendBots.map((view) => view.bot)],
     [managedAndTeamBots, directory.friendBots],
@@ -159,6 +139,9 @@ export default function ConversationPage(): JSX.Element {
     inputRef: inputRef as RefObject<BridgeInputRef | null>,
     buildRequestParams: (content) => buildSingleChatBridgeRequest(target?.id ?? null, content),
   });
+
+  // /file 等面板唤起后切会话:输入清空/失效 chip/Escape 收起子面板(详见 useSessionSwitchReset)。
+  useSessionSwitchReset(selectedSession?.sessionId ?? null, interactiveModel.fileFeature.senderRef);
 
   // 只读(others)装配:三元组不完整时 Hook 内部只清态不发请求。
   const selectionIsReadonly = origin === 'others' && store.selectedBotId !== null;
@@ -260,6 +243,7 @@ export default function ConversationPage(): JSX.Element {
             setMobileListOpen(false);
           }}
         />
+        <div className="relative flex h-full min-h-0 min-w-0 flex-1">
         {selectionIsReadonly ? (
           <ReadOnlyConversationPanel
             bot={readonly.bot}
@@ -292,6 +276,7 @@ export default function ConversationPage(): JSX.Element {
             onSidePaneIsOpenChange={headerPanels.onSidePaneIsOpenChange}
           />
         )}
+        </div>
       </div>
       {engineVersionNotice.dialogs}
     </div>

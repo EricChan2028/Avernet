@@ -1,4 +1,5 @@
 pub mod collaboration_history;
+pub mod collaboration_draft;
 pub use collaboration_history::*;
 pub mod collaboration_terminal_im;
 mod collaboration_recovery;
@@ -92,3 +93,4 @@ pub use session_file::{
     NewSessionFileParams, SessionFileListPage, SessionFileListParams, SessionFileRepoPort,
 };
 pub use user_identity::{UserIdentity, UserIdentityRepoPort};
+pub mod collaboration_actor;

@@ -22,18 +22,25 @@ from agentclaw.community.adapters.http.task.schemas_relay_report import (
     TaskReportCommandDTO, report_result_to_dto,
 )
 from agentclaw.community.adapters.http.task.trajectory_html import render_trajectory_html
+from agentclaw.community.adapters.http.task.schemas_artifact import (
+    group_artifacts_by_node,
+)
 from agentclaw.community.adapters.http.task.schemas import (
     TaskCallbackRequest, TaskExecutionGraphDTO,
     TaskGrantRequestDTO, TaskGrantResultDTO, TaskInfoRequestDTO,
     TaskNodeUpdateDTO, TaskOpResultDTO,
     TaskRevokeRequestDTO, TaskRevokeResultDTO, TaskSettingRequestDTO,
     TaskSettingStateDTO, TaskTrajectoryDTO, acceptance_result_from_dto,
-    graph_to_dto, op_result_to_dto, task_info_request_from_dto,
-    trajectory_to_dto,
+    graph_to_dto, op_result_to_dto,
+    task_info_request_from_dto, trajectory_to_dto,
 )
+from agentclaw.community.adapters.http.task.artifact_routes import router as artifact_api_router
 from agentclaw.community.adapters.http.task.relay_routes import router as relay_api_router
 from agentclaw.community.adapters.http.task.bbs_routes import router as bbs_api_router
 from agentclaw.community.adapters.http.task.intake_routes import router as intake_api_router
+from agentclaw.community.adapters.http.task.task_read_routes import (
+    router as task_read_api_router,
+)
 from agentclaw.community.adapters.http.task.callback_routes import (
     _dispatch,
     emit_relay_report_reject_trajectory,
@@ -50,6 +57,9 @@ from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
 from agentclaw.community.api.task.task_grant_service import TaskClaimGrantServiceProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.api.task.task_context_service import TaskContextServiceProtocol
+from agentclaw.community.core.repository.protocols.task import (
+    TaskArtifactRepositoryProtocol,
+)
 from agentclaw.community.core.errors import InternalError
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.task.domain.errors import TaskStateError
@@ -85,6 +95,8 @@ router = APIRouter(prefix="/api/v1/collaboration/tasks", tags=["task"])
 router.include_router(relay_api_router)
 router.include_router(bbs_api_router)
 router.include_router(intake_api_router)
+router.include_router(task_read_api_router)
+router.include_router(artifact_api_router)
 
 # ===== 公开面镜像(execute;内部 /api/v1 副本,不经 spanner)=====
 # 与 ``adapters/http/openapi_v1/task/router.py`` 公开面同一 ``TaskServiceProtocol`` 委托,逻辑一致 —— 内部调用方走此副本免 gateway spanner。改其一须同步。
@@ -201,7 +213,11 @@ async def benchmark_execute_task_internal(
             sent = await bot_port.send_message(
                 bot_id=bot_identity,
                 message=prompt,
-                metadata={"benchmark": True},
+                metadata={
+                    "benchmark": True,
+                    "sender_options": {"from": body.owner_user_id},
+                    "bot_options": {"lifecycle_stage": "draft"},
+                },
             )
         except Exception as exc:  # noqa: BLE001
             return envelope(op_result_to_dto(_send_failed(exc)), request)
@@ -229,6 +245,11 @@ async def benchmark_execute_task_internal(
 
     execution_config = dict(task_request.execution_config)
     execution_config["main_session_id"] = session_id
+    if not a2a:
+        # Both benchmark messages target the draft runtime binding. Persist that
+        # fact with the root node so liveness probing and harness resume use the
+        # same runtime history that the user is inspecting.
+        execution_config["lifecycle_stage"] = "draft"
     task_request = replace(task_request, execution_config=execution_config)
 
     result = await service.execute(task_request)
@@ -266,7 +287,12 @@ async def benchmark_execute_task_internal(
             launch_sent = await bot_port.send_message(
                 bot_id=bot_identity,
                 message=launch_message,
-                metadata={"benchmark": True, "session_id": session_id},
+                metadata={
+                    "benchmark": True,
+                    "session_id": session_id,
+                    "sender_options": {"from": task_request.owner_user_id},
+                    "bot_options": {"lifecycle_stage": "draft"},
+                },
             )
     except Exception as exc:  # noqa: BLE001
         result = replace(
@@ -313,6 +339,7 @@ async def get_task_trajectory_internal(
         Query(description="展示形式:html=返回人类可读的 HTML 轨迹页;省略或其它值=默认 JSON envelope"),
     ] = None,
     service: TaskContextServiceProtocol = Injected(TaskContextServiceProtocol),  # noqa: B008
+    artifact_repo: TaskArtifactRepositoryProtocol = Injected(TaskArtifactRepositoryProtocol),  # noqa: B008
 ) -> Envelope[TaskTrajectoryDTO]:
     """读取任务轨迹(内部副本;与公开面 ``adapters/http/openapi_v1/task/router.py`` 同一委托,逻辑一致,改其一须同步)。
 
@@ -330,7 +357,10 @@ async def get_task_trajectory_internal(
     )
     dto = trajectory_to_dto(trajectory)
     if display == "html":
-        return HTMLResponse(render_trajectory_html(dto, do_analysis=do_analysis))
+        artifact_rows = artifact_repo.list_by_task(task_id)
+        return HTMLResponse(
+            render_trajectory_html(dto, do_analysis=do_analysis, artifact_rows=artifact_rows)
+        )
     return envelope(dto, request)
 
 
@@ -495,7 +525,23 @@ async def report_callback(
     if isinstance(raw_event, dict) and "relay_token" in raw_event:
         try:
             command = TaskReportCommandDTO.model_validate(raw_event).to_domain()
-        except ValidationError as exc:
+        except (ValidationError, ValueError) as exc:
+            # ValidationError ⊂ ValueError;捕获两者是因为 artifacts 列表的结构性
+            # 校验(§4 互斥/交叉/JSON 合法/上限)在 to_domain 的解析层以裸 ValueError
+            # 抛出——同样按 4xx 信封回执并留审计,不得落 500(评审修正)。
+            if not isinstance(exc, ValidationError):
+                _named = str(exc)
+                logger.warning(
+                    "[task_relay_report] artifact payload rejected: %s", _named
+                )
+                await persist_relay_report_audit(
+                    svc, raw=raw_event,
+                    error=f"invalid relay report payload: {_named}",
+                )
+                return error_response(
+                    422, f"Invalid relay report request: {_named}", request,
+                )
+            # —— 以下为 pydantic ValidationError 的既有 422 出口(行为不变)——
             # Manual parsing bypasses FastAPI's request validation, so surface
             # the caller's error as the endpoint's normal enveloped 422 instead
             # of letting Pydantic's exception become a 500. Loc/type/msg only:
@@ -900,12 +946,13 @@ async def set_dingtalk_config(
 
 # Keep this dynamic route after every static task route so names such as
 # ``benchmark_execute`` and ``discovery`` can never be consumed as task IDs.
-# The public-only query surfaces (dashboard/list) are intentionally absent
-# here, so their addresses must fall through to 404 rather than authenticate
-# as though they were task IDs.
+# /dashboard and /list now have real internal mirror routes above; /artifacts
+# likewise (POST/GET, artifact_routes.py); this guard stays as the safety net
+# keeping those words (if a static route is ever removed) from falling through
+# to the ID lookup.
 def reject_public_only_task_id(task_id: str) -> None:
     """Refuse historical public-only read paths from reaching the ID lookup."""
-    if task_id in {"dashboard", "list"}:
+    if task_id in {"dashboard", "list", "artifacts"}:
         raise HTTPException(status_code=404, detail="Not Found")
 
 
@@ -920,8 +967,15 @@ async def get_task_internal(
     request: Request,
     user: AuthenticatedUser = Depends(get_current_user),
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+    artifact_repo: TaskArtifactRepositoryProtocol = Injected(TaskArtifactRepositoryProtocol),  # noqa: B008
 ) -> Envelope[TaskExecutionGraphDTO]:
     """Return one task dashboard for authenticated Goal clients."""
     del user
     graph = service.get_task_dashboard(task_id)
-    return envelope(graph_to_dto(graph), request)
+    return envelope(
+        graph_to_dto(
+            graph,
+            artifacts_by_node=group_artifacts_by_node(artifact_repo.list_by_task(task_id)),
+        ),
+        request,
+    )

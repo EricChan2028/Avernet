@@ -33,6 +33,9 @@ from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
     TaskSettingsServiceProtocol,
 )
 from agentclaw.community.api.task.feedback_service import FeedbackServiceProtocol
+from agentclaw.community.api.task.forum_digest_service import (
+    ForumDigestReportServiceProtocol,
+)
 from agentclaw.community.api.task.forum_service import ForumServiceProtocol
 from agentclaw.community.api.task.task_grant_service import (
     TaskClaimGrantService,
@@ -44,6 +47,7 @@ from agentclaw.community.core.repository.implementations.task.feedback import (
     FeedbackRepository,
 )
 from agentclaw.community.core.repository.implementations.task.forum import (
+    ForumDigestReportRepository,
     ForumRepository,
 )
 from agentclaw.community.core.repository.protocols.task import (
@@ -59,6 +63,9 @@ from agentclaw.community.core.repository.protocols.task.feedback import (
 )
 from agentclaw.community.core.repository.protocols.task.forum import (
     ForumRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.task.forum_digest import (
+    ForumDigestReportRepositoryProtocol,
 )
 from agentclaw.community.api.task.task_context_service import TaskContextServiceProtocol
 from agentclaw.community.core.task.task_center.task_service import TaskService
@@ -77,10 +84,22 @@ from agentclaw.community.core.task.forum.browsing import (
     BbsBrowseLoopScheduler,
 )
 from agentclaw.community.core.task.forum.browsing.cron_setup import BbsBrowseCronManager
+from agentclaw.community.core.task.forum.digest.report_service import (
+    BbsDigestReportService,
+)
 from agentclaw.community.core.task.forum.services.forum_service import ForumService
 from agentclaw.community.core.task.task_harness.harness import TaskHarness
+from agentclaw.community.core.task.task_harness.relay_session_recovery import (
+    RelaySessionRecovery,
+)
+from agentclaw.community.core.task.task_harness.runtime_probe import (
+    TaskRuntimeLivenessProbe,
+)
 from agentclaw.community.core.task.task_context.task_graph_service import (
     TaskGraphService,
+)
+from agentclaw.community.core.task.task_context.task_artifact.artifact_publish import (
+    TaskArtifactPublishService,
 )
 from agentclaw.community.core.task.task_runner.client.bcs_token_provider import (
     BcsTokenProvider,
@@ -96,6 +115,12 @@ from agentclaw.community.core.bot_management.services.bcn_service import BcnServ
 from agentclaw.community.core.task.task_runner.client.ports import (
     BcsClientPort,
     OpenApiBotPort,
+)
+from agentclaw.community.core.task.task_discovery.frontend_url import (
+    ConfigFrontendUrlProvider,
+)
+from agentclaw.community.plugin_api.bbs_digest_notify import (
+    BbsDigestNotifyProvider,
 )
 from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 from agentclaw.community.di.config import TaskDispatchConfig
@@ -147,8 +172,18 @@ class TaskModule(Module):
         # injectors. The full composition root attaches the graph repository in
         # the task_service provider below.
         binder.bind(TaskGraphService, to=TaskGraphService, scope=singleton)
+        # Capture service for artifact staging (spec 2026-10-20-task-artifact-domain §5.1):
+        # pure construction + contextvar staging, no repository, no IO; the write
+        # itself rides the graph transaction. "未接线不发布" refers to the
+        # graph-repo-absent case handled in _persist_locked, not this binding.
+        binder.bind(TaskArtifactPublishService, to=TaskArtifactPublishService, scope=singleton)
         binder.bind(ForumRepositoryProtocol, to=ForumRepository, scope=singleton)
         binder.bind(ForumServiceProtocol, to=ForumService, scope=singleton)
+        binder.bind(
+            ForumDigestReportRepositoryProtocol,
+            to=ForumDigestReportRepository,
+            scope=singleton,
+        )
         binder.bind(FeedbackRepositoryProtocol, to=FeedbackRepository, scope=singleton)
         binder.bind(FeedbackServiceProtocol, to=FeedbackService, scope=singleton)
         # BBS Browse Loop — runner (push seam), scheduler (framework cron), and the
@@ -162,6 +197,27 @@ class TaskModule(Module):
         # 不在此直绑,否则无参构造会漏掉 repo 注入。
         binder.bind(
             NoopCallbackAuthenticator, to=NoopCallbackAuthenticator, scope=singleton
+        )
+
+    @singleton
+    @provider
+    @inject
+    def bbs_digest_report_service(
+        self,
+        repository: ForumDigestReportRepositoryProtocol,
+        bot_service: BotServiceProtocol,
+        openapi_bot: OpenApiBotPort,
+        notify_sender: BbsDigestNotifyProvider,
+        frontend_url_provider: ConfigFrontendUrlProvider,
+    ) -> ForumDigestReportServiceProtocol:
+        """Build the batch digest service from deployment-owned delivery ports."""
+
+        return BbsDigestReportService(
+            repository=repository,
+            bot_service=bot_service,
+            openapi_bot=openapi_bot,
+            notify_sender=notify_sender,
+            frontend_url_provider=frontend_url_provider,
         )
 
     @singleton
@@ -276,13 +332,51 @@ class TaskModule(Module):
                 exc,
             )
             task_settings = None
+        from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
+            BcsBotTokenProvider,
+            NullBcsBotTokenProvider,
+        )
+
+        try:
+            bot_token_provider = injector.get(BcsBotTokenProvider)
+        except Exception as exc:  # noqa: BLE101 未绑定时降级为无 token provider
+            logger.info(
+                "[task][task-module] BcsBotTokenProvider 未绑定 → 使用空实现:%s: %s",
+                type(exc).__name__,
+                exc,
+            )
+            bot_token_provider = NullBcsBotTokenProvider()
         # harness 旁路常驻巡检(SLA 超时复位 / FAILED 重派重试 / PENDING 派发超时重搜推);
         # 可配置开关,默认开启(tasks/settings `harness_poller`):旁路巡检常驻兜底(SLA 超时复位/FAILED
         # 重派/PENDING 派发超时重搜推);harness=None(未绑且 env 关)时不启动 daemon 巡检线程。
         # 优先读 tasks/settings(harness_poller,KV 跨副本热改),未绑/读异常回退 env OCB_TASK_HARNESS_ENABLED。
         if _resolve_harness_enabled(task_settings):
-            harness = TaskHarness(graph)
-            logger.info("[task][task-module] TaskHarness 旁路巡检已启用")
+            runtime_probe = TaskRuntimeLivenessProbe(bot=bot, bcs=bcs)
+            # Relay no-progress is a same-session continuation, never a central
+            # RUNNING→PENDING reset. Resolve the optional collaborators here so
+            # production never falls back to the graph-retry semantics.
+            relay_bot_tokens = bot_token_provider
+            try:
+                relay_task_context = injector.get(TaskContextServiceProtocol)
+            except Exception:  # noqa: BLE001
+                relay_task_context = None
+            relay_recovery = RelaySessionRecovery(
+                bot=bot,
+                bcs=bcs,
+                bot_tokens=relay_bot_tokens,
+            )
+            harness = TaskHarness(
+                graph,
+                runtime_probe=runtime_probe,
+                relay_recovery=relay_recovery,
+                task_context_service=relay_task_context,
+            )
+            logger.info(
+                "[task][task-module] TaskHarness 旁路巡检已启用 runtime_probe=on "
+                "relay_resume=on bot_port=%s bcs_port=%s",
+                type(bot).__name__ if bot is not None else "None",
+                type(bcs).__name__ if bcs is not None else "None",
+            )
         else:
             harness = None
             logger.info("[task][task-module] TaskHarness 旁路巡检已关闭(默认)")
@@ -345,15 +439,6 @@ class TaskModule(Module):
             staff_dept = injector.get(StaffDeptPlugin)
         except Exception:  # noqa: BLE101 未绑定 → list 不附加 owner_user_name
             staff_dept = None
-        from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
-            BcsBotTokenProvider,
-            NullBcsBotTokenProvider,
-        )
-
-        try:
-            bot_token_provider = injector.get(BcsBotTokenProvider)
-        except Exception:  # noqa: BLE101 未绑定时降级为无 token provider
-            bot_token_provider = NullBcsBotTokenProvider()
         intake_handler = None
         if intake_repo is not None and bot is not None and bot_service is not None:
             intake_handler = TaskIntakeHandler(

@@ -1,11 +1,13 @@
 import { ChatLayoutPanelSlot } from '@/components/Workspace/ChatLayoutPanelSlot';
 import { SidePanelCollapseButton } from '@/components/Workspace/SidePanelCollapseButton';
+import { TaskLinkedSession } from '@/components/Workspace/TaskLinkedSession';
 import { filterVisibleGroupMessages } from '@/pages/Workspace/hooks/groupChatHistoryUtils';
 import { useCollabPanel } from '@/pages/Workspace/hooks/useCollabPanel';
 import { useGroupTaskExecution } from '@/pages/Workspace/hooks/useGroupTaskExecution';
 import { useMessageAreaSkeleton } from '@/pages/Workspace/hooks/useMessageAreaSkeleton';
 import { useMessageEdit } from '@/pages/Workspace/hooks/useMessageEdit';
 import { useMessageInteractions } from '@/pages/Workspace/hooks/useMessageInteractions';
+import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import type { MentionConfig } from '@tc-chat/ui';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import { useEffect, useMemo, useState } from 'react';
@@ -39,6 +41,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     execApprovals,
     supportState,
     connectionStatus,
+    historyOnly = false,
     groupBootstrapProcessing = false,
     send,
     abortBot,
@@ -72,6 +75,8 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     userIdentityId,
     userIdentityName,
   } = props;
+  const linkedSession = useTaskSidePanelStore((state) => state.linkedSession);
+  const closeLinkedSession = useTaskSidePanelStore((state) => state.closeLinkedSession);
 
   const collabPanel = useCollabPanel(
     session,
@@ -86,7 +91,9 @@ export function GroupChatPane(props: GroupChatPaneProps) {
   const messages = filterVisibleGroupMessages(chat.messages ?? []);
   const isRequesting = !!chat.isRequesting;
   // 消息区两态强制（Spec AC-2，预览反馈第五轮）：空消息一律骨架屏，确认后的真空会话才显示空态。
-  const isLoadingHistory = useMessageAreaSkeleton({ messages, status: connectionStatus });
+  const isLoadingHistory = useMessageAreaSkeleton({
+    messages, status: connectionStatus, historyOnlyReady: historyOnly && supportState.phase === 'ready',
+  });
   const messageInteractions = useMessageInteractions({
     sessionId: session?.sessionId,
     messages,
@@ -150,7 +157,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
   const isWaitingForBot = !isHumanOnlyMention(lastSentMentions, session?.participants ?? []);
 
   // 输入框可见性（与下方 GroupChatComposer 渲染条件同源）：空态行动区仅在可发送视角提供。
-  const composerVisible = !!session && activeIdentity?.kind !== 'bot' && !collabPanel.humanAbsentOnly;
+  const composerVisible = !!session && !historyOnly && activeIdentity?.kind !== 'bot' && !collabPanel.humanAbsentOnly;
   // 帽条可见性与 composer 分离：「退出会话」仅在 human 视角已加入（present）时有意义（同原 LeaveBar）。
   const statusBarVisible = composerVisible && collabPanel.humanJoined && !collabPanel.botActorId;
 
@@ -158,10 +165,15 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     // relative 供副屏右上「收起」悬浮钮绝对定位（SidePanelCollapseButton）。
     <section className="relative flex min-w-0 flex-1 flex-col bg-background">
       <ChatLayout className="min-h-0 flex-1">
+        {linkedSession ? (
+          <TaskLinkedSession target={linkedSession} userId={userIdentityId ?? undefined} onClose={closeLinkedSession} />
+        ) : (
+          <>
         <GroupHeader
           selectedGroup={group}
           selectedSession={session}
           connectionStatus={connectionStatus}
+          historyOnly={historyOnly}
           onOpenSessionList={onOpenSessionList}
           canManageGroup={canManageGroup}
           activePanel={activePanel}
@@ -178,7 +190,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
         <GroupChatMessageArea
           session={session}
           group={group}
-          isLoadingHistory={isLoadingHistory && !groupBootstrapProcessing}
+          isLoadingHistory={isLoadingHistory && !groupBootstrapProcessing && !(historyOnly && showError)}
           groupBootstrapProcessing={groupBootstrapProcessing}
           showError={showError}
           supportError={supportState.error}
@@ -256,6 +268,8 @@ export function GroupChatPane(props: GroupChatPaneProps) {
             />
           </div>
         ) : null}
+          </>
+        )}
         {/* 协作群副屏口径：加宽至 480（不动 WORKSPACE_RIGHT_PANEL_LAYOUT 共用宽度）；
             不随点外收起，仅顶栏「副屏」钮/悬浮「收起」钮关闭。 */}
         <ChatLayoutPanelSlot

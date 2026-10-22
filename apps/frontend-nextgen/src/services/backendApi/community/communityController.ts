@@ -1,6 +1,11 @@
 import { getCapabilities } from '@/capabilities';
 import type { CommunityReplyDto, CommunityTopicDto } from '@/domain/community/mapper';
-import type { CommunityReplyPager, CommunityTopicQuery, CreateCommunityTopicInput } from '@/domain/community/types';
+import type {
+  CommunityReplyPager,
+  CommunityTopicQuery,
+  CreateCommunityReplyInput,
+  CreateCommunityTopicInput,
+} from '@/domain/community/types';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope } from '../types';
 
@@ -19,6 +24,10 @@ export type CommunityEnvelope<T> = BackendApiEnvelope<T>;
 export interface CommunityCreatedTopicDto {
   topic_id: string;
   topic_type?: string;
+}
+
+export interface CommunityCreatedReplyDto {
+  post_id?: string;
 }
 
 /** 默认每页条数（列表首屏、加载更多、回帖分页统一）。 */
@@ -65,10 +74,21 @@ export function listCommunityTopics(query: CommunityTopicQuery = {}, signal?: Ab
   });
 }
 
-export function getCommunityTopic(topicId: string, signal?: AbortSignal) {
+export function getCommunityTopic(
+  topicId: string,
+  options: {
+    viewerAuthorId?: string;
+    viewerAuthorType?: 'HUMAN' | 'BOT';
+  } = {},
+  signal?: AbortSignal,
+) {
   const base = bbsApiBase();
+  const params: Record<string, unknown> = {};
+  if (options.viewerAuthorId?.trim()) params.viewer_author_id = options.viewerAuthorId.trim();
+  if (options.viewerAuthorType?.trim()) params.viewer_author_type = options.viewerAuthorType.trim();
   return backendRequest<CommunityEnvelope<CommunityTopicDto>>(`${base}/${encodeURIComponent(topicId)}`, {
     method: 'GET',
+    params,
     signal,
   });
 }
@@ -99,6 +119,14 @@ export function createCommunityTopic(input: CreateCommunityTopicInput, signal?: 
     author_id: string;
     title: string;
     body: string;
+    topic_type: 'DISCUSSION' | 'POLL';
+    topic_config?: {
+      poll?: {
+        selection: 'SINGLE' | 'MULTI';
+        options: string[];
+        deadline_at?: string;
+      };
+    };
     author_display_name?: string;
     author_avatar_url?: string;
   } = {
@@ -107,7 +135,17 @@ export function createCommunityTopic(input: CreateCommunityTopicInput, signal?: 
     author_id: input.authorId,
     title: input.title,
     body: input.body,
+    topic_type: input.topicType === 'poll' ? 'POLL' : 'DISCUSSION',
   };
+  if (input.topicType === 'poll' && input.poll) {
+    data.topic_config = {
+      poll: {
+        selection: input.poll.selection === 'multi' ? 'MULTI' : 'SINGLE',
+        options: input.poll.options,
+        ...(input.poll.deadlineAt ? { deadline_at: input.poll.deadlineAt } : {}),
+      },
+    };
+  }
   // 空白 trim 后下发，避免发出空字符串快照；缺勤时不带 key，后端落 null（§2.1：不传则 null）。
   const displayName = input.authorName?.trim();
   if (displayName) data.author_display_name = displayName;
@@ -117,6 +155,37 @@ export function createCommunityTopic(input: CreateCommunityTopicInput, signal?: 
     data,
     signal,
   });
+}
+
+export function createCommunityReply(input: CreateCommunityReplyInput, signal?: AbortSignal) {
+  // BBS reply write contract uses the same author-declared body as Topic writes.
+  // Product users reply as the current Human; reply_to_post_id stays absent for ordinary replies.
+  const replyToPostId = input.replyToPostId?.trim();
+  const displayName = input.authorName?.trim();
+  const data: {
+    client_request_id: string;
+    author_type: 'HUMAN';
+    author_id: string;
+    body: string;
+    reply_to_post_id?: string;
+    poll_selection?: { option_indices: number[] };
+    author_display_name?: string;
+    author_avatar_url?: string;
+  } = {
+    client_request_id: makeClientRequestId(),
+    author_type: 'HUMAN',
+    author_id: input.authorId,
+    body: input.body,
+  };
+  if (replyToPostId) data.reply_to_post_id = replyToPostId;
+  if (input.pollSelection) data.poll_selection = { option_indices: [...input.pollSelection] };
+  if (displayName) data.author_display_name = displayName;
+  if (input.authorAvatarUrl) data.author_avatar_url = input.authorAvatarUrl;
+
+  return backendRequest<CommunityEnvelope<CommunityCreatedReplyDto>>(
+    `${bbsApiBase()}/${encodeURIComponent(input.topicId)}/posts`,
+    { method: 'POST', data, signal },
+  );
 }
 
 export function closeCommunityTopic(topicId: string, authorId: string, signal?: AbortSignal) {

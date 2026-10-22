@@ -13,14 +13,25 @@ from agentclaw.community.adapters.http.openapi_v1.task.bbs.router import (
 from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     CloseTopicRequestUnified,
     CreateReplyRequestUnified,
+    PollSelectionRequest,
     CreateTopicRequestUnified,
+    PollConfigRequest,
+    TopicConfigRequest,
+    TopicDetail,
 )
 from agentclaw.community.core.errors import Conflict, Forbidden, NotFound
 from agentclaw.community.core.task.forum.models import (
+    ForumPollConfig,
+    ForumPollSelection,
+    ForumPollResultOptionRecord,
+    ForumPollResultRecord,
     ForumPostRecord,
     ForumReplyCreateResult,
     ForumTopicCreateResult,
     ForumTopicRecord,
+    ForumTopicAnalysisRecord,
+    ForumTopicConfig,
+    ForumTopicSummaryRecord,
 )
 
 _NOW = datetime(2026, 9, 20, 8, 0, tzinfo=timezone.utc)
@@ -46,6 +57,7 @@ def _topic(
         title="Topic title",
         body="Topic description",
         status=status,
+        analysis=ForumTopicAnalysisRecord(),
         created_at=_NOW,
         updated_at=_NOW,
     )
@@ -118,6 +130,8 @@ async def test_create_topic_unified_records_declared_human_author():
             "client_request_id": "req-1",
             "title": "t",
             "body": "b",
+            "topic_type": "DISCUSSION",
+            "topic_config": None,
         }
     ]
     assert payload.data is not None and payload.data.topic_id == "topic_1"
@@ -148,6 +162,8 @@ async def test_create_topic_unified_records_declared_bot_author():
             "client_request_id": "req-1",
             "title": "t",
             "body": "b",
+            "topic_type": "DISCUSSION",
+            "topic_config": None,
         }
     ]
 
@@ -172,6 +188,102 @@ async def test_create_topic_unified_passes_author_type_through_verbatim():
     )
 
     assert service.calls[0]["author_type"] == "human"
+
+
+@pytest.mark.asyncio
+async def test_create_topic_unified_translates_topic_config():
+    service = _write_service(_topic_result(True))
+
+    await create_topic_unified(
+        body=CreateTopicRequestUnified(
+            author_type="HUMAN",
+            author_id="user-a",
+            client_request_id="req-poll",
+            title="poll",
+            body="Choose",
+            topic_type="POLL",
+            topic_config=TopicConfigRequest(
+                poll=PollConfigRequest(
+                    selection=" single ",
+                    options=[" Option A ", "Option B"],
+                    deadline_at=_NOW,
+                )
+            ),
+        ),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics"),
+        response=Response(),
+        service=service,
+    )
+
+    assert service.calls[0]["topic_type"] == "POLL"
+    assert service.calls[0]["topic_config"] == ForumTopicConfig(
+        poll=ForumPollConfig(
+            selection=" single ",
+            options=(" Option A ", "Option B"),
+            deadline_at=_NOW,
+        )
+    )
+
+
+def test_topic_detail_returns_topic_config_and_analysis():
+    payload = TopicDetail.from_record(
+        ForumTopicRecord(
+            topic_id="topic_1",
+            author_type="HUMAN",
+            author_id="user-a",
+            title="Poll",
+            body="Choose",
+            status="OPEN",
+            analysis=ForumTopicAnalysisRecord(
+                summary=ForumTopicSummaryRecord(
+                    content="The topic asks participants to choose one option."
+                ),
+                tags=("AI治理", "投票"),
+                poll_result=ForumPollResultRecord(
+                    options=(
+                        ForumPollResultOptionRecord(index=0, votes=2, percent=67),
+                        ForumPollResultOptionRecord(index=1, votes=1, percent=33),
+                    ),
+                    total_votes=3,
+                    participant_count=3,
+                    updated_at=_NOW,
+                ),
+            ),
+            topic_type="POLL",
+            topic_config=ForumTopicConfig(
+                poll=ForumPollConfig(
+                    selection="MULTI",
+                    options=("A", "B"),
+                    deadline_at=_NOW,
+                )
+            ),
+            created_at=_NOW,
+            updated_at=_NOW,
+        )
+    )
+
+    assert payload.topic_config is not None
+    assert payload.topic_config.poll is not None
+    assert payload.topic_config.poll.model_dump() == {
+        "selection": "MULTI",
+        "options": ["A", "B"],
+        "deadline_at": _NOW,
+    }
+    assert payload.analysis.summary is not None
+    assert payload.analysis.summary.content == (
+        "The topic asks participants to choose one option."
+    )
+    assert payload.analysis.tags == ["AI治理", "投票"]
+    assert payload.analysis.poll_stats is not None
+    assert payload.analysis.poll_stats.model_dump() == {
+        "total_votes": 3,
+        "participant_count": 3,
+        "by_option": [
+            {"index": 0, "votes": 2, "percent": 67},
+            {"index": 1, "votes": 1, "percent": 33},
+        ],
+        "updated_at": _NOW,
+    }
 
 
 @pytest.mark.asyncio
@@ -228,6 +340,8 @@ async def test_create_reply_unified_records_declared_human_author():
             "author_id": "user-a",
             "client_request_id": "req-2",
             "body": "r",
+            "reply_to_post_id": None,
+            "poll_selection": None,
         }
     ]
 
@@ -257,6 +371,74 @@ async def test_create_reply_unified_records_declared_bot_author():
             "author_id": "bot-a",
             "client_request_id": "req-2",
             "body": "r",
+            "reply_to_post_id": None,
+            "poll_selection": None,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_create_reply_unified_forwards_referenced_post():
+    service = _write_service(_reply_result(True))
+
+    await create_reply_unified(
+        body=CreateReplyRequestUnified(
+            author_type="HUMAN",
+            author_id="user-a",
+            client_request_id="req-referenced",
+            body="r",
+            reply_to_post_id="post_1",
+        ),
+        topic_id="topic_1",
+        request=_request(
+            "POST", "/openapi/v1/collaboration/tasks/bbs/topics/topic_1/posts"
+        ),
+        response=Response(),
+        service=service,
+    )
+
+    assert service.calls == [
+        {
+            "op": "create_reply",
+            "topic_id": "topic_1",
+            "author_type": "HUMAN",
+            "author_id": "user-a",
+            "client_request_id": "req-referenced",
+            "body": "r",
+            "reply_to_post_id": "post_1",
+            "poll_selection": None,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_create_reply_unified_forwards_structured_poll_selection():
+    service = _write_service(_reply_result(True))
+
+    await create_reply_unified(
+        body=CreateReplyRequestUnified(
+            author_type="BOT",
+            author_id="bot-a",
+            client_request_id="req-poll-vote",
+            body="I choose option one.",
+            poll_selection=PollSelectionRequest(option_indices=[0]),
+        ),
+        topic_id="topic_1",
+        request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics/topic_1/posts"),
+        response=Response(),
+        service=service,
+    )
+
+    assert service.calls == [
+        {
+            "op": "create_reply",
+            "topic_id": "topic_1",
+            "author_type": "BOT",
+            "author_id": "bot-a",
+            "client_request_id": "req-poll-vote",
+            "body": "I choose option one.",
+            "reply_to_post_id": None,
+            "poll_selection": ForumPollSelection(option_indices=(0,)),
         }
     ]
 
@@ -491,6 +673,8 @@ async def test_create_topic_unified_passes_optional_author_display_when_supplied
         "client_request_id": "req-1",
         "title": "t",
         "body": "b",
+        "topic_type": "DISCUSSION",
+        "topic_config": None,
         "author_display_name": "国科",
         "author_avatar_url": "https://av/nk",
     }
@@ -522,4 +706,6 @@ async def test_create_topic_unified_omits_author_display_when_not_supplied():
         "client_request_id": "req-1",
         "title": "t",
         "body": "b",
+        "topic_type": "DISCUSSION",
+        "topic_config": None,
     }

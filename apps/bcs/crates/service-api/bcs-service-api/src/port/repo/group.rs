@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use crate::types::{
     EventActor, Group, GroupHumanNotifyPolicy, GroupKind, GroupMessage, GroupMutableFieldsPatch,
     GroupStatus, Participant, MessageViewScope, ParticipantMode, RoutingPolicy, ServiceError,
-    ServiceResult, ServiceSpec, Workspace,
+    ServiceResult, ServiceSpec,
 };
 
 use super::AppendEventRecord;
@@ -63,6 +63,13 @@ pub struct CommitGroupEventfulMutation {
 /// behavior and orchestration.
 #[async_trait]
 pub trait GroupRepoPort: Send + Sync {
+    /// Process-local membership projection for Provider policy tightening.
+    /// Persistent Provider stores enforce the equivalent condition atomically
+    /// in their metadata UPDATE instead of issuing a separate Group read.
+    async fn has_public_group_with_members(&self, _actor_ids: &[String]) -> ServiceResult<bool> {
+        Err(ServiceError::InternalError("public group membership lookup is not configured".into()))
+    }
+
     async fn upsert(&self, group: Group) -> ServiceResult<()>;
     /// Atomically make a provisioning Group available, activate its pending
     /// inline subscriptions, and append the ordered creation Events.
@@ -121,7 +128,6 @@ pub trait GroupRepoPort: Send + Sync {
         actor_id: &str,
         message_view_scope: MessageViewScope,
     ) -> ServiceResult<()>;
-    async fn update_workspace(&self, id: &str, workspace: Workspace) -> ServiceResult<()>;
     async fn update_label(&self, id: &str, label: Option<String>) -> ServiceResult<()>;
     async fn update_status(&self, id: &str, status: GroupStatus) -> ServiceResult<()>;
     /// Persist a `service_spec` patch onto the group. `Some(spec)` installs or

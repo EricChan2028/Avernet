@@ -12,6 +12,9 @@ import { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve
 import { SessionRecoveryTaskRepository } from "../../repositories/repair/session-recovery-task-repository.js";
 import { SessionRecoveryTaskService } from "../../services/repair/session-recovery/task-service.js";
 import { createMonitoringRecoveryTrigger, SESSION_RECOVERY_ALLOWLIST_KEY } from "../../services/monitoring/session-recovery-trigger.js";
+import { DIAGNOSIS_V3_VERSION } from "../../services/monitoring/contracts.js";
+import { runtimeIdentity } from "../../services/monitoring/__tests__/runtime-identity-fixture.js";
+import { MonitoringError } from "../../services/monitoring/contracts.js";
 import type { MonitoringRecoveryTrigger } from "../../services/monitoring/contracts.js";
 import { database } from "../../services/monitoring/__tests__/test-database.js";
 import { fixtureIntegration } from "../../services/monitoring/__tests__/identity-fixtures.js";
@@ -374,12 +377,12 @@ describe('monitoring browser HTTP identity and enrollment boundary', () => {
 });
 
 describe("diagnosis report -> allowlist -> durable recovery task", () => {
-  async function automaticRecovery() {
+  async function automaticRecovery(botId = "mock-bot-te") {
     await stop();
     await runMigrations(db, "sqlite");
     const config = new AppConfigRepository(db);
     await config.create({ config_key: SESSION_RECOVERY_ALLOWLIST_KEY, config_json: JSON.stringify({
-      allowed_bots: [{ bot_id: "mock-bot-te", entity_id: "001234", env: "prod" }],
+      allowed_bots: [{ bot_id: botId, entity_id: "001234", env: "prod" }],
     }) });
     const objects = new Map<string, Buffer>();
     const artifacts = {
@@ -394,7 +397,7 @@ describe("diagnosis report -> allowlist -> durable recovery task", () => {
     recovery = createMonitoringRecoveryTrigger({ config, service });
     await start();
     return { config, tasks, service, agent, artifacts,
-      input: { ...alert, env: "prod", handlerName: "NOT_COMPLETED", sessionKey: "agent:main:session:original:user:001234" } };
+      input: { ...alert, botId, env: "prod", handlerName: "NOT_COMPLETED", sessionKey: "agent:main:session:original:user:001234" } };
   }
 
   it("keeps the diagnosis on task storage failure, then creates exactly one task on duplicate retry", async () => {
@@ -425,6 +428,23 @@ describe("diagnosis report -> allowlist -> durable recovery task", () => {
     await vi.waitFor(() => expect(agent.start).toHaveBeenCalledTimes(1));
   });
 
+  it("creates one durable OC v3 recovery task with normalized instance locators", async () => {
+    const { input, tasks, agent } = await automaticRecovery("mock-bot-oc");
+    const event = { ...input, schemaVersion: DIAGNOSIS_V3_VERSION, engine: "OC",
+      runtimeIdentity: { ...runtimeIdentity, BOT_ID: input.botId, OWNER_ID: input.entityId } };
+    expect((await post(event)).status).toBe(201);
+    expect((await post(event)).body.duplicate).toBe(true);
+    const rows = await db.query<{ task_id: string }>("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'");
+    expect(rows).toHaveLength(1);
+    const task = await tasks.find(rows[0].task_id);
+    expect(task?.request.target).toEqual({ bot_id: input.botId, entity_id: input.entityId, env: "prod", engine: "OC",
+      runtime_identity: { stage: "online", deviceUuid: runtimeIdentity.CLIENT_ID, version: "V16" } });
+    const [stored] = await db.query("SELECT runtime_identity FROM insight_monitoring_diagnose WHERE event_id = ?", [event.eventId]);
+    expect(JSON.parse(String(stored.runtime_identity))).toEqual(event.runtimeIdentity);
+    expect(task?.request.target.runtime_identity).not.toHaveProperty("TOKEN");
+    await vi.waitFor(() => expect(agent.start).toHaveBeenCalledTimes(1));
+  });
+
   it("acknowledges nonmembers normally and retries enabled configuration failures without losing diagnostics", async () => {
     const { input, config, agent } = await automaticRecovery();
     expect((await post({ ...input, entityId: "another-owner" })).status).toBe(201);
@@ -445,6 +465,16 @@ describe("recovery result receiver HTTP contract", () => {
   const result = { event_id: alert.eventId, task_id: "SR-http", result_version: 3,
     status: "completed", phase: "verify", waiting_reason: null, effect: "recovered", result_text: "已恢复", evidence_ids: [] };
   const report = (body: Record<string, unknown>) => post(body, "session-recovery-results");
+  it.each(["none", "performed", "unknown"])("accepts and stores intervention_status=%s over HTTP with legacy results", async intervention_status => {
+    await post(alert);
+    expect((await report(result)).status).toBe(200);
+    const updated = { ...result, result_version: 4, intervention_status };
+    expect(await report(updated)).toMatchObject({ status: 200, body: { accepted: true, duplicate: false } });
+    expect(await report(updated)).toMatchObject({ status: 200, body: { duplicate: true } });
+    const [row] = await db.query("SELECT self_healing_results FROM insight_monitoring_diagnose WHERE event_id = ?", [alert.eventId]);
+    expect(JSON.parse(String(row.self_healing_results))).toEqual([result, updated]);
+    expect((await report({ ...updated, result_version: 5, intervention_status: true })).status).toBe(422);
+  });
   it("persists and acknowledges identical replay without requiring an extra token", async () => {
     await post(alert);
     expect(await report(result)).toMatchObject({ status: 200, body: { accepted: true, eventId: alert.eventId, taskId: "SR-http", resultVersion: 3, duplicate: false } });
@@ -466,4 +496,29 @@ describe("recovery result receiver HTTP contract", () => {
     expect((await report({ ...base, result_text: "x".repeat(padding) })).status).toBe(200);
     expect((await report({ ...base, result_text: "x".repeat(padding + 1) })).status).toBe(413);
   });
+});
+
+
+it("stores the complete v3 snapshot without leaking it in ACKs, UI DTOs or rejection responses", async () => {
+  await stop();
+  recovery = { trigger: vi.fn().mockRejectedValue(new MonitoringError("INVALID_EVENT", "Recovery rejected; diagnostic saved")) };
+  await start();
+  const event = { ...unresolved, decision: "ALERT", handlerName: "NOT_COMPLETED", schemaVersion: DIAGNOSIS_V3_VERSION,
+    runtimeIdentity: { ...runtimeIdentity, BOT_ID: unresolved.botId } };
+  const rejected = await post(event);
+  expect(rejected.status).toBe(400);
+  const [stored] = await db.query("SELECT runtime_identity, entity_id FROM insight_monitoring_diagnose WHERE event_id = ?", [event.eventId]);
+  expect(JSON.parse(String(stored.runtime_identity))).toEqual(event.runtimeIdentity);
+  expect(stored.entity_id).toBe(event.entityId);
+  expect(recovery.trigger).toHaveBeenCalledWith(expect.objectContaining({ runtimeIdentity: event.runtimeIdentity, entityId: event.entityId }));
+  await stop(); recovery = undefined; await start();
+  const ack = await post(event);
+  expect(ack.status).toBe(200);
+  expect(ack.body.duplicate).toBe(true);
+  const page = await get(event.botId);
+  expect(page.body.items[0]).not.toHaveProperty("runtimeIdentity");
+  for (const response of [rejected, ack, page]) {
+    expect(JSON.stringify(response)).not.toContain(runtimeIdentity.TOKEN);
+    expect(JSON.stringify(response)).not.toContain(runtimeIdentity.CLIENT_ID);
+  }
 });

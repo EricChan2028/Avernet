@@ -157,15 +157,8 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
                 </span>
               }
             />
-            {/* 在线信号点(2026-10-22 体验精修二轮):收起竖轨好友 Bot 头像已佩戴
-                (ConversationCollapsedRail.OnlineDot 同款),展开列表此前缺失 → 补齐。
-                语义一致:仅好友 Bot 佩戴(管理/团队 Bot 无好友在线语义),在线才亮。 */}
-            {section === 'friend' && bot.online === true && (
-              <span
-                aria-hidden="true"
-                className="absolute bottom-0 right-0 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-background"
-              />
-            )}
+            {/* 在线信号点已移除(随上游 #2990 收起竖轨同款裁决):metadata status 对
+                已删除 Bot 仍残留 ACTIVE,绿点失真误导;待后端好友关系/元数据同步修复后再恢复。 */}
           </span>
           <div
             className={cn(

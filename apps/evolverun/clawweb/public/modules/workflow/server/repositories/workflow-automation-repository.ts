@@ -25,7 +25,15 @@ export class WorkflowAutomationRepository {
       const job: AutomationJob = { id, workflowId, taskId: taskScope(workflowId), revision: 0, stateVersion: 0, createdAtMs: now,
         kind, status: 'pending', attempts: 0, nextAtMs: now, leaseToken: null, leaseUntilMs: 0, reason: null, data: { ...data } };
       await new RepairReleaseRepository(tx).insert(kind, { requestId: id }, job);
+      // A surrounding result transaction may still roll back; this is not a delivery receipt.
+      if (kind === 'auto_notice') console.info('[workflow-notification] ' + JSON.stringify({ event: 'enqueue_prepared', transactionPending: true,
+        workflowId, noticeId: id, taskId: job.data.taskId ?? null, revision: job.data.revision ?? null,
+        kind: job.data.kind ?? null, recipientId: job.data.recipientId ?? null }));
       return job;
+    }).catch(error => {
+      if (kind === 'auto_notice') console.warn('[workflow-notification] ' + JSON.stringify({ event: 'enqueue_failed', workflowId,
+        noticeId: id, reason: 'NOTIFICATION_QUEUE_WRITE_FAILED' }));
+      throw error;
     });
   }
   async claim(id: string, now: number): Promise<AutomationJob | null> {
@@ -67,19 +75,29 @@ export class WorkflowAutomationRepository {
       AND CAST(${this.json('nextAtMs')} AS SIGNED) <= ? AND CAST(${this.json('leaseUntilMs')} AS SIGNED) <= ?
       ORDER BY updated_at_ms, record_id LIMIT ?`, [kind,scopeKey,now,now,limit])).map(row => JSON.parse(row.body_json));
   }
+  async readyNotifications(now: number, limit = 20, scope?: { workflowIds: string[]; exclude: boolean }): Promise<AutomationJob[]> {
+    if (scope && !scope.exclude && !scope.workflowIds.length) return [];
+    const filter = scope?.workflowIds.length ? ` AND workflow_id ${scope.exclude ? 'NOT IN' : 'IN'} (${scope.workflowIds.map(() => '?').join(',')})` : '';
+    return (await this.db.query<{ body_json: string }>(`SELECT body_json FROM workflow_repair_release_records
+      WHERE record_kind = 'auto_notice' AND ${this.json('status')} IN ('pending','retryable','dispatching')
+      AND CAST(${this.json('nextAtMs')} AS SIGNED) <= ? AND CAST(${this.json('leaseUntilMs')} AS SIGNED) <= ?
+      ${filter} ORDER BY updated_at_ms, record_id LIMIT ?`, [now, now, ...(scope?.workflowIds ?? []), limit])).map(row => JSON.parse(row.body_json));
+  }
   /** Filter current eligibility before the batch limit so historical tasks cannot starve recoverable drafts. */
-  async recoverableDrafts(workflowId: string, now: number, policyVersion: number): Promise<Array<{ job: AutomationJob; revision: number }>> {
+  async recoverableDrafts(workflowId: string, now: number, policyVersion: number, jobId?: string): Promise<Array<{ job: AutomationJob; revision: number }>> {
     const field = (name: string) => this.json(name, 'a');
     const requestMatches = this.db.dialect.driver === 'better-sqlite3'
       ? `r.request_id = ${field('data.request.requestId')}` : `BINARY r.request_id = BINARY ${field('data.request.requestId')}`;
+    // Start MySQL with scoped jobs; a reverse nested-loop join can rescan job JSON per failed revision.
     const rows = await this.db.query<{ body_json: string; revision: number }>(`SELECT a.body_json, r.revision
-      FROM workflow_repair_release_records a JOIN workflow_repair_revisions r ON r.task_id = ${field('data.realTaskId')}
+      FROM workflow_repair_release_records a ${this.db.dialect.driver === 'better-sqlite3' ? 'JOIN' : 'STRAIGHT_JOIN'} workflow_repair_revisions r ON r.task_id = ${field('data.realTaskId')}
       AND r.workflow_id = a.workflow_id AND r.phase = 'failed' AND ${requestMatches}
-      WHERE a.task_id = ? AND a.record_kind = 'auto_draft' AND a.record_status = 'blocked'
+      WHERE a.task_id = ? AND a.record_kind = 'auto_draft' AND ${field('status')} = 'blocked'
       AND ${field('reason')} = 'DRAFT_REQUIRES_MANUAL_REVIEW' AND ${field('data.batches')} IS NOT NULL
       AND CAST(${field('leaseUntilMs')} AS SIGNED) <= ? AND CAST(${field('data.request.automation.policyVersion')} AS SIGNED) = ?
+      ${jobId ? 'AND a.record_id = ?' : ''}
       AND NOT EXISTS (SELECT 1 FROM workflow_repair_revisions newer WHERE newer.task_id = r.task_id AND newer.revision > r.revision)
-      ORDER BY a.created_at_ms, a.record_id LIMIT 50`, [taskScope(workflowId), now, policyVersion]);
+      ORDER BY a.created_at_ms, a.record_id LIMIT 50`, [taskScope(workflowId), now, policyVersion, ...(jobId ? [jobId] : [])]);
     return rows.map(row => ({ job: JSON.parse(row.body_json) as AutomationJob, revision: Number(row.revision) }))
       .filter(({ job }) => job.data.batches && job.data.request?.automation?.policyVersion === policyVersion);
   }
@@ -143,21 +161,24 @@ export class WorkflowAutomationRepository {
     }
     return result;
   }
-  async retryableFailures(workflowId: string, now: number): Promise<AutomationJob[]> {
+  async retryableFailures(workflowId: string, now: number, jobId?: string): Promise<AutomationJob[]> {
     const rows = await this.db.query<{ body_json: string }>(`SELECT body_json FROM workflow_repair_release_records
       WHERE task_id = ? AND record_kind IN ('auto_run', 'auto_notice') AND ${this.json('status')} = 'blocked'
       AND ${this.json('reason')} IN ('ANALYSIS_FAILED', 'NOTIFICATION_REJECTED', 'OWNER_MISSING', 'OWNER_PERMISSION_DENIED')
-      ORDER BY updated_at_ms, record_id LIMIT 50`, [taskScope(workflowId)]);
+      ${jobId ? 'AND record_id = ?' : ''}
+      ORDER BY updated_at_ms, record_id LIMIT 50`, [taskScope(workflowId), ...(jobId ? [jobId] : [])]);
     return rows.map(row => JSON.parse(row.body_json) as AutomationJob).filter(job => job.leaseUntilMs <= now);
   }
-  async retryFailures(workflowId: string, now: number) {
-    await this.db.transaction(async tx => {
+  async retryFailures(workflowId: string, now: number, jobId?: string) {
+    return this.db.transaction(async tx => {
       await new RepairBatchRepository(tx).lockWorkflow(tx, workflowId);
       const repo = new WorkflowAutomationRepository(tx);
-      for (const job of await repo.retryableFailures(workflowId, now)) {
+      const jobs = await repo.retryableFailures(workflowId, now, jobId);
+      for (const job of jobs) {
         const next: AutomationJob = { ...job, status: 'retryable', attempts: 0, nextAtMs: now, stateVersion: job.stateVersion + 1 };
         await new RepairReleaseRepository(tx).update(next, job.stateVersion);
       }
+      return jobs.length;
     });
   }
 }

@@ -151,6 +151,8 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 32, name: "session_registry" },
     SqliteMigration { version: 33, name: "provider_slug" },
     SqliteMigration { version: 34, name: "group_context" },
+    SqliteMigration { version: 35, name: "group_context_owners" },
+    SqliteMigration { version: 36, name: "collaboration_drafts" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -484,6 +486,30 @@ async fn apply_sqlite_migration_body(
             {
                 db.execute(DbStatement::new(sql)).await?;
             }
+            Ok(())
+        }
+        35 => {
+            let columns = sqlite_table_columns(db, "bcs_group_contexts").await?;
+            for (index, sql) in include_str!(
+                "../../../../migrations/sqlite/035_group_context_owners.sql"
+            )
+            .split(';')
+            .map(str::trim)
+            .filter(|sql| !sql.is_empty())
+            .enumerate()
+            {
+                if index == 0 && columns.iter().any(|column| column == "owners_json") {
+                    continue;
+                }
+                db.execute(DbStatement::new(sql)).await?;
+            }
+            Ok(())
+        }
+        36 => {
+            let steps = include_str!("../../../../migrations/sqlite/036_collaboration_drafts.sql")
+                .split(';').map(str::trim).filter(|sql| !sql.is_empty())
+                .map(|sql| DbTransactionStep::Execute(DbStatement::new(sql))).collect();
+            db.transaction(steps).await?;
             Ok(())
         }
         _ => Ok(()),

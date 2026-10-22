@@ -60,6 +60,21 @@ const candidates = () => ({
   page: { page: 1, pageSize: 20, total: 1, totalPages: 1 }, limits: { maxItems: 100, maxRequestBytes: 65536 },
 })
 
+it('does not reread the same historical scope when the parent history flag changes', async () => {
+  const detail = taskDetail('review', '候选', ['item-1'])
+  detail.latestAttempt.input.items[0].context = { targetSnapshot: { kind: 'deployment', workflowId: 'wf-1', workflowVersion: 1, deployNumber: 1, configDigest: 'a'.repeat(64) } }
+  repairApi.task.mockResolvedValue(detail)
+  repairApi.candidates.mockResolvedValue(candidates())
+  const props = { workflowId: 'wf-1', taskId: 'FIX-1', canEdit: true, onClose() {}, onChanged() {} }
+  const view = render(<RepairTaskDialog {...props} includeHistorical={false} />)
+  await userEvent.click(await screen.findByRole('button', { name: '调整建议与要求', exact: true }))
+  await screen.findByRole('checkbox', { name: '选择修订项 新出现的修复建议' })
+  view.rerender(<RepairTaskDialog {...props} includeHistorical />)
+  await act(async () => {})
+  expect(repairApi.candidates).toHaveBeenCalledTimes(1)
+  expect(repairApi.candidates).toHaveBeenCalledWith('wf-1', expect.objectContaining({ includeHistorical: true, versionScope: 'all', includeTasks: false }))
+})
+
 it('shows one primary action, durable failed deployment status and Git links instead of prominent hashes', async () => {
   const detail = taskDetail('review', '候选已生成')
   detail.capabilities.publication = true
@@ -79,7 +94,35 @@ it('shows one primary action, durable failed deployment status and Git links ins
 beforeEach(() => { sessionStorage.clear(); Object.values(repairApi).forEach(mock => mock.mockReset()); repairApi.diff.mockResolvedValue({ files: [], truncated: false }) })
 afterEach(() => vi.useRealTimers())
 
-it('shows the selected historical failure and identifies the latest execution separately', async () => {
+it('requests only the displayed candidate page when adjusting scope, not all workflow metadata pages', async () => {
+  repairApi.task.mockResolvedValue(taskDetail('review', '候选', ['item-1'])); repairApi.candidates.mockResolvedValue(candidates());
+  render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit onClose={() => {}} onChanged={() => {}} />);
+  await userEvent.click(await screen.findByRole('button', { name: '调整建议与要求', exact: true }));
+  await screen.findByRole('checkbox', { name: '选择修订项 新出现的修复建议' });
+  expect(repairApi.candidates).toHaveBeenCalledWith('wf-1', expect.objectContaining({ page: 1, pageSize: 20, metadataPage: 1 }));
+});
+
+it('allows editing frozen choices while suggestions load and preserves edits when the response arrives', async () => {
+  repairApi.task.mockResolvedValue(taskDetail('review', '候选', ['item-1', 'item-2']));
+  let finish!: (value: ReturnType<typeof candidates>) => void;
+  repairApi.candidates.mockImplementation(() => new Promise(resolve => { finish = resolve }));
+  render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit onClose={() => {}} onChanged={() => {}} />);
+  await userEvent.click(await screen.findByRole('button', { name: '调整建议与要求', exact: true }));
+  const original = screen.getByRole('checkbox', { name: '选择修订项 修复建议 1' });
+  expect(original).toBeEnabled();
+  await userEvent.click(original);
+  await userEvent.type(screen.getByRole('textbox', { name: '修改反馈' }), '保留已有约束');
+  expect(screen.getByRole('button', { name: '生成新版本' })).toBeDisabled();
+  await act(async () => { finish(candidates()) });
+  expect(original).not.toBeChecked();
+  expect(screen.getByRole('checkbox', { name: '选择修订项 修复建议 2' })).toBeChecked();
+  expect(screen.getByRole('checkbox', { name: '选择修订项 新出现的修复建议' })).not.toBeChecked();
+  expect(screen.getByRole('textbox', { name: '修改反馈' })).toHaveValue('保留已有约束');
+  expect(screen.getByRole('button', { name: '生成新版本' })).toBeEnabled();
+  expect(repairApi.revise).not.toHaveBeenCalled();
+});
+
+it('shows no execution record for a historical failure when only the latest execution is available', async () => {
   const detail = taskDetail('review', '最新成功候选')
   detail.latestAttempt.revision = 6
   const failed = { ...detail.latestAttempt, revision: 5, phase: 'failed', draft: null, checks: null,
@@ -89,7 +132,10 @@ it('shows the selected historical failure and identifies the latest execution se
   render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit={false} onClose={() => {}} onChanged={() => {}} />)
   await userEvent.selectOptions(await screen.findByRole('combobox', { name: '查看修复版本' }), '5')
   expect(screen.getByText('所选版本 v5：生成失败')).toBeVisible()
-  expect(screen.getByText(/生成执行记录 · v6/)).toBeVisible()
+  expect(screen.getByText('生成执行记录 · v5')).toBeVisible()
+  await userEvent.click(screen.getByText('生成执行记录 · v5'))
+  expect(screen.getByText('该版本暂无执行记录。')).toBeVisible()
+  expect(screen.queryByText(/生成执行记录 · v6/)).not.toBeInTheDocument()
   expect(screen.getByText(/AIS 任务执行或提交失败/)).toBeVisible()
   expect(screen.queryByText('当前查看的是历史候选，请切回最新可用候选。')).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: '发布此版本' })).not.toBeInTheDocument()

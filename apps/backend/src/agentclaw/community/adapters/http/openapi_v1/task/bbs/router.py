@@ -21,6 +21,8 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 from agentclaw.community.core.errors import Forbidden
 from agentclaw.community.core.task.forum.models import (
+    MAX_AUTHOR_ID_LENGTH,
+    MAX_AUTHOR_TYPE_LENGTH,
     MAX_SEARCH_KEYWORD_LENGTH,
 )
 from agentclaw.community.core.task.forum.service_protocol import ForumServiceProtocol
@@ -35,8 +37,10 @@ from .schemas import (
     CloseTopicRequestUnified,
     CreateBrowseReportRequest,
     CreateReplyRequestUnified,
+    domain_poll_selection,
     CreateTopicRequestUnified,
     PostItem,
+    domain_topic_config,
     ReplyCreated,
     SubscriptionItem,
     TopicClosed,
@@ -120,10 +124,24 @@ async def list_topics(
 async def get_topic(
     topic_id: TopicIdPath,
     request: Request,
+    viewer_author_type: str | None = Query(
+        default=None,
+        max_length=MAX_AUTHOR_TYPE_LENGTH,
+        description="Optional viewer author kind: HUMAN or BOT.",
+    ),
+    viewer_author_id: str | None = Query(
+        default=None,
+        max_length=MAX_AUTHOR_ID_LENGTH,
+        description="Optional viewer author id used to request personalized state.",
+    ),
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[TopicDetail]:
     """Return one Topic with its full description, but without replies."""
-    topic = service.get_topic(topic_id=topic_id)
+    topic = service.get_topic(
+        topic_id=topic_id,
+        viewer_author_type=viewer_author_type,
+        viewer_author_id=viewer_author_id,
+    )
     topic = enrich_bot_display_name(topic, request=request)
     return envelope(TopicDetail.from_record(topic), request)
 
@@ -140,7 +158,7 @@ async def list_posts(
     page_params: PageParamsDep,
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[Page[PostItem]]:
-    """Page through a Topic's replies in stable chronological order."""
+    """Page first-level replies; child replies follow their parent floor."""
     result = service.list_posts(
         topic_id=topic_id,
         page=page_params.page,
@@ -183,6 +201,8 @@ async def create_topic_unified(
         client_request_id=body.client_request_id,
         title=body.title,
         body=body.body,
+        topic_type=body.topic_type,
+        topic_config=domain_topic_config(body.topic_config),
         **author_display_fields(body),
     )
     payload = TopicCreated(topic_id=result.topic.topic_id)
@@ -217,6 +237,8 @@ async def create_reply_unified(
         author_id=body.author_id,
         client_request_id=body.client_request_id,
         body=body.body,
+        reply_to_post_id=body.reply_to_post_id,
+        poll_selection=domain_poll_selection(body.poll_selection),
         **author_display_fields(body),
     )
     payload = ReplyCreated(post_id=result.post.post_id)

@@ -1,5 +1,5 @@
 import { resolveTaskControlPlaneEnvironment, type AgentControlPlaneEnvironment } from "../common/task-control-plane.js";
-import { assertActionScope } from "./action-scope.js";
+import { assertActionScope, engineActionScope, recoveryActionOperations, validateRecoveryAction } from "./action-scope.js";
 import { comparableRequestPayload } from "../../../repositories/repair/agent-tool-call-record.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve-repository";
@@ -28,10 +28,11 @@ function recoveryToolRequest(body: Record<string, unknown>): Record<string, unkn
     requestDigest: createHash("sha256").update(comparableRequestPayload(body)).digest("hex") };
 }
 export function recoveryTargetSnapshot(target: ResolvedBotTarget): AgentRuntimeTargetSnapshot {
-  const fingerprint = createHash("sha256").update(JSON.stringify([target.environment, target.ownerId, target.botId,
-    target.provider, target.bindingId, target.deviceId, target.sandboxId ?? null, target.activeEngine ?? null])).digest("hex");
+  const identity = [target.environment, target.ownerId, target.botId, target.provider, target.bindingId, target.deviceId, target.sandboxId ?? null, target.activeEngine ?? null];
+  if (target.deviceUuid || target.runtimeIdentity) identity.push(target.deviceUuid ?? null, target.providerDeviceId ?? null, JSON.stringify(target.runtimeIdentity ?? null));
+  const fingerprint = createHash("sha256").update(JSON.stringify(identity)).digest("hex");
   return { version: 1, fingerprint, reason: "task_created", target: { ...target, environment: target.environment as "pre" | "prod",
-    botType: "personal", botStatus: null, bindingStatus: null, observedAt: new Date().toISOString(), source: "clawweb_runtime_catalog" } };
+    botType: target.botType === "service" ? "service" : "personal", botStatus: null, bindingStatus: null, observedAt: new Date().toISOString(), source: "clawweb_runtime_catalog" } };
 }
 
 /** Business adapter over existing AIS dispatch, workload tickets, tool ledger and Bot runtime. */
@@ -221,17 +222,18 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     return task;
   }
   async bootstrap(task: RecoveryStoredTask) {
-    const { pending_results: _pending, execution: rawExecution, aisExecution: _ais, ...business } = task;
+    const { pending_results: _pending, execution: rawExecution, aisExecution: _ais, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, ...business } = task;
     const { ticketDigest: _digest, ...execution } = task.status === "canceled" ? this.executions.end(rawExecution!) : rawExecution!;
     return { taskId: task.taskId, stepId: task.current!.stepId, executionId: execution.executionId, deliveryKey: this.latestDeliveryKey(task), task: { ...business, execution,
         timeline: business.timeline.filter(event => event.payload.channel !== "group_webhook").slice(-60).map(event => ({ ...event, payload: event.kind === "operation" ? { tool_call_id: event.payload.tool_call_id, status: event.payload.status, evidence_id: event.payload.evidence_id } : event.payload })),
         evidence: business.evidence.map(item => ({ ...item, excerpt: item.excerpt.slice(0, 1500) })),
       }, handbook: savedRecoveryHandbook(task),
       timings: { heartbeatSeconds: 20, decisionPollSeconds: 20 }, planProtocol: {
-        operationScope: "Engine 操作需在方案内提供参考请求或 operationScope: { operation, target? }。operation 是业务动作（例如 cron.delete、file.write），target 是定时任务ID、MCP code 或绝对文件路径。参数内容可调整，主要动作和对象不可更换。Shell 仍需遵守方案的业务范围，服务不解析 Shell 的业务语义。",
+        allowedOperations: recoveryActionOperations,
+        operationScope: "所有 Agent 执行动作需在方案内提供参考 Engine 请求或结构化 operationScope: { operation, target? }。operation 必须取自 allowedOperations，不自行构造动作名；定时任务启用和禁用使用 cron.update，target 填定时任务ID，文件操作的 target 填绝对路径。合法动作名不代表目标支持该操作，实际接口与工具以 tools.engine 和 supportedActionTypes 为准。参数内容可调整，主要动作和对象不可更换。MCP 和用户 Skill 的全部变更交给 Owner，写入 owner_cooperation；无需 Agent 操作时 actions 用空数组。Owner 完成配合后再继续验证和重试。Cron 必须使用声明的接口工具。Shell 仅承载其余获批环境动作，不得绕过接口或变更 MCP／Skill；服务不解析完整 Shell 业务语义。",
         unknownWrite: "未知写入先读取现场，用 reconcile_write 提交 applied / not_applied 和后续读取证据。原调用记录保持不可变；核实后可继续方案，不会自动重放。",
       }, tools: { logs_search: !!this.deps.logs,
-        runtime_inspect: true, session_read: true, supportedActionTypes: task.request.target.engine === "TE" ? ["engine_operation"] : ["container_command", "engine_operation"], engine: BotEngineOperations.capabilities(task.runtimeTarget!.target.activeEngine), trajectory_read: !!this.deps.trajectory, nasSessionRead: task.request.target.engine !== "TE", nasRoots: this.deps.nasRoots ?? [], ocb_operation: false, apply_action: task.plan?.approvedAt != null, retry_message: true, reconcile_write: true } };
+        runtime_inspect: true, session_read: task.request.target.engine !== "TE", supportedActionTypes: task.request.target.engine === "TE" ? ["engine_operation"] : ["container_command", "engine_operation"], engine: BotEngineOperations.capabilities(task.runtimeTarget!.target.activeEngine), trajectory_read: !!this.deps.trajectory, nasSessionRead: task.request.target.engine !== "TE", nasRoots: this.deps.nasRoots ?? [], ocb_operation: false, apply_action: task.plan?.approvedAt != null, retry_message: true, reconcile_write: true } };
   }
   async heartbeat(task: RecoveryStoredTask, sessionId?: string) {
     if (task.status === "canceled" || task.execution?.state === "ended") return { state: "ended" };
@@ -240,6 +242,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     return { state: saved.execution!.state, leaseExpiresAt: saved.execution!.leaseExpiresAt };
   }
   async sessionRead(task: RecoveryStoredTask, body: Record<string, unknown>) {
+    if (task.request.target.engine === "TE") throw new SessionRecoveryError(422, "unsupported_session_read", "TE 通过 trajectory_read 读取 AIVision，不提供会话 API 读取");
     return this.tool(task, body, "session_read", false, async () => {
       const output = body.nas_evidence ? this.nasEvidence(task, body.nas_evidence) : await this.reader.read({ target: task.runtimeTarget!.target, sessionKey: task.request.session_key,
         deliveryKey: this.latestDeliveryKey(task), expectedSessionId: this.originalSessionId(task),
@@ -283,14 +286,26 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       || body.content_offset !== undefined && (!Number.isSafeInteger(body.content_offset) || Number(body.content_offset) < 0 || !body.field)
       || body.content_limit !== undefined && (!Number.isSafeInteger(body.content_limit) || Number(body.content_limit) < 1 || Number(body.content_limit) > 12000 || !body.field)) fail(422, "轨迹范围无效");
     return this.tool(task, body, "trajectory_read", false, async () => {
+      const deliveryKey = this.latestDeliveryKey(task);
+      const sent = [...task.timeline].reverse().find(event => event.kind === "operation"
+        && (event.payload.result as Record<string, unknown>)?.delivery_key === deliveryKey
+        && typeof (event.payload.result as Record<string, unknown>)?.initial_message === "boolean");
+      const call = sent ? await this.deps.audit.findToolCall(String(sent.payload.tool_call_id)) : null;
+      const receipt = call?.taskId === task.taskId && call.toolName === "retry_message" ? call.result as Record<string, unknown> : undefined;
+      const startedAt = receipt?.dry_run !== true && typeof receipt?.started_at_ms === "number" ? receipt.started_at_ms : undefined;
       const result = await this.deps.trajectory!.read({ target: task.runtimeTarget!.target,
         sessionKey: task.request.session_key, offset: Number(offset), limit: Number(limit), traceId: body.trace_id as string | undefined, maxBytes: 128 * 1024,
         observationId: body.observation_id as string | undefined, field: body.field as "input" | "output" | undefined,
-        contentOffset: body.content_offset as number | undefined, contentLimit: body.content_limit as number | undefined });
+        contentOffset: body.content_offset as number | undefined, contentLimit: body.content_limit as number | undefined,
+        ...(startedAt !== undefined ? { messageMarker: `[会话自愈：${deliveryKey}]\n`, notBeforeMs: startedAt } : {}) });
       if (Buffer.byteLength(JSON.stringify(result), "utf8") > 128 * 1024) {
         throw new SessionRecoveryError(422, "recovery_trajectory_page_too_large", "轨迹页过大，请缩小读取范围；正文使用 field 和 content_offset 分段读取");
       }
-      return result;
+      if (task.requiresFreshObservation) {
+        const latest = await this.required(task.taskId);
+        await this.save(latest, value => ({ ...value, requiresFreshObservation: false, observationDeadlineAt: this.now() + this.deps.observationMs }), task.execution!.executionId);
+      }
+      return { ...result, delivery_key: this.latestDeliveryKey(task) };
     });
   }
   async inspect(task: RecoveryStoredTask, body: Record<string, unknown>) {
@@ -306,6 +321,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     if (task.status !== "running" || task.phase !== "apply" || !task.plan?.approvedAt || task.level === "debug") fail(403, "环境修改需要有效的完整方案授权");
     const action = task.plan.actions.find(item => item.actionId === body.actionId);
     if (!action) fail(422, "操作不属于获批方案");
+    validateRecoveryAction(action);
     const command = body.command;
     const engineOperation = body.engineOperation;
     if (command !== undefined && engineOperation !== undefined) fail(422, "一次调用只能提交一种实际执行操作");
@@ -316,7 +332,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     let actualRequest: Record<string, unknown>;
     if (actualEngine !== undefined) {
       if (!actualEngine || typeof actualEngine !== "object" || Array.isArray(actualEngine)
-        || Object.keys(actualEngine).some(key => !["method", "path", "body", "upload"].includes(key))) fail(422, "Engine 请求只能包含 method、path、body 或 upload");
+        || Object.keys(actualEngine).some(key => !["method", "path", "body", "upload", "query"].includes(key))) fail(422, "Engine 请求只能包含 method、path、body、upload 或受支持的 query");
       const request = actualEngine as EngineOperation;
       BotEngineOperations.validate(task.runtimeTarget!.target.activeEngine, request, true);
       assertActionScope(action, request);
@@ -325,10 +341,12 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     } else {
       if (task.request.target.engine === "TE") fail(422, "TE 不提供 Shell，请使用声明的 Engine 接口");
       if (typeof actualCommand !== "string" || !actualCommand.trim() || actualCommand.length > 16384 || actualCommand.includes("\0")) fail(422, "命令格式无效");
-      actualAction = { ...action, type: "container_command", engineOperation: undefined, operation: undefined, command: actualCommand };
+      const shellAction = { ...action, type: "container_command" as const, operationScope: action.operationScope ?? (action.engineOperation ? engineActionScope(action.engineOperation) : undefined), engineOperation: undefined, operation: undefined, command: actualCommand };
+      validateRecoveryAction(shellAction);
+      actualAction = shellAction;
       actualRequest = { ...body, command: actualCommand };
     }
-    const current = await this.deps.targets.resolve({ environment: task.request.target.env, ownerId: task.request.target.entity_id, botId: task.request.target.bot_id });
+    const current = await this.deps.targets.resolve({ environment: task.request.target.env, ownerId: task.request.target.entity_id, botId: task.request.target.bot_id, ...(task.request.target.runtime_identity ? { runtimeIdentity: task.request.target.runtime_identity } : {}) });
     if (recoveryTargetSnapshot(current).fingerprint !== task.runtimeTarget!.fingerprint) fail(409, "目标现场已变化，需上报方案不再适用");
     // Approval identifies the business action; actual transport details are audited, not equality-fenced.
     return this.tool(task, actualRequest, "apply_action", true, markDispatched => { markDispatched(); return this.runtimeTool.applyApprovedAction(this.context(task), actualAction); });
@@ -343,10 +361,10 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     const key = initial ? task.request.delivery_key : `retry-${createHash("sha256").update(`${task.taskId}:${String(body.clientRequestId)}`).digest("hex").slice(0, 48)}`;
     return this.tool(task, body, "retry_message", task.level !== "debug", async markDispatched => {
       if (task.level === "debug") return { status: "not_intervened", dry_run: true, delivery_key: key, message: body.message, initial_message: initial };
-      const currentTarget = await this.deps.targets.resolve({ environment: task.request.target.env, ownerId: task.request.target.entity_id, botId: task.request.target.bot_id });
+      const currentTarget = await this.deps.targets.resolve({ environment: task.request.target.env, ownerId: task.request.target.entity_id, botId: task.request.target.bot_id, ...(task.request.target.runtime_identity ? { runtimeIdentity: task.request.target.runtime_identity } : {}) });
       if (recoveryTargetSnapshot(currentTarget).fingerprint !== task.runtimeTarget!.fingerprint) fail(409, "目标运行位置已变化，不能投递旧方案的重试消息");
       const originalId = this.originalSessionId(task);
-      if (originalId) await this.reader.read({ target: task.runtimeTarget!.target, sessionKey: task.request.session_key,
+      if (originalId && task.request.target.engine !== "TE") await this.reader.read({ target: task.runtimeTarget!.target, sessionKey: task.request.session_key,
         deliveryKey: this.latestDeliveryKey(task), expectedSessionId: originalId, limit: 1 });
       const marker = `[会话自愈：${key}]`;
       const startedAt = this.now();
@@ -398,7 +416,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       const judgment = body.judgment as RecoveryJudgment;
       if (!judgment || !["confirmed", "unconfirmed"].includes(judgment.delivery) || !["acted", "replied", "none", "unknown"].includes(judgment.response)
         || !["recovered", "not_recovered", "unknown"].includes(judgment.effect) || typeof judgment.summary !== "string" || !Array.isArray(judgment.evidence_ids)) fail(422, "效果回报格式无效");
-      if (judgment.delivery === "confirmed" && !task.timeline.some(event => event.kind === "operation" && (event.payload.result as Record<string, unknown>)?.delivery_confirmed === true && (event.payload.result as Record<string, unknown>)?.delivery_key === this.latestDeliveryKey(task))) fail(422, "触达确认必须来自原会话实际用户消息");
+      if (judgment.delivery === "confirmed" && !task.timeline.some(event => event.kind === "operation" && (event.payload.result as Record<string, unknown>)?.delivery_confirmed === true && (event.payload.result as Record<string, unknown>)?.delivery_key === this.latestDeliveryKey(task))) fail(422, "触达确认必须来自受控会话或轨迹读取核实的本次实际用户消息");
       await this.deps.business().observe(task.taskId, task.version, judgment, []);
     } else if (body.kind === "plan") {
       const plan = body.plan as RecoveryPlan;

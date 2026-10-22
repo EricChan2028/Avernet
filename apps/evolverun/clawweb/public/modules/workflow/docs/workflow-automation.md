@@ -13,6 +13,131 @@ concurrency. Defaults are off; existing environment/legacy failure-event setting
 remain compatible, but do not acquire a daily schedule until explicitly saved.
 There are no new environment variables or tables.
 
+`executionEnvironment` selects `pre` or `prod` in this same policy row, defaulting
+to `prod` for existing policies. The management page saves this selector immediately,
+even while analysis is off; changing it does not enable analysis or configure a daily
+plan. The Host injects its normalized environment into the shared runtime. Only the
+selected environment scans, handles failed-run events, dispatches automatic drafts,
+or consumes notifications. Within that environment, existing database claims and
+leases still arbitrate all instances. Manual generation and result collection remain
+available in either environment. Development Hosts do not consume shared automatic
+jobs. Notification queries filter environment ownership before their bounded batch
+limit, so another environment's backlog cannot starve eligible deliveries.
+
+When pre-production and production share a database, update all instances to this
+version before selecting `pre`: old consumers do not understand this field and can
+still claim the shared queue. Environment ownership is not a new queue or schema.
+
+Policy discovery skips individually malformed policy/recipient YAML or invalid
+settings, logging `[workflow-automation] invalid settings` without raw contents.
+Direct settings reads remain strict; invalid settings never imply production
+ownership. A notice with invalid settings is deferred for one minute in the existing
+queue (`NOTIFICATION_SETTINGS_INVALID`), without sending or increasing attempts,
+so a malformed workflow cannot occupy every bounded batch. Interrupted sends still
+become uncertain and are never automatically resent. Database failures are not
+classified as invalid settings and remain visible to the caller.
+
+`notificationRecipients` is an optional list of up to 20 account IDs. Empty or
+absent means the current workflow Owner; a configured list replaces that default.
+IDs are trimmed and deduplicated. They are stored in a separate
+`workflow_repair_notify_<workflow hash>` row in the existing `cm_app_config` table.
+Recipient-only PUTs use `expectedNotificationVersion` and return `notificationVersion`;
+they preserve the scheduling policy and its version, so editing recipients cannot
+invalidate an in-flight automatic dispatch. Mixed recipient/scheduling writes are
+rejected; the UI submits each named section separately. Existing scheduling writes
+do not alter recipients. The optional `dailyConfigured` write explicitly preserves an
+unconfigured schedule when changing a switch or recipients; older v1 policies
+without the field retain their existing configured schedule. Notification-only
+edits neither enable analysis nor activate a daily schedule.
+
+The management page separates automatic analysis, the dependent automatic draft
+step, and evolution-task notifications. Switches save immediately; the analysis
+plan and recipients have separately named save actions. Pending writes show an
+immediate progress message, prevent duplicate submissions, and do not save
+unrelated local edits. Errors retain local input, and success requires the API
+response rather than an optimistic success message. Feedback appears beside the
+changed section; success clears after 2.5 seconds, while failures remain visible.
+The execution environment stays in a compact row above the configuration sections.
+An unconfigured daily plan is labelled as not enabled, and its displayed time is
+explicitly a draft rather than an active schedule. With analysis enabled, the
+optimization section previews the currently entered time/impact and offers one
+explicit action to save that plan and enable automatic drafts in a single existing
+versioned policy write. Merely opening the page does not activate anything. With
+analysis disabled, the section offers to enable analysis only; already configured
+plans retain the existing independent draft toggle and do not save unrelated edits.
+
+## Evolution-task completion notices
+
+Completion delivery runs even if generation reconciliation, effect observation, or
+one workflow's automatic planning fails. The deployed configuration supplies proposal
+identity without requiring equality with Git's YAML representation; independent Git
+commit, tree, and reviewed-file checks are unchanged.
+
+Search `workflow-notification` (without brackets) for notification diagnostics.
+Every entry is a single line containing the prefix and JSON fields, so log search
+does not separate the keyword from its reason and correlation IDs. Startup emits
+`consumer_configured` (automation / notification_only / none); the public Host also
+emits `provider_configured` with sender and public-URL presence booleans, never
+their values. `worker_started` identifies the first drain invocation and environment.
+`batch_ready` records the first eligible count, including zero, and later nonempty
+batches; empty polls do not log every 15 seconds. Counts are environment-scoped,
+not a claim that the shared database has no notices.
+
+`completion_observed` means the result observer was reached. `enqueue_prepared`
+means the queue insert was prepared inside the result transaction, not that the
+outer transaction committed or a message was delivered. `enqueue_failed` preserves
+the write error. `recipients_queued`, `skipped` with its reason, `blocked`,
+`provider_unavailable`, `provider_failed`, `delivery_failed`, and `drain_failed` expose failures and exits;
+provider failures distinguish missing configuration, known HTTP rejection (with
+status), and unknown transport outcomes without logging raw provider errors;
+the last includes the stage (settings_scan / queue_read / delivery). Exceptions
+still propagate, and diagnostic failures contain stable reasons rather than raw
+provider errors, credentials, or payloads. Historical results are not replayed for
+diagnostics. These entries require deploying the updated consumer instances; no
+matching keyword in older logs cannot establish whether a notice was queued.
+
+Per-delivery structured fields
+include event (`dispatching`, `accepted`, `retryable`, `uncertain`), workflow/task/
+revision, notice ID, execution environment, recipient ID, attempts, and provider
+receipt when available. `accepted` means the sender accepted the request, not that
+the recipient read it. Notification text, workflow inputs, and credentials are not
+logged. Unknown transport outcomes retain their existing no-blind-resend behavior.
+
+The shared Host wires `queueRepairCompletion` through the workbench's optional
+transactional completion observer. Both manual generation and its retries/feedback
+queue one notice per task revision on successful reviewable output, no-change,
+failed generation or failed checks. Queue persistence commits with the result;
+remote notification delivery is not part of the result transaction. Historical
+results are not backfilled. Automatic successful batches keep their existing
+coordinator notification, once the complete chain is reviewable; intermediate
+batches do not generate repeated success notices. Automatic failures also notify.
+
+The existing monitor drains `auto_notice` independently of automatic-analysis
+enablement or daily configuration, including workflows with no saved policy.
+Owner resolution remains current for default notices. Configured recipients use
+individual deterministic journal records and existing leases, so a confirmed
+success is not repeated when another recipient needs a retry. Unknown outcomes
+remain unknown, without blind resend. The existing Host notification port and
+DingTalk provider are reused; no new notification channel, table, or migration
+is introduced. Missing provider configuration remains visible in the existing
+notification/retry records and does not trigger AIS again.
+
+Public ClawWeb passes notification-only settings/ports to the shared runtime and
+its existing 15-second timer calls `monitor.reconcile()`, including when no AIS
+execution adapter is configured. It uses the existing Insight notification sender,
+current Owner and workflow permission repositories. This does not install or enable
+automatic analysis/draft scheduling. OCB continues to supply full automation ports;
+the shared monitor chooses that existing automation consumer or the notification-only
+consumer, never both. Shutdown clears the existing timer; no second scheduler is added.
+
+The same queue consumer serves both Hosts. Expanding a configured recipient list
+only persists deterministic child records; it does not recursively send them.
+Each drain selects at most five due records and processes them concurrently, with
+the existing 20-second timeout per provider call. Thus provider waiting consumes
+one timeout window per batch, not one window per recipient and parent. This is a
+transport-wait bound, not a database-latency guarantee. Pending children survive
+restart; successful children and unknown outcomes are not blindly sent again.
+
 Avernet owns policy, state, selection, recovery, contracts, and UI. The OCB
 composition adapter resolves the current Owner, checks edit permission, invokes
 the existing run-analysis starter and Git baseline service, and sends through the
@@ -194,8 +319,13 @@ as `retryFailures`, independent of the recent-history limit. Analysis/notice job
 must be blocked with one of the existing recoverable reasons and no live lease;
 the existing 50-record selection limit applies. Drafts must satisfy the current
 Owner/policy, batch, original request, failed revision and lease checks. The UI
-lists each target and its type before offering retry; missing or empty lists offer
-no retry action. Recovery rechecks current conditions; a concurrent state change
+offers “重试分析”, “重试生成” or “重发通知” only beside the corresponding eligible
+blocked record. There is no permanent empty recovery section or mixed bulk button.
+`POST automation-retry` accepts optional `{ jobId }`; a target is filtered in SQL
+before the existing selection limit and can requeue only that record. Invalid
+target parameters return 400 and a no-longer-eligible target returns 409. Older
+callers omitting the target retain the existing bounded bulk recovery behavior.
+Recovery rechecks current conditions; a concurrent state change
 can remove eligibility. In-flight and unknown-outcome requests keep reconciling
 their original identities. Status reads do not claim jobs or submit business work.
 
@@ -211,7 +341,8 @@ reads the original candidate. Existing automatic-batch and publication guards ap
 `GET /api/task-guard/workflows/:workflowId/automation-records` requires the existing
 workflow view permission. It reads history only: no coverage aggregation, policy,
 Owner, repair-task detail, or recovery eligibility reads run on this endpoint.
-It accepts `period=all|today|7d`, `status=all|pending|dispatching|waiting|retryable|uncertain|done|blocked`,
+It accepts `period=all|today|7d`, `kind=all|analysis|optimization|notification` (omitted means all, for older callers),
+`status=all|pending|dispatching|waiting|retryable|uncertain|done|blocked|attention`,
 `limit` (integer 1–20, default 8), and an opaque `cursor` of at most 512 characters.
 Invalid values return 400. Response: `{ jobs: AutomationJobSummary[], nextCursor: string | null }`.
 No exact total is calculated. The next cursor uses immutable creation time plus
@@ -219,42 +350,63 @@ record ID and anchors the date window to the first page's time. “Today” star
 Shanghai midnight; “7d” includes today and the preceding six Shanghai calendar
 days. These are creation dates, not the original workflow run's occurrence date.
 
-Default UI shows eight newest records, regardless of task status. “查看全部记录”
-opens a 20-record page with date and status selectors and previous/next navigation.
-Changing a filter resets the cursor trail. Collapsing restores the unfiltered
-latest eight. Filters do not affect the independent retry-target list or its
-eligibility. Failed history reads can be retried without a business write.
-Only the first page polls; older pages load on demand and are briefly cached.
-Successful task-retry requests invalidate the history cache.
+The settings UI provides separate “查看记录” entries in the “自动分析” and “自动优化”
+sections. Records and recovery status are read only after an entry is opened;
+the initial settings view requests neither. Kind filtering happens in SQL before
+paging, so notification traffic cannot hide real tasks. These are automatic-task
+records: optimization corresponds only to `auto_draft`; manual execution is shown
+in the corresponding evolution task. Opening an entry displays a compact,
+height-limited 20-record list with date/status selectors and previous/next navigation.
+Changing a filter resets the cursor trail. Collapsing removes the list; opening
+another entry starts at its first unfiltered page. Filters do not change recovery eligibility, but a filtered-out record
+leaves no detached action elsewhere on the page. Failed history reads can be retried without a business write.
+History pages load on demand and are briefly cached; they do not poll or refresh
+on window focus. The refresh button explicitly reloads the current page.
+Task-retry responses refresh status and history, including rejected retries. Pending
+requests show immediate feedback and prevent duplicate submissions; success means
+the selected record was requeued, not that execution completed. Scheduling and
+execution concurrency are unchanged.
 
-Migration v146 adds a virtual status projection restricted to auto_run, auto_draft
-and auto_notice plus two compound indexes on task/kind/time/record ID and
-task/kind/status/time/record ID. JSON stays authoritative; historical statuses are
-available without rewriting journal bodies. ZDAS uses ALTER TABLE ADD INDEX,
-not the dialect's skipped standalone CREATE INDEX. Normal migration DDL authority
-is required before the new reader is deployed; a managed runtime without DDL
-permission must receive the schema through its existing migration process.
-Creating indexes can take time on existing large tables and is a deployment-time
-operation, never a request-time operation. No migration was run against a shared
-or production database during development.
+Successful notification journals remain stored but are not displayed in the main
+task list. “查看通知异常” loads only notifications with
+`status=attention` (retryable, uncertain or blocked; a query filter, not a new state).
+Its eight-record cursor pages expose every exception without a history cutoff.
+Task rows show time, result, a shortened target reference and the existing detail
+link; full technical IDs and attempt counts are available under “查看详情”. Neither
+display filtering nor paging changes notification delivery, retry eligibility or
+business execution. The status eligibility list remains read-only; no missing or
+unknown eligibility is guessed from an error label alone.
 
-Each read performs three ordered index-range queries (one per displayed kind),
-returning at most limit+1 scalar projections each, then merges that bounded set.
-It never loads full request/model-input JSON, sorts the complete history, computes
-a total, or uses a deep OFFSET. The index key lengths remain below ZDAS's
-767-byte ceiling with utf8mb4. Regression tests seed 20,000 records and inspect
-SQLite query plans for both unfiltered and rare-status pages, including cursors.
-MySQL/OceanBase live query plans and index build times remain integration checks;
-DDL rendering tests do not establish deployed performance.
+History reads require only the existing v142 journal schema. Status is read from
+body_json; no generated column, new index, backfill or DDL permission is required.
+The v146 automation-history migration is retired; its version must not be reused.
+Environments that previously applied it can keep the unused column/indexes: this
+repair does not issue DROP statements or modify migration ledger entries.
+
+Each read uses one query scoped by task_id and the displayed record kinds, using
+the existing (task_id, record_kind) index where selected by the database planner.
+A limited derived table selects at most limit+1 record IDs and creation times;
+primary-key lookups then extract display JSON only for those page records. It never transfers full request/model-input JSON,
+computes a total, uses a deep OFFSET or loads all history into the application.
+Date/status filtering and creation-time sorting run in the database. Existing
+indexes do not cover time or JSON status, so LIMIT bounds returned rows, not rows
+examined. Rare-status and deep-history queries can still inspect the workflow's
+history and sort qualifying rows. No arbitrary record/date cutoff is imposed;
+limits to result coverage require measured benefit before adoption. SQLite
+regressions inspect existing-index use; local timings do not establish deployed
+MySQL/OceanBase performance.
 
 ### Bounded draft-recovery polling
 
 Status polling and recovery use one batched eligibility query against the current
 failed revision and its original request. Cancelled tasks, tasks with a newer
 revision, stale request IDs, other policy versions and active leases are excluded
-before the 50-draft batch limit. The task/revision primary key and v146 status/time
-index support the join and ordering. Polling never calls the full workbench task
-reader for each historical draft. Owner and current policy authority are still
+before the 50-draft batch limit. The existing task/kind index scopes journal reads;
+the task/revision primary key supports excluding newer revisions. MySQL uses
+STRAIGHT_JOIN to start with scoped journal rows, avoiding a reverse nested-loop
+plan that rescans JSON per failed revision. Status comes from JSON; sorting is
+performed by the database. Polling never calls the full workbench task reader for
+each historical draft. Owner and current policy authority are still
 checked; recovery keeps the journal CAS/lease check and the subsequent generation
 checks. After recovering a batch, remaining eligible drafts appear in the next
 snapshot. The retry-target list and retry action share this same selector.

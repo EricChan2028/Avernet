@@ -19,6 +19,51 @@ function fixture():RepairTaskDetail {
 const props=()=>({canEdit:true,onFeedback:vi.fn(),onCancel:vi.fn(),onRetryDispatch:vi.fn(),onRetryGeneration:vi.fn(),onRefresh:vi.fn(),dispatchError:'',busy:false})
 function mount(detail=fixture(),extra={}){return render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><RepairTaskPanel detail={detail} {...props()} {...extra}/></QueryClientProvider>)}
 beforeEach(()=>{sessionStorage.clear();vi.clearAllMocks();api.diff.mockResolvedValue({files:[],truncated:false});api.trials.mockResolvedValue({configured:false,trials:[]});api.verification.mockResolvedValue({evidence:{deployNumber:160,total:0,excludedUnknownVersions:0,samples:[],automatic:[]},conclusions:[]})})
+it('switches execution state, IDs and errors with v9 while v11 continues generating',async()=>{
+ const detail=fixture(),base=detail.latestAttempt
+ const failed={...base,revision:9,phase:'failed',input:{...base.input,revision:9},draft:null,checks:null,
+  error:{code:'AIS_FAILED',message:'Failed to submit task, Please resubmit!'}} as RepairTaskDetail['latestAttempt']
+ detail.executions={9:{...detail.execution!,status:'failed',jobId:'job-v9',executionId:'exec-v9',rawStatus:'failed'}}
+ detail.latestAttempt={...base,revision:11,phase:'drafting',input:{...base.input,revision:11},draft:null,checks:null,error:null}
+ detail.execution={...detail.execution!,status:'running',jobId:'job-v11',executionId:'exec-v11',rawStatus:'running'}
+ detail.latestSuccessful=null;detail.revisions=[detail.latestAttempt,failed]
+ const rendered=mount(detail)
+ const select=screen.getByRole('combobox',{name:'查看修复版本'}),header=screen.getByRole('region',{name:'当前候选'})
+ await userEvent.selectOptions(select,'9')
+ expect(within(header).getByText(/最近一次生成 v11：生成中/)).toBeVisible()
+ await userEvent.click(within(header).getByText('生成执行记录 · v9'))
+ expect(within(header).getByText('执行失败')).toBeVisible()
+ await userEvent.click(within(header).getByText('执行记录',{exact:true}))
+ expect(within(header).getByText(/"executionId": "exec-v9"/)).toBeVisible()
+ expect(within(header).queryByText(/exec-v11/)).not.toBeInTheDocument()
+ expect(screen.getByRole('alert',{name:'生成失败详情'})).toHaveTextContent('版本：v9 · 执行编号：exec-v9')
+ rendered.rerender(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><RepairTaskPanel detail={{...detail,revisions:[detail.latestAttempt],executions:{11:detail.execution!}}} {...props()}/></QueryClientProvider>)
+ expect(within(header).getByText(/"executionId": "exec-v9"/)).toBeVisible()
+ await userEvent.selectOptions(select,'11')
+ expect(within(header).getByText('生成执行记录 · v11')).toBeVisible()
+ expect(within(header).getByText('正在生成候选')).toBeVisible()
+ expect(within(header).getByText(/"executionId": "exec-v11"/)).toBeVisible()
+ expect(screen.queryByRole('alert',{name:'生成失败详情'})).not.toBeInTheDocument()
+ expect(api.publish).not.toHaveBeenCalled();expect(api.trials).not.toHaveBeenCalled()
+})
+it('identifies global assessment failures and preserves the selected problem and execution reference',()=>{
+ const detail=fixture();detail.latestAttempt.phase='failed';detail.latestAttempt.draft=null;detail.latestSuccessful=null;
+ detail.latestAttempt.error={code:'CANDIDATE_WRITE_FAILED',message:'全局修复评估失败：计划缺少原始问题',stage:'planning',details:{reasonCode:'REPAIR_STRATEGY_INVALID',itemIds:['source'],itemCount:1}};
+ mount(detail);
+ const failure=screen.getByRole('alert',{name:'生成失败详情'});
+ expect(failure).toHaveTextContent('本次生成失败 · 全局修复评估');
+ expect(failure).toHaveTextContent('校验输入并限制输出');
+ expect(failure).toHaveTextContent('exec');
+});
+it('shows the failed stage, original goal, exact parse location and next action without downloading diagnostics',()=>{
+ const detail=fixture();detail.latestAttempt.phase='failed';detail.latestAttempt.draft=null;detail.latestSuccessful=null;
+ detail.latestAttempt.error={code:'CANDIDATE_WRITE_FAILED',message:'生成结果解析失败',stage:'parse_model_output',details:{reasonCode:'MODEL_OUTPUT_INVALID_JSON',itemIds:['source'],itemIndex:1,itemCount:1,line:1,column:2,parserMessage:'Expecting property name enclosed in double quotes'}};
+ mount(detail);
+ const failure=screen.getByRole('alert',{name:'生成失败详情'});
+ expect(failure).toHaveTextContent('模型结果解析');expect(failure).toHaveTextContent('校验输入并限制输出');
+ expect(failure).toHaveTextContent('第 1 行，第 2 列');expect(failure).toHaveTextContent('属性名必须使用双引号');
+ expect(failure).toHaveTextContent('exec');expect(failure).toHaveTextContent('可以沿用原要求重试');
+});
 it('switches actual content without generating, trialing or publishing and supports arrow-key focus',async()=>{
  const user=userEvent.setup(),onFeedback=vi.fn();mount(fixture(),{onFeedback});
  const tabs=await screen.findByRole('tablist',{name:'任务内容'});
@@ -66,7 +111,7 @@ it('explains an intermediate automatic no-change batch without claiming the roun
 });
 it('summarizes real checks and outcomes before folded reports and retains diff retry',async()=>{
  api.diff.mockRejectedValueOnce(new Error('controlled diff unavailable')).mockResolvedValue({files:[],truncated:false});mount();
- expect(screen.getByText('已生成修改 1 项 · 无需修改 0 项 · 未解决 0 项')).toBeVisible();
+ expect(screen.getByText('已生成修改 1 项 · 未采纳 0 项 · 待确认 0 项')).toBeVisible();
  expect(screen.getByText(/静态检查：通过/)).toBeVisible();expect(screen.getByText(/Mock 检查：未覆盖/)).toBeVisible();
  expect(screen.queryByText('workflow repair candidate: 1/1 items changed')).not.toBeVisible();
  await userEvent.click(await screen.findByRole('button',{name:'重试差异'}));
@@ -151,6 +196,24 @@ it('does not substitute original evidence when an old task has no model input re
  mount();await userEvent.click(screen.getByRole('tab',{name:'优化目标'}));
  expect(screen.getByText(/暂无实际模型输入记录/)).toBeInTheDocument();
  expect(screen.queryByText('模型核心输入',{selector:'summary'})).not.toBeInTheDocument();
+ expect(screen.getByText('原始建议与证据',{selector:'summary'})).toBeVisible();
+});
+
+it('distinguishes planning and generation calls while preserving legacy input rendering',async()=>{
+ const detail=fixture();
+ detail.latestAttempt.draft!.modelInputs=[
+  {phase:'planning',itemId:'source',coreInput:'Global planning prompt',materials:{root:'/ais/planning',files:[]}},
+  {phase:'generation',itemId:'source',coreInput:'Grouped generation prompt',materials:{root:'/ais/generation',files:[]}},
+  {itemId:'source-two',coreInput:'Legacy generation prompt',materials:{root:'/ais/legacy',files:[]}},
+ ];
+ mount(detail);const user=userEvent.setup();await user.click(screen.getByRole('tab',{name:'优化目标'}));
+ await user.click(screen.getByText('模型输入与材料',{selector:'summary'}));
+ expect(screen.getByText('第 1 次模型调用 · 全局规划')).toBeVisible();
+ expect(screen.getByText('第 2 次模型调用 · 生成修改')).toBeVisible();
+ expect(screen.getByText('第 3 次模型调用',{exact:true})).toBeVisible();
+ for(const core of screen.getAllByText('模型核心输入',{selector:'summary'}))await user.click(core);
+ for(const prompt of ['Global planning prompt','Grouped generation prompt','Legacy generation prompt'])expect(screen.getByText(prompt)).toBeVisible();
+ expect(screen.getAllByText('可选材料索引',{selector:'summary'})).toHaveLength(3);
  expect(screen.getByText('原始建议与证据',{selector:'summary'})).toBeVisible();
 });
 

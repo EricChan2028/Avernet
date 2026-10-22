@@ -1,5 +1,8 @@
+/** @jest-environment jsdom */
 import { defaultCapabilities } from '@/capabilities/defaultCapabilities';
 import { useExternalAuthStore } from '@/stores/externalAuthStore';
+import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
+import { history as mockHistory } from '@umijs/max';
 import { Bot, Terminal } from 'lucide-react';
 
 describe('Open Core default capabilities', () => {
@@ -225,5 +228,123 @@ describe('Open Core default capabilities', () => {
     const r = defaultCapabilities.getTaskClaimGrantStrategy();
     expect(r.status).toBe('available');
     expect(r.value).toBe('skip');
+  });
+});
+
+// ── 任务副屏 V2 会话联动(P4):会话宿主内只替换左侧内容，宿主外才走路由 ──
+jest.mock('@umijs/max', () => ({ history: { push: jest.fn(), replace: jest.fn() } }));
+
+describe('defaultCapabilities.navigateToConversation', () => {
+  const pushMock = mockHistory.push as unknown as jest.Mock;
+  const replaceMock = (mockHistory as unknown as { replace?: jest.Mock }).replace as jest.Mock | undefined;
+
+  const setPath = (pathname: string) => {
+    window.history.pushState({}, '', pathname);
+  };
+
+  beforeEach(() => {
+    useTaskSidePanelStore.getState().resetAll();
+    pushMock.mockClear();
+    replaceMock?.mockClear();
+  });
+
+  it.each(['/workspace/chat', '/workspace/collaboration'])(
+    '%s 内点群节点 → 左侧联动群会话，TaskPanel 宿主路由不变',
+    (pathname) => {
+      setPath(pathname);
+      const result = defaultCapabilities.navigateToConversation({
+        sessionId: 'bcs_grp_902:round:2',
+        kind: 'group',
+        groupId: 'g-902',
+      });
+
+      expect(result.status).toBe('available');
+      expect(useTaskSidePanelStore.getState().linkedSession).toEqual({
+        sessionId: 'bcs_grp_902:round:2',
+        kind: 'group',
+        groupId: 'g-902',
+        botId: null,
+      });
+      expect(pushMock).not.toHaveBeenCalled();
+      expect(replaceMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['/workspace/chat', '/workspace/collaboration'])(
+    '%s 内点 Bot 节点 → 左侧联动 Bot 会话，TaskPanel 宿主路由不变',
+    (pathname) => {
+      setPath(pathname);
+      const result = defaultCapabilities.navigateToConversation({
+        sessionId: 'agent:main:session:s-1',
+        kind: 'bot',
+        botId: 'bot-9',
+      });
+
+      expect(result.status).toBe('available');
+      expect(useTaskSidePanelStore.getState().linkedSession).toEqual({
+        sessionId: 'agent:main:session:s-1',
+        kind: 'bot',
+        groupId: null,
+        botId: 'bot-9',
+      });
+      expect(pushMock).not.toHaveBeenCalled();
+      expect(replaceMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('kind=unknown 但 sessionId 为 bcs_grp_ 形态 → 按群会话联动', () => {
+    setPath('/workspace/chat');
+    defaultCapabilities.navigateToConversation({
+      sessionId: 'bcs_grp_902:round:2',
+      kind: 'unknown',
+    });
+
+    expect(useTaskSidePanelStore.getState().linkedSession).toEqual({
+      sessionId: 'bcs_grp_902:round:2',
+      kind: 'group',
+      groupId: null,
+      botId: null,
+    });
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it('会话宿主之外点群节点 → 路由进入协作群会话页', () => {
+    setPath('/work/my-task');
+    const result = defaultCapabilities.navigateToConversation({
+      sessionId: 'bcs_grp_902:round:2',
+      kind: 'group',
+      groupId: 'g-902',
+    });
+
+    expect(result.status).toBe('available');
+    const url = pushMock.mock.calls[0][0] as string;
+    expect(url.startsWith('/workspace/collaboration?')).toBe(true);
+    expect(url).toContain('session=');
+    expect(url).toContain('group=');
+    expect(useTaskSidePanelStore.getState().linkedSession).toBeNull();
+  });
+
+  it('会话宿主之外点 Bot 节点 → 路由进入单聊会话页', () => {
+    setPath('/work/my-task');
+    defaultCapabilities.navigateToConversation({
+      sessionId: 'agent:main:session:s-1',
+      kind: 'bot',
+      botId: 'bot-9',
+    });
+
+    const url = pushMock.mock.calls[0][0] as string;
+    expect(url.startsWith('/workspace/chat?')).toBe(true);
+    expect(url).toContain('bot=bot-9');
+    expect(url).toContain('session=');
+    expect(useTaskSidePanelStore.getState().linkedSession).toBeNull();
+  });
+
+  it('sessionId 缺失 → unsupported，不触发联动或路由', () => {
+    const result = defaultCapabilities.navigateToConversation({ sessionId: '', kind: 'unknown' });
+    expect(result.status).toBe('unsupported');
+    expect(useTaskSidePanelStore.getState().linkedSession).toBeNull();
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(replaceMock).not.toHaveBeenCalled();
   });
 });

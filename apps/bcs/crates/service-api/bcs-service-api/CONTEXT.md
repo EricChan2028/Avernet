@@ -304,6 +304,12 @@ MessageFlowService exposes Human-only environment-wide delivery-policy read/repl
 
 - Application, core, and port trait contracts for BCS.
 - Group human-mention notify mode is part of the Group patch contract.
+  Normal creation also carries the concrete `HumanMentionNotifyMode` through
+  `CreateCollaborationGroup` and `GroupCreateCommand`. Both HTTP adapters default
+  omitted values to `all` and reject explicit null or unknown values. Management
+  sets it before the first Group upsert, including inline provisioning and
+  creation without an initial Session; no follow-up patch or extra write is
+  needed. DM creation/reuse contracts and notification routing are unchanged.
   Both HTTP adapters translate the wire field into
   `application::v1::GroupPatch::human_mention_notify_mode` (`null` and unknown
   values are rejected at the adapter boundary); the V1 Group application copies
@@ -442,6 +448,12 @@ conflict without credential replay; different refs may share a valid register to
 Shared receipt DTOs live in types (no repo-to-core dependency). Core and repository
 contracts have shared conformance harnesses, including Memory/SQLite implementations.
 No Plugin API changes. Token v2 purpose and mode claims cannot be widened during redemption.
+Authorization returns `ProviderRegistrationAuthorization` containing allowed
+connection modes and the Provider auth mode. `RegisterProviderBot.token_auth_mode`
+is an internal optional claim copied only from a verified Token, not an HTTP
+parameter. The core checks a present value against current Provider configuration
+before mutations; None preserves historical v2 compatibility. Consumers and test
+fakes must rebuild against 0.4.0 for these Rust source-contract changes; no database change is needed.
 
 ProviderBotCoreService also owns authorized deletion by Bot Provider/ref metadata
 for both modes. ProviderManagement invokes this core operation before its legacy
@@ -488,3 +500,7 @@ and Direct A2A. ChatRun ports expose nullable delivery/source IDs, durable manag
 checkpoint CAS and cursor recovery pages capped at eight records. DeliveryLookup
 supports an eight-ID recovery batch. Async acceptance may include a safe queue
 summary; HTTP version negotiation remains the adapter's responsibility.
+
+SessionManagementService.authorize_collaboration is the policy contract used before HTTP self-enrollment and runtime Human input. Bootstrap injects the live registry into SessionManagementServiceImpl; the runtime-cleanup wrapper delegates the contract. Legacy implementations without Provider support retain their existing default behavior.
+
+BotProviderRepoPort.validate_provider_affiliation is a fresh preflight for registration before capability merging. Concrete memory/SQL attachment implementations must also recheck public membership at the write boundary; the default unsupported error is not an authorization fallback.
