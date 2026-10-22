@@ -78,6 +78,10 @@ enabled = false
 [database]
 type = "sqlite"
 
+[collaboration_drafts]
+# Opt in explicitly to persist and share collaboration drafts.
+enabled = false
+
 [database.sqlite]
 path = "bcs.db"
 

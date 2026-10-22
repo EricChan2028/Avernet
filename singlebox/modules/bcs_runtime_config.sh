@@ -162,6 +162,9 @@ prepare_bcs_runtime_config() {
         local escaped_e2e_judge_url
         escaped_e2e_judge_url="$(toml_sed_replacement "${BCS_E2E_MOCK_BASE_URL}/v1")"
         sed_args+=(
+            # The coverage suite exercises Draft delivery; enable it only in
+            # generated E2E config, leaving the local template disabled.
+            "-e" "/^\[collaboration_drafts\]/,/^\[/{s|^enabled = .*|enabled = true|;}"
             "-e" "/^\[llm\]/,/^\[/{s|^type = \".*\"$|type = \"openai_compatible\"|;s|^base_url = \".*\"$|base_url = \"${escaped_e2e_judge_url}\"|;s|^api_key_env = \".*\"$|api_key_env = \"BCS_E2E_JUDGE_API_KEY\"|;s|^model = \".*\"$|model = \"e2e-judge\"|;s|^timeout_ms = [0-9][0-9]*$|timeout_ms = 30000|;}"
             "-e" "/^\[security.outbound_url\]/,/^\[/{s|^block_private_networks = .*|block_private_networks = false|;s|^allow_loopback = .*|allow_loopback = true|;}"
         )
