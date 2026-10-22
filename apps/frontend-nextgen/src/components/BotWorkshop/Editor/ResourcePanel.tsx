@@ -1,30 +1,13 @@
 import { Button } from '@/components/ui/Button';
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
 import { Input } from '@/components/ui/Input';
 import { Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import type { BotEditorResource, BotEditorResourcePreview } from '@/domain/botEditor';
-import { buildVisibleResourceTree, formatResourceBytes } from '@/services/botWorkshop/resourceTree';
-import {
-  ChevronRight,
-  Copy,
-  Download,
-  File,
-  FilePlus,
-  Folder,
-  FolderOpen,
-  FolderPlus,
-  Loader2,
-  Trash2,
-  Upload,
-} from 'lucide-react';
+import { buildVisibleResourceTree } from '@/services/botWorkshop/resourceTree';
+import { ChevronRight, Folder, FolderPlus, Upload } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
+import { ResourcePanelRow } from './ResourcePanelRow';
 import { ResourcePreviewDrawer } from './ResourcePreviewDrawer';
-
-/** 行首留白（px），与设计稿行内 icon 前 7px 呼应 */
-const ROW_BASE_PADDING = 8;
-/** 每层目录缩进步距（px） */
-const INDENT_STEP = 20;
 
 export function ResourcePanel({
   resources,
@@ -64,12 +47,6 @@ export function ResourcePanel({
   const uploadDirectoryRef = useRef('');
   const visibleResources = useMemo(() => buildVisibleResourceTree(resources, expanded), [expanded, resources]);
   const breadcrumbSegments = useMemo(() => directory.split('/').filter(Boolean), [directory]);
-  const resourceIconClassName = (item: BotEditorResource) => {
-    if (item.type === 'folder') return 'text-warning';
-    if (/\.json$/i.test(item.name)) return 'text-violet-500';
-    if (/\.(md|mdx)$/i.test(item.name)) return 'text-emerald-500';
-    return 'text-zinc-400';
-  };
   const uploadToDirectory = async (target: string, file: File) => {
     await onUpload(target ? `${target}/${file.name}` : file.name, file);
     if (target) await onLoadDirectory(target);
@@ -163,161 +140,35 @@ export function ResourcePanel({
         </div>
         {resources.length ? (
           <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-            {visibleResources.map(({ item, depth }) => {
-              const isFolder = item.type === 'folder';
-              const isOpen = expanded.includes(item.path);
-              const selected = directory === item.path || preview?.path === item.path;
-              return (
-                <div
-                  key={item.path}
-                  data-depth={depth}
-                  className={`group relative flex h-9 items-center rounded-md pr-1.5 transition-colors ${
-                    selected ? 'bg-primary/5' : 'hover:bg-zinc-200/80 dark:hover:bg-zinc-800/70'
-                  }`}
-                  style={{
-                    // 文件行补一个箭头槽（16px 图标 + 6px 间距），使两层 icon 纵向对齐
-                    paddingLeft: `${ROW_BASE_PADDING + depth * INDENT_STEP + (isFolder ? 0 : 22)}px`,
-                  }}
-                >
-                  {/* 祖先层级导轨：行行相接拼成连续竖线（dmore 051 的 Line 12 规格） */}
-                  {Array.from({ length: depth }, (_, index) => (
-                    <span
-                      key={index}
-                      aria-hidden
-                      data-rail
-                      className="absolute inset-y-0 w-px bg-zinc-200 dark:bg-zinc-800"
-                      style={{ left: `${ROW_BASE_PADDING + index * INDENT_STEP + 9}px` }}
-                    />
-                  ))}
-                  {isFolder ? (
-                    <Button
-                      variant="ghost"
-                      className="h-auto min-w-0 flex-1 justify-start gap-1.5 rounded-md px-1.5 py-1.5 text-left font-normal hover:bg-transparent"
-                      aria-label={`${isOpen ? '收起' : '展开'}${item.name}`}
-                      aria-expanded={isOpen}
-                      title={item.path}
-                      onClick={() => toggleDirectory(item.path)}
-                      leftIcon={
-                        loadingPaths.includes(item.path) ? (
-                          <Loader2 className="size-4 shrink-0 animate-spin text-zinc-400" />
-                        ) : (
-                          <ChevronRight
-                            aria-hidden
-                            className={`size-4 shrink-0 text-zinc-400 transition-transform duration-150 ${
-                              isOpen ? 'rotate-90' : ''
-                            }`}
-                          />
-                        )
-                      }
-                    >
-                      {isOpen ? (
-                        <FolderOpen aria-hidden className="size-4 shrink-0 text-warning" />
-                      ) : (
-                        <Folder aria-hidden className="size-4 shrink-0 text-warning" />
-                      )}
-                      <span className="ml-1 min-w-0 flex-1 truncate text-[13px] font-normal text-zinc-600 dark:text-zinc-400">
-                        {item.name}
-                      </span>
-                      <span className="sr-only">{item.path}</span>
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="ghost"
-                      className="h-auto min-w-0 flex-1 justify-start gap-2 rounded-md px-1.5 py-1.5 text-left font-normal hover:bg-transparent"
-                      aria-label={`预览${item.name}`}
-                      title={item.path}
-                      disabled={desktop && (item.size ?? 0) > 1048576}
-                      // 预览失败（如大文件 413000）已由全局错误通道提示，吞掉传播避免 dev 遮罩报 Unhandled Rejection
-                      onClick={() =>
-                        void onPreview(item.path)
-                          .then((result) => setPreview({ path: item.path, result }))
-                          .catch(() => undefined)
-                      }
-                    >
-                      <File aria-hidden className={`size-4 shrink-0 ${resourceIconClassName(item)}`} />
-                      <span className="min-w-0 flex-1 truncate text-[13px] font-normal text-zinc-600 dark:text-zinc-400">
-                        {item.name}
-                      </span>
-                      {item.size !== undefined ? (
-                        <span className="mr-1 shrink-0 text-xs tabular-nums text-zinc-400">
-                          {formatResourceBytes(item.size)}
-                        </span>
-                      ) : null}
-                      <span className="sr-only">
-                        {item.path}
-                        {item.size !== undefined ? ` · ${formatResourceBytes(item.size)}` : ''}
-                      </span>
-                    </Button>
-                  )}
-                  <div
-                    className={`relative z-10 flex shrink-0 items-center gap-0.5 transition-opacity ${
-                      selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
-                    }`}
-                  >
-                    {item.type === 'folder' ? (
-                      <>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-7 rounded-md text-zinc-500"
-                          disabled={!editable}
-                          aria-label={`向${item.name}添加文件`}
-                          leftIcon={<FilePlus className="size-4" />}
-                          onClick={() => {
-                            uploadDirectoryRef.current = item.path;
-                            uploadRef.current?.click();
-                          }}
-                        />
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-7 rounded-md text-zinc-500"
-                          disabled={!editable}
-                          aria-label={`在${item.name}中新建子目录`}
-                          leftIcon={<FolderPlus className="size-4" />}
-                          onClick={() => {
-                            setCreateParent(item.path);
-                            setCreateOpen(true);
-                          }}
-                        />
-                      </>
-                    ) : null}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7 rounded-md text-zinc-500"
-                      aria-label={`复制路径${item.name}`}
-                      leftIcon={<Copy className="size-4" />}
-                      onClick={() => void onCopyPath(item.path)}
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7 rounded-md text-zinc-500"
-                      disabled={desktop && item.type === 'folder'}
-                      aria-label={`下载${item.type === 'folder' ? '文件夹' : '文件'}${item.name}`}
-                      leftIcon={<Download className="size-4" />}
-                      onClick={() => void onDownload(item.path, item.type)}
-                    />
-                    <ConfirmDialog
-                      title="删除资源"
-                      description={`确认递归删除「${item.path}」？`}
-                      confirmVariant="destructive"
-                      onConfirm={() => onDelete(item.path)}
-                      disabled={!editable}
-                    >
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-7 rounded-md text-zinc-500 hover:text-destructive"
-                        aria-label={`删除${item.name}`}
-                        leftIcon={<Trash2 className="size-4" />}
-                      />
-                    </ConfirmDialog>
-                  </div>
-                </div>
-              );
-            })}
+            {visibleResources.map(({ item, depth }) => (
+              <ResourcePanelRow
+                key={item.path}
+                item={item}
+                depth={depth}
+                isOpen={expanded.includes(item.path)}
+                dirLoading={loadingPaths.includes(item.path)}
+                selected={directory === item.path || preview?.path === item.path}
+                editable={editable}
+                desktop={desktop}
+                onToggleDirectory={toggleDirectory}
+                onAddFileTo={(target) => {
+                  uploadDirectoryRef.current = target;
+                  uploadRef.current?.click();
+                }}
+                onCreateSubdirectory={(parent) => {
+                  setCreateParent(parent);
+                  setCreateOpen(true);
+                }}
+                onPreviewFile={(target) =>
+                  void onPreview(target)
+                    .then((result) => setPreview({ path: target, result }))
+                    .catch(() => undefined)
+                }
+                onCopyPath={onCopyPath}
+                onDownload={onDownload}
+                onDelete={onDelete}
+              />
+            ))}
           </div>
         ) : (
           <div className="rounded-xl border border-dashed border-border bg-card py-14">

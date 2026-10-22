@@ -39,11 +39,7 @@ describe('ConversationSessionRow 平齐化与热区分级（dmore 1:1）', () =>
     const title = screen.getByText('对话会话');
     expect(title).toHaveClass('text-[13px]', 'leading-[18px]');
     expect(title).toHaveClass('font-normal');
-    if (selected) {
-      expect(title).toHaveClass('text-primary');
-    } else {
-      expect(title).toHaveClass('text-content-strong');
-    }
+    expect(title).toHaveClass(selected ? 'text-primary' : 'text-content-strong');
   });
 
   it('标题对齐一级名称：固定头像槽后起排；非收藏行右缘内缩，收藏行右缘到边', () => {

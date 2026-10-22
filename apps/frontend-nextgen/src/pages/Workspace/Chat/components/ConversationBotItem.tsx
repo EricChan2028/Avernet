@@ -15,7 +15,7 @@ import { isManagedConversationSection } from '@/domain/conversation/types';
 import { useConversationInstanceRow } from '../hooks/useConversationInstanceScope';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { cn } from '@/utils/cn';
-import { ChevronDown, Plus, Search } from 'lucide-react';
+import { ChevronDown, Plus } from 'lucide-react';
 import React from 'react';
 import { AvatarTile } from '../../components/AvatarTile';
 import type { ConversationSessionListActions } from '../hooks/useConversationSessionActions';
@@ -25,6 +25,7 @@ import { OthersArea, type ConversationBotItemOthers } from './ConversationBotOth
 import { ConversationOriginFilter } from './ConversationOriginFilter';
 import { ConversationSessionIdSearchInput } from './ConversationSessionIdSearchInput';
 import { ConversationSessionList } from './ConversationSessionList';
+import { ConversationSessionSearchIconButton } from './ConversationSessionSearchIconButton';
 
 export type { ConversationBotItemOthers } from './ConversationBotOthersArea';
 
@@ -212,29 +213,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
               />
             )}
             {searchVisible && (
-              <IconButton
-                label="会话ID检索"
-                size="sm"
-                icon={
-                  <span className="relative flex items-center justify-center">
-                    <Search className="h-3.5 w-3.5" aria-hidden="true" />
-                    {searchMarked && (
-                      <span
-                        className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-primary"
-                        aria-hidden="true"
-                      />
-                    )}
-                  </span>
-                }
-                className={cn(
-                  'h-6 w-6 rounded-md hover:bg-muted',
-                  searchMarked ? 'text-primary hover:text-primary' : 'text-muted-foreground hover:text-foreground',
-                )}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  handleSearchToggle();
-                }}
-              />
+              <ConversationSessionSearchIconButton marked={searchMarked} onToggle={handleSearchToggle} />
             )}
             {showFilter && (
               <ConversationOriginFilter

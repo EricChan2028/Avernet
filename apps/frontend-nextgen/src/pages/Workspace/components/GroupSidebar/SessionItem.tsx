@@ -1,15 +1,4 @@
-import { Button, IconButton, Input } from '@/components/ui';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/AlertDialog';
-import { Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
+import { Button, IconButton } from '@/components/ui';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import type { IdentityView, SessionView } from '@/domain/collaboration';
 import type { DomainResult } from '@/services/workspace/identityService';
@@ -19,6 +8,7 @@ import { MoreHorizontal, Pencil, Settings2, Share2, Star, Trash2 } from 'lucide-
 import React, { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { SharePopover } from '../ManagePanel/SharePopover';
+import { SessionItemDeleteDialog, SessionItemRenameDialog } from './SessionItemDialogs';
 
 interface SessionItemProps {
   session: SessionView;
@@ -254,22 +244,13 @@ export const SessionItem = React.memo(function SessionItem({
         </span>
       </div>
 
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除会话</AlertDialogTitle>
-            <AlertDialogDescription>
-              删除后该会话及其消息将无法恢复，确定删除“{session.title}”吗？
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void confirmDelete()} disabled={deleting}>
-              {deleting ? '删除中…' : '确认删除'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <SessionItemDeleteDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title={session.title}
+        deleting={deleting}
+        onConfirm={() => void confirmDelete()}
+      />
 
       <SharePopover
         open={shareOpen}
@@ -283,27 +264,14 @@ export const SessionItem = React.memo(function SessionItem({
         onClose={() => setShareOpen(false)}
       />
 
-      <Modal open={renameOpen} onOpenChange={setRenameOpen}>
-        <ModalContent size="sm" showClose>
-          <ModalHeader>
-            <ModalTitle>编辑会话标题</ModalTitle>
-          </ModalHeader>
-          <Input value={titleDraft} onChange={(e) => setTitleDraft(e.target.value)} aria-label="会话标题" />
-          <ModalFooter>
-            <Button variant="ghost" size="sm" onClick={() => setRenameOpen(false)} disabled={renaming}>
-              取消
-            </Button>
-            <Button
-              variant="default"
-              size="sm"
-              onClick={() => void confirmRename()}
-              disabled={renaming || !titleDraft.trim()}
-            >
-              保存
-            </Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
+      <SessionItemRenameDialog
+        open={renameOpen}
+        onOpenChange={setRenameOpen}
+        draft={titleDraft}
+        onDraftChange={setTitleDraft}
+        saving={renaming}
+        onConfirm={() => void confirmRename()}
+      />
     </>
   );
 });
