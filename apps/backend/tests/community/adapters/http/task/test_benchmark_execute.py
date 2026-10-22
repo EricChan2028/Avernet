@@ -27,6 +27,7 @@ from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
 
 class _StubService:
     def __init__(self, result: TaskOpResult | None = None) -> None:
+        self.node_updates: list[dict[str, Any]] = []
         self.result = result or TaskOpResult(
             task_id="task-1",
             node_id="task-1",
@@ -42,6 +43,14 @@ class _StubService:
     async def execute(self, request):
         self.requests.append(request)
         return self.result
+
+    async def update_task_node_info(
+        self, task_id, node_id, **kwargs
+    ):
+        self.node_updates.append(
+            {"task_id": task_id, "node_id": node_id, **kwargs}
+        )
+        return TaskOpResult(task_id=task_id, node_id=node_id, success=True)
 
 
 class _StubBotPort:
@@ -220,6 +229,11 @@ class TestBenchmarkExecute:
         assert len(service.requests) == 1
         assert service.requests[0].execution_config["main_session_id"] == "benchmark-session-1"
         assert service.requests[0].execution_config["lifecycle_stage"] == "draft"
+        assert service.node_updates[-1] == {
+            "task_id": "task-1",
+            "node_id": "task-1",
+            "extend_props_patch": {"run_id": "openapi-run-2"},
+        }
         assert service.requests[0].owner_bot_id == "bot-1"
         assert service.requests[0].owner_user_id == "owner-1"
 

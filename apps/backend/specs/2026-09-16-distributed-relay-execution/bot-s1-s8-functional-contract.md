@@ -1444,7 +1444,7 @@ local_acceptance_result: AcceptanceResult = AcceptanceResult(
 ### 14.1 EXECUTION_RESULT
 
 - Backend 以内部 `(task_id, node_id, attempt, EXECUTION_RESULT)` 识别当前尝试唯一的执行结果；同一尝试重复请求不重复写节点事实，同键不同内容返回冲突。
-- 接纳 `exec_error` 时记录该 attempt 失败并停止 S5，不能把错误 patch 当成已完成业务事实。只有新的执行代次重投才轮换 `relay_token`；运行时无进展 harness 采用 same-session 续跑，不推进 attempt、不轮换 token。same-session 续跑预算耗尽则进入 HUNG/待干预，不无限重试。
+- 接纳 `exec_error` 时记录该 attempt 失败并停止 S5，不能把错误 patch 当成已完成业务事实。只有新的执行代次重投才轮换 `relay_token`；`active + 无进展` 先等待引擎自身 timeout/终态，不直接进入 harness 续跑。进入恢复态后的 same-session 续跑不推进 attempt、不轮换 token；预算耗尽则进入 HUNG/待干预，不无限重试。
 - S1 只投影当前 attempt 已接纳的执行 patch；旧失败 attempt 保留为审计轨迹，旧绑定的迟到 context/report/dispatch 不得推进当前节点。成功尝试接纳后才允许该节点唯一的 `PLAN_RESULT`。
 - `relay_token` 由 Backend 首派前签发，仅新的执行代次重投时轮换；same-session harness 续跑不轮换。Bot 只原样携带；`event_id` 由 Bot 调用层生成并在同一事件重试时复用。两者不是身份凭证；Bot 不填写 attempt 或图谱版本。
 
@@ -1463,12 +1463,12 @@ local_acceptance_result: AcceptanceResult = AcceptanceResult(
 
 ### 14.4 harness 恢复
 
-Runtime liveness 连续无进展、连续未知/无响应，或终态成功但未上报时，Relay harness 执行以下 **same-session** 恢复：
+Runtime liveness 采用引擎状态作为事实源：`active + 有进展` 不做恢复；`active + 无进展` 只记录、计数，等待引擎自身的 timeout/终态，不发送恢复消息。只有引擎出现 `terminal_failed` / `timeout` / `aborted`，或 `terminal_success` 但任务图未收到报告，或连续 `unknown` / `unresponsive` 时，Relay harness 才进入以下 **same-session** 恢复：
 
 - 节点保持 `RUNNING`；不重置 `PENDING`，不重新 prepare，不重新 dispatch，不轮换 `relay_token`，不改变 `run_mode`、`assignee`、群/会话或任务标识。
-- 单 Bot/OpenAPI 节点向原始 session 发送：`继续执行当前未完成的 task-loop S1~S6。不要新建任务、不要重新澄清、不要重新提交 execute。如果当前步骤无法完成，请输出明确失败原因，并继续执行后续步骤。`
+- 单 Bot/OpenAPI 节点仅向原始 session 发送：`继续执行当前未完成的 task-loop S1~S6。不要新建任务、不要重新澄清、不要重新提交 execute。如果当前步骤无法完成，请输出明确失败原因，并继续执行后续步骤。`不执行引擎 run abort/stop 权限干预，不改变节点代次或 `relay_token`。
 - BCS 协作群节点通过既有 `POST /sessions/{sid}/chat` 会话口发送同一条自然语言消息，调用者使用原群内参与者 Bot 身份，不新建群/会话。
-- same-session 续跑次数持久化在节点 `relay_harness_resume_attempts` 中，不写入 `harness_retries`，不参与报告幂等键。默认最多 2 次；最后一次仍无有效进展则节点显式置 `HUNG`，原因是 `relay_harness_resume_exhausted`。该终态不隐式升级 BBS，也不改变执行模态。
+- same-session 续跑次数持久化在节点 `relay_harness_resume_attempts` 中，不写入 `harness_retries`，不参与报告幂等键。默认最多 2 次；第二次恢复后，若下一次探活仍满足“可恢复终态/连续无响应”条件，则节点显式置 `HUNG`，原因是 `relay_harness_resume_exhausted`。该终态不隐式升级 BBS，也不改变执行模态。
 - Bot 继续执行时仍按当前 `relay_token` 调用 S1/context、S4b/report、S5/report 和 S6/dispatch；不新增第三个 report event 或恢复专用标记。
 - 独立的新执行代次重投（例如节点已执行失败且重新 prepare/dispatch）仍由后端状态机控制并可轮换 `relay_token`，与 same-session 续跑是两种不同恢复。
 

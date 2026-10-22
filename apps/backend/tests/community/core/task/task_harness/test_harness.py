@@ -241,7 +241,7 @@ class TestHarnessOnlyPollsExecutionLeaves:
         assert node.status == Status.RUNNING
         assert len(recovery.nodes) == 1
 
-    def test_relay_no_progress_requires_sla_observations_and_resume_semantics(
+    def test_relay_active_no_progress_waits_for_engine_terminal_state(
         self, svc, graph
     ):
         graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
@@ -254,50 +254,21 @@ class TestHarnessOnlyPollsExecutionLeaves:
         clock = _Clock(0.0)
         rec = Recorder()
         h = TaskHarness(
-            svc, rec, clock=clock, default_sla_timeout=30,
+            svc, rec, clock=clock, default_sla_timeout=1,
             runtime_probe=probe, runtime_probe_threshold=1,
             runtime_retry_threshold=3, relay_recovery=recovery,
         )
         h.register("t1")
         h._poll_once()
-        for _ in range(3):
+
+        for _ in range(5):
             clock.advance(10.0)
             assert h._poll_once() == []
 
-        clock.advance(6.0)
-        resets = h._poll_once()
-        assert resets == []
         assert node.status == Status.RUNNING
         assert node.run_info.extend_props["relay_token"] == "token-1"
-        assert node.run_info.extend_props["relay_harness_resume_attempts"] == 1
-        assert len(recovery.nodes) == 1
-        assert recovery.nodes[0].node_id == "c1"
-
-        # A second repeated no-progress observation consumes the second and
-        # final same-session attempt.
-        clock.advance(10.0)
-        assert h._poll_once() == []
-        clock.advance(10.0)
-        assert h._poll_once() == []
-        clock.advance(10.0)
-        resets = h._poll_once()
-        assert resets == []
-        assert len(recovery.nodes) == 2
-        assert node.status == Status.RUNNING
-        assert node.run_info.extend_props["relay_harness_resume_attempts"] == 2
-
-        # The next repeated observation HUNGs without any on_harness reset.
-        clock.advance(10.0)
-        assert h._poll_once() == []
-        clock.advance(10.0)
-        assert h._poll_once() == []
-        clock.advance(10.0)
-        resets = h._poll_once()
-        assert len(resets) == 1
-        assert node.status == Status.HUNG
-        assert resets[0].failure_reason.startswith(
-            "relay_harness_resume_exhausted: runtime_no_progress"
-        )
+        assert recovery.nodes == []
+        assert "relay_harness_resume_attempts" not in node.run_info.extend_props
         assert rec.patches == []
 
     def test_relay_terminal_success_unreported_resumes_same_session(

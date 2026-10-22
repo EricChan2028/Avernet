@@ -101,6 +101,18 @@ class TestTaskRuntimeLivenessProbe(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.state, "terminal_failed")
         self.assertEqual(result.status, "failed")
 
+    async def test_engine_timeout_and_abort_map_to_terminal_failed(self):
+        for status in ("TIMEOUT", "ABORTED"):
+            with self.subTest(status=status):
+                bot = _FakeBot()
+                bot.run = {"status": status}
+                probe = TaskRuntimeLivenessProbe(bot=bot)
+
+                result = await probe.probe(_Node(run_id="r1"))
+
+                self.assertEqual(result.state, "terminal_failed")
+                self.assertEqual(result.status, status.lower())
+
     async def test_session_probe_passes_composite_bot_id(self):
         bot = _FakeBot()
         probe = TaskRuntimeLivenessProbe(bot=bot)
