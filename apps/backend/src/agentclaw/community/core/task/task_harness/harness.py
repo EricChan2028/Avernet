@@ -196,6 +196,7 @@ class TaskHarness:
                 "no_progress": 0,
                 "success_unreported": 0,
                 "resume_attempts": 0,
+                "probe_unavailable": 0,
             },
         )
         try:
@@ -211,7 +212,12 @@ class TaskHarness:
                 state="unknown", error=f"{type(exc).__name__}: {exc}"[:500]
             )
 
-        current["cursor"] = result.heartbeat_cursor
+        if result.state != "probe_unavailable":
+            # Successful/observable probes update the cursor; an unavailable probe
+            # has no observation and therefore must not overwrite the last known
+            # cursor. Otherwise the next successful probe could be misjudged as
+            # fresh progress after service instability.
+            current["cursor"] = result.heartbeat_cursor
         detail = {
             "runtime_state": result.state,
             "runtime_status": result.status,
@@ -242,9 +248,20 @@ class TaskHarness:
                 current["no_progress"] = 0
             else:
                 current["no_progress"] += 1
+        elif result.state == "probe_unavailable":
+            # Transport/app request failure is not Bot unresponsiveness. Predeploy
+            # and single-server deployments can make the probe read path itself
+            # intermittently unavailable; therefore this state must never consume
+            # recovery attempts or advance the task's failure state.
+            current["unknown"] = 0
+            current["no_progress"] = 0
+            current["probe_unavailable"] = (
+                current.get("probe_unavailable", 0) + 1
+            )
         elif result.state == "unknown":
             current["unknown"] += 1
             current["no_progress"] = 0
+            current["probe_unavailable"] = 0
             if current["unknown"] >= self._runtime_retry_threshold:
                 reason = "runtime_unresponsive"
 

@@ -25,6 +25,7 @@ RuntimeLivenessState = Literal[
     "terminal_success",
     "terminal_failed",
     "unknown",
+    "probe_unavailable",
 ]
 
 
@@ -248,6 +249,27 @@ def _bot_identity_from_node(node: TaskNode) -> str | None:
 class TaskRuntimeLivenessProbe:
     """Read runtime status and heartbeats through existing internal ports."""
 
+    @staticmethod
+    def _unavailable(
+        *,
+        source: str,
+        error: Exception,
+        detail: dict[str, Any],
+    ) -> RuntimeProbeResult:
+        """Build a ``probe_unavailable`` result.
+
+        An unreadable runtime is not evidence of a dead Bot. The harness must not
+        consume same-session recovery attempts from this state, otherwise a
+        transient predeploy outage on a single-server pre environment can be
+        mistaken for a Bot runtime hang.
+        """
+        return RuntimeProbeResult(
+            state="probe_unavailable",
+            source=source,
+            error=f"{type(error).__name__}: {error}"[:500],
+            detail={"reason": "probe_request_failed", **detail},
+        )
+
     def __init__(self, *, bot: Any = None, bcs: Any = None) -> None:
         self._bot = bot
         self._bcs = bcs
@@ -331,10 +353,9 @@ class TaskRuntimeLivenessProbe:
                 lifecycle_stage=lifecycle_stage,
             )
         except Exception as exc:  # noqa: BLE001
-            return RuntimeProbeResult(
-                state="unknown",
+            return self._unavailable(
                 source="openapi_bot.session",
-                error=f"{type(exc).__name__}: {exc}"[:500],
+                error=exc,
                 detail={
                     "session_id": session_id,
                     "bot_id_missing": not bot_id,
@@ -392,11 +413,11 @@ class TaskRuntimeLivenessProbe:
             )
         try:
             run = await self._bot.get_run(run_id)
-        except Exception as exc:  # noqa: BLE001 - probe must be observable, not fatal
-            return RuntimeProbeResult(
-                state="unknown",
+        except Exception as exc:  # noqa: BLE001
+            return self._unavailable(
                 source="openapi_bot.run",
-                error=f"{type(exc).__name__}: {exc}"[:500],
+                error=exc,
+                detail={"run_id": run_id},
             )
         if not isinstance(run, dict):
             return RuntimeProbeResult(
@@ -512,10 +533,17 @@ class TaskRuntimeLivenessProbe:
                 detail={"group_id": group_id, "run_error": run_error},
             )
         if group is None and run is None:
+            # Neither collaboration runtime read produced an observation. Treat
+            # this as the probe being unavailable rather than Bot liveness
+            # evidence, so a service outage cannot consume Relay recovery.
             return RuntimeProbeResult(
-                state="unknown",
+                state="probe_unavailable",
                 source="bcs",
-                detail={"group_id": group_id, "run_id": run_id},
+                detail={
+                    "reason": "probe_request_failed",
+                    "group_id": group_id,
+                    "run_id": run_id,
+                },
                 error=group_error or run_error,
             )
         if group is None and run is not None:
