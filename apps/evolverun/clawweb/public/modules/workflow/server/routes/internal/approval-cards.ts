@@ -146,13 +146,19 @@ export function createInternalApprovalCardsRouter(approvalCardRepo: ApprovalCard
       const cacheKey = `${botId ?? "*"}:${limit}`;
 
       // Serve from TTL cache if fresh — avoids hitting DB on every poll
+      res.locals.requestDiagnosis?.mark("cacheLookupStartMs");
       const cached = getResolvedCache(cacheKey);
+      res.locals.requestDiagnosis?.mark("cacheLookupEndMs");
+      res.locals.requestDiagnosis?.set("cacheHit", Boolean(cached));
       if (cached) {
         res.json(cached);
         return;
       }
 
+      res.locals.requestDiagnosis?.mark("repositoryStartMs");
       const cards = await approvalCardRepo.findResolvedCardWeb(limit, botId);
+      res.locals.requestDiagnosis?.mark("repositoryEndMs");
+      res.locals.requestDiagnosis?.set("rows", cards.length);
       const body = { success: true, data: cards };
       _resolvedCache.set(cacheKey, { data: body, timestamp: Date.now() });
       res.json(body);

@@ -638,7 +638,10 @@ export function createInternalRunsRouter(
       return;
     }
     try {
+      res.locals.requestDiagnosis?.mark("repositoryStartMs");
       const rows = await flowRunRepo.findRuns({ status, workflowId, limit, offset });
+      res.locals.requestDiagnosis?.mark("repositoryEndMs");
+      res.locals.requestDiagnosis?.set("rows", rows.length);
       apiLog("READ", "/runs", { status: 200, count: rows.length, filterStatus: status, filterWorkflowId: workflowId });
       res.json({ success: true, data: rows, total: rows.length, limit, offset });
     } catch (error) {
