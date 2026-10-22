@@ -13,8 +13,10 @@ class _FakeBot:
         self.messages = []
         self.session_bot_ids = []
         self.session_stages = []
+        self.run_ids = []
 
     async def get_run(self, run_id):
+        self.run_ids.append(run_id)
         return dict(self.run)
 
     async def get_session_messages(
@@ -100,6 +102,19 @@ class TestTaskRuntimeLivenessProbe(unittest.IsolatedAsyncioTestCase):
         result = await probe.probe(_Node(run_id="r1"))
         self.assertEqual(result.state, "terminal_failed")
         self.assertEqual(result.status, "failed")
+
+    async def test_single_bot_uses_latest_harness_resume_run(self):
+        bot = _FakeBot()
+        probe = TaskRuntimeLivenessProbe(bot=bot)
+        node = _Node(run_id="stale-run", session_id="s1")
+        node.run_info.extend_props["relay_harness_resume_run_id"] = "resume-run"
+
+        result = await probe.probe(node)
+
+        self.assertEqual(bot.run_ids, ["resume-run"])
+        self.assertEqual(result.state, "active")
+        self.assertEqual(result.detail["run_id"], "resume-run")
+        self.assertEqual(result.detail["session_id"], "s1")
 
     async def test_engine_timeout_and_abort_map_to_terminal_failed(self):
         for status in ("TIMEOUT", "ABORTED"):

@@ -298,6 +298,7 @@ class TestHarnessOnlyPollsExecutionLeaves:
         assert resets == []
         assert node.status == Status.RUNNING
         assert len(recovery.nodes) == 1
+        assert node.run_info.extend_props["relay_harness_resume_run_id"] == "r-resume"
         assert rec.patches == []
 
     def test_running_parent_with_children_is_not_reset(self, svc, graph):

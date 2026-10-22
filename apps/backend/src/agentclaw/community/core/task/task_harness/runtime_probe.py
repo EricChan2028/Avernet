@@ -260,7 +260,13 @@ class TaskRuntimeLivenessProbe:
     ) -> RuntimeProbeResult:
         """Return one internal liveness observation for a dispatched node."""
         props = getattr(node.run_info, "extend_props", {}) or {}
-        run_id = str(props.get("run_id") or "").strip() or None
+        # Prefer the latest same-session resume run over the original dispatch
+        # run. Otherwise the probe keeps reading the first terminal run while
+        # the resumed run is still active.
+        raw_run_id = (
+            props.get("relay_harness_resume_run_id") or props.get("run_id")
+        )
+        run_id = str(raw_run_id or "").strip() or None
         session_id = str(props.get("session_id") or "").strip() or None
         group_id = str(props.get("group_id") or "").strip() or None
         lifecycle_stage = (
