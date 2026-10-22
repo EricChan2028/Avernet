@@ -18,6 +18,10 @@ provides:
   - "TeclawProvisionService"
   - "TeclawPublishTaskLifecycle"
   - "AicodingRestartLifecycle"
+  - "AicodingArtifactTransferStrategy"
+  - "ArtifactTransferStrategy"
+  - "DefaultArtifactTransferStrategy"
+  - "ArtifactTransferRegistry"
   - "CreateBotForOthersService"
   - "DefaultBotPassportRepairService"
   - "BotQuotaService and BotQuotaScope"
@@ -179,3 +183,51 @@ restart. Normal stop/start failures continue to propagate.
 service draft Bot release checks. It consumes existing repositories, the
 DeviceContextResolver and DeviceAdapterTransport and never invokes lifecycle or
 publish-policy writes. See its README for the contract and deployment boundary.
+
+### Fastdisk transfer runtime layout and rollout
+
+The artifact engine name is logical: `claude_code` may use the physical
+`.aicoding` runtime. After a successful fastdisk gate, both upload source and
+restore destination use the detected `layout.home`; OSS version/engine prefixes
+continue to come from the build plan. Restore returns that physical draft path.
+Only absent/null configuration blocks use defaults; non-mapping blocks fail
+configuration validation.
+
+Deploy schema-6 container scripts before this Backend change. Old/missing scripts
+on fastdisk Bots fail closed. Non-target engines skip detection; non-fastdisk
+coding engines retain NAS transfer only after successful detection and binding
+checks. Restore is not transactional: completed replacements remain after failure;
+required transfer failures stop subsequent stale-file cleanup.
+
+To roll back, pause fastdisk transfers, retain compatible schema-6 scripts, and
+revert Backend only after deciding how authoritative fastdisk files will remain
+available. Do not resume the old NAS path on stale data; first establish a
+verified migration to NAS or deploy the previous compatible fastdisk implementation.
+
+### Runtime artifact allowlist parity (schema 6)
+
+The shared build resolves `service_bot_runtime_artifact` once for the Bot owner
+and environment. The same boolean is passed to the AICoding publication hook and
+legacy NAS transfer; the strategy does not query a second allowlist. Schema 6
+adds `include_runtime_artifacts` (boolean, omitted means disabled). With the gate
+off, `.agentclaw` is untouched, while existing versioned `.local/bin` contents
+are cleared without reading the draft CLI source or creating an absent OSS
+subtree. Engine files and mount-path selection are unchanged. Historical draft
+restore ignores today's publication gate and restores the selected version.
+Schema-5 containers fail the pre-execution probe rather than ignoring the gate.
+
+
+### Artifact transfer strategy selection
+
+`engines/artifact_transfer.py` owns the neutral interface, default no-op and
+registry. The composition root registers the coding implementation for
+`aicoding` and `claude_code`; `BotBuildService` resolves using each build plan's
+engine on both publication and draft restore. All other engines select the
+default, whose `False` / `None` results retain the existing NAS flow without
+reading coding configuration, runtime paths or container state. The default
+never reports a completed transfer. Coding errors still propagate, not fall back.
+
+Fastdisk detection, configuration, command execution and OSS request construction
+remain in `engines/aicoding/`. DI assembly may reference the concrete coding
+implementation; the shared build service imports only the neutral registry.
+This is a selection refactor, not a script protocol change (schema 6 is unchanged).

@@ -8,7 +8,7 @@
 //! MySQL: Session metadata + Participants (persistent)
 //! ```
 //!
-//! Messages and workspace are NOT persisted - they are lost on server restart.
+//! Messages are NOT persisted - they are lost on server restart.
 
 use async_trait::async_trait;
 use bcs_db_api::{
@@ -35,7 +35,6 @@ use bcs_service_api::{
     GroupMetricsSnapshotPort,
     GroupMutableFieldsPatch, GroupStatus, GroupStrategy, HumanMentionNotifyMode, Participant,
     ParticipantKind, ParticipantMode, ParticipantRole, RoutingPolicy, ServiceError, ServiceResult,
-    Workspace,
 };
 
 pub mod memory;
@@ -52,6 +51,7 @@ mod store_mapping;
 mod store_reads;
 mod store_repo;
 mod store_writes;
+mod provider_scope_guard;
 
 /// MySQL-backed group repository.
 pub type MysqlGroupRepo = MySqlGroupStore;
@@ -335,8 +335,9 @@ fn apply_db_group_mutation_candidate(
 ///
 /// Uses MySQL for persistent storage of session metadata and participants.
 ///
-/// Messages and workspace are NEVER persisted - they are lost on server restart.
+/// Messages are NEVER persisted - they are lost on server restart.
 pub struct MySqlGroupStore {
+    provider_scope_guard: bool,
     /// Database plugin selected by the composition root.
     db: DbPluginCompat,
     /// TODO: remove with DbPluginCompat once legacy helper signatures stop threading logical_db.
@@ -353,9 +354,11 @@ pub struct MySqlGroupStore {
 }
 
 impl MySqlGroupStore {
+    pub fn with_provider_scope_guard(mut self) -> Self { self.provider_scope_guard = true; self }
     /// Create a new MySqlGroupStore.
     pub fn new(db: Arc<dyn DbPlugin>, env: String) -> Self {
         Self {
+            provider_scope_guard: false,
             db: DbPluginCompat::new(db),
             logical_db: String::new(),
             env,
@@ -368,6 +371,7 @@ impl MySqlGroupStore {
     /// Create a new MySqlGroupStore with SQLite dialect.
     pub fn sqlite(db: Arc<dyn DbPlugin>, env: String) -> Self {
         Self {
+            provider_scope_guard: false,
             db: DbPluginCompat::new(db),
             logical_db: String::new(),
             env,

@@ -215,3 +215,56 @@ Response parsing lives in `services/baas_api_response.py`; the existing oversize
 `BaasService` keeps its current size-gate exemption and delegates this parsing.
 The broader service split remains a separate refactor, as recorded by the
 existing architecture allowlist; this fix reduces the service file size.
+## Fastdisk artifact transfer
+
+`BotBuildService` receives the neutral `ArtifactTransferRegistry` and resolves
+an `ArtifactTransferStrategy` using each build plan's engine, at both `publish`
+and `restore` hooks. DI registers `AicodingArtifactTransferStrategy` only for
+`aicoding` and `claude_code`. Every other engine resolves to
+`DefaultArtifactTransferStrategy`, which returns False / None without runtime
+access, preserving the caller's existing NAS build/restore flow. A no-op never
+means transfer success. Coding errors propagate without NAS fallback.
+
+The interface, default implementation and registry live in the neutral
+`core/bot_management/engines/artifact_transfer.py`; that module imports no
+coding implementation or configuration. Detection, draft-device/version checks,
+runtime path resolution, restore-result assembly, command execution and the
+pure configuration parser remain under `engines/aicoding/`. The caller neither
+checks `supports` nor assembles a container-script request. Path resolution is
+passed lazily, and the restore hook receives the existing migration-error type.
+
+The existing `ServiceBotModule` has a separate registry provider that assembles
+the coding implementation. Its `bot_build_service` provider only injects that
+registry. API, version paths, configuration keys, schema 6 and timeouts are
+unchanged by this selection refactor.
+
+The AICoding strategy consumes the existing build plan and a command executor. It
+embeds only read-only mount detection so legacy containers need no detector
+installation. Non-fastdisk bots retain host-side NAS transfer. Detector failure
+is not a non-fastdisk result. Fastdisk bots require schema-6
+`/home/admin/bin/service_publish.py`; missing/incompatible scripts fail with a
+logged error, without uploading a fallback implementation.
+
+Publication passes the existing version prefix and per-bot dynamic exclusions
+for direct OSS upload. Fixed file selection and extra-root mappings are owned by
+the installed container policy, not expanded into Backend requests. Draft restore passes the identity/version-derived OSS prefix, logical artifact
+path, Mist credential name (not keys), ownership and remaining operation budget.
+The container downloads directly into mapped runtime paths, without whole-tree
+staging or a second local rsync. Exclusions and CLI merge behavior are retained;
+engine/Claude stale-file cleanup starts only after required downloads succeed.
+Completed file replacements remain on failure; there is no transactional rollback. The startup tar merge is
+not substituted for restore's delete semantics.
+
+Command transport stages only invocation parameters and execution control in
+bounded chunks, then waits for an atomic exit-status result. The container scripts
+repository owns transfer implementation. Consumers retain publication-state and
+error handling; no independent Backend post-upload object validation is added.
+
+
+Draft device resolution is AICoding-owned: after engine eligibility is established,
+the strategy queries the existing binding repository by `bot.binding_id` and
+requires an ACTIVE binding with a device ID. It does not trust `bot.device_id`,
+mutate the Bot context, or fall back on lookup failure. Other engines never make
+this strategy-specific query; the shared draft flow retains its original context.
+Optional command-timeout forwarding remains infrastructure-only: omitted timeout
+arguments retain the existing provider call/default behavior.
