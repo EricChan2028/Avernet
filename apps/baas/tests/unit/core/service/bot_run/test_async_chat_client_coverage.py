@@ -1995,7 +1995,7 @@ class TestA2aBaseUrlFromWs:
     """
 
     def test_proxypass_shape_keeps_route_prefix_wss(self):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
+        from secbaas.community.core.service.bot_run._async_chat_client_a2a import (
             _a2a_base_url_from_ws,
         )
 
@@ -2005,7 +2005,7 @@ class TestA2aBaseUrlFromWs:
         )
 
     def test_proxypass_shape_keeps_route_prefix_ws(self):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
+        from secbaas.community.core.service.bot_run._async_chat_client_a2a import (
             _a2a_base_url_from_ws,
         )
 
@@ -2013,7 +2013,7 @@ class TestA2aBaseUrlFromWs:
         assert _a2a_base_url_from_ws(uri) == "http://proxy.example/proxypass/sbx-1"
 
     def test_aicoding_custom_adapter_ws_path_shape(self):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
+        from secbaas.community.core.service.bot_run._async_chat_client_a2a import (
             _a2a_base_url_from_ws,
         )
 
@@ -2022,7 +2022,7 @@ class TestA2aBaseUrlFromWs:
         assert _a2a_base_url_from_ws(uri) == "https://proxy.example/proxypass/sbx-1"
 
     def test_default_engine_path_shape(self):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
+        from secbaas.community.core.service.bot_run._async_chat_client_a2a import (
             _a2a_base_url_from_ws,
         )
 
@@ -2030,21 +2030,21 @@ class TestA2aBaseUrlFromWs:
         assert _a2a_base_url_from_ws(uri) == "http://proxy.example/proxypass/sbx-1"
 
     def test_direct_shape_no_prefix_strips_to_bare_base(self):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
+        from secbaas.community.core.service.bot_run._async_chat_client_a2a import (
             _a2a_base_url_from_ws,
         )
 
         assert _a2a_base_url_from_ws("ws://host:20003/ws") == "http://host:20003"
 
     def test_direct_shape_no_path(self):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
+        from secbaas.community.core.service.bot_run._async_chat_client_a2a import (
             _a2a_base_url_from_ws,
         )
 
         assert _a2a_base_url_from_ws("ws://host:20003") == "http://host:20003"
 
     def test_non_ws_scheme_returns_none(self):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
+        from secbaas.community.core.service.bot_run._async_chat_client_a2a import (
             _a2a_base_url_from_ws,
         )
 
@@ -2097,7 +2097,7 @@ class TestInteractionAnswerTransportAttribution:
             uri="ws://host/ws",
             max_retries=0,
             interaction_service=service,
-            a2a_mode="grey",
+            transport_mode="grey",
         )
         acc._chat_transport._current_name = "a2a"
         a2a_client = MagicMock(name="a2a")
@@ -2127,7 +2127,7 @@ class TestInteractionAnswerTransportAttribution:
             uri="ws://host/ws",
             max_retries=0,
             interaction_service=service,
-            a2a_mode="grey",
+            transport_mode="grey",
         )
         acc._chat_transport._current_name = "a2a"
         a2a_client = MagicMock(name="a2a")
@@ -2154,7 +2154,7 @@ class TestInteractionAnswerTransportAttribution:
             uri="ws://host/ws",
             max_retries=0,
             interaction_service=service,
-            a2a_mode="grey",
+            transport_mode="grey",
         )
         acc._chat_transport._current_name = "a2a"
         acc._client = MagicMock(name="a2a")
@@ -2205,8 +2205,8 @@ class TestA2aModeValidation:
             AsyncChatClient as _ACC,
         )
 
-        with pytest.raises(ValueError, match="invalid a2a_mode"):
-            _ACC(uri="ws://host/ws", a2a_mode="bogus")
+        with pytest.raises(ValueError, match="invalid transport_mode"):
+            _ACC(uri="ws://host/ws", transport_mode="bogus")
 
     @pytest.mark.parametrize("mode", ["off", "grey", "on"])
     def test_valid_modes_are_accepted(self, mode, mock_bot_ws):
@@ -2214,8 +2214,8 @@ class TestA2aModeValidation:
             AsyncChatClient as _ACC,
         )
 
-        client = _ACC(uri="ws://host/ws", a2a_mode=mode)
-        assert client._a2a_mode == mode
+        client = _ACC(uri="ws://host/ws", transport_mode=mode)
+        assert client.transport_mode == mode
 
     def test_constructor_selects_transport_strategy_once(self, mock_bot_ws):
         """off 默认只选 WS；grey/on 只选 A2A，构造后不允许混走另一实现。"""
@@ -2232,7 +2232,7 @@ class TestA2aModeValidation:
         assert not hasattr(default_client._chat_transport, "routed_sessions")
 
         for mode in ("grey", "on"):
-            client = AsyncChatClient(uri="ws://host/ws", a2a_mode=mode)
+            client = AsyncChatClient(uri="ws://host/ws", transport_mode=mode)
             assert isinstance(client._chat_transport, A2aChatTransport)
             assert client._chat_transport.mode == mode
 
@@ -2264,7 +2264,7 @@ class TestA2aModeValidation:
         ):
             client = AsyncChatClient(
                 uri="ws://host/api/openclaw/ws",
-                a2a_mode="on",
+                transport_mode="on",
                 max_retries=1,
                 retry_base_backoff=0,
             )
@@ -2283,17 +2283,21 @@ class TestA2aModeValidation:
 
     @pytest.mark.asyncio
     async def test_a2a_on_without_base_url_raises(self, mock_bot_ws):
-        """a2a_mode=on 无可推导 HTTP base 时明确失败，不伪装成 WS 成功。"""
+        """transport_mode=on 无可推导 HTTP base 时明确失败，不伪装成 WS 成功。"""
         from secbaas.community.core.service.bot_run._bot_a2a_client import (
             A2aUnavailableError,
         )
 
-        client = AsyncChatClient(uri="ws://host/not-openclaw", a2a_mode="on")
+        client = AsyncChatClient(uri="ws://host/not-openclaw", transport_mode="on")
         # A non-openclaw/custom path is still convertible to a host base, so
         # force the strategy boundary directly to cover the no-base contract.
-        client._a2a_base_url_from_ws = lambda _uri: None
-        with pytest.raises(A2aUnavailableError):
-            await client.connect()
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client_a2a."
+            "_a2a_base_url_from_ws",
+            return_value=None,
+        ):
+            with pytest.raises(A2aUnavailableError):
+                await client.connect()
 
 
 class TestA2aGreyReconnectFallbackOwnership:
@@ -2312,7 +2316,7 @@ class TestA2aGreyReconnectFallbackOwnership:
                 self.calls.extend(args)
                 return {"ok": True, "endpoint": self.name}
 
-        acc = AsyncChatClient(uri="ws://host/api/openclaw/ws", a2a_mode="grey")
+        acc = AsyncChatClient(uri="ws://host/api/openclaw/ws", transport_mode="grey")
         fallback = _FakeEndpoint("fallback")
         new_main = _FakeEndpoint("new-main-ws")
         acc._client = new_main
@@ -2345,7 +2349,7 @@ class TestA2aBaseUrlUnknownWsPath:
     def test_unknown_custom_ws_path_falls_back_to_bare_host(self):
         """末段非 ``ws`` 的自定义 ws_path：不猜前缀归属——base 维持 host 根，
         由能力探测诚实回退（portal 前缀只在词汇表内剥）。"""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
+        from secbaas.community.core.service.bot_run._async_chat_client_a2a import (
             _a2a_base_url_from_ws,
         )
 
@@ -2423,7 +2427,7 @@ def stub_v3_patch():
 
 def _a2a_acc_with_stub_main_client() -> AsyncChatClient:
     """A2A 策略 + 可收口的替身主连接（close 可 await）。"""
-    acc = AsyncChatClient(uri="ws://host/ws", max_retries=0, a2a_mode="grey")
+    acc = AsyncChatClient(uri="ws://host/ws", max_retries=0, transport_mode="grey")
     acc._client = MagicMock()
     acc._client.connected = True
     acc._client.close = AsyncMock()
@@ -2509,7 +2513,7 @@ class TestInjectAttachmentsV3Reroute:
         self, mock_bot_ws, mock_bot_ws_instance
     ):
         """fallback close 抛错必须吞掉——主连接收口不得被旁支拖死。"""
-        acc = AsyncChatClient(uri="ws://host/ws", max_retries=0, a2a_mode="grey")
+        acc = AsyncChatClient(uri="ws://host/ws", max_retries=0, transport_mode="grey")
         await acc.connect()
 
         bad_fallback = MagicMock()
@@ -2757,7 +2761,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
 
     def _acc_with_owned_a2a_main(self) -> AsyncChatClient:
         """transport=a2a + 显式诚实面主连接（归属查询/abort 不误报）。"""
-        acc = AsyncChatClient(uri="ws://host/ws", max_retries=0, a2a_mode="grey")
+        acc = AsyncChatClient(uri="ws://host/ws", max_retries=0, transport_mode="grey")
         acc._chat_transport._current_name = "a2a"
         acc._client = MagicMock()
         acc._client.connected = True

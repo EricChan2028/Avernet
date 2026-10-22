@@ -1,6 +1,7 @@
-"""AsyncChatClient - WebSocket 聊天客户端封装（纯异步版本）
+"""AsyncChatClient - transport-agnostic chat client orchestration
 
-支持同一 WS 连接上多个 sessionKey 并行收发消息。
+支持同一 transport 连接上多个 sessionKey 并行收发消息，并由独立传输
+策略负责连接、重连、请求路由与 transport 专属归属状态。
 
 核心设计：
 - 按 sessionKey 维护独立的 _SessionState（content、Event、agent_events 等）
@@ -8,7 +9,7 @@
 - 同一 sessionKey 并发时排队等待（而非硬拒绝），超时抛 ConcurrentSessionError
 - 不同 sessionKey 的消息可并行，互不干扰
 - 可选的并发信号量（max_concurrent_sessions）限制单连接总并发数，提供背压
-- WS 断连自动重连（max_retries），exponential backoff
+- 连接断开自动重连（max_retries），exponential backoff
 - 连接池可按 sandbox_id 复用已握手的 AsyncChatClient 实例
 
 全部基于 asyncio，不使用任何 threading，不会阻塞 event loop。
@@ -27,8 +28,11 @@ from secbaas.community.logger import get_logger
 from secbaas.community.tracer import get_tracer_plugin
 
 from ..bot_interaction import BotInteractionService
-from ._async_chat_client_a2a import A2aChatTransport
-from ._async_chat_client_ws import WebSocketChatTransport
+from ._async_chat_client_transport import (
+    ChatTransportMode,
+    build_chat_transport,
+    normalize_chat_transport_mode,
+)
 from ._bot_websocket_client import BotWebSocketClient, ChatRequestError
 from ._interaction_protocol import (
     EngineInteractionRequestedEvent,
@@ -38,47 +42,6 @@ from ._session_key_matcher import SessionKeyMatcher
 from ._session_state import SessionState
 
 logger = get_logger("core-bot-run")
-
-
-def _strip_ws_endpoint_suffix(path: str) -> str:
-    """剥去路径尾部的 WS endpoint 后缀，保留其前的一切路由前缀。
-
-    后缀词汇集与 _claw_service._build_ws_url / adapter.ws_path() 同源：
-      - ``/api/{engine}/ws``（默认与 openclaw/claude_code adapter）
-      - ``/api/ws``（aicoding adapter）
-      - ``/ws``（直连形态，无前缀）
-    末段不是 ``ws``（未知自定义 ws_path）则不剥——base 维持旧语义
-    （host 根），由能力探测诚实回退，绝不猜前缀归属。
-    """
-    segments = path.strip("/").split("/") if path.strip("/") else []
-    if not segments or segments[-1] != "ws":
-        return ""
-    if len(segments) >= 3 and segments[-3] == "api" and segments[-2] != "api":
-        # /api/{engine}/ws 与 /api/ws（aicoding 的 engine 段就是 "ws"）
-        segments = segments[:-3]
-    elif len(segments) >= 2 and segments[-2] == "api":
-        segments = segments[:-2]
-    else:
-        segments = segments[:-1]
-    return "/" + "/".join(segments) if segments else ""
-
-
-def _a2a_base_url_from_ws(uri: str) -> str | None:
-    """ws(s)://host:port{prefix}/ws-endpoint → http(s)://host:port{prefix}。
-
-    A2A 端点与 v3 WS 端点同进程同端口（engine adapter :20003 单实例双面）；
-    真实调用方 _build_ws_url 产出 ``wss://proxy/proxypass/<target>{ws_path}``
-    形状——代理路由前缀必须保留在 base 上（只剥 WS endpoint 后缀，从后向前
-    按词汇集剥），否则 card/RPC 打到代理根，grey 永远回退、on 连不上。
-    """
-    if not isinstance(uri, str) or "://" not in uri:
-        return None
-    scheme, _, rest = uri.partition("://")
-    if scheme not in ("ws", "wss"):
-        return None
-    host_port, _, raw_path = rest.partition("/")
-    prefix = _strip_ws_endpoint_suffix("/" + raw_path) if raw_path else ""
-    return ("https://" if scheme == "wss" else "http://") + host_port + prefix
 
 
 def _public_interaction_envelope(
@@ -113,7 +76,7 @@ def _capture_trace_context() -> Any:
 def _with_session_trace(method_name: str = "_on_event") -> Callable[..., Any]:
     """装饰器：从 payload 中查找 session state，恢复 trace context 后执行方法。
 
-    适用于 _on_chat / _on_agent 等 WS 回调，这些回调在 _recv_loop 后台 Task
+    适用于 _on_chat / _on_agent 等接收回调，这些回调在后台 Task
     中执行，无 active trace context。装饰器自动：
       1. 从 payload.sessionKey 查找 _SessionState（支持模糊匹配）
       2. 恢复 state 中保存的 trace context，使日志 traceid 关联原始请求
@@ -180,20 +143,20 @@ class NotConnectedError(Exception):
 
 
 class AsyncChatClient:
-    """WebSocket 聊天客户端封装类（纯异步版本）
+    """Transport-agnostic chat client orchestration.
 
-    支持同一 WS 连接上多个 sessionKey 并行收发消息。
+    支持同一 transport 连接上多个 sessionKey 并行收发消息。
     按 sessionKey 维护独立的 _SessionState，事件回调根据 payload.sessionKey 分发。
     全部基于 asyncio，不使用任何 threading。
 
     并发控制：
     - max_concurrent_sessions: 单连接最大并发会话数（0=不限），
-      通过 asyncio.Semaphore 提供背压，防止单连接上过多并发请求压垮 WS Server。
+      通过 asyncio.Semaphore 提供背压，防止单连接上过多并发请求压垮服务端。
     - session_key_timeout: 同一 sessionKey 的并发请求排队等待超时时间，
       超时后抛 ConcurrentSessionError（与旧行为兼容）。
 
     重连机制：
-    - max_retries: WS 断连后自动重连次数（0=不重试）。
+    - max_retries: 连接断开后自动重连次数（0=不重试）。
     - retry_base_backoff: 重连退避基数（秒），实际退避 = base * 2^(attempt-1)。
 
     使用示例:
@@ -220,32 +183,35 @@ class AsyncChatClient:
         retry_base_backoff: float = 0.5,
         ignore_case: bool = False,
         interaction_service: BotInteractionService | None = None,
-        a2a_mode: str = "off",
+        transport_mode: str = "off",
         sensitive_bypass_keys_loader: Callable[[], tuple[str, ...]] | None = None,
     ):
         """初始化客户端
 
         Args:
-            uri: WebSocket URI
+            uri: transport 连接地址；off 模式为 WebSocket URI
             headers: 请求头（如 Cookie）
             client_id: 客户端 ID，不传则自动生成
             client_version: 客户端版本
             verbose: 是否打印详细日志
             max_concurrent_sessions: 单连接最大并发会话数，0 表示不限
             session_key_timeout: 同一 sessionKey 并发等待超时（秒）
-            max_retries: WS 断连后自动重连次数，0 表示不重试
+            max_retries: 连接断开后自动重连次数，0 表示不重试
             retry_base_backoff: 重连退避基数（秒）
             ignore_case: sessionKey 模糊匹配是否忽略大小写
+            transport_mode: off（WS）、grey/on（HTTP 策略）三种传输模式
             sensitive_bypass_keys_loader: 敏感日志豁免片段读取函数
                 （由连接池注入，返回解析后的片段元组）
         """
         self.uri = uri
-        # 1b 迁移灰度开关：constructor 是唯一入口；off 只能选 WS 链路，
-        # grey/on 只能选 A2A 链路（grey 内部允许按当前行为回落 WS main）。
-        if a2a_mode not in {"off", "grey", "on"}:
-            raise ValueError(f"invalid a2a_mode: {a2a_mode!r}")
-        self._a2a_mode = a2a_mode
-        # retained for diagnostics/backward compatibility; routing no longer reads it
+        # Constructor is the single transport-selection entry point.  The
+        # transport mode value is normalized into a generic
+        # transport mode and immediately delegated to the strategy factory.
+        self._transport_mode: ChatTransportMode = normalize_chat_transport_mode(
+            transport_mode,
+            parameter_name="transport_mode",
+        )
+        # Transport identity is diagnostic-only; request routing is strategy-owned.
         self._transport: str = "v3-ws"
         self.headers = headers or {}
         self.client_id = client_id or f"client-{uuid.uuid4().hex[:8]}"
@@ -296,18 +262,19 @@ class AsyncChatClient:
         # 断连事件：底层客户端断连时 set，_reconnect_loop 等待此事件
         self._disconnect_event: asyncio.Event = asyncio.Event()
 
-        # Explicit transport selection.  The strategy owns connection creation,
-        # reconnect creation, request routing and A2A-only state.
-        self._chat_transport = (
-            A2aChatTransport(self, a2a_mode)
-            if a2a_mode in {"grey", "on"}
-            else WebSocketChatTransport(self)
-        )
+        # The strategy owns connection creation and reconnection, request
+        # routing, and transport-specific background ownership state.
+        self._chat_transport = build_chat_transport(self, self._transport_mode)
 
     @property
     def is_connected(self) -> bool:
         """检查连接是否健康（供连接池健康检查使用）。"""
         return self._client is not None and self._client.connected
+
+    @property
+    def transport_mode(self) -> ChatTransportMode:
+        """Transport mode selected once during construction."""
+        return self._transport_mode
 
     @property
     def is_reconnecting(self) -> bool:
@@ -318,12 +285,12 @@ class AsyncChatClient:
     def has_active_sessions(self) -> bool:
         """是否有活跃占据（供连接池过期清理/排空判断）。
 
-        R6-1：除等待中的编排会话外，A2A 后台 body task（wait_result=
-        False 的非等待发送）也算——sweep 不得把仍在服务真实 run 的连
-        接当空闲收口。
+        R6-1：除等待中的编排会话外，transport-managed 后台 body task
+        （wait_result=False 的非等待发送）也算——sweep 不得把仍在服务
+        真实 run 的连接当空闲收口。
 
-        R7-F2：v3 fallback 上的附件后台 run 同样占据本连接的服务面
-        （归属标记随 run 存活，与 A2A 的 has_running_runs 同口径）。
+        R7-F2：fallback 上的附件后台 run 同样占据本连接的服务面
+        （归属标记随 run 存活，与 transport 的 has_running_runs 同口径）。
         """
         if len(self._active_sessions) > 0:
             return True
@@ -333,7 +300,7 @@ class AsyncChatClient:
         """该连接是否持有此 session 的在途运行——R4-1/R6-1/R7-F2 归属查询。
 
         三信号：①编排层 _sessions（调用方**等待期间**——等待中取消
-        落在等待者上永远正确）；②底层 A2A run 在途（**run 执行期**——
+        落在等待者上永远正确）；②底层 transport run 在途（**run 执行期**——
         wait_result=False 的 ACK 返回后 _sessions 即被 pop，但 body
         task 仍在消费流，CancelTask 的 engine_task_id 记录还活着）；
         ③v3 fallback 归属标记（**附件 run 执行期**——B3 reroute 的 run
@@ -358,10 +325,6 @@ class AsyncChatClient:
             client_version=self.client_version,
             headers=self.headers,
         )
-
-    def _a2a_base_url_from_ws(self, ws_uri: str) -> str | None:
-        """Expose the WS-to-A2A endpoint conversion to the A2A strategy."""
-        return _a2a_base_url_from_ws(ws_uri)
 
     def _bind_client_events(self, client: Any) -> None:
         """Bind the transport-agnostic session orchestration callbacks."""
@@ -876,12 +839,12 @@ class AsyncChatClient:
             session_key,
             timeout,
         )
-        # ── B3（16-5）请求级特性门：A2A 传输上的附件请求重路由到 v3 专用
-        # 连接——不静默丢参、不硬错。v3 fallback 懒创建一次（复用前查
-        # connected，死连接就地失效重建）；事件 handlers 双注册（同一套
-        # 编排回调）；on_disconnect 挂专用隔离处理器（R17-5/PR #2743 R3-2：
-        # 只终结归属 fallback 的会话——全局断连回调会误杀 A2A 侧正常运行
-        # 中的请求）。close() 一并收口。
+        # ── B3（16-5）请求级特性门：附件请求可由 transport 策略重路由到
+        # 专用 fallback 连接——不静默丢参、不硬错。fallback 懒创建一次
+        # （复用前查 connected，死连接就地失效重建）；事件 handlers 双注册
+        # （同一套编排回调）；on_disconnect 挂专用隔离处理器（R17-5/PR #2743
+        # R3-2：只终结归属 fallback 的会话，全局断连回调不误伤正常运行中
+        # 的请求）。close() 一并收口。
         target = await self._chat_transport.send_target(
             session_key=session_key,
             attachments=attachments,
@@ -1348,12 +1311,10 @@ class AsyncChatClient:
                 interaction_id=interaction_id,
             )
             if command is not None:
-                # P1-4：答复按产生 interaction 的传输归属路由——B3 附件
-                # reroute 的 run 在 v3 专用连接上，ResolveInteraction 必须发
-                # 到那里（A2A kernel 注册表没有该 run，错发得 not_found、审批
-                # 无法恢复）。正常 A2A session 走 A2A 客户端并带 session_key
-                # （客户端用它取该 run 记录的 IAM 许可，P1-5）。off/v3 模式
-                # 恒走 self._client 且调用签名原样——原路径不动。
+                # P1-4：答复按产生 interaction 的传输归属路由——B3 的
+                # reroute run 必须回到其专用连接，错发只会得到 not_found
+                # 并让审批无法恢复。交互分发把这些差异完全交给策略；
+                # 调用方只拿到目标 client 和额外调用参数。
                 client, resolve_kwargs = await self._chat_transport.interaction_target(
                     session_key=session_key
                 )
@@ -1604,9 +1565,9 @@ class AsyncChatClient:
                             pass
                         self._client = None
 
-                    # Reconnect through the current transport strategy:
-                    # A2A mode must not silently fall back to a hard-coded
-                    # WebSocket constructor here.
+                    # Reconnect through the constructor-selected strategy:
+                    # the selected transport must never be replaced by a
+                    # hard-coded WebSocket client on reconnect.
                     new_client, _hello = await self.create_transport_client()
                     self._bind_client_events(new_client)
                     self._client = new_client

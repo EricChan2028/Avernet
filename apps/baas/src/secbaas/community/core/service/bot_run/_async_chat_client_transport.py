@@ -7,11 +7,42 @@ each other's internals.
 
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
+
+ChatTransportMode = Literal["off", "grey", "on"]
+
+
+def normalize_chat_transport_mode(
+    value: str, *, parameter_name: str = "transport_mode"
+) -> ChatTransportMode:
+    """Validate a transport mode value once at the construction boundary."""
+    if value not in {"off", "grey", "on"}:
+        raise ValueError(f"invalid {parameter_name}: {value!r}")
+    return cast(ChatTransportMode, value)
+
+
+def build_chat_transport(
+    owner: AsyncChatTransportOwner, mode: ChatTransportMode
+) -> AsyncChatTransportBase:
+    """Construct the transport selected by ``mode`` without leaking policy branches
+    into ``AsyncChatClient``.
+
+    Tests that need to patch a concrete implementation still patch the
+    implementation module rather than this seam.
+    """
+    if mode == "off":
+        from ._async_chat_client_ws import WebSocketChatTransport
+
+        return WebSocketChatTransport(owner)
+    if mode in {"grey", "on"}:
+        from ._async_chat_client_a2a import A2aChatTransport
+
+        return A2aChatTransport(owner, mode)
+    raise ValueError(f"invalid transport_mode: {mode!r}")
 
 
 class AsyncChatTransportOwner(Protocol):
-    """Minimal state surface required by a transport implementation."""
+    """Minimal state required by WS and A2A transport implementations."""
 
     uri: str
     client_id: str
@@ -23,9 +54,6 @@ class AsyncChatTransportOwner(Protocol):
         raise NotImplementedError
 
     def _make_ws_client(self) -> Any:  # noqa: SLF001
-        raise NotImplementedError
-
-    def _a2a_base_url_from_ws(self, ws_uri: str) -> str | None:  # noqa: SLF001
         raise NotImplementedError
 
     def _event_bridge_snapshot(self) -> dict[str, Any]:  # noqa: SLF001

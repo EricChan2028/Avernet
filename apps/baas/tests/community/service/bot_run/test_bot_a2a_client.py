@@ -1277,7 +1277,7 @@ def test_abort_routes_with_the_run_b3_and_off_modes():
             return {"ok": True}
 
     async def scenario():
-        acc = AsyncChatClient(uri="ws://unused", a2a_mode="grey")
+        acc = AsyncChatClient(uri="ws://unused", transport_mode="grey")
         acc._chat_transport._current_name = "a2a"
         acc._client = _FakeTransport("a2a")
         acc._chat_transport.fallback_client = _FakeTransport("v3")
@@ -1492,10 +1492,10 @@ def test_proxypass_route_prefix_survives_to_card_and_rpc():
 
             acc = AsyncChatClient(
                 uri=f"ws://127.0.0.1:{srv.port}{prefix}/api/openclaw/ws",
-                a2a_mode="on",
+                transport_mode="on",
                 max_retries=0,
             )
-            assert acc._a2a_mode == "on"
+            assert acc.transport_mode == "on"
             hello = await acc.connect()
             assert acc._transport == "a2a", (
                 f"probing must hit prefixed card: hello={hello}"
@@ -1820,7 +1820,7 @@ def test_attachment_hitl_answer_routes_via_v3_and_run_resumes():
             )
             acc = AsyncChatClient(
                 uri=f"ws://127.0.0.1:{srv.port}/api/openclaw/ws",
-                a2a_mode="on",
+                transport_mode="on",
                 max_retries=0,
                 interaction_service=service,
             )
@@ -2642,7 +2642,9 @@ def test_pool_owner_lookup_survives_wait_result_false_send():
 
         async def scenario():
             inner = await _connect_async(srv.base)  # 真 BotA2aClient
-            holder = AsyncChatClient(uri="ws://x/ws", max_retries=0, a2a_mode="on")
+            holder = AsyncChatClient(
+                uri="ws://x/ws", max_retries=0, transport_mode="on"
+            )
             holder._client = inner
             holder._chat_transport._current_name = "a2a"
 
@@ -2697,7 +2699,7 @@ def test_async_client_grey_mode_falls_back_to_v3_on_probe_failure():
             ):
                 acc = AsyncChatClient(
                     uri=f"ws://127.0.0.1:{srv.port}/api/openclaw/ws",
-                    a2a_mode="grey",
+                    transport_mode="grey",
                     max_retries=0,
                 )
                 hello = await acc.connect()
@@ -2724,7 +2726,7 @@ def test_async_client_on_mode_raises_when_a2a_probe_fails():
         async def scenario():
             acc = AsyncChatClient(
                 uri=f"ws://127.0.0.1:{srv.port}/api/openclaw/ws",
-                a2a_mode="on",
+                transport_mode="on",
                 max_retries=0,
             )
             await acc.connect()
@@ -2755,7 +2757,7 @@ def test_async_client_grey_malformed_card_falls_back_to_v3(case, payload):
             ):
                 acc = AsyncChatClient(
                     uri=f"ws://127.0.0.1:{srv.port}/api/openclaw/ws",
-                    a2a_mode="grey",
+                    transport_mode="grey",
                     max_retries=0,
                 )
                 hello = await acc.connect()
@@ -2784,7 +2786,7 @@ def test_async_client_on_mode_malformed_card_raises_a2a_error(case, payload):
         async def scenario():
             acc = AsyncChatClient(
                 uri=f"ws://127.0.0.1:{srv.port}/api/openclaw/ws",
-                a2a_mode="on",
+                transport_mode="on",
                 max_retries=0,
             )
             await acc.connect()

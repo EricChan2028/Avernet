@@ -14,6 +14,47 @@ from ._bot_a2a_client import A2aUnavailableError, BotA2aClient
 logger = get_logger("core-bot-run")
 
 
+def _strip_ws_endpoint_suffix(path: str) -> str:
+    """剥去路径尾部的 WS endpoint 后缀，保留其前的一切路由前缀。
+
+    后缀词汇集与 _claw_service._build_ws_url / adapter.ws_path() 同源：
+      - ``/api/{engine}/ws``（默认与 openclaw/claude_code adapter）
+      - ``/api/ws``（aicoding adapter）
+      - ``/ws``（直连形态，无前缀）
+    末段不是 ``ws``（未知自定义 ws_path）则不剥——base 维持旧语义
+    （host 根），由能力探测诚实回退，绝不猜前缀归属。
+    """
+    segments = path.strip("/").split("/") if path.strip("/") else []
+    if not segments or segments[-1] != "ws":
+        return ""
+    if len(segments) >= 3 and segments[-3] == "api" and segments[-2] != "api":
+        # /api/{engine}/ws 与 /api/ws（aicoding 的 engine 段就是 "ws"）
+        segments = segments[:-3]
+    elif len(segments) >= 2 and segments[-2] == "api":
+        segments = segments[:-2]
+    else:
+        segments = segments[:-1]
+    return "/" + "/".join(segments) if segments else ""
+
+
+def _a2a_base_url_from_ws(uri: str) -> str | None:
+    """ws(s)://host:port{prefix}/ws-endpoint → http(s)://host:port{prefix}。
+
+    A2A 端点与 v3 WS 端点同进程同端口（engine adapter :20003 单实例双面）；
+    真实调用方 _build_ws_url 产出 ``wss://proxy/proxypass/<target>{ws_path}``
+    形状——代理路由前缀必须保留在 base 上（只剥 WS endpoint 后缀，从后向前
+    按词汇集剥），否则 card/RPC 打到代理根，grey 永远回退、on 连不上。
+    """
+    if not isinstance(uri, str) or "://" not in uri:
+        return None
+    scheme, _, rest = uri.partition("://")
+    if scheme not in ("ws", "wss"):
+        return None
+    host_port, _, raw_path = rest.partition("/")
+    prefix = _strip_ws_endpoint_suffix("/" + raw_path) if raw_path else ""
+    return ("https://" if scheme == "wss" else "http://") + host_port + prefix
+
+
 class A2aChatTransport(AsyncChatTransportBase):
     """A2A transport, including grey fallback and A2A-attachment reroute.
 
@@ -38,7 +79,7 @@ class A2aChatTransport(AsyncChatTransportBase):
         return self._current_name
 
     async def create(self) -> tuple[Any, dict[str, Any]]:
-        a2a_base = self.owner._a2a_base_url_from_ws(self.owner.uri)  # noqa: SLF001
+        a2a_base = _a2a_base_url_from_ws(self.owner.uri)
         if self.mode == "on" and a2a_base is None:
             raise A2aUnavailableError(
                 "no HTTP base could be derived from the ws endpoint"
