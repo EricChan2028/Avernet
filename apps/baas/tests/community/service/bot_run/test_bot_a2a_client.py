@@ -1277,18 +1277,17 @@ def test_abort_routes_with_the_run_b3_and_off_modes():
             return {"ok": True}
 
     async def scenario():
-        acc = AsyncChatClient(uri="ws://unused")
-        acc._transport = "a2a"
+        acc = AsyncChatClient(uri="ws://unused", a2a_mode="grey")
+        acc._chat_transport._current_name = "a2a"
         acc._client = _FakeTransport("a2a")
-        acc._v3_fallback = _FakeTransport("v3")
-        acc._v3_routed_sessions["s-att"] = "v3"
+        acc._chat_transport.fallback_client = _FakeTransport("v3")
+        acc._chat_transport.routed_sessions["s-att"] = "v3"
         await acc.chat_abort("s-att", "r1")  # B3 reroute 过的 run
         await acc.chat_abort("s-normal")  # A2A 正常 session
 
         acc2 = AsyncChatClient(uri="ws://unused")
-        acc2._transport = "v3-ws"  # off 模式
         acc2._client = _FakeTransport("v3-ws")
-        acc2._v3_routed_sessions["s-att"] = "v3"  # 脏标记也不得干扰 v3
+        assert not hasattr(acc2._chat_transport, "routed_sessions")
         await acc2.chat_abort("s-att")
 
     _run(scenario())
@@ -1835,7 +1834,7 @@ def test_attachment_hitl_answer_routes_via_v3_and_run_resumes():
             acc._client.interaction_resolve = spy_resolve
 
             with patch(
-                "secbaas.community.core.service.bot_run._bot_websocket_client.BotWebSocketClient",
+                "secbaas.community.core.service.bot_run._async_chat_client.BotWebSocketClient",
                 _FakeV3KingineTransport,
             ):
                 task = asyncio.create_task(
@@ -1847,7 +1846,7 @@ def test_attachment_hitl_answer_routes_via_v3_and_run_resumes():
                     )
                 )
                 await asyncio.sleep(0.05)  # reroute 发生
-                v3 = acc._v3_fallback
+                v3 = acc._chat_transport.fallback_client
                 assert v3 is not None, "附件请求未 reroute 到 v3 fallback"
                 assert v3.chat_send_calls, "chat_send 未打到 v3"
                 assert v3.chat_send_calls[0][0] == "hitl-1"
@@ -1894,7 +1893,7 @@ def test_attachment_hitl_answer_routes_via_v3_and_run_resumes():
                 )
                 content, _events = await asyncio.wait_for(task, 5)
                 assert content == "resumed-after-approval"
-                assert "hitl-1" not in acc._v3_routed_sessions
+                assert "hitl-1" not in acc._chat_transport.routed_sessions
                 await acc.close()
                 return service
 
@@ -2643,9 +2642,9 @@ def test_pool_owner_lookup_survives_wait_result_false_send():
 
         async def scenario():
             inner = await _connect_async(srv.base)  # 真 BotA2aClient
-            holder = AsyncChatClient(uri="ws://x/ws", max_retries=0)
+            holder = AsyncChatClient(uri="ws://x/ws", max_retries=0, a2a_mode="on")
             holder._client = inner
-            holder._transport = "a2a"
+            holder._chat_transport._current_name = "a2a"
 
             other = MagicMock()  # 另一条空闲连接
             other.tracks_session = MagicMock(return_value=False)
