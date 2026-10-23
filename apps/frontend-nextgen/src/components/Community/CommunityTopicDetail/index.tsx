@@ -179,14 +179,15 @@ export function CommunityTopicDetail({
                   registerElement={registerReplyElement}
                 />
               )}
-              {topic ? (
+              {/* Topic 级投票信息与楼主楼层一样只属于第 1 页，避免翻页时重复展示。 */}
+              {replyPage === 1 && (
                 <PollPanel
                   topicType={topic.topicType}
                   status={topic.status}
                   poll={topic.topicConfig?.poll}
                   pollStats={topic.analysis?.pollStats}
                 />
-              ) : null}
+              )}
               {floorGroups.map(({ reply, floorNo, children }) => (
                 <Floor
                   key={reply.id}

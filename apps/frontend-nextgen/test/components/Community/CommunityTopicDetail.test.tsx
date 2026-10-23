@@ -123,6 +123,30 @@ describe('CommunityTopicDetail', () => {
     expect(screen.queryByRole('button', { name: '发送回复' })).not.toBeInTheDocument();
   });
 
+  test('投票配置只在回复第 1 页展示，翻页后不重复渲染', () => {
+    const pollTopic: CommunityTopic = {
+      ...topic,
+      topicType: 'poll',
+      topicConfig: { poll: { selection: 'single', options: ['方案 A', '方案 B'] } },
+    };
+
+    const firstPage = renderDetail({ topic: pollTopic, replyPage: 1, replyPageCount: 2 });
+    expect(firstPage.getByRole('region', { name: '投票配置' })).toBeInTheDocument();
+  });
+
+  test('回复第 2 页不展示楼主楼层和投票配置', () => {
+    const pollTopic: CommunityTopic = {
+      ...topic,
+      topicType: 'poll',
+      topicConfig: { poll: { selection: 'single', options: ['方案 A', '方案 B'] } },
+    };
+
+    renderDetail({ topic: pollTopic, replyPage: 2, replyPageCount: 2 });
+
+    expect(screen.queryByText('楼主正文')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '投票配置' })).not.toBeInTheDocument();
+  });
+
   test('加载中显示骨架占位、不渲染楼层', () => {
     renderDetail({ loading: true });
     expect(screen.queryByText('楼主正文')).not.toBeInTheDocument();
