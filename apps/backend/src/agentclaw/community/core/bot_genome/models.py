@@ -24,7 +24,7 @@ from agentclaw.community.core.bot_genome.spec_models import GenomePolicy, Genome
 class ContentReader(Protocol):
     """How patch application, checks, diff and compile read the bytes a digest names.
 
-    The registry binds it to the manifest content store scoped to the bot;
+    The registry binds it to the content store scoped to the bot;
     tests bind it to a directory of blobs. ``read`` raises
     :class:`~agentclaw.community.core.bot_genome.errors.ContentNotReachable`
     for a digest the bot cannot reach.
@@ -120,8 +120,8 @@ class Provenance:
     def __post_init__(self) -> None:
         """Runs on construction: an identity the audit columns cannot hold is refused before anything is written.
 
-        User ids are unbounded at the API boundary, and the content store's
-        ``modifier`` column (a frozen migration shared with the Manifest) is
+        User ids are unbounded at the API boundary, and every audit column
+        (the content store's ``modifier`` and the genome's actor columns) is
         ``MAX_AUDIT_ACTOR_CHARS`` wide, so a longer identity is refused here
         as ``LimitExceeded`` rather than failing inside a write.
         """

@@ -3,7 +3,7 @@
 What it ties together: capture (``capture/``), patch application, policy
 and risk (``patch/``), the apply-time predicates (``spec_checks``), the
 diff and the compiled document, the five ``ac_genome_*`` repositories, and
-the manifest content store for every byte a revision names.
+the content store for every byte a revision names.
 
 Recording order (plan): the shape and policy checks, apply, the spec
 checks on the result, risk; only then are produced bytes filed and rows
@@ -21,9 +21,7 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplySta
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
     BotConfigManifestApplyServiceProtocol,
 )
-from agentclaw.community.core.bot_config_manifest.content import ContentScope, ManifestContentServiceProtocol
-from agentclaw.community.core.bot_config_manifest.content.errors import ContentStoreError
-from agentclaw.community.core.bot_config_manifest.fetch.limits import DIGEST_RE
+from agentclaw.community.core.content_store import DIGEST_RE, ContentScope, ContentStoreError, ContentStoreProtocol
 from agentclaw.community.core.bot_genome import contract
 from agentclaw.community.core.bot_genome.canonical import canonicalize, loads_strict, revision_id, sha256_digest
 from agentclaw.community.core.bot_genome.capture import BotStateReader, capture_spec
@@ -123,7 +121,7 @@ class _BotContent(ContentReader):
     A digest is readable only when the registry filed a row for it for this bot.
     """
 
-    def __init__(self, content: ManifestContentServiceProtocol, scope: ContentScope) -> None:
+    def __init__(self, content: ContentStoreProtocol, scope: ContentScope) -> None:
         self._content, self._scope = content, scope
 
     def read(self, digest: str) -> bytes:
@@ -155,7 +153,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         refs: GenomeRefRepositoryProtocol,
         patches: GenomePatchRepositoryProtocol,
         promotions: GenomePromotionRepositoryProtocol,
-        content: ManifestContentServiceProtocol,
+        content: ContentStoreProtocol,
         state_reader: Callable[[], BotStateReader],
         checks: SpecChecks,
         validator: SkillPackageValidator,
