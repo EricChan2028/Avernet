@@ -1,18 +1,16 @@
 // @asset-migrated: teamclaw 自研资产
 /**
- * TaskOverviewV2 —— Level1 任务总览,PRD:步骤区(节点视图/DAG 视图双切换)+ 产物区 + 折叠任务信息。
+ * TaskOverviewV2 —— Level1 任务总览,PRD 两区结构:步骤区(节点视图/DAG 视图双切换)+ 产物区。
  * 交互语义(PRD 方案A):点节点 = 跳转选中(不进第二层);下钻按钮 = 选中 + 进栈。
  */
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 
 import { resolveNodeSessionTarget } from '../sessionResolution';
 import { C } from '../tokens';
 import type { TaskView } from '../types';
-import { ArtifactsSection } from './ArtifactsSection';
 import { DagViewV2 } from './DagViewV2';
 import { NodeListViewV2 } from './NodeListViewV2';
-import { TaskInfoSection } from './TaskInfoSection';
-import { TaskOutputSection } from './TaskOutputSection';
+import { TaskArtifactsList } from './TaskArtifactsList';
 import type { TaskPanelNav } from './taskPanelNav';
 
 export interface TaskOverviewV2Props {
@@ -55,23 +53,14 @@ const ViewSwitchButton: React.FC<{
 export const TaskOverviewV2: React.FC<TaskOverviewV2Props> = ({ task, nav, apiBaseUrl, onOpenSubTask }) => {
   const [view, setView] = useState<StepView>('node');
 
-  // 任务级产物聚合:节点产物(Descriptor 口径优先)∪ 根/任务级 legacy 产物,按 id 去重 —— spec §3.2 产物区
-  const aggregatedArtifacts = useMemo(() => {
-    const merged = new Map<string, TaskView['artifacts'][number]>();
-    for (const node of task.nodes) {
-      for (const a of node.artifacts) merged.set(a.id, a);
-    }
-    for (const a of task.artifacts) {
-      if (!merged.has(a.id)) merged.set(a.id, a);
-    }
-    return [...merged.values()];
-  }, [task]);
-
   return (
     <div data-testid="task-overview-v2" style={{ minHeight: '100%' }}>
       <section>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px 0' }}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary }}>步骤</span>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary }}>步骤</span>
+            <span style={{ fontSize: 11, color: C.textSecondary }}>点击查看会话</span>
+          </div>
           <div style={{ display: 'inline-flex', gap: 2, background: C.surfaceAlt, borderRadius: 6, padding: 2 }}>
             <ViewSwitchButton
               active={view === 'node'}
@@ -111,9 +100,7 @@ export const TaskOverviewV2: React.FC<TaskOverviewV2Props> = ({ task, nav, apiBa
           </div>
         )}
       </section>
-      <TaskOutputSection task={task} />
-      <ArtifactsSection artifacts={aggregatedArtifacts} apiBaseUrl={apiBaseUrl} />
-      <TaskInfoSection task={task} />
+      <TaskArtifactsList task={task} apiBaseUrl={apiBaseUrl} />
     </div>
   );
 };
