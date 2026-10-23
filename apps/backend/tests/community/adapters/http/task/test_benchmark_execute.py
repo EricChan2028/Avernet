@@ -22,6 +22,7 @@ from agentclaw.community.core.task.task_runner.client.ports import (
 )
 from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
     build_benchmark_task_launch_message,
+    format_benchmark_prompt,
 )
 
 
@@ -399,3 +400,28 @@ class TestBenchmarkExecute:
         assert re.findall(r"--!?>", message) == ["-->"]
         assert "--\u200b>" in message
         assert "--\u200b!>" in message
+
+
+def test_benchmark_prompt_allows_internal_fact_execution_and_requires_relay() -> None:
+    prompt = format_benchmark_prompt(
+        {
+            "metadata": {
+                "title": "排查当前特征",
+                "instruction": "排查特征 123 当前查询无值的原因",
+            },
+            "goal": {
+                "objective": "取得当前特征的实际排查结论",
+                "acceptances": [
+                    {"id": "a1", "acceptance": "结论有当前对象事实支撑"}
+                ],
+            },
+        }
+    )
+
+    assert "禁止公共互联网检索，允许内部事实执行与接力" in prompt
+    assert "内部查询/操作工具" in prompt
+    assert "context、report、search、dispatch" in prompt
+    assert "必须保留对应任务缺口并按 TaskLoop Relay 协议搜索、交接" in prompt
+    assert "不能单独把相关验收项判为通过或将任务收口为 DONE" in prompt
+    assert "仅依据上方给定上下文与自身知识完成执行" not in prompt
+    assert "不得因无法联网核实而跳过验收或判 FAILED" not in prompt
