@@ -1,11 +1,10 @@
-"""Reference canonical JSON and digests for the Bot Genome contract (test-only).
+"""Canonical JSON and digests for the Bot Genome contract.
 
 The contract (``apps/backend/api-contracts/genome/v1/README.md`` §3) hashes
 records with the JSON Canonicalization Scheme, RFC 8785, restricted to a subset
-with no floats. This module is the reference the contract test checks the
-published vectors and example ids against. It is deliberately small and has no
-caller outside the tests: the Genome Registry (work item RSI-03) moves it into
-``core/bot_genome/`` and keeps ``canonical-json-vectors.json`` as its oracle.
+with no floats. This module is the registry's one implementation of that rule;
+``canonical-json-vectors.json`` is its oracle (``tests/community/core/bot_genome/
+test_canonical.py`` and the contract test run every vector against it).
 
 Why a subset is enough, and safe: RFC 8785 serialises numbers the way
 ECMAScript does for IEEE doubles, which is the part implementations most often
@@ -17,6 +16,7 @@ Usage::
     canonicalize({"b": 1, "a": [True, None]})   # -> b'{"a":[true,null],"b":1}'
     revision_id(spec, policy)                    # -> "sha256:7c1e…"
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -62,9 +62,14 @@ def sha256_digest(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
-def revision_id(spec: dict[str, Any], policy: dict[str, Any]) -> str:
-    """Identity of a revision: the digest of ``JCS({"policy": …, "spec": …})``."""
-    return sha256_digest(canonicalize({"spec": spec, "policy": policy}))
+def as_json(value: Any) -> Any:
+    """A contract model's JSON object (``to_json()``), or the value itself when it already is JSON."""
+    return value.to_json() if hasattr(value, "to_json") else value
+
+
+def revision_id(spec: Any, policy: Any) -> str:
+    """Identity of a revision: the digest of ``JCS({"policy": …, "spec": …})``; takes the models or their JSON."""
+    return sha256_digest(canonicalize({"spec": as_json(spec), "policy": as_json(policy)}))
 
 
 def tree_digest(files: list[tuple[str, bytes]]) -> str:

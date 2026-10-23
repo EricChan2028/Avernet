@@ -97,45 +97,52 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 
 ## P1 — 版本化 Bot（独立于 RSI 也有价值）
 
-### RSI-03 Backend 中的基因组注册表
+### RSI-03 Backend 中的基因组注册表 — 已完成
 - **模块**：backend
-- **目标**：修订版表、带 CAS 的引用（ref）、补丁应用/校验、diff、将钉住的源
-  解析进内容存储、谱系查询。提供晋升 API：移动 `active` 并调用 Manifest apply
-  （个人 Bot），或把修订版作为下一个发布版本发布（服务型 Bot）。已应用摘要 →
-  修订版的映射，以及漂移检查（[01-genome.zh-CN.md](01-genome.zh-CN.md) §5.5）。
+- **目标**：修订版表、带 CAS 的引用（ref）、补丁应用/校验、diff、把捕获的内容和
+  产出型内容存入内容存储、谱系查询。提供晋升 API：以 CAS 移动 `active`，记录
+  已编译文档及其摘要，并把修订版交给 `RevisionApplier` 接缝。已应用 → 修订版的
+  映射，以及漂移检查（[01-genome.zh-CN.md](01-genome.zh-CN.md) §5.5）。
 - **依赖**：RSI-02。
 - **先读**：[01-genome.zh-CN.md](01-genome.zh-CN.md)；`core/bot_config_manifest/`。
-- **完成标准**：可从 manifest、从补丁创建修订版；可对任意两个修订版做 diff；
-  移动引用时能检测冲突；一致性测试 + 单元测试；singlebox 验收故事「编辑 →
-  修订版 → apply → 通过晋升一个更早的修订版回到两个修订版之前」。
+- **已交付**（`apps/backend/specs/2026-10-19-bot-genome-registry/`）：
+  `core/bot_genome/` 及其五张表、捕获 Bot 的当前状态
+  （`POST …/genome/revisions:capture`）、应用到补丁自身 base 上的补丁
+  （`POST …/genome/revisions`）、策略配置操作（`PUT …/genome/policy`）、diff、
+  以 CAS 移动 `draft`、内容读取/上传、晋升，以及
+  `/openapi/v1/bots/{bot_id}/genome` 接口面；一致性、仓储、装配和路由测试。晋升
+  唯一的 applier 会在移动任何引用之前以 `not_appliable` 拒绝每一次投递并指明
+  RSI-04，因此 singlebox 故事止步于这次拒绝。
+- **留给 RSI-04**：投递本身（个人 Bot）、服务型 Bot 发布、钉住共享仓库技能的
+  提交（`origin: repo` 只记录路径），以及 apply 报告携带 `document_digest`。在此
+  之前，`applied_revision` 按 apply id 把 Bot 最近一次 Manifest apply 关联到发起它
+  的那次晋升。
+- **后续**：捕获会拒绝由平台管理的 teclaw Bot（teclaw 投递模式 `platform`，
+  `CaptureRefused`）：它没有可读取的设备，因此捕获它意味着像该投递模式那样，
+  从平台自己的数据行组合出它的状态。
 
-### RSI-04 面向基因组的 Manifest 变更
+### RSI-04 已编译修订版的直接投递（第二阶段）
 - **模块**：backend
-- **目标**：Manifest 保持对修订版无感知；它只获得以下格式特性以及一项自身的事实
-  （[01-genome.zh-CN.md](01-genome.zh-CN.md) §8）：
-  1. 内容存储源：条目可以指向 manifest 内容存储中的某个摘要；apply 从存储中读取
-     字节，并跳过拉取；
-  2. `engine_config` 生效：为允许列表中的键提供物化器（待定决策 G-4；可能在
-     P3/P4 落地）；
-  3. `memory` 类别：策展条目加一种模式，由 apply 交给引擎适配器
-     （`EngineMemoryProjection`；在 RSI-05 之后落地）；
-  4. 内容存储的产出内容写入路径（由补丁创建、而非拉取的内容）；
-  5. 已应用文档摘要：apply 报告记录它所应用的确切文档的摘要；对服务型 Bot，
-     发布记录记录所发布文档的摘要；
-  6. Center 技能源：条目可以指定一个固定的 Skill Center 版本（Manifest v1 无法
-     声明 Center 技能，而 apply 会删除 `skills` 部分中省略的每个技能，否则已编译
-     的修订版会删除 Bot 的 Center 技能）。
-  已编译的修订版还必须能删除修订版中省略的内容，因此本项依赖两个 Manifest 修复：
-  资源删除（[#2162](https://github.com/inclusionAI/Avernet/issues/2162)）和
-  `script: null`（[#2862](https://github.com/inclusionAI/Avernet/issues/2862)）。内容
-  存储源和 Center 源的提议写法见
-  [`manifest-v1-compatibility.md`](../../api-contracts/genome/v1/manifest-v1-compatibility.md)。
-  Manifest 中没有修订版表、引用或 `revision_id`；`/config-manifest` 端点保持
-  不变。现有的服务型 Bot 回滚功能不做改变。
-- **依赖**：RSI-03。
-- **完成标准**：所有现有 manifest 测试无需修改即通过；新增测试表明，使用内容
-  存储源的文档在应用时无需任何拉取，并且 apply 报告和发布记录携带所应用文档的
-  摘要；`engine_config` 和 `memory` 的测试随各自条目一起落地。
+- **目标**：通过现有的 apply 引擎把已编译的修订版直接投递到 Bot 运行时，中间
+  不再经过 Manifest 文档。新组件接收已编译的修订版（每个类别都存在；文件条目
+  以内容存储摘要表示，Center 技能以固定版本表示，共享技能仓库的技能以路径
+  表示），直接喂给 apply 引擎的各物化器：从内容存储读取字节，解析 Center 与
+  仓库技能；它们接入 RSI-03 留下的 `RevisionApplier` 接缝。Manifest 语法不新增
+  任何源类型。apply 报告记录它所应用的已编译文档的摘要
+  （[01-genome.zh-CN.md](01-genome.zh-CN.md) §8 第 5 项）；对服务型 Bot，发布
+  记录记录所发布文档的摘要。已编译的修订版还必须能删除修订版中省略的内容，
+  因此本项包含两个完整性修复：资源删除
+  （[#2162](https://github.com/inclusionAI/Avernet/issues/2162)）和
+  `script: null`（[#2862](https://github.com/inclusionAI/Avernet/issues/2862)）。
+  仍属于 Manifest、随各自条目落地的工作：`engine_config`（待定决策 G-4，
+  [#2858](https://github.com/inclusionAI/Avernet/issues/2858)）和 `memory`
+  类别（在 RSI-05 之后）。Manifest 中没有修订版表、引用或 `revision_id`；
+  `/config-manifest` 端点保持不变。现有的服务型 Bot 回滚功能不做改变。
+- **依赖**：RSI-03（接缝与已编译文档）、#2162、#2862。
+- **完成标准**：所有现有 manifest 测试无需修改即通过；在 singlebox 中晋升一个
+  修订版即可把它投递到个人 Bot，无需任何拉取、也不写 Manifest，apply 报告携带
+  已编译文档的摘要且 `GenomeRegistry.applied_revision` 能映射回修订版；通过
+  晋升更早的修订版回退两个版本能恢复 Bot，包括被删除的资源和脚本。
 
 ## P2 — 进化核心
 
@@ -316,5 +323,5 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 | DS-2（原 D-3） | 将 ClawBench 作为平台默认评分器 | 04-default-strategies.md → RSI-11 |
 | DS-3（原 D-4） | Workflow YAML 作为基因还是独立 artifact | 04-default-strategies.md |
 | DS-4（原 D-5） | ClawMind 分析器契约；休眠的分析器要么接入要么移除 | 04-default-strategies.md |
-| D-6 | 基因组存储：DB + 内容存储（推荐）还是每个 Bot 一个 git 仓库 | 01-genome.md；RSI-03 |
+| D-6 | 基因组存储：DB + 内容存储还是每个 Bot 一个 git 仓库 | **已关闭（RSI-03）：** DB + 内容存储；01-genome.md §9.2 |
 | A-n | 进化 API 的待定决策（事件投递；Bot 运行请求已推迟） | 09-evolution-api.md |

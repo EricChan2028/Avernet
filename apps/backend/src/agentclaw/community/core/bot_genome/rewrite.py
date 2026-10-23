@@ -1,11 +1,9 @@
-"""Reference rewrite measure for the Bot Genome contract (test-only).
+"""The rewrite measure of the Bot Genome contract.
 
 The contract (``apps/backend/api-contracts/genome/v1/README.md`` §6.3) flags a
 patch's change to a text file as a ``rewrite`` when more than 2/5 of its lines
 changed, by exact line LCS, bounded so that every implementation stays cheap and
-reaches the same answer. This module is the reference the contract test checks
-``rewrite-vectors.json`` against; the Genome Registry (RSI-03) moves it into
-``core/bot_genome/`` and keeps the vectors as its oracle.
+reaches the same answer. ``rewrite-vectors.json`` is this module's oracle.
 
 The exact LCS is computed with Myers' O((N+M)D) shortest edit script, where D
 is the number of inserted plus deleted lines: LCS = (N + M - D) / 2. Myers is
@@ -18,6 +16,7 @@ Usage::
 
     rewrite_flagged(["a", "b"], ["a", "c"], numerator=2, denominator=5, cell_limit=2**24)  # -> True
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -80,9 +79,7 @@ def _lcs_table(a: Sequence[str], b: Sequence[str]) -> int:
     return row[-1]
 
 
-def rewrite_flagged(
-    a: Sequence[str], b: Sequence[str], *, numerator: int, denominator: int, cell_limit: int
-) -> bool:
+def rewrite_flagged(a: Sequence[str], b: Sequence[str], *, numerator: int, denominator: int, cell_limit: int) -> bool:
     """README §6.3: True when the change from ``a`` to ``b`` is a rewrite."""
     total = len(a) + len(b)
     if total == 0:

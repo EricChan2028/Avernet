@@ -82,6 +82,47 @@ class ManifestContentServiceProtocol(Protocol):
         ...
 
     @abstractmethod
+    def store_produced(
+        self,
+        data: bytes,
+        *,
+        scope: ContentScope,
+        origin: str,
+        modifier: str = "",
+        category: Optional[str] = None,
+        entry_identity: Optional[str] = None,
+    ) -> StoredContentRecord:
+        """Persist bytes the platform produced rather than fetched (the Genome Registry's path).
+
+        A captured persona file, a file a patch wrote, an upload for a
+        patch: no source URL exists, so the provenance row records
+        ``produced://<origin>`` as both URLs — ``origin`` is a short label
+        such as ``genome/capture``, ``genome/patch`` or ``genome/upload``.
+        The blob write is the same content-addressed, idempotent write
+        ``store`` makes. One row per bot and digest, best effort: when this
+        bot already holds a row for the digest, no second row is filed and
+        the returned record carries ``id=None`` (``is_reachable`` says which
+        case the caller is in). Two concurrent stores of the same bytes can
+        both file a row; the log has no unique key, and a second row changes
+        no answer.
+        """
+        ...
+
+    @abstractmethod
+    def is_reachable(self, scope: ContentScope, digest: str, *, produced_by: Optional[str] = None) -> bool:
+        """Whether this bot holds a provenance row for the digest.
+
+        With ``produced_by`` (an origin's first segment, ``"genome"``), only
+        rows that producer filed count (``produced://genome/…``): a digest the
+        Manifest fetched for the bot is not thereby the registry's.
+
+        Reachability is what lets the registry hand bytes to a caller: a
+        digest that exists in the blob tree but was never stored *for this
+        bot* is not this bot's to read.
+        """
+        ...
+
+    @abstractmethod
     def read(self, digest: str) -> bytes:
         """Read the platform copy by content address, verifying it.
 
