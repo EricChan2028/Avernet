@@ -321,14 +321,13 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       effect: "unknown", summary, evidence_ids: task.evidence.map(item => item.evidence_id) };
   }
 
-  async maintenance(isActive: () => Promise<boolean> = async () => true): Promise<void> {
+  async maintenance(): Promise<void> {
     let cursor = "";
-    while (await isActive()) {
+    for (;;) {
       const batch = await this.deps.tasks.listForMaintenance?.(200, cursor, this.deps.controlPlaneEnvironment, this.now());
       if (!batch) return;
       for (const task of batch.tasks) {
       try {
-        if (!await isActive()) return;
         if (!this.ownsTask(task)) continue;
         // Persisted retry scheduling also survives a process restart between state save and release.
         if (task.status === "running" && task.executionRetry?.retryAt && task.execution?.state !== "ended") {
@@ -390,24 +389,23 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
   }
 
   /** Independently scheduled delivery; never holds up state transitions or expiry handling. */
-  async reportResults(isActive: () => Promise<boolean> = async () => true): Promise<void> {
-    if (!await isActive()) return;
+  async reportResults(): Promise<void> {
     // A bounded page and serial HTTP calls cap each maintenance tick's work.
     const batch = await this.deps.tasks.listForReporting?.(5, this.reportingCursor, this.deps.controlPlaneEnvironment);
     if (!batch) return;
     this.reportingCursor = batch.nextTaskId;
     let remaining = 5;
     for (const task of batch.tasks) {
-      remaining -= await this.reportPending(task, remaining, isActive);
+      remaining -= await this.reportPending(task, remaining);
       if (!remaining) { this.reportingCursor = task.taskId; break; }
     }
   }
 
-  async reportPending(task: RecoveryStoredTask, limit = 5, isActive: () => Promise<boolean> = async () => true): Promise<number> {
+  async reportPending(task: RecoveryStoredTask, limit = 5): Promise<number> {
     if (task.simulation || !this.ownsTask(task)) return 0;
     let sent = 0;
     for (const result of task.pending_results) {
-      if (sent >= limit || !await isActive()) break;
+      if (sent >= limit) break;
       const attempt = await this.deps.tasks.claimResult(task.taskId, result.result_version);
       if (attempt === null) break;
       sent += 1;

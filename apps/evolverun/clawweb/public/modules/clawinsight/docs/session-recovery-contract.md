@@ -151,20 +151,17 @@ When a real user continues the original conversation after the fault, the worker
 
 List and callback projections include optional `completion_reason=user_continued`. The monitoring receiver accepts it only for completed tasks, preserves it in existing history JSON and remains compatible with old payloads. UI, notifications and statistics distinguish this normal handoff from failure and from `effect=recovered`. Other blocked reports retain failure semantics; unknown reasons and unsupported read evidence are rejected. Roll out sender/receiver support before the updated worker package. No task-status enum or database schema change is required.
 
-## Background scan coordination
+## Background scan efficiency
 
 Repair and recovery continue to share Agent execution reconciliation and retain
-their own status handlers. Execution reconciliation, recovery maintenance and
-result reporting each claim a database-backed scan lease scoped to the control
-plane environment. Lease checks fence new work after ownership loss; existing
-Task transitions and result reservations still guard individual operations.
-The scheduler lease does not change Agent heartbeat or execution lease policy.
+their own status handlers. Reconciliation processes at most four records
+concurrently and refills free slots across page boundaries. An unavailable AIS
+status never establishes a business failure. Maintenance filters compact
+candidate state and loads artifacts only for due work; its page cursor follows
+candidates even when every record in a page is filtered out. Failure reports for
+the same execution reuse the existing retry marker and do not consume another
+retry while release is pending.
 
-Reconciliation processes at most four records concurrently and refills free
-slots across page boundaries. An unavailable AIS status never establishes a
-business failure. Maintenance first filters compact candidate state and loads
-artifacts only for due work; its page cursor follows candidates even when every
-record in a page is filtered out. Failure reports for the same execution reuse
-the existing retry marker and do not consume another retry while release is
-pending. See [migration 147](../../../../../docs/clawweb/evolve-schema-v147/README.md)
-for managed-database rollout requirements.
+These changes preserve the existing per-instance timers and guards, Agent
+heartbeat/execution leases, and retry policy. No schema migration is required.
+Cross-instance scan ownership remains unresolved.

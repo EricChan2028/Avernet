@@ -97,18 +97,3 @@ it("keeps Repair and recovery interruption handling separate", async () => {
   expect(handlers.repair).toHaveBeenCalledOnce();
   expect(handlers.session_recovery).toHaveBeenCalledOnce();
 });
-
-it("does not stop a job or submit a failure after losing scan ownership during an AIS query", async () => {
-  const { deps, provider, handlers, configs } = fixture(1);
-  configs.get("task-1")!.execution.leaseExpiresAt = 99;
-  let active = true;
-  deps.isActive = async () => active;
-  provider.getJobStatusDetail.mockImplementation(async () => {
-    active = false;
-    return { status: "running", rawStatus: "running" };
-  });
-  await reconcileAgentExecutions(deps);
-  expect(provider.stopExecution).not.toHaveBeenCalled();
-  expect(handlers.repair).not.toHaveBeenCalled();
-  expect(handlers.session_recovery).not.toHaveBeenCalled();
-});
