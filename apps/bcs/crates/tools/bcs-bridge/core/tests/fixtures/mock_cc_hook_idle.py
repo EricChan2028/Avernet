@@ -18,6 +18,11 @@ def read():
     return json.loads(line)
 
 init = read()
+if case == "legacy":
+    assert init["type"] == "user", "explicit legacy must skip hook initialization"
+    emit("system", subtype="init")
+    emit("result", subtype="success", is_error=False, result="DONE")
+    sys.exit(0)
 if case in ("observe_init_failure", "observe_init_timeout"):
     if init["type"] == "user":
         emit("system", subtype="init")
@@ -55,6 +60,17 @@ def hook(n, tasks):
     assert answer["response"]["response"] == {}, "observation must not block or change model input"
 
 epoch()
+if case == "authentication_error":
+    # Native 2.1.199 failure shape; no successful Stop/idle evidence follows.
+    emit("result", subtype="success", is_error=True, api_error_status=401,
+         result="Failed to authenticate. API Error: 401 review synthetic authentication failure")
+    time.sleep(60)
+if case == "rate_limit_error":
+    # A failed turn emits no successful Stop/idle evidence. The driver must
+    # surface the cause immediately rather than waiting for completion hooks.
+    emit("result", subtype="success", is_error=True,
+         result="API Error: Request rejected (429) · provider rate limit; PRIVATE credential")
+    time.sleep(60)
 if case == "malformed":
     print('PRIVATE malformed control frame', flush=True)
     sys.exit(0)
