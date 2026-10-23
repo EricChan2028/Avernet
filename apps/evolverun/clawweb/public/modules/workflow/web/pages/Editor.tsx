@@ -1,7 +1,7 @@
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { ReactFlowProvider } from '@xyflow/react'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
-import { useDbWorkflow, useSaveWorkflowToDb, useFacadeBindings } from '../api/hooks'
+import { useDbWorkflow, useSaveWorkflowToDb, useFacadeBindings, useAutoHealSave, useAutoHealDeploy } from '../api/hooks'
 import { useEditorStore } from '../editor/store'
 import { getClientUser } from '@avernet/clawweb-shared/web/hooks/useClientUser'
 import WorkflowPackSidebar from '../components/WorkflowPackSidebar'
@@ -13,9 +13,22 @@ import YamlEditor from '../components/YamlEditor'
 import WorkflowHistoryPanel from '../components/WorkflowHistoryPanel'
 import { compactDiff, formatCurrentSpecForDiff, formatSpecForDiff, specsEqual, unifiedDiff } from '../components/WorkflowVersionDiff'
 import { api } from '@avernet/clawweb-shared/web/api/client'
-import type { WorkflowSpec, DeployHistoryItem, VersionSnapshot } from '@avernet/clawweb-shared/web/types'
+import type { WorkflowSpec, DeployHistoryItem, VersionSnapshot, AutoHealSaveResult } from '@avernet/clawweb-shared/web/types'
 
 type ViewMode = 'visual' | 'yaml' | 'split'
+
+/** Extract a human-readable message from fetchJson ApiError strings ("API NNN: {json}"). */
+function extractApiErrorMessage(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err)
+  const jsonMatch = msg.match(/^API \d+:\s*(\{.*\})$/s)
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[1]) as { message?: string }
+      if (parsed.message) return parsed.message
+    } catch { /* not valid JSON — fall through */ }
+  }
+  return msg
+}
 
 interface EditorProps {
   /** Embedded inside another page (e.g. 任务护航 workspace): hides the workflow sidebar and fills parent height. */
@@ -48,12 +61,17 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
   const [activeSnapshot, setActiveSnapshot] = useState<VersionSnapshot | null>(null)
   const [showDeploymentDiff, setShowDeploymentDiff] = useState(false)
   const [deploymentBaselineRevision, setDeploymentBaselineRevision] = useState(0)
+  const [showDeployConfirm, setShowDeployConfirm] = useState(false)
 
   const { spec, isDirty, selectedNodeId, validationErrors, loadSpec, createNew, importYaml, selectNode, markClean } = useEditorStore()
 
   const { data: workflowSpec, isLoading: workflowLoading } = useDbWorkflow(selectedWorkflowId ?? '')
 
   const saveToDbMutation = useSaveWorkflowToDb()
+  // Git snapshot + server-side deploy share the same auto-heal services as AutoHealPanel.
+  const gitSaveMutation = useAutoHealSave()
+  const deployMutation = useAutoHealDeploy()
+  const deployInFlight = useRef(false)
   const { data: facadeBindings } = useFacadeBindings()
 
   const COMMAND_PATTERN = /^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$/
@@ -184,15 +202,26 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
         return
       }
       const originalId = selectedWorkflowId && selectedWorkflowId !== id ? selectedWorkflowId : undefined
+      // Step 1: DB upsert + ID cascade + facade binding + creation grants (unchanged).
       await saveToDbMutation.mutateAsync({
         workflowId: id,
         spec: specToSave,
         facade,
         originalWorkflowId: originalId,
         botOwnerId: user.userId,
-        // A browser edit is a DB draft. Git-backed save/deploy history is written by ClawMind.
+        // The editor writes no deploy_history row here; deploy rows come from the
+        // server-side deploy below (auto-heal deploy service), same as AutoHealPanel.
         skipDeployHistory: true,
       })
+      // Step 2: git snapshot on saved/{workflowId} via the same service the auto-heal
+      // panel uses, so an editor save matches AutoHealPanel's saved state exactly.
+      let gitResult: AutoHealSaveResult | null = null
+      let gitError: string | null = null
+      try {
+        gitResult = await gitSaveMutation.mutateAsync({ workflowId: id, spec: specToSave, note: 'editor save' })
+      } catch (gitErr) {
+        gitError = extractApiErrorMessage(gitErr)
+      }
       if (id !== spec.id || title !== spec.title) {
         useEditorStore.getState().updateSpecField('id', id)
         useEditorStore.getState().updateSpecField('title', title || id)
@@ -200,12 +229,19 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
       useEditorStore.getState().updateSpecField('facade', facade)
       markClean()
       setShowSaveDialog(false)
-      setSaveMessage({ type: 'success', text: '工作流已保存到数据库。' })
-      setTimeout(() => setSaveMessage(null), 3000)
+      if (gitResult) {
+        const shortCommit = gitResult.commit ? gitResult.commit.slice(0, 8) : ''
+        setSaveMessage({ type: 'success', text: `工作流已保存（git ${gitResult.branch}${shortCommit ? ` · ${shortCommit}` : ''}）` })
+        setTimeout(() => setSaveMessage(null), 3000)
+      } else {
+        // Degraded: DB saved, git snapshot failed. Keep the warning visible (no
+        // auto-dismiss) like other error paths; save is idempotent — retry recovers.
+        setSaveMessage({ type: 'error', text: `数据库已保存，但 git 快照失败：${gitError}。重试保存可恢复。` })
+      }
     } catch (err) {
       setSaveMessage({ type: 'error', text: err instanceof Error ? err.message : '保存失败' })
     }
-  }, [spec, saveId, saveTitle, saveCommand, saveRemark, commandError, saveToDbMutation, markClean, COMMAND_PATTERN, selectedWorkflowId])
+  }, [spec, saveId, saveTitle, saveCommand, saveRemark, commandError, saveToDbMutation, gitSaveMutation, markClean, COMMAND_PATTERN, selectedWorkflowId])
 
   const handleYamlImport = useCallback(() => {
     try {
@@ -278,6 +314,46 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
       setSaveMessage({ type: 'error', text: '复制发布命令失败，请手动复制。' })
     }
   }, [selectedWorkflowId])
+
+  // Server-side deploy via the same service the auto-heal panel uses: reserve deploy
+  // number → git tag + push wf/{workflowId} → activate deploy history. autoRun stays
+  // off because the editor has no source-run context (AutoHealPanel does the same).
+  const runDeploy = useCallback(async () => {
+    if (!selectedWorkflowId || deployInFlight.current) return
+    deployInFlight.current = true
+    setSaveMessage(null)
+    try {
+      const result = await deployMutation.mutateAsync({
+        workflowId: selectedWorkflowId,
+        note: 'editor deploy',
+        autoRun: false,
+      })
+      setSaveMessage({ type: 'success', text: `部署成功：deploy #${result.deployNumber} · v${result.version} · ${result.tagName}` })
+      setTimeout(() => setSaveMessage(null), 5000)
+      // Refresh the comparison baseline so the「待部署」badge clears immediately.
+      setDeploymentBaselineRevision((revision) => revision + 1)
+    } catch (err) {
+      const detail = extractApiErrorMessage(err)
+      setSaveMessage({ type: 'error', text: `部署失败：${detail}。兜底：在 Bot 对话执行 /workflow deploy ${selectedWorkflowId}` })
+    } finally {
+      deployInFlight.current = false
+    }
+  }, [selectedWorkflowId, deployMutation])
+
+  const handleDeployClick = useCallback(() => {
+    if (!selectedWorkflowId) return
+    // Block deploying unsaved canvas edits — deploy always publishes the saved DB spec.
+    if (isDirty) {
+      setSaveMessage({ type: 'error', text: '画布有未保存改动，请先保存再部署。' })
+      return
+    }
+    if (hasUndeployedChanges) {
+      // Diff preview doubles as the deploy confirmation (Q5).
+      setShowDeploymentDiff(true)
+    } else {
+      setShowDeployConfirm(true)
+    }
+  }, [selectedWorkflowId, isDirty, hasUndeployedChanges])
 
   // Keyboard shortcut: Ctrl/Cmd+S saves the current workflow.
   useEffect(() => {
@@ -357,6 +433,7 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
               <button role="menuitem" onClick={() => { setShowYamlImport(true); setYamlInput(''); setShowMore(false) }} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">粘贴 YAML</button>
               <button role="menuitem" onClick={() => { handleImportFile(); setShowMore(false) }} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">导入 YAML 文件</button>
               <button role="menuitem" onClick={() => { handleYamlExport(); setShowMore(false) }} disabled={!spec} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:text-slate-300">导出 YAML</button>
+              <button role="menuitem" onClick={() => { setShowDeployGuide(true); setShowMore(false) }} disabled={!selectedWorkflowId} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:text-slate-300">Bot 命令部署（复制命令兜底）</button>
             </div></>}
           </div>}
           <button
@@ -368,11 +445,11 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
           </button>
           <button
             type="button"
-            onClick={() => setShowDeployGuide(true)}
-            disabled={!selectedWorkflowId}
+            onClick={handleDeployClick}
+            disabled={!selectedWorkflowId || deployMutation.isPending}
             className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:text-slate-300"
           >
-            部署
+            {deployMutation.isPending ? '部署中…' : '部署'}
           </button>
         </div>
       </div>
@@ -597,10 +674,10 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
               </button>
               <button
                 onClick={handleSave}
-                disabled={!saveId.trim() || !!commandError}
+                disabled={!saveId.trim() || !!commandError || saveToDbMutation.isPending || gitSaveMutation.isPending}
                 className="rounded-md bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
               >
-                Save to Database
+                {saveToDbMutation.isPending || gitSaveMutation.isPending ? '保存中…' : '保存工作流'}
               </button>
             </div>
           </div>
@@ -647,15 +724,41 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
                 )
               })}
             </div>
-            <div className="flex justify-end gap-2 border-t border-gray-200 bg-gray-50 px-4 py-2">
-              <button onClick={() => setShowDeploymentDiff(false)} className="rounded border border-gray-300 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50">稍后部署</button>
-              <button onClick={() => { setShowDeploymentDiff(false); setShowDeployGuide(true) }} className="rounded bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700">部署</button>
+            <div className="flex items-center justify-between gap-2 border-t border-gray-200 bg-gray-50 px-4 py-2">
+              <span className="truncate text-xs text-gray-400">Bot 命令兜底：<code className="rounded bg-gray-100 px-1">/workflow deploy {selectedWorkflowId}</code></span>
+              <span className="flex shrink-0 gap-2">
+                <button onClick={() => setShowDeploymentDiff(false)} className="rounded border border-gray-300 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50">稍后部署</button>
+                <button onClick={() => { setShowDeploymentDiff(false); void runDeploy() }} className="rounded bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700">确认部署</button>
+              </span>
             </div>
           </div>
         </div>
       )}
 
-      {/* Publishing owns a remote Git tag and read-only Pack, which are created by ClawMind rather than this browser. */}
+      {/* Lightweight deploy confirmation when the canvas matches the live version (Q5). */}
+      {showDeployConfirm && selectedWorkflowId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
+          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-gray-900">部署工作流</h3>
+            <p className="mt-3 text-sm text-gray-600">
+              {activeSnapshot
+                ? '当前内容与线上生效版本一致，仍要重新部署吗？将生成新的部署记录（deploy #、git tag）。'
+                : latestDeploy
+                  ? '无法获取线上生效版本的快照，仍要部署当前已保存内容吗？'
+                  : '该工作流尚无线上生效版本，部署后将创建首个生效版本。'}
+            </p>
+            <p className="mt-2 text-xs text-gray-400">
+              Bot 命令兜底：在 Bot 对话执行 <code className="rounded bg-gray-100 px-1">/workflow deploy {selectedWorkflowId}</code>
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={() => setShowDeployConfirm(false)} className="rounded-md border border-gray-300 px-4 py-1.5 text-sm text-gray-700 hover:bg-gray-50">取消</button>
+              <button onClick={() => { setShowDeployConfirm(false); void runDeploy() }} className="rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-700">确认部署</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Fallback entry (Q3): the Bot command guide only opens from the 更多 menu or after a failed direct deploy. */}
       {showDeployGuide && selectedWorkflowId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
           <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
