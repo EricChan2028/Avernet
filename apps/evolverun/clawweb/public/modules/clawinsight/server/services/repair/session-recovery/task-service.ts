@@ -321,28 +321,31 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       effect: "unknown", summary, evidence_ids: task.evidence.map(item => item.evidence_id) };
   }
 
-  async maintenance(): Promise<void> {
+  async maintenance(isActive: () => Promise<boolean> = async () => true): Promise<void> {
     let cursor = "";
-    for (;;) {
+    while (await isActive()) {
       const batch = await this.deps.tasks.listForMaintenance?.(200, cursor, this.deps.controlPlaneEnvironment, this.now());
       if (!batch) return;
       for (const task of batch.tasks) {
       try {
+        if (!await isActive()) return;
         if (!this.ownsTask(task)) continue;
         // Persisted retry scheduling also survives a process restart between state save and release.
         if (task.status === "running" && task.executionRetry?.retryAt && task.execution?.state !== "ended") {
           // A retained retry marker must never retire a successor launched by another worker.
           if (task.executionRetry.executionId !== task.execution?.executionId) continue;
+          if (!await isActive()) return;
           await this.deps.agent.release(task);
         }
         if (task.status === "running" && ["observe", "verify"].includes(task.phase)
           && task.observationDeadlineAt !== null && task.observationDeadlineAt <= this.now() && !task.requiresFreshObservation) {
+          if (!await isActive()) return;
           await this.observe(task.taskId, task.version, { delivery: task.judgment?.delivery ?? "unconfirmed", response: task.judgment?.response ?? "unknown",
             effect: "unknown", summary: "本轮观察到期，保存进度并等待诊断服务继续", evidence_ids: task.judgment?.evidence_ids ?? [] }, []);
           continue;
         }
         if (task.status === "running" && (!task.execution || task.execution.state === "ended" || task.executionRetry?.retryAt)
-          && (task.executionRetry?.retryAt ?? 0) <= this.now()) await this.start(task);
+          && (task.executionRetry?.retryAt ?? 0) <= this.now() && await isActive()) await this.start(task);
       } catch { console.error("[session-recovery] maintenance failed", task.taskId); }
       }
       if (!batch.nextTaskId) return;
@@ -389,23 +392,24 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
   }
 
   /** Independently scheduled delivery; never holds up state transitions or expiry handling. */
-  async reportResults(): Promise<void> {
+  async reportResults(isActive: () => Promise<boolean> = async () => true): Promise<void> {
+    if (!await isActive()) return;
     // A bounded page and serial HTTP calls cap each maintenance tick's work.
     const batch = await this.deps.tasks.listForReporting?.(5, this.reportingCursor, this.deps.controlPlaneEnvironment);
     if (!batch) return;
     this.reportingCursor = batch.nextTaskId;
     let remaining = 5;
     for (const task of batch.tasks) {
-      remaining -= await this.reportPending(task, remaining);
+      remaining -= await this.reportPending(task, remaining, isActive);
       if (!remaining) { this.reportingCursor = task.taskId; break; }
     }
   }
 
-  async reportPending(task: RecoveryStoredTask, limit = 5): Promise<number> {
+  async reportPending(task: RecoveryStoredTask, limit = 5, isActive: () => Promise<boolean> = async () => true): Promise<number> {
     if (task.simulation || !this.ownsTask(task)) return 0;
     let sent = 0;
     for (const result of task.pending_results) {
-      if (sent >= limit) break;
+      if (sent >= limit || !await isActive()) break;
       const attempt = await this.deps.tasks.claimResult(task.taskId, result.result_version);
       if (attempt === null) break;
       sent += 1;

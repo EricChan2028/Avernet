@@ -162,6 +162,13 @@ candidates even when every record in a page is filtered out. Failure reports for
 the same execution reuse the existing retry marker and do not consume another
 retry while release is pending.
 
-These changes preserve the existing per-instance timers and guards, Agent
-heartbeat/execution leases, and retry policy. No schema migration is required.
-Cross-instance scan ownership remains unresolved.
+The existing timers and local in-flight guards remain. Hosts can inject the
+existing Backend-style cache operations: an atomic lock scoped by control-plane
+environment and background job, plus a shared last-scan timestamp. Deployed
+execution reconciliation, recovery maintenance and result reporting use separate
+locks. A 60-second lock renews every 20 seconds; the timestamp limits scan starts
+to once per 20 seconds across staggered timers. Ownership loss stops new work;
+Task transitions and result reservations continue to guard individual actions.
+Cache failures skip the round instead of starting independent scans. Standalone
+local callers can omit the cache. No schema migration is required, and Agent
+heartbeat/execution leases and retry policy are unchanged.
