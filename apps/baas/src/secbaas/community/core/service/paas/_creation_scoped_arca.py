@@ -1,9 +1,13 @@
 """Defer NAS retirement during a trusted replacement to conflict recovery."""
 
+from secbaas.community.api.device_manage import ErrorCode, PaasError
 from secbaas.community.api.device_manage.creation_context import (
     get_device_creation_context,
 )
-from secbaas.community.spi.sandbox.arca import ArcaSandboxError
+from secbaas.community.spi.sandbox.arca import (
+    ArcaSandboxError,
+    ArcaSandboxNotFoundError,
+)
 
 from ._arca_paas_service import ArcaPaasService as LifecycleArcaPaasService
 
@@ -15,6 +19,16 @@ class ArcaPaasService(LifecycleArcaPaasService):
     deferred phase. The create provider must validate ownership, operation and
     binding before retiring that instance. No storage allocation is deleted.
     """
+
+    async def destroy_device(self, paas_device_id: str) -> bool:
+        try:
+            return await super().destroy_device(paas_device_id)
+        except PaasError:
+            raise
+        except Exception as error:
+            raise self._translate_error(
+                error, ErrorCode.DEVICE_DESTROY_FAILED
+            ) from error
 
     def _destroy_device_sync(self, paas_device_id: str) -> bool:
         context = get_device_creation_context()
@@ -35,8 +49,11 @@ class ArcaPaasService(LifecycleArcaPaasService):
             raise ArcaSandboxError(
                 "Replacement identity does not match retirement target"
             )
-        sandbox = self._arca_sandbox_plugin.connect_sync_sandbox(paas_device_id)
-        info = sandbox.get_info()
+        try:
+            sandbox = self._arca_sandbox_plugin.connect_sync_sandbox(paas_device_id)
+            info = sandbox.get_info()
+        except ArcaSandboxNotFoundError:
+            return True
         storage = info.storage
         storage_type = (
             storage.get("type")

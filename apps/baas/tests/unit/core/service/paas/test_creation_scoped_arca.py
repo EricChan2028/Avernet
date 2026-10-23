@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from secbaas.community.api.device_manage import ArcaCredentials
+from secbaas.community.api.device_manage import ArcaCredentials, PaasError
 from secbaas.community.api.device_manage.creation_context import (
     DeviceCreationContext,
     device_creation_scope,
@@ -17,7 +17,10 @@ from secbaas.community.core.service.paas._arca_paas_service import (
 from secbaas.community.core.service.paas._factory import (
     ArcaPaasService as FactoryService,
 )
-from secbaas.community.spi.sandbox.arca import ArcaSandboxError
+from secbaas.community.spi.sandbox.arca import (
+    ArcaSandboxError,
+    ArcaSandboxNotFoundError,
+)
 
 
 @pytest.mark.parametrize("capable", [True, False, None])
@@ -73,3 +76,31 @@ def test_scoped_identity_mismatch_never_destroys():
         with pytest.raises(ArcaSandboxError):
             service._destroy_device_sync("new")
     plugin.connect_sync_sandbox.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", [True, False])
+async def test_scoped_query_failure_preserves_paas_contract(missing):
+    plugin = MagicMock(supports_nas_replacement_recovery=True)
+    plugin.connect_sync_sandbox.side_effect = (
+        ArcaSandboxNotFoundError("sandbox not found")
+        if missing
+        else RuntimeError("query failed")
+    )
+    service = ArcaPaasService(
+        ArcaCredentials(
+            base_url="http://fixture",
+            api_key="fixture",
+            tenant_name="t",
+            template_id=1,
+            template_uuid="fixture",
+        ),
+        plugin,
+    )
+    with device_creation_scope(DeviceCreationContext("t", "test", "d", "op", "old@1")):
+        if missing:
+            assert await service.destroy_device("old") is True
+        else:
+            with pytest.raises(PaasError):
+                await service.destroy_device("old")
+    plugin.delete_storage.assert_not_called()
