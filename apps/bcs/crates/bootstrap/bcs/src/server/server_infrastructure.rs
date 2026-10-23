@@ -642,7 +642,27 @@ impl BcsServer {
         );
         let message_flow_builder = message_flow_builder.with_system_message(use_cases.system_message.clone()).with_direct_chat(a2a_chat_impl);
         let channel_slot = message_flow_builder.channel_slot();
-        let message_flow: Arc<dyn MessageFlowService> = crate::message_delivery_wiring::wire_with_leader(message_flow_builder, &config, leader_election.clone()).await?;
+        // P3.3 SQL speaking leases (spec §6.3): the durable store keyed by
+        // the resolved environment shares the SQL wiring family. The SAME
+        // instance feeds the flow's admission fence AND the WS lease
+        // command entrance — one store, one epoch.
+        let lease_store: Arc<
+            dyn bcs_service_api::port::repo::session_speaking_lease::SpeakingLeaseRepoPort,
+        > = Arc::new(bcs_session_store::SqlSpeakingLeaseRepo::new(
+            db_plugin.clone(),
+            crate::env::resolve_env(),
+            db_flavor,
+        ));
+        let message_flow: Arc<dyn MessageFlowService> = crate::message_delivery_wiring::wire_with_caller_assembly(
+            message_flow_builder,
+            &config,
+            leader_election.clone(),
+            None,
+            None,
+            Some(lease_store.clone()),
+        )
+        .await?;
+        let speaking_leases = Some(lease_store);
         let mut delivery_startup_guard = crate::message_delivery_wiring::StartupGuard(Some(message_flow.clone()));
         frontend_connections
             .set_bot_query(use_cases.bot_query.clone())
@@ -935,6 +955,7 @@ impl BcsServer {
             frontend_run_channels,
             session_authorization_core,
             delivery_admission,
+            speaking_leases,
             coordination_processed: Arc::new(Mutex::new(std::collections::HashMap::new())),
             leader_election,
             lifecycle,

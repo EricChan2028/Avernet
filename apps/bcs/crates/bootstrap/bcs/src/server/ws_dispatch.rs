@@ -119,6 +119,13 @@ pub(super) fn web_ws_dispatch_state(
         frontend_connections: state.frontend_connections.clone(),
         run_channels: state.frontend_run_channels.clone(),
         delivery_admission: state.delivery_admission.clone(),
+        // Speaking-lease store (spec §6.3, P3.3): none wired in this
+        // composition keeps lease commands answering an explicit error.
+        // Speaking leases are wired at composition time by the caller
+        // assembly path; this shared constructor stays lease-less (lease
+        // commands answer an explicit error) when none is available here.
+        speaking_leases: None,
+        lease_idle_timeout_ms: 60_000,
     })
 }
 

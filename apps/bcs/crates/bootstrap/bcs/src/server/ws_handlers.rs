@@ -44,6 +44,7 @@ pub(super) async fn ws_upgrade_handler(
             ws_state,
             bcs_ws::web::WorkbenchConnectionAuth::UserBound {
                 actor_id: bound_actor_id,
+                caller_ingress: None,
             },
             metrics_hook,
         ))
