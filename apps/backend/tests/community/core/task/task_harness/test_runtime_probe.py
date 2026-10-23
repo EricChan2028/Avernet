@@ -32,18 +32,34 @@ class _FakeBcs:
         self.group = {
             "status": "running",
             "version": 1,
+            "driver_bot_id": "bot-bcs-uuid",
             "session": {"status": "running", "version": 1},
         }
+        self.message_calls = []
 
     async def get_group(self, group_id):
         return dict(self.group)
 
     async def get_session_messages(self, session_id, limit=20, since_msg_id=None,
                                    caller_bearer=None):
+        self.message_calls.append(
+            {
+                "session_id": session_id,
+                "limit": limit,
+                "since_msg_id": since_msg_id,
+                "caller_bearer": caller_bearer,
+            }
+        )
         return []
 
     async def get_state_machine_run(self, run_id):
         raise RuntimeError("no run")
+
+
+class _FakeBotTokens:
+    def get_token(self, bot_uuid):
+        assert bot_uuid == "bot-bcs-uuid"
+        return "bearer-token"
 
 
 class _Node:
@@ -222,6 +238,35 @@ class TestTaskRuntimeLivenessProbe(unittest.IsolatedAsyncioTestCase):
         await probe.probe(node)
 
         self.assertEqual(bot.session_stages, [None])
+
+    async def test_group_message_probe_uses_driver_bot_bearer(self):
+        bcs = _FakeBcs()
+        probe = TaskRuntimeLivenessProbe(bcs=bcs, bot_tokens=_FakeBotTokens())
+
+        result = await probe.probe(
+            _Node(group_id="g1", session_id="s1", assignee="g1")
+        )
+
+        self.assertEqual(result.state, "active")
+        self.assertEqual(
+            bcs.message_calls,
+            [
+                {
+                    "session_id": "s1",
+                    "limit": 20,
+                    "since_msg_id": None,
+                    "caller_bearer": "bearer-token",
+                }
+            ],
+        )
+
+    async def test_group_message_probe_falls_back_to_hmac_without_tokens(self):
+        bcs = _FakeBcs()
+        probe = TaskRuntimeLivenessProbe(bcs=bcs)
+
+        await probe.probe(_Node(group_id="g1", session_id="s1"))
+
+        self.assertIsNone(bcs.message_calls[0]["caller_bearer"])
 
     async def test_group_terminal_success_is_reported(self):
         bcs = _FakeBcs()

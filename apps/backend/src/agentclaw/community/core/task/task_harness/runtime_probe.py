@@ -270,9 +270,12 @@ class TaskRuntimeLivenessProbe:
             detail={"reason": "probe_request_failed", **detail},
         )
 
-    def __init__(self, *, bot: Any = None, bcs: Any = None) -> None:
+    def __init__(
+        self, *, bot: Any = None, bcs: Any = None, bot_tokens: Any = None
+    ) -> None:
         self._bot = bot
         self._bcs = bcs
+        self._bot_tokens = bot_tokens
 
     async def probe(
         self,
@@ -300,6 +303,7 @@ class TaskRuntimeLivenessProbe:
         # runtime handle decides the probe, not only the persisted run_mode.
         if group_id:
             return await self._probe_group(
+                node=node,
                 run_id=run_id,
                 group_id=group_id,
                 session_id=session_id,
@@ -465,9 +469,43 @@ class TaskRuntimeLivenessProbe:
             },
         )
 
+    def _group_bearer(
+        self,
+        *,
+        group_id: str,
+        group: dict[str, Any] | None,
+        node: TaskNode,
+    ) -> str | None:
+        """Resolve a group participant token for the session-history ACL.
+
+        The service HMAC identity is not a session participant. Prefer persisted
+        driver facts, then the authoritative group's driver, and only then the
+        node assignee. No token makes the transport fail closed without changing
+        liveness semantics; the heartbeat read reports that transport error.
+        """
+        props = getattr(node.run_info, "extend_props", {}) or {}
+        candidate = str(
+            props.get("bcs_driver_bot")
+            or props.get("assignee_bcs_uuid")
+            or ""
+        ).strip()
+        if not candidate and isinstance(group, dict):
+            candidate = str(
+                group.get("driver_bot_id")
+                or group.get("driver_bot")
+                or ""
+            ).strip()
+        if not candidate:
+            candidate = str(getattr(node.run_info, "assignee", "") or "").strip()
+        if not candidate or candidate == group_id or self._bot_tokens is None:
+            return None
+        token = self._bot_tokens.get_token(candidate)
+        return str(token or "") or None
+
     async def _probe_group(
         self,
         *,
+        node: TaskNode,
         run_id: str | None,
         group_id: str,
         session_id: str | None,
@@ -559,7 +597,16 @@ class TaskRuntimeLivenessProbe:
         message_error: str | None = None
         if session_id:
             try:
-                messages = await self._bcs.get_session_messages(session_id, limit=20)
+                caller_bearer = self._group_bearer(
+                    group_id=group_id,
+                    group=group,
+                    node=node,
+                )
+                messages = await self._bcs.get_session_messages(
+                    session_id,
+                    limit=20,
+                    caller_bearer=caller_bearer,
+                )
                 cursor_value = (
                     cursor_value,
                     _last_message_cursor(messages),

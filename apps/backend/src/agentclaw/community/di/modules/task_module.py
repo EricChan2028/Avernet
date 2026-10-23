@@ -404,7 +404,11 @@ class TaskModule(Module):
         # 重派/PENDING 派发超时重搜推);harness=None(未绑且 env 关)时不启动 daemon 巡检线程。
         # 优先读 tasks/settings(harness_poller,KV 跨副本热改),未绑/读异常回退 env OCB_TASK_HARNESS_ENABLED。
         if _resolve_harness_enabled(task_settings):
-            runtime_probe = TaskRuntimeLivenessProbe(bot=bot, bcs=bcs)
+            runtime_probe = TaskRuntimeLivenessProbe(
+                bot=bot,
+                bcs=bcs,
+                bot_tokens=bot_token_provider,
+            )
             # Relay no-progress is a same-session continuation, never a central
             # RUNNING→PENDING reset. Resolve the optional collaborators here so
             # production never falls back to the graph-retry semantics.
