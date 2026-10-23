@@ -94,6 +94,11 @@ class ArcaSandbox(Protocol):
 class ArcaSandboxPlugin(Protocol):
     """Factory protocol for creating and connecting to Arca sandbox devices.
 
+    Optional capability: `supports_nas_replacement_recovery = True` opts into
+    deferring NAS retirement during a trusted replacement to create-time
+    ownership, operation and pinned-binding validation. Missing capability
+    retains existing retirement behavior. This is not a required protocol member.
+
     Implementations:
     - ArcaSdkSandboxPlugin: wraps the real Arca SDK (SandboxFactory + SyncSandbox)
     - StubArcaSandboxPlugin: in-memory mock for unit tests

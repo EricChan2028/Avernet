@@ -43,3 +43,14 @@ termination attempt.
 This optional infrastructure behavior does not require local or other sandbox
 providers to emulate remote NAS recovery. Provider tests must exercise a real
 consumer and assert both resource outcomes and the actual adapter calls.
+
+ARCA update retirement runs inside the same trusted scope. The factory selects
+an ARCA adapter that defers NAS retirement until create can validate the pinned
+binding and operation marker. Its destroy-phase acknowledgement does not mean
+the NAS or instance has been deleted. Explicit deletion outside that scope keeps
+its existing semantics; non-NAS replacements retain their existing retirement.
+Unknown storage or mismatched retirement identity cannot authorize deletion.
+
+Only plugins explicitly declaring `supports_nas_replacement_recovery = True`
+opt into deferred NAS retirement; absence retains the existing lifecycle. Opt-in
+requires implementing the ownership, replay and binding checks described above.
