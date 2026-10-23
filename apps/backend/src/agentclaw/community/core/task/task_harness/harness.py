@@ -196,6 +196,7 @@ class TaskHarness:
                 "no_progress": 0,
                 "success_unreported": 0,
                 "resume_attempts": 0,
+                "resume_send_failures": 0,
                 "probe_unavailable": 0,
             },
         )
@@ -293,13 +294,20 @@ class TaskHarness:
                 channel = resumed.channel
             except Exception as exc:  # noqa: BLE001 - recoverable transport error
                 error_msg = f"{type(exc).__name__}: {exc}"[:500]
+                current["resume_send_failures"] += 1
                 logger.warning(
-                    "[task][harness] relay session resume failed task=%s node=%s "
-                    "attempts=%d/%d error=%s",
-                    task_id, node.node_id, attempts + 1,
-                    self._relay_resume_max_attempts, error_msg,
+                    "[task][harness] relay session resume send failed task=%s "
+                    "node=%s delivered_attempts=%d/%d send_failures=%d error=%s",
+                    task_id, node.node_id, attempts,
+                    self._relay_resume_max_attempts,
+                    current["resume_send_failures"], error_msg,
                 )
+                # A request/deployment failure means the resume prompt was not
+                # delivered to the Bot session. It is not a resume attempt and
+                # must not advance the same-session recovery budget.
+                return None
             current["resume_attempts"] = attempts + 1
+            current["resume_send_failures"] = 0
             self._report_node_patch(
                 TaskNodePatch(
                     task_id=task_id,
