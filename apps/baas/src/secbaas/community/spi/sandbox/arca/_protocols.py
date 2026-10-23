@@ -123,6 +123,14 @@ class ArcaSandboxPlugin(Protocol):
     ) -> ArcaSandbox:
         """Create a new sandbox and wait for it to be ready.
 
+        A provider may recover one exclusive NAS binding conflict within a
+        server-issued DeviceCreationContext. Recovery must retain the storage,
+        verify the same tenant/environment/device, and pin the pre-create
+        occupant; a changed or newly created occupant must never be released.
+        Request metadata alone cannot grant recovery. Providers without this
+        capability keep their normal failure behavior. See
+        docs/device-creation-context.md for the internal scope contract.
+
         Args:
             template_id: Platform template ID.
             ttl_in_minutes: Time-to-live in minutes.
