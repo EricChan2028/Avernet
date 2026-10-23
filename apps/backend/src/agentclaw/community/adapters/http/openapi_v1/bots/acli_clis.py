@@ -47,7 +47,12 @@ from agentclaw.community.api.collaborator_lock_service import (
 )
 from agentclaw.community.di import Injected
 
-from .acli_clis_docs import ADD_RESPONSES, CANCEL_RESPONSES, HOW_IT_RUNS, REMOVE_RESPONSES
+from .schemas_acli_clis_responses import (
+    ADD_RESPONSES,
+    CANCEL_RESPONSES,
+    HOW_IT_RUNS,
+    REMOVE_RESPONSES,
+)
 from .schemas_acli_clis import (
     AcliCliOperation,
     AddBotCli,

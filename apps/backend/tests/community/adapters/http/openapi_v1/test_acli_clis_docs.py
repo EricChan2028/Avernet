@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from starlette.requests import Request
 
 from agentclaw.community.adapters.http.openapi_v1.bots.acli_clis import add_bot_cli, router
-from agentclaw.community.adapters.http.openapi_v1.bots.acli_clis_docs import (
+from agentclaw.community.adapters.http.openapi_v1.bots.schemas_acli_clis_responses import (
     ADD_RESPONSES,
     CANCEL_RESPONSES,
     REMOVE_RESPONSES,
