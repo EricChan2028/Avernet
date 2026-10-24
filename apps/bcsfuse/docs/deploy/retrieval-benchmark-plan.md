@@ -46,7 +46,7 @@
 
 ### 直接运行
 
-客户端安装 k6；设置 `BASE_URL`、`BCSFUSE_BENCH_TOKEN`，将 `QUERIES_FILE` 设置为真实查询 JSON 数组的**绝对路径**。凭据只从环境注入，不写入命令示例、报告或仓库。
+客户端安装 k6；设置 `BASE_URL`，OCB 预发设置 `BCSFUSE_BENCH_COOKIE`（已有登录 Cookie），独立 Bearer 模式才使用 `BCSFUSE_BENCH_TOKEN`。将 `QUERIES_FILE` 设置为真实查询 JSON 数组的**绝对路径**。凭据只从环境注入，不写入命令示例、报告或仓库。
 
 在 Avernet 的 `apps/bcsfuse` 目录执行：
 

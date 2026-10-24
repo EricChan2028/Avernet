@@ -6,6 +6,7 @@ import { Rate, Trend } from 'k6/metrics';
 
 const base = (__ENV.BASE_URL || '').replace(/\/$/, '');
 const token = __ENV['BCSFUSE_BENCH_TOKEN'];
+const loginCookie = __ENV['BCSFUSE_BENCH_COOKIE'];
 const mode = __ENV.MODE || 'both';
 const topK = Number(__ENV.TOP_K || 10);
 const queries = JSON.parse(open(__ENV.QUERIES_FILE || './retrieval_bench_queries.example.json'));
@@ -16,8 +17,8 @@ if (!Number.isFinite(maxErrorRate) || maxErrorRate < 0 || maxErrorRate >= 1 ||
     !Number.isFinite(p99Limit) || p99Limit < 0) {
   throw new Error('MAX_ERROR_RATE must be in [0,1); P99_LIMIT_MS must be nonnegative');
 }
-if (!base || !token || !['vector', 'keyword', 'both'].includes(mode)) {
-  throw new Error('Set BASE_URL, BCSFUSE_BENCH_TOKEN and MODE=vector|keyword|both');
+if (!base || (!token && !loginCookie) || !['vector', 'keyword', 'both'].includes(mode)) {
+  throw new Error('Set BASE_URL, benchmark token or gateway cookie, and MODE=vector|keyword|both');
 }
 if (!Array.isArray(queries) || queries.length < 1 || queries.length > 64) {
   throw new Error('QUERIES_FILE must contain 1..64 representative query strings');
@@ -33,7 +34,10 @@ const storeTime = new Trend('bench_store_ms', true);
 const dispatchWait = new Trend('bench_dispatch_wait_ms', true);
 const vectorTime = new Trend('bench_vector_ms', true);
 const keywordTime = new Trend('bench_keyword_ms', true);
-const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+const headers = { 'Content-Type': 'application/json',
+  ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  ...(loginCookie ? { Cookie: loginCookie } : {}),
+};
 
 export const options = {
   setupTimeout: '10m',
@@ -54,13 +58,16 @@ export const options = {
 };
 
 export function setup() {
-  const infoResponse = http.get(`${base}/internal/bench/info`, { headers, tags: { phase: 'setup' } });
+  const infoResponse = http.get(`${base}/internal/bench/info`, { headers, redirects: 0, tags: { phase: 'setup' } });
   if (infoResponse.status !== 200) fail(`info failed: HTTP ${infoResponse.status}`);
   const info = infoResponse.json();
+  if (info.storage_only !== true || typeof info.instance_id !== 'string') {
+    fail('Response is not benchmark info; check gateway login and deployed benchmark routes');
+  }
   if (!(info.vector_count > 0)) fail('Index is empty; do not measure empty-index throughput');
   const prepared = http.post(`${base}/internal/bench/samples`, JSON.stringify({
     queries, with_vectors: mode !== 'keyword',
-  }), { headers, timeout: '9m', tags: { phase: 'setup' } });
+  }), { headers, redirects: 0, timeout: '9m', tags: { phase: 'setup' } });
   if (prepared.status !== 200) fail(`sample preparation failed: HTTP ${prepared.status}`);
   const samples = prepared.json();
   if (samples.instance_id !== info.instance_id) fail('Requests reached different processes; pin one instance');
@@ -77,7 +84,7 @@ export default function (samples) {
     sample_set_id: samples.sample_set_id,
     sample_index: execution.scenario.iterationInTest % samples.sample_count,
     mode, top_k: topK, filters,
-  }), { headers, timeout: '10s', tags: { phase: 'search', mode } });
+  }), { headers, redirects: 0, timeout: '10s', tags: { phase: 'search', mode } });
   httpTime.add(response.timings.duration);
   limited.add(response.status === 429);
   serverError.add(response.status >= 500);

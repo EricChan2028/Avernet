@@ -1,7 +1,7 @@
 """Opt-in, authenticated storage benchmark; never mounted by the public app.
 
 Hosts explicitly supply the already-loaded store, real embedding provider and
-access token. Only preparation calls the model. Search never writes the store.
+authentication dependency. Only preparation calls the model. Search never writes the store.
 """
 
 import math
@@ -10,9 +10,10 @@ import secrets
 import socket
 import threading
 from dataclasses import dataclass
+from collections.abc import Callable
 from functools import partial
 from time import perf_counter
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 import anyio
@@ -59,21 +60,29 @@ class SampleSet:
     vectors: list[list[float]]
 
 
-def create_retrieval_benchmark_router(
-    *, store: VectorStoreAdapter, embedding: EmbeddingProvider,
-    model_name: str, dimension: int, token: str, max_inflight: int = 32,
-) -> APIRouter:
-    """Mount only from an explicitly enabled, non-production composition root."""
-    if not token.strip() or not model_name.strip() or dimension <= 0 or not 1 <= max_inflight <= 128:
-        raise ValueError("benchmark needs token, model name, dimension and 1..128 inflight requests")
-    instance_id = f"{socket.gethostname()}:{os.getpid()}:{uuid4().hex[:12]}"
-    samples = SampleSet("", [], [])
-    preparation_lock = threading.Lock()
-    inflight = anyio.CapacityLimiter(max_inflight)
+def benchmark_bearer_auth(token: str) -> Callable[..., Any]:
+    """Bearer protection for hosts that do not supply their existing auth boundary."""
+    if not token.strip():
+        raise ValueError("benchmark bearer token is required")
 
     async def authenticate(authorization: str = Header(default="")) -> None:
         if not secrets.compare_digest(authorization.encode(), f"Bearer {token}".encode()):
             raise HTTPException(401, "benchmark authorization required")
+
+    return authenticate
+
+
+def create_retrieval_benchmark_router(
+    *, store: VectorStoreAdapter, embedding: EmbeddingProvider,
+    model_name: str, dimension: int, authenticate: Callable[..., Any], max_inflight: int = 32,
+) -> APIRouter:
+    """Mount only from an explicitly enabled, non-production composition root."""
+    if not callable(authenticate) or not model_name.strip() or dimension <= 0 or not 1 <= max_inflight <= 128:
+        raise ValueError("benchmark needs authentication, model name, dimension and 1..128 inflight requests")
+    instance_id = f"{socket.gethostname()}:{os.getpid()}:{uuid4().hex[:12]}"
+    samples = SampleSet("", [], [])
+    preparation_lock = threading.Lock()
+    inflight = anyio.CapacityLimiter(max_inflight)
 
     router = APIRouter(prefix="/internal/bench", tags=["Retrieval benchmark"],
                        dependencies=[Depends(authenticate)])

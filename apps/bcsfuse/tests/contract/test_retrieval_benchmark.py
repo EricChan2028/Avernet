@@ -28,7 +28,9 @@ class QueryEmbeddings:
 
 @contextmanager
 def bench(tmp_path, **options):
-    from src.interfaces.api.retrieval_benchmark import create_retrieval_benchmark_router
+    from src.interfaces.api.retrieval_benchmark import (
+        benchmark_bearer_auth, create_retrieval_benchmark_router,
+    )
 
     backend = SQLiteVectorPersistenceBackend(str(tmp_path / "vectors.sqlite"))
     store = QdrantMySQLVectorStore(
@@ -44,7 +46,7 @@ def bench(tmp_path, **options):
     app = FastAPI()
     app.include_router(create_retrieval_benchmark_router(
         store=store, embedding=embedding, model_name="test-model", dimension=3,
-        token="unit-test", **options,
+        authenticate=benchmark_bearer_auth("unit-test"), **options,
     ))
     try:
         with TestClient(app, headers={"Authorization": "Bearer unit-test"}) as client:

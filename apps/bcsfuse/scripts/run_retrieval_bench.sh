@@ -5,7 +5,10 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 k6_bin="${K6_BIN:-k6}"
 : "${BASE_URL:?Set BASE_URL to one pinned prepub instance}"
-: "${BCSFUSE_BENCH_TOKEN:?Set BCSFUSE_BENCH_TOKEN through the calling environment}"
+if [[ -z "${BCSFUSE_BENCH_TOKEN:-}" && -z "${BCSFUSE_BENCH_COOKIE:-}" ]]; then
+  echo 'Set BCSFUSE_BENCH_COOKIE for the existing gateway, or BCSFUSE_BENCH_TOKEN for bearer mode' >&2
+  exit 2
+fi
 : "${QUERIES_FILE:?Set QUERIES_FILE to an absolute path containing representative queries}"
 if [[ "$QUERIES_FILE" != /* || ! -f "$QUERIES_FILE" ]]; then
   echo 'QUERIES_FILE must be an existing absolute path' >&2
@@ -26,7 +29,9 @@ if [[ ${#rates[@]} -eq 0 || ${#modes[@]} -eq 0 ]]; then
   exit 2
 fi
 
-export BASE_URL BCSFUSE_BENCH_TOKEN QUERIES_FILE
+export BASE_URL QUERIES_FILE
+if [[ -n "${BCSFUSE_BENCH_TOKEN:-}" ]]; then export BCSFUSE_BENCH_TOKEN; fi
+if [[ -n "${BCSFUSE_BENCH_COOKIE:-}" ]]; then export BCSFUSE_BENCH_COOKIE; fi
 export DURATION="${DURATION:-30s}"
 result_dir="${RESULT_DIR:-${TMPDIR:-/tmp}/bcsfuse-bench-$(date +%Y%m%d-%H%M%S)-$$}"
 # Refuse to overwrite evidence from an earlier run.
