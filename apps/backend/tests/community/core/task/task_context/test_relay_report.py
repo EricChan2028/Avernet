@@ -91,6 +91,14 @@ def _declined_execution() -> TaskReportCommand:
     )
 
 
+def test_node_context_projects_current_graph_attempt() -> None:
+    service = _graph_service()
+    node = service.query_task_dashboard("task-1").tasks[0]
+    node.run_info.extend_props["harness_retries"] = 1
+
+    assert service.get_node_context("task-1", "task-1").attempt == 1
+
+
 def test_report_creates_one_successor_and_projects_replay_receipt() -> None:
     service = _graph_service()
     execution = _execution()

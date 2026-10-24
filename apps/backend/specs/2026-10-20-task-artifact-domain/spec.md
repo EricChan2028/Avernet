@@ -252,7 +252,7 @@ class CodeContent(ArtifactContent):
   1. 四个 content 字段(`text_content`/`file_content`/`url_link_content`/`code_content`)**恰好一个**非空,其余为 null;`artifact_kind` 与非空字段的分支一致(text/file/url_link/code);
   2. content 字段值为合法 JSON 字符串,反序列化走 §3.4 既有分支构造器校验(unknown tag 字段名/互斥破坏/路径逃逸/非 http(s) 链接等);content JSON **不含 kind tag**——判别信息由字段名承载;
   3. `task_id`/`node_id` **必须等于本次报文级定位**(callback 本就寻址唯一 node),不一致即非法;
-  4. `attempt`(int ≥ 0)**与图上 `harness_retries` 快照一致**(与 relay 既有 attempt 精确校验口径同源),不一致即非法——防止幂等键被误导(方案取舍:拒绝而非采纳,诚实优先);
+  4. `attempt`(int ≥ 0)**等于 S1 `TaskContext.attempt`**,服务端继续与图上 `harness_retries` 快照精确交叉校验(与 relay 既有 attempt 口径同源),不一致即非法——防止幂等键被误导(方案取舍:拒绝而非采纳,诚实优先);错配失败重试时只能修正 `attempt`,不得清空 `artifacts`、篡改产物内容或更换 `event_id`;
   5. `session_id` 与图绑定会话交叉校验:图已绑定时必须一致;图未绑定时采纳上报值进 scope.session_id(信任已鉴权回调方,与 §3.4 信任边界一致)——scope 不再"图中无会话则伪造 None"单一语义,改为"图优先、上报兜底"。
 - `text_content` 与双轨派生并存:TEXT 产物有两个来源(bot 显式上报 + 后端从 fold 后 output 派生),同 scope 同内容由幂等键收敛为一行,互不重复计账。
 - **(方案取舍)产物上报收敛在 relay 一条口**:接力链路是当前基线上 bot 执行回调的主协议,产物字段只在此扩展(`extra=forbid` 的 DTO 加可选字段是兼容变更);集中 push/pull 的报文本动不动,后续若有需要按同构 item 字段平移,不在本期预铺;`artifacts` 位于报文顶层而非 `output_patch` 深处——产物是回调契约里可枚举、可校验的一段,不稀释 output dict 的既有语义。

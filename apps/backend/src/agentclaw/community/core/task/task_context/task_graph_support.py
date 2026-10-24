@@ -37,6 +37,9 @@ from agentclaw.community.core.task.domain.models import (
     TaskSummary,
 )
 from agentclaw.community.core.task.repository.types import BbsTaskOverviewRecord
+from agentclaw.community.core.task.task_context.task_artifact.artifact_publish import (
+    graph_node_attempt,
+)
 
 DEFAULT_MAX_DEPTH = 2
 DEFAULT_MAX_LOOP = 3
@@ -739,6 +742,7 @@ def get_node_context(self, task_id: str, node_id: str) -> TaskContext:
             gaps=[],
             task_id=task_id,
             node_id=node_id,
+            attempt=graph_node_attempt(current),
             root_task_spec=root.task_spec,
             current_task_spec=current.task_spec,
             actual_goal=runtime.actual_goal if decision == "ACCEPTED" else None,

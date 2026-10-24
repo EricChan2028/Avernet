@@ -126,13 +126,13 @@ def build_task_info_request(result: TaskIntakeResult) -> TaskInfoRequest:
 
 | 对象/值 | 核心字段 | 产生者 → 消费者 | 是否持久化 |
 | --- | --- | --- | --- |
-| `TaskContext` | `task_id`、`node_id`、根/当前规格、仅前序 `all_done_output`、S3 运行期 `actual_goal/capability_failure_reason`、可选本棒 `accepted_execution_patch/accepted_plan_report` | Task Module 节点级投影 → 当前棒 Bot S1–S5.5 与恢复 | 对象不另存；从图谱事实与上报接纳记录投影 |
+| `TaskContext` | `task_id`、`node_id`、当前 `attempt`、根/当前规格、仅前序 `all_done_output`、S3 运行期 `actual_goal/capability_failure_reason`、可选本棒 `accepted_execution_patch/accepted_plan_report` | Task Module 节点级投影 → 当前棒 Bot S1–S5.5 与恢复 | 对象不另存；从图谱事实与上报接纳记录投影 |
 | `BotCapability` | `identity`、`activated_skills`、`available_tools` | Bot Runtime 的真实能力快照 → S3 | 不写 TaskGraph |
 | `task_gaps: list[str]` | 根任务尚未满足的验收缺口 | S2/S5.1 Skill 推理 → S3/S5.2 | 仅本棒本地；不写 `TaskContext` 或图谱 |
 | `TaskNodePatch` | `actual_goal`、`output_patch`、`local_acceptance_result`、`execution_decision`、异常原因 | S4a → S4b；Backend 接纳后写当前节点 `run_info` | 接纳后持久化节点事实 |
 | 未落图 `TaskNode` | `task_id`、`task_spec`、逐步填充的 `run_info.run_mode/assignee`；`node_id/status/node_run_graph` 暂空 | S5.2 → S5.4 → S5.5 | Backend 接纳后补齐服务端字段并落图；不新增 Relay `PlanResult` |
 | `BotCandidate` | `bot_id`、`name`、`description`、可选 `score` | S5.3 → S5.4 | 候选只在 Bot 本地；不写图谱 |
-| `TaskReportCommand` | `task_id/node_id/event_type/event`；收口时带 `task_acceptance_result`，S5.2 规划失败时带 `failure_reason`；可选 `trace.steps`，每个 step 为扁平七字段 | Bot Runtime → 统一上报 Service API | 三种 `PLAN_RESULT` 分支互斥；服务端按节点状态幂等接纳，`trace` 每条 step 独立进入 `task_trajectory_events` |
+| `TaskReportCommand` | `task_id/node_id/event_type/event`；收口时带 `task_acceptance_result`，S5.2 规划失败时带 `failure_reason`；可选 `artifacts[].attempt = TaskContext.attempt`；可选 `trace.steps`，每个 step 为扁平七字段 | Bot Runtime → 统一上报 Service API | 三种 `PLAN_RESULT` 分支互斥；服务端按节点状态幂等接纳，`trace` 每条 step 独立进入 `task_trajectory_events` |
 | `TaskReportResult` | `status`、可选 `target_node_id`、终态标志 | Backend → S4b/S5.5 | 返回已接纳迁移结果；不是多个新结果类 |
 
 目标 `TaskContext` 不含 `gaps`。`all_done_output` 严格只包含**本棒之前**沿 Relay 前驱链已接纳的 `DoneOutput`，本棒即使已上报也绝不纳入；S5.1 才将本棒 `TaskNodePatch` 转为事实追加一次。`accepted_execution_patch` 与 `accepted_plan_report` 只表示本棒已经被接纳的阶段，来自图谱投影，不是 `TaskContext` 的独立持久化。节点的 `AcceptanceResult.gap_items` 仍持久化，和“不保存任务级 gaps”不矛盾。
@@ -147,7 +147,7 @@ def build_task_info_request(result: TaskIntakeResult) -> TaskInfoRequest:
 | --- | --- | --- | --- | --- | --- |
 | 发起/澄清/确认 | CLI Adapter → Task Module | `TaskService.intake(command, context)`；`POST /api/v1/collaboration/tasks/intake` | `TaskIntakeCommand` 请求体；`session_id` 与认证事实形成 `TaskIntakeContext` | `TaskIntakeResult`；`CONFIRM` 也只返回它 | 目标设计；需实现 |
 | 创建正式任务 | CLI → Backend 创建链路 → Task Module | `POST /api/v1/collaboration/tasks/start` → 内部既有 `TaskService.execute(TaskInfoRequest)` | HTTP 只传 `session_id`；Backend 读取已确认 `TaskIntakeResult` 并构造 `TaskInfoRequest` | `TaskOpResult(task_id,node_id,success,run_id,root_execution_instruction)`；根节点 `node_id == task_id` | 已实现；不新增 Service `start` |
-| 获取本棒上下文 | Bot Runtime → Task Module | `GET /api/v1/collaboration/tasks/{task_id}/nodes/{node_id}/context` | 路径中的 `task_id,node_id` 与 Header 中的当前 `relay_token`；生产内网白名单准入 | `TaskContext`；根规格、当前节点规格、仅前序已接纳执行事实、运行期 `actual_goal/capability_failure_reason` 恢复投影 | 已实现 |
+| 获取本棒上下文 | Bot Runtime → Task Module | `GET /api/v1/collaboration/tasks/{task_id}/nodes/{node_id}/context` | 路径中的 `task_id,node_id` 与 Header 中的当前 `relay_token`；生产内网白名单准入 | `TaskContext`；根规格、当前节点规格、当前 `attempt`、仅前序已接纳执行事实、运行期 `actual_goal/capability_failure_reason` 恢复投影 | 已实现 |
 | 候选检索 | Bot Runtime → Task Module 搜索能力 | `TaskService.search_bots`；`POST /api/v1/collaboration/tasks/search` | `query=next_node.task_spec.goal.objective.strip()`；`task_id/node_id/relay_token` 为当前棒标识与执行代次 | HTTP `Envelope[TaskSearchResultDTO]`；内部领域仍为 `list[BotCandidate]`，Skill 在下一子步骤形成执行者决策 | 已实现 |
 | 统一事件上报 | Bot Runtime → Task Module | `POST /api/v1/collaboration/tasks/callback/report` | `TaskReportCommand`，先执行结果，再上报一次包含规划与选人决策的 `PLAN_RESULT` | `TaskReportResult`；返回接纳状态与可能的目标节点 ID | 已实现 |
 | 实际交接 | 当前棒 Skill → HTTP Adapter → `TaskDispatcher`；Backend 消费者只恢复后继节点 | `POST /api/v1/collaboration/tasks/dispatch` → `TaskDispatcher.dispatch(next_node)` | HTTP 传 `task_id,origin_node_id,target_node_id,relay_token`；Backend 读取已落图的权威 `next_node: TaskNode` | `{ok: true, node_id}`；成功表示内部 Runner 已将指令交给投递通道，不代表任务完成 | 已实现 |
@@ -196,7 +196,7 @@ POST /api/v1/collaboration/tasks/start       # 目标；当前等价入口为 /e
   data: TaskOpResult {task_id, node_id, success, run_id, ...}
 
 GET /api/v1/collaboration/tasks/{task_id}/nodes/{node_id}/context
-  data: TaskContext {task_id, node_id, root_task_spec,
+  data: TaskContext {task_id, node_id, attempt, root_task_spec,
                      current_task_spec, all_done_output,
                      accepted_execution_patch?, accepted_plan_report?}
 

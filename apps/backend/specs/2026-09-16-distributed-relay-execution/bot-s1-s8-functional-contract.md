@@ -557,6 +557,9 @@ class TaskContext:
     task_id: str
     node_id: str
 
+    # 由 Backend 从当前节点 harness_retries 权威快照投影。
+    attempt: int = 0
+
     # 整个任务的原始规格，供任务级 GAP 推理使用。
     root_task_spec: TaskSpec
 
@@ -577,7 +580,7 @@ class TaskContext:
     accepted_plan_report: TaskReportResult | None = None
 ```
 
-`TaskContext` 是只读投影，不另行持久化，也不包含任务级 `gaps`。`actual_goal` 是唯一的运行期补全字段：服务端 S1 对新的执行代次投影为 `None`，S3 在 Bot 本地填写；当本棒执行结果已被服务端接纳，恢复读取时从当前节点 `run_info.actual_goal` 投影，避免重新执行 LLM 能力匹配。`all_done_output` 的范围以当前 `node_id` 为界，沿唯一 Relay 前驱链选择已接纳的前序执行事实；本棒的执行结果即使已经上报，也只出现在 `accepted_execution_patch`，绝不回填进 `all_done_output`。空 `output_patch={}` 仍可表示已接纳执行，不能靠输出是否非空判断。`accepted_plan_report` 仅在本棒 `PLAN_RESULT` 已接纳时非空，用于恢复原 `target_node_id` 或完成/HUNG 结果；两字段均由已有领域对象承载，不新增包装对象。同一节点发生 harness 重试时，Backend 只投影当前有效执行尝试的接纳阶段；先前失败尝试留作节点审计事实，不得作为当前尝试的 `accepted_execution_patch` 阻断重试。
+`TaskContext` 是只读投影，不另行持久化，也不包含任务级 `gaps`。`attempt` 由 Backend 从当前节点 `run_info.extend_props["harness_retries"]` 投影；Bot 不得自行计数或硬编码，artifact 上报项中的 `attempt` 必须逐项取该值。`actual_goal` 是唯一的运行期补全字段：服务端 S1 对新的执行代次投影为 `None`，S3 在 Bot 本地填写；当本棒执行结果已被服务端接纳，恢复读取时从当前节点 `run_info.actual_goal` 投影，避免重新执行 LLM 能力匹配。`all_done_output` 的范围以当前 `node_id` 为界，沿唯一 Relay 前驱链选择已接纳的前序执行事实；本棒的执行结果即使已经上报，也只出现在 `accepted_execution_patch`，绝不回填进 `all_done_output`。空 `output_patch={}` 仍可表示已接纳执行，不能靠输出是否非空判断。`accepted_plan_report` 仅在本棒 `PLAN_RESULT` 已接纳时非空，用于恢复原 `target_node_id` 或完成/HUNG 结果；两字段均由已有领域对象承载，不新增包装对象。同一节点发生 harness 重试时，Backend 只投影当前有效执行尝试的接纳阶段；先前失败尝试留作节点审计事实，不得作为当前尝试的 `accepted_execution_patch` 阻断重试。
 
 ### 4.2 BotCapability
 
@@ -786,6 +789,7 @@ Task Module：
   task_id + node_id ─> 查询当前节点及已接纳事实 ─> TaskContext
   TaskContext.task_id            = task_id
   TaskContext.node_id            = node_id
+  TaskContext.attempt             = 当前 TaskNode.run_info.extend_props.harness_retries
   TaskContext.root_task_spec     = 任务原始 TaskSpec
   TaskContext.current_task_spec  = 当前 TaskNode.task_spec
   TaskContext.all_done_output    = 仅本棒之前已接纳前序节点的 DoneOutput[]
@@ -1446,7 +1450,7 @@ local_acceptance_result: AcceptanceResult = AcceptanceResult(
 - Backend 以内部 `(task_id, node_id, attempt, EXECUTION_RESULT)` 识别当前尝试唯一的执行结果；同一尝试重复请求不重复写节点事实，同键不同内容返回冲突。
 - 接纳 `exec_error` 时记录该 attempt 失败并停止 S5，不能把错误 patch 当成已完成业务事实。只有新的执行代次重投才轮换 `relay_token`；`active + 无进展` 先等待引擎自身 timeout/终态，不直接进入 harness 续跑。进入恢复态后的 same-session 续跑不推进 attempt、不轮换 token；预算耗尽则进入 HUNG/待干预，不无限重试。
 - S1 只投影当前 attempt 已接纳的执行 patch；旧失败 attempt 保留为审计轨迹，旧绑定的迟到 context/report/dispatch 不得推进当前节点。成功尝试接纳后才允许该节点唯一的 `PLAN_RESULT`。
-- `relay_token` 由 Backend 首派前签发，仅新的执行代次重投时轮换；same-session harness 续跑不轮换。Bot 只原样携带；`event_id` 由 Bot 调用层生成并在同一事件重试时复用。两者不是身份凭证；Bot 不填写 attempt 或图谱版本。
+- `relay_token` 由 Backend 首派前签发，仅新的执行代次重投时轮换；same-session harness 续跑不轮换。Bot 只原样携带；`event_id` 由 Bot 调用层生成并在同一事件重试时复用。两者不是身份凭证。Relay 上报核心定位字段不携带 attempt 或图谱版本；`TaskContext.attempt` 是 S1 暴露的当前节点权威尝试号，仅用于对齐 `artifacts[].attempt`。
 
 ### 14.2 PLAN_RESULT
 
