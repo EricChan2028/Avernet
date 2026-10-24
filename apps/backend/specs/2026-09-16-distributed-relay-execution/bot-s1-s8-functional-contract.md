@@ -516,7 +516,8 @@ S5.2 规划下一棒（无 gaps 时跳过）
     -> next_node: TaskNode（未落图，仅填任务规格）
 
 S5.3 搜索候选
-  TaskContext + next_node.task_spec.goal.objective
+  TaskContext + next_node.task_spec.goal
+    -> project_candidate_query（本地检索投影）
     -> TaskService.search_bots（POST /search）
     -> candidates: list[BotCandidate]
 
@@ -1234,7 +1235,7 @@ def plan_next_node(
     )
 ```
 
-`None` 只表示 `task_gaps=[]`；有缺口但无法规划必须走错误通道，不能误判为完成。此处 `TaskNode` 尚未落图，`node_id/status/node_run_graph` 为合法临时空态。每棒最多初始化一个下一棒节点。
+`None` 只表示 `task_gaps=[]`；有缺口但无法规划必须走错误通道，不能误判为完成。此处 `TaskNode` 尚未落图，`node_id/status/node_run_graph` 为合法临时空态。S5.2 仅允许初始化一个下一棒节点；该节点是唯一剩余节点，必须通过 `next_spec.goal.acceptances` 完整承载每一个 `task_gap`，不得把缺口留给未规划的后续节点。
 
 ### 9.3 S5.3：搜索候选
 
@@ -1255,16 +1256,18 @@ candidates: list[BotCandidate]
 处理函数：
 
 ```python
-query = next_node.task_spec.goal.objective.strip()
-require(query)
+candidate_query = project_candidate_query(next_node.task_spec.goal)
+require(candidate_query)
 candidates: list[BotCandidate] = await task_service.search_bots(
-    query=query,
+    query=candidate_query,
     task_id=task_context.task_id,
     node_id=task_context.node_id,  # 轨迹归属当前棒；下一棒尚无 ID
 )
 ```
 
-S5.3 直接使用 `TaskService.search_bots`，不新增 Bot 本地搜索包装函数。`task_gaps` 已在 S5.2 转为下一棒规格，不再拼进搜索词。现有中心化检索也直接使用节点目标；搜索服务自行分词。空候选是正常结果，进入 S5.4；搜索服务不可用是可重试错误，不进入 S5.5。搜索不创建节点、不选人。
+`project_candidate_query` 是 Bot 本地检索投影，不是 TaskSpec 字段，也不进入 TaskGraph。它只读取 `next_node.task_spec.goal.objective` 与 `goal.acceptances[].description`，合并出简洁的自然语言能力请求；trim 后不超过 80 个 Unicode code points。压缩时删除修饰词、阶段说明和重复语义，不得尾部截断或模糊到丢失剩余能力范围；不得读取 `context.background/title/extend_props`，也不包含历史输出、报告路径、协议、控制 token、会话/群或执行控制话术。query 只用于能力检索，不改变 TaskSpec 语义。
+
+S5.3 直接使用 `TaskService.search_bots`，不新增 Bot 本地搜索包装函数。`task_gaps` 已在 S5.2 转为下一棒规格且由后继 Acceptances 覆盖；candidate query 只按能力域提取，不再拼接原始缺口列表。空候选是正常结果，进入 S5.4；搜索服务不可用是可重试错误，不进入 S5.5。搜索不创建节点、不选人。
 
 ### 9.4 S5.4：决定执行者
 
@@ -1416,7 +1419,7 @@ Skill 通过生产内网白名单保护的 `POST /api/v1/collaboration/tasks/dis
 | S4b：上报 | S4b：上报结果 | `node_patch: TaskNodePatch` | Runtime 将 `TaskNodePatch` 原样放入 `TaskReportCommand(EXECUTION_RESULT)`；服务端接纳后写入当前节点运行事实 | `execution_report: TaskReportResult`，成功状态为 `APPLIED` | `POST /callback/report`，事件为 `EXECUTION_RESULT` |
 | S5.1 | 更新缺口 | `task_context: TaskContext`、`node_patch: TaskNodePatch` | 根任务规格 + 历史产出 + 本棒事实重算缺口，缺口为空时生成根任务验收 | `task_gaps: list[str]`、`task_acceptance_result: AcceptanceResult \| None` | 无 |
 | S5.2 | 规划下一棒 | `task_context: TaskContext`、`task_gaps: list[str]`、`node_patch: TaskNodePatch` | 有缺口时生成 `TaskSpec`，初始化未落图 `TaskNode`；无缺口返回 `None` | `next_node: TaskNode \| None` | 无 |
-| S5.3 | 搜索候选 | `task_context: TaskContext`、`next_node: TaskNode`；调用依赖 `task_service: TaskService` | 以 `next_node.task_spec.goal.objective.strip()` 生成字符串查询并调用 `search_bots`；`task_context.node_id` 只用于当前棒轨迹归属 | `candidates: list[BotCandidate]` | `POST /search` |
+| S5.3 | 搜索候选 | `task_context: TaskContext`、`next_node: TaskNode`；调用依赖 `task_service: TaskService` | 以 `project_candidate_query(next_node.task_spec.goal)` 生成本地候选查询并调用 `search_bots`；`task_context.node_id` 只用于当前棒轨迹归属 | `candidates: list[BotCandidate]` | `POST /search` |
 | S5.4 | 决定执行者 | `next_node: TaskNode`、`candidates: list[BotCandidate]` | Skill 本地决策，向同一个未落图节点填入执行模式、执行者；MISS 显式标记 BBS | 已填执行者的 `next_node: TaskNode` | 无 |
 | S5.5 | 上报规划节点 | `command: TaskReportCommand`；由 S5.1 根任务验收、S5.4 `next_node` 或 S5.2 规划异常三选一构造；前置条件为执行上报 `APPLIED` | Runtime 调 `TaskService.report(command)`，只上报一次 `PLAN_RESULT`；Backend 原子收口或创建唯一后继并写入选人决策 | `planning_report: TaskReportResult` | `POST /callback/report`，`PLAN_RESULT` |
 | S6 | 实际交接 | 后继棒：`task_id`、`origin_node_id`、`planning_report.target_node_id`、`relay_token`；Backend 据此读取权威 `next_node: TaskNode` | Skill 调 HTTP；Adapter 校验 relay_token 执行代次并读取节点，调用 `TaskDispatcher.dispatch(next_node)`。接力策略内部调用 Runner 投递；后台消费者恢复未投递后继意图 | HTTP 返回 `{ok: true, node_id: target_node_id}`；成功表示通道接纳，下一棒进入 S1 | `POST /api/v1/collaboration/tasks/dispatch` → `TaskDispatcher.dispatch(next_node)` |

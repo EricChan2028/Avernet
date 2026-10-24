@@ -51,6 +51,9 @@ from agentclaw.community.di.modules.task_module import _resolve_harness_enabled
 from agentclaw.community.core.task.task_runner.client.catalog_keyword_discover import (
     CatalogKeywordBotDiscover,
 )
+from agentclaw.community.core.task.task_runner.client.semantic_keyword_bot_discover import (
+    SemanticKeywordBotDiscover,
+)
 
 
 class _StubDiscoverModule(Module):
@@ -187,7 +190,7 @@ def test_task_module_binds_callback_singletons():
     assert inj.get(CallbackAuthenticator) is inj.get(CallbackAuthenticator)
 
 
-def test_task_module_uses_keyword_discovery_in_every_profile(monkeypatch):
+def test_task_module_uses_keyword_discovery_when_semantic_port_is_absent(monkeypatch):
     class _BotPublic:
         def search_catalog_public_bots_by_keyword(self, **_kwargs):
             return {"total": 0, "items": []}
@@ -196,6 +199,20 @@ def test_task_module_uses_keyword_discovery_in_every_profile(monkeypatch):
         monkeypatch.setenv("DEPLOY_PROFILE", profile)
         discover = TaskModule._resolve_discover(bot_public=_BotPublic())
         assert isinstance(discover, CatalogKeywordBotDiscover)
+
+
+def test_task_module_uses_semantic_hybrid_when_semantic_port_is_available():
+    class _BotPublic:
+        def search_catalog_public_bots_by_keyword(self, **_kwargs):
+            return {"total": 0, "items": []}
+
+    discover = TaskModule._resolve_discover(
+        bot_public=_BotPublic(), semantic_discover=object()
+    )
+    assert isinstance(discover, SemanticKeywordBotDiscover)
+    assert isinstance(
+        discover.search_by_keyword(keyword="市场", user_id="146836"), dict
+    )
 
 
 class _FakeSettings(TaskSettingsServiceProtocol):

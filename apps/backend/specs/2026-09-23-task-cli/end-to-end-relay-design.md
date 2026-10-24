@@ -148,7 +148,7 @@ def build_task_info_request(result: TaskIntakeResult) -> TaskInfoRequest:
 | 发起/澄清/确认 | CLI Adapter → Task Module | `TaskService.intake(command, context)`；`POST /api/v1/collaboration/tasks/intake` | `TaskIntakeCommand` 请求体；`session_id` 与认证事实形成 `TaskIntakeContext` | `TaskIntakeResult`；`CONFIRM` 也只返回它 | 目标设计；需实现 |
 | 创建正式任务 | CLI → Backend 创建链路 → Task Module | `POST /api/v1/collaboration/tasks/start` → 内部既有 `TaskService.execute(TaskInfoRequest)` | HTTP 只传 `session_id`；Backend 读取已确认 `TaskIntakeResult` 并构造 `TaskInfoRequest` | `TaskOpResult(task_id,node_id,success,run_id,root_execution_instruction)`；根节点 `node_id == task_id` | 已实现；不新增 Service `start` |
 | 获取本棒上下文 | Bot Runtime → Task Module | `GET /api/v1/collaboration/tasks/{task_id}/nodes/{node_id}/context` | 路径中的 `task_id,node_id` 与 Header 中的当前 `relay_token`；生产内网白名单准入 | `TaskContext`；根规格、当前节点规格、当前 `attempt`、仅前序已接纳执行事实、运行期 `actual_goal/capability_failure_reason` 恢复投影 | 已实现 |
-| 候选检索 | Bot Runtime → Task Module 搜索能力 | `TaskService.search_bots`；`POST /api/v1/collaboration/tasks/search` | `query=next_node.task_spec.goal.objective.strip()`；`task_id/node_id/relay_token` 为当前棒标识与执行代次 | HTTP `Envelope[TaskSearchResultDTO]`；内部领域仍为 `list[BotCandidate]`，Skill 在下一子步骤形成执行者决策 | 已实现 |
+| 候选检索 | Bot Runtime → Task Module 搜索能力 | `TaskService.search_bots`；`POST /api/v1/collaboration/tasks/search` | `query=project_candidate_query(next_node.task_spec.goal)`；`task_id/node_id/relay_token` 为当前棒标识与执行代次 | HTTP `Envelope[TaskSearchResultDTO]`；内部领域仍为 `list[BotCandidate]`，Skill 在下一子步骤形成执行者决策 | 已实现 |
 | 统一事件上报 | Bot Runtime → Task Module | `POST /api/v1/collaboration/tasks/callback/report` | `TaskReportCommand`，先执行结果，再上报一次包含规划与选人决策的 `PLAN_RESULT` | `TaskReportResult`；返回接纳状态与可能的目标节点 ID | 已实现 |
 | 实际交接 | 当前棒 Skill → HTTP Adapter → `TaskDispatcher`；Backend 消费者只恢复后继节点 | `POST /api/v1/collaboration/tasks/dispatch` → `TaskDispatcher.dispatch(next_node)` | HTTP 传 `task_id,origin_node_id,target_node_id,relay_token`；Backend 读取已落图的权威 `next_node: TaskNode` | `{ok: true, node_id}`；成功表示内部 Runner 已将指令交给投递通道，不代表任务完成 | 已实现 |
 | 查询任务 | task-cli → Task Module | `task-cli get <task-id>` 对应既有 dashboard Service API | `task_id` | 图与节点状态、产出 | 既有查询能力，非 Intake |
@@ -202,7 +202,7 @@ GET /api/v1/collaboration/tasks/{task_id}/nodes/{node_id}/context
 
 POST /api/v1/collaboration/tasks/search
   body: {query: str, task_id: str, node_id: str, relay_token: str}
-        # query 取下一棒 goal.objective；标识与执行代次必须属于当前棒
+        # query 是由 objective + acceptances[].description 投影出的本地候选查询；标识与执行代次必须属于当前棒
   data: list[BotCandidate] → Bot Skill 本地决策 → 填充未落图 TaskNode
 
 POST /api/v1/collaboration/tasks/callback/report
@@ -245,7 +245,7 @@ POST /api/v1/collaboration/tasks/dispatch
 | S4b 上报执行 | `node_patch: TaskNodePatch` | 将 patch 放入 `TaskReportCommand(EXECUTION_RESULT)`；Backend 接纳后写当前节点 `run_info` | `execution_report: TaskReportResult` | `POST /callback/report` |
 | S5.1 更新缺口 | `task_context: TaskContext`、`node_patch: TaskNodePatch` | 根规格 + 历史事实 + 本棒事实重算；缺口为空时做根任务验收 | `task_gaps: list[str]`、`task_acceptance_result: AcceptanceResult \| None` | 无 |
 | S5.2 规划下一棒 | `task_context: TaskContext`、`task_gaps: list[str]`、`node_patch: TaskNodePatch` | 有缺口时初始化未落图 `TaskNode`，填 `task_spec`；无缺口返回 `None` | `next_node: TaskNode \| None` | 无 |
-| S5.3 搜索候选 | `task_context: TaskContext`、`next_node: TaskNode`；调用依赖 `task_service: TaskService` | 以 `next_node.task_spec.goal.objective` 搜索；`task_context.node_id` 只标记当前棒搜索轨迹，不选人、不创建节点 | `candidates: list[BotCandidate]` | `POST /search` |
+| S5.3 搜索候选 | `task_context: TaskContext`、`next_node: TaskNode`；调用依赖 `task_service: TaskService` | 以 `project_candidate_query(next_node.task_spec.goal)` 本地投影出的候选查询搜索；`task_context.node_id` 只标记当前棒搜索轨迹，不选人、不创建节点 | `candidates: list[BotCandidate]` | `POST /search` |
 | S5.4 决定执行者 | `next_node: TaskNode`、`candidates: list[BotCandidate]` | Skill 本地选择单 Bot/协作群或 MISS，并填充同一未落图节点的 `run_info` | 已填执行者的 `next_node: TaskNode` | 无 |
 | S5.5 统一上报 | `command: TaskReportCommand`；由 S5.1 根任务验收、S5.4 `next_node` 或 S5.2 规划异常三选一构造；前置条件为执行上报 `APPLIED` | 直接调用 `TaskService.report(command)`，一次 `PLAN_RESULT`；Backend 原子收口或创建唯一后继并写执行者决策 | `planning_report: TaskReportResult` | `POST /callback/report` |
 | S6 真正交接 | 当前棒 `task_id/origin_node_id/relay_token` 与后继棒 `planning_report.target_node_id`，Backend 读取权威 `next_node: TaskNode` | Skill 调 HTTP；Adapter 校验 relay_token 执行代次并调用 `TaskDispatcher.dispatch(next_node)`；接力策略内部调用 Runner。后台消费者恢复未投递后继意图 | `{ok: true, node_id}`；成功表示通道接纳，下一棒进入 S1 | `POST /api/v1/collaboration/tasks/dispatch` → `TaskDispatcher.dispatch(next_node)` |
@@ -317,7 +317,7 @@ else:
         )
     else:
         candidates = await task_service.search_bots(
-            query=next_node.task_spec.goal.objective.strip(),
+            query=project_candidate_query(next_node.task_spec.goal),
             task_id=task_context.task_id,
             node_id=task_context.node_id,  # 当前棒；下一棒尚无 node_id
         )
@@ -429,7 +429,7 @@ class TaskService:
 - HTTP `/start`：只收 `session_id`；Backend 应用层校验会话 owner 与 `CONFIRMED` 状态，读取已保存 Result 并构造内部 `TaskInfoRequest`，再调用唯一创建方法 `TaskService.execute(request)`。TaskInfo、根图、唯一 session 关联和根投递意图必须同提交；返回成功的 `TaskOpResult(task_id=node_id)`，重试同一 session 返回原结果。它不返回 `TaskContext`，也不等候 Runner 投递。现有 `execute` 将 TaskInfo 与图谱分步写入，实施前需增强其可靠提交能力，或提供经过故障注入验证的可恢复提交协议；HTTP Adapter 只映射协议，不承担会话业务校验或事务编排。
 - `get_node_context`：在生产内网白名单准入并通过当前节点 `relay_token` 代次校验后，委托 `TaskGraphService` 从已持久化图谱投影严格前序 `all_done_output` 与本棒已接纳的执行 patch/规划结果；首棒、后续棒、harness 恢复均调用此同一接口。现有 `get_task_context(task_id)` 只能做兼容入口，不得猜测多节点任务的当前节点。
 - `report`：统一接纳 `EXECUTION_RESULT` 与合并后的 `PLAN_RESULT`。后者一次接纳未落图节点及执行者决策，原子完成当前棒、创建下一棒并写入执行者，或收口/HUNG/BBS。图谱同事务保存当前代次、`event_id`、规范化内容指纹与原结果；同一事件重试返回原迁移结果，不重复建节点或发布 BBS。方法只收 `TaskReportCommand`，其中 `relay_token` 由 Backend 签发、`event_id` 由 Bot 调用层生成；不显式传认证调用方。
-- `search_bots`：只读检索，直接以 S5.2 生成的下一棒 `TaskSpec.goal.objective` 为 `query`，返回 `list[BotCandidate]` 供 S5.4 Skill 决策；不另设 Bot 本地搜索包装函数，也不重复拼接 `task_gaps`。`task_id/node_id` 必填，只将轨迹归属当前棒，不要求下一棒先落图；HTTP Adapter 还校验当前棒 `relay_token`。当前实现名为 `search_task_candidates` 且返回字典；HTTP Adapter 需把候选归一化，已有 HTTP 调用方依赖的响应字段需兼容迁移。
+- `search_bots`：只读检索，以 S5.2 生成的下一棒 `TaskSpec.goal` 本地投影出的 `candidate_query` 为 `query`；投影只读取 `goal.objective` 与 `goal.acceptances[].description`，trim 后不超过 80 个 Unicode code points。返回 `list[BotCandidate]` 供 S5.4 Skill 决策；不另设 Bot 本地搜索包装函数，也不重复拼接 `task_gaps`。`task_id/node_id` 必填，只将轨迹归属当前棒，不要求下一棒先落图；HTTP Adapter 还校验当前棒 `relay_token`。当前实现名为 `search_task_candidates` 且返回字典；HTTP Adapter 需把候选归一化，已有 HTTP 调用方依赖的响应字段需兼容迁移。
 - S6 不增加 `TaskService.dispatch_task` 包装方法：Skill 调生产内网白名单保护的 `/dispatch` HTTP 路径，Adapter 校验起点节点的当前 `relay_token`，以 `task_id,target_node_id` 读取权威 `next_node` 并调用 `TaskDispatcher.dispatch(next_node)`；Dispatcher 核心链路校验前后节点关系、节点状态和投递意图。HTTP 请求还携带当前棒 `origin_node_id`，成功响应保持 `{ok,node_id}` 最小摘要。接力派发策略内部调用 `TaskRunner.start_run(next_node)`。根节点不走该派发分支；失败恢复消费者复用同一 Dispatcher；Skill 不传 `dispatch_id`。
 - `get_task_dashboard`：服务 `task-cli get`，只读图与节点状态；不作为 Bot S1 的业务上下文来源。
 

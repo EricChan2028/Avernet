@@ -334,9 +334,10 @@ class TaskModule(Module):
         端口接线策略(所有部署 profile 均相同):只从 DI composition root 获取
         ``OpenApiBotPort`` / ``BcsClientPort``。部署差异由 application overlay 的配置块驱动
         具体端口实现,TaskModule 不读取部署 profile,也不携带环境专属分支。
-        - discover: every profile reuses ``CatalogKeywordBotDiscover`` over the public
-          Bot catalogue (BCS catalog keyword search). Task dispatch intentionally does
-          not invoke BCSFuse recommendation, whose availability must not decide routing.
+        - discover: every profile uses the same internal candidate contract. When the
+          BCSFuse-backed discover service is available, task search first uses one
+          candidate-query semantic recommendation and falls back to the existing
+          catalog keyword search; if BCSFuse is not bound, behavior stays keyword-only.
         """
         try:
             graph.bind_repository(injector.get(TaskGraphRepositoryProtocol))
@@ -357,7 +358,13 @@ class TaskModule(Module):
             type(bcs).__name__ if bcs is not None else "None",
             "" if (bot is not None and bcs is not None) else "不(全退 Avernet 桩)",
         )
-        discover_port = self._resolve_discover(bot_public=bot_public)
+        semantic_discover = self._resolve_optional_port(
+            injector, BotDiscoverServiceProtocol, "BCSFuse 语义搜推端口缺省"
+        )
+        discover_port = self._resolve_discover(
+            bot_public=bot_public,
+            semantic_discover=semantic_discover,
+        )
         # BBS 候选查询复用 BcnService 的统一 provider 身份(BcnConfig prod/pre,与 register/switch
         # provider-bot 同源)。任务模块作为普通消费方经 DI 注入 BcnService;纯内核/未装 BotManagement 的
         # 未安装 BotManagement 的轻量 DI 测试路径取不到 → None(BBS 按可恢复态跳过;未配置 provider 时走 not-configured)。
@@ -726,18 +733,26 @@ class TaskModule(Module):
 
     @staticmethod
     def _resolve_discover(
-        *, bot_public: BotPublicServiceProtocol
+        *,
+        bot_public: BotPublicServiceProtocol,
+        semantic_discover: BotDiscoverServiceProtocol | None = None,
     ) -> BotDiscoverServiceProtocol:
-        """Reuse the catalog keyword candidate adapter for every profile.
+        """Resolve semantic-first hybrid retrieval, or the keyword-only fallback.
 
-        ``SearchBasedDispatchStrategy`` performs jieba tokenization and calls this
-        port once per token. The adapter delegates to BCS catalog keyword search
-        (``search_catalog_public_bots_by_keyword``); BCSFuse recommendation remains
-        available to the separate public Bot-discovery API and is not a task
-        dispatch dependency.
+        ``BotDiscoverServiceProtocol`` from bot_public is the optional BCSFuse
+        recommendation port. When it is absent in a lightweight injector, task
+        dispatch keeps the existing keyword-only adapter; when it is present,
+        the hybrid adapter tries the candidate query semantically first and only
+        falls back to the established tokenized catalog keyword search.
         """
         from agentclaw.community.core.task.task_runner.client.catalog_keyword_discover import (
             CatalogKeywordBotDiscover,
         )
+        from agentclaw.community.core.task.task_runner.client.semantic_keyword_bot_discover import (
+            SemanticKeywordBotDiscover,
+        )
 
-        return CatalogKeywordBotDiscover(bot_public)  # type: ignore[arg-type]
+        keyword_discover = CatalogKeywordBotDiscover(bot_public)  # type: ignore[arg-type]
+        if semantic_discover is None:
+            return keyword_discover
+        return SemanticKeywordBotDiscover(keyword_discover, semantic_discover)
