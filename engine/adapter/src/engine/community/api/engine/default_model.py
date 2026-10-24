@@ -17,6 +17,8 @@ async def default_model() -> ApiResponse:
         model = DefaultModel.model_validate(model)
     except CapabilityNotSupportedError as error:
         raise HTTPException(501, "Default model is not supported") from error
+    except TimeoutError as error:
+        raise HTTPException(504, "Default model query timed out") from error
     except Exception as error:
         raise HTTPException(502, "Default model query failed") from error
     return ApiResponse(success=True, data=model.model_dump(), warning=warning)

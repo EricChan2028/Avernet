@@ -61,3 +61,10 @@ def test_bad_answer_does_not_become_success(client, answer):
                 return_value=answer
             )
             assert client.get("/api/engine/default-model").status_code == 502
+
+
+def test_rpc_timeout_remains_gateway_timeout(client):
+    with patch("engine.community.api.engine.default_model.check_capability", return_value=None):
+        with patch("engine.community.api.engine.default_model.EngineManager.get_instance") as manager:
+            manager.return_value.models.get_default_model = AsyncMock(side_effect=TimeoutError())
+            assert client.get("/api/engine/default-model").status_code == 504
