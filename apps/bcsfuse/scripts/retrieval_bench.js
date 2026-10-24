@@ -10,6 +10,12 @@ const mode = __ENV.MODE || 'both';
 const topK = Number(__ENV.TOP_K || 10);
 const queries = JSON.parse(open(__ENV.QUERIES_FILE || './retrieval_bench_queries.example.json'));
 const filters = JSON.parse(__ENV.FILTERS || '{}');
+const maxErrorRate = Number(__ENV.MAX_ERROR_RATE || '0.001');
+const p99Limit = Number(__ENV.P99_LIMIT_MS || '0');
+if (!Number.isFinite(maxErrorRate) || maxErrorRate < 0 || maxErrorRate >= 1 ||
+    !Number.isFinite(p99Limit) || p99Limit < 0) {
+  throw new Error('MAX_ERROR_RATE must be in [0,1); P99_LIMIT_MS must be nonnegative');
+}
 if (!base || !token || !['vector', 'keyword', 'both'].includes(mode)) {
   throw new Error('Set BASE_URL, BCSFUSE_BENCH_TOKEN and MODE=vector|keyword|both');
 }
@@ -18,6 +24,10 @@ if (!Array.isArray(queries) || queries.length < 1 || queries.length > 64) {
 }
 
 const valid = new Rate('bench_valid');
+const limited = new Rate('bench_limited');
+const serverError = new Rate('bench_server_error');
+const transportError = new Rate('bench_transport_error');
+const emptyResults = new Rate('bench_empty_results');
 const httpTime = new Trend('bench_http_ms', true);
 const storeTime = new Trend('bench_store_ms', true);
 const dispatchWait = new Trend('bench_dispatch_wait_ms', true);
@@ -36,9 +46,10 @@ export const options = {
     },
   },
   thresholds: {
-    bench_valid: ['rate>0.99'],
-    'http_req_failed{phase:search}': ['rate<0.01'],
+    bench_valid: [`rate>=${1 - maxErrorRate}`],
+    'http_req_failed{phase:search}': [`rate<=${maxErrorRate}`],
     dropped_iterations: ['count==0'],
+    ...(p99Limit > 0 ? { bench_http_ms: [`p(99)<=${p99Limit}`] } : {}),
   },
 };
 
@@ -56,7 +67,8 @@ export function setup() {
   console.log(JSON.stringify({ instance_id: info.instance_id, vector_count: info.vector_count,
     dimension: info.dimension, model: info.model, packages: info.packages,
     sample_source: samples.sample_source, sample_count: samples.sample_count,
-    mode, top_k: topK, logging: info.logging }));
+    mode, top_k: topK, max_error_rate: maxErrorRate, p99_limit_ms: p99Limit,
+    max_inflight: info.max_inflight, logging: info.logging }));
   return samples;
 }
 
@@ -67,6 +79,9 @@ export default function (samples) {
     mode, top_k: topK, filters,
   }), { headers, timeout: '10s', tags: { phase: 'search', mode } });
   httpTime.add(response.timings.duration);
+  limited.add(response.status === 429);
+  serverError.add(response.status >= 500);
+  transportError.add(response.status === 0);
   let data = null;
   try { data = response.json(); } catch (_) { /* Count malformed responses as failures. */ }
   if (response.status === 409 || (data && data.instance_id && data.instance_id !== samples.instance_id)) {
@@ -80,6 +95,7 @@ export default function (samples) {
   });
   valid.add(ok);
   if (ok) {
+    emptyResults.add(data.vector_hits.length + data.keyword_hits.length === 0);
     storeTime.add(data.timing_ms.store);
     dispatchWait.add(data.timing_ms.dispatch_wait);
     if (mode !== 'keyword') vectorTime.add(data.timing_ms.vector);

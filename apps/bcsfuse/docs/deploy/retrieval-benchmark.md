@@ -1,5 +1,7 @@
 # 单实例检索压测（实验分支）
 
+执行顺序、优先级、验收口径和结果记录表见 [支付宝 Agent 搜索压测方案](retrieval-benchmark-plan.md)。批量执行使用 `scripts/run_retrieval_bench.sh`。
+
 用于判断当前 Qdrant Local 存储封装的吞吐；不代表完整推荐接口或独立 Qdrant Server 的性能。
 公共应用默认不挂载测试路由，部署宿主必须显式接入并保护访问。接口只读已有索引，不生成 Agent、不修改数据库、不触发重建。
 
