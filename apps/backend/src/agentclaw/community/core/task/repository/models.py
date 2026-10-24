@@ -40,6 +40,7 @@ from agentclaw.community.core.task.repository.types import (
     TrajectoryEventRecord,
 )
 from agentclaw.community.core.task.task_context.task_artifact import content_from_json
+from agentclaw.community.utils.env_utils import get_current_env
 
 # SQLite autoincrements only on INTEGER PRIMARY KEY; BigInteger renders BIGINT
 # and breaks SQLite autoincrement. with_variant keeps BIGINT on MySQL/OceanBase.
@@ -82,6 +83,7 @@ class TaskInfoModel(Base):
     status = Column(String(64), nullable=False)
     graph_run_id = Column(_RUN_ID, nullable=True)
     graph_loop_round = Column(Integer, nullable=False, default=0)
+    env = Column(String(32), nullable=False, default=get_current_env)
     graph_output = Column(Text, nullable=True)
     graph_extend_props = Column(Text, nullable=True)
     graph_version = Column(BigInteger, nullable=False, default=0)
@@ -97,6 +99,7 @@ class TaskInfoModel(Base):
         Index("uk_task_id", "task_id", unique=True),
         Index("uk_task_info_intake_session", "intake_session_id", unique=True),
         Index("idx_task_info_status", "status", "gmt_modified"),
+        Index("idx_task_info_env_status", "env", "status", "gmt_modified"),
     )
 
     def to_record(self) -> TaskInfoRecord:
@@ -112,6 +115,7 @@ class TaskInfoModel(Base):
             status=Status(self.status),
             graph_run_id=self.graph_run_id,
             graph_loop_round=self.graph_loop_round,
+            env=self.env,
             graph_output=_loads(self.graph_output),
             graph_extend_props=_loads(self.graph_extend_props),
             graph_version=self.graph_version,
@@ -150,6 +154,7 @@ class TaskDeliveryIntentModel(Base):
     task_id = Column(_TASK_ID, nullable=False)
     node_id = Column(_NODE_ID, nullable=False)
     relay_token = Column(String(64), nullable=False)
+    env = Column(String(32), nullable=False, default=get_current_env)
     state = Column(String(32), nullable=False, default="PENDING")
     attempt = Column(Integer, nullable=False, default=0)
     lease_until_ms = Column(BigInteger, nullable=True)
@@ -161,6 +166,7 @@ class TaskDeliveryIntentModel(Base):
     __table_args__ = (
         Index("uk_task_delivery_intent", "task_id", "node_id", unique=True),
         Index("idx_task_delivery_pending", "state", "lease_until_ms"),
+        Index("idx_task_delivery_env_pending", "env", "state", "lease_until_ms"),
     )
 
 

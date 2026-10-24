@@ -8,9 +8,11 @@ from typing import Optional, Sequence
 from injector import inject
 
 from agentclaw.community.core.repository.protocols.task import TaskInfoRepositoryProtocol
+from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.core.task.repository.models import TaskInfoModel
 from agentclaw.community.core.task.repository.types import TaskInfoRecord
+from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
 
@@ -38,6 +40,7 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
             task_spec=json.dumps(record.task_spec),
             status=record.status.value,
             graph_run_id=record.graph_run_id,
+            env=record.env,
             graph_loop_round=record.graph_loop_round,
             graph_output=json.dumps(record.graph_output) if record.graph_output is not None else None,
             graph_extend_props=(
@@ -59,24 +62,48 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
             db.refresh(row)
             return row.to_record()
 
+    @staticmethod
+    def _require_env(row: TaskInfoModel) -> None:
+        env = get_current_env()
+        if row.env != env:
+            raise TaskStateError(
+                f"task environment mismatch: task={row.env}, current={env}"
+            )
+
     def get(self, task_id: str) -> Optional[TaskInfoRecord]:
         with self._db.orm_session() as db:
             row = db.query(self._model).filter(self._model.task_id == task_id).first()
-            return row.to_record() if row else None
+            if row is None:
+                return None
+            self._require_env(row)
+            return row.to_record()
 
     def get_by_intake_session(self, session_id: str) -> Optional[TaskInfoRecord]:
         with self._db.orm_session() as db:
-            row = db.query(self._model).filter(self._model.intake_session_id == session_id).first()
-            return row.to_record() if row else None
+            row = (
+                db.query(self._model)
+                .filter(self._model.intake_session_id == session_id)
+                .first()
+            )
+            if row is None:
+                return None
+            self._require_env(row)
+            return row.to_record()
 
     def update_status(self, task_id: str, status: Status) -> bool:
         with self._db.orm_session() as db:
-            count = (
+            row = (
                 db.query(self._model)
                 .filter(self._model.task_id == task_id)
-                .update({"status": status.value}, synchronize_session=False)
+                .with_for_update()
+                .first()
             )
-        return count > 0
+            if row is None:
+                return False
+            self._require_env(row)
+            row.status = status.value
+            db.flush()
+            return True
 
     def list_records(
         self,
@@ -85,7 +112,7 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
         owner_user_id: Optional[str] = None,
     ) -> list[TaskInfoRecord]:
         with self._db.orm_session() as db:
-            q = db.query(self._model)
+            q = db.query(self._model).filter(self._model.env == get_current_env())
             # status 是运行时态集合:空/None 不过滤,非空按 SQL IN 过滤。
             if status:
                 q = q.filter(self._model.status.in_([s.value for s in status]))
@@ -106,7 +133,7 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
         page_size: int = 20,
     ) -> tuple[list[TaskInfoRecord], int]:
         with self._db.orm_session() as db:
-            q = db.query(self._model)
+            q = db.query(self._model).filter(self._model.env == get_current_env())
             # status 是运行时态集合:空/None 不过滤,非空按 SQL IN 过滤。
             if status:
                 q = q.filter(self._model.status.in_([s.value for s in status]))
@@ -134,7 +161,8 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
         with self._db.orm_session() as db:
             statuses = [status] if isinstance(status, Status) else list(status)
             q = db.query(self._model).filter(
-                self._model.status.in_([item.value for item in statuses])
+                self._model.env == get_current_env(),
+                self._model.status.in_([item.value for item in statuses]),
             )
             if gmt_modified_since is not None:
                 q = q.filter(self._model.gmt_modified >= gmt_modified_since)

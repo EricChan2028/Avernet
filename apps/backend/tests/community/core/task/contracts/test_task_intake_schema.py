@@ -46,3 +46,12 @@ def test_task_info_intake_index_uses_odc_mysql_compatible_alter_table() -> None:
     assert "ADD UNIQUE KEY `uk_task_info_intake_session` (`intake_session_id`)" in ddl
     assert "CREATE UNIQUE INDEX" not in ddl
     assert "ADD COLUMN IF NOT EXISTS" not in ddl
+
+
+def test_delivery_intent_is_environment_scoped_in_ddl() -> None:
+    """Relay delivery is only claimable by the environment that owns the task."""
+    ddl = _normalized_ddl()
+    assert "`env` varchar(32) NOT NULL DEFAULT 'pre'" in ddl
+    assert (
+        "KEY `idx_task_delivery_env_pending` (`env`, `state`, `lease_until_ms`)"
+    ) in ddl
