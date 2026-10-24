@@ -1,74 +1,84 @@
-# 单实例检索压测（实验分支）
+# Qdrant Local / Server 单实例对比（实验分支）
 
-执行顺序、优先级、验收口径和结果记录表见 [支付宝 Agent 搜索压测方案](retrieval-benchmark-plan.md)。批量执行使用 `scripts/run_retrieval_bench.sh`。
+## 本轮测什么
 
-用于判断当前 Qdrant Local 存储封装的吞吐；不代表完整推荐接口或独立 Qdrant Server 的性能。
-公共应用默认不挂载测试路由，部署宿主必须显式接入并保护访问。接口只读已有索引，不生成 Agent、不修改数据库、不触发重建。
+每个后端各测四项：关键词检索、向量检索、带前置标签过滤的关键词检索、带前置标签过滤的向量检索。
+关键词采用现有中文二元词／英文词的稀疏向量和 IDF；不是 Server 新增的全文 BM25 功能。
+**不执行 Worker ID 精确匹配、业务合并、精排、结果缓存或数据库回查。**
+旧接口约 200 ms 的结果包含 ID 精确匹配，不能与本版纯检索数字混在一起。
 
-## 查询向量从哪里来
+准备阶段从 TC 已加载的 Local 索引复制一次真实向量和资料，创建独立的内存 Local 集合及 Server 集合。
+两者使用同一份记录、同一维度和距离算法、相同稀疏向量；之后不跟随 TC 更新。
+复制时短暂持有 TC 索引锁；上传 Server、建索引和调用模型均在释放锁后执行。
+只支持最多 5000 条记录的诊断快照；请在低流量时准备并观察内存。TC 原集合和业务检索不变。
 
-准备阶段将真实查询词交给部署应用配置的 Embedding 服务，生成向量后保存在当前进程内。
-压测阶段按样本编号调用存储，**不再调用模型，不缓存搜索结果，不使用随机向量**。
-仅测关键词时可跳过向量准备。预置的查询文件只是输入格式示例，请换成实际业务样本。
-向量与索引必须使用同一种模型及维度；名称与维度一致也不能证明历史索引使用同一模型，需核对部署记录。
+查询样本的 dense 向量由已配置 Embedding 模型生成，sparse 向量由本地分词生成。
+两者都在准备阶段完成，搜索阶段仅按样本编号查询，无模型调用、不用随机向量。
+同一个样本集用于全部对比轮次；不要在 Local 与 Server 两轮之间重新生成。
 
-## HTTP 契约 v1
+Local 保留独立互斥锁以避免并发访问风险，Server 不加此锁。
+`store` 耗时包含 Local 锁等待或 Server HTTP 往返；属于存储访问耗时，不能称为引擎内部 CPU 时间。
+同机 Server 与 TC 共享 CPU/内存，不是独立资源池。不要同时压两个后端。
 
-认证由部署宿主显式注入。使用 `benchmark_bearer_auth` 的宿主要求 `Authorization: Bearer <运行时注入的压测凭据>`，未通过返回 401；OCB 实验分支预发沿用已有网关登录和内网访问限制，无需额外压测 Token。公共应用仍不自动挂载路由，也不提供隐式匿名认证。
+## HTTP 契约 v2
 
-| 接口 | 请求／结果 |
-| --- | --- |
-| `GET /internal/bench/info` | 实例及进程标识、存储类型、向量条数、维度、模型、依赖版本、样本数、并发上限、日志 Handler 和生效级别；不返回向量、查询文本或凭据 |
-| `POST /internal/bench/samples` | `{"queries":["查账","订票"],"with_vectors":true}`；返回 `sample_set_id`、`sample_count` 和样本来源。每批 1—64 条，每条最多 2048 字符；整批成功后替换旧样本，失败返回 503 并保留旧样本 |
-| `POST /internal/bench/search` | `{"sample_set_id":"准备接口返回的ID","sample_index":0,"mode":"both","top_k":10,"filters":{}}`；返回两类命中的 ID/分数及耗时，不返回画像或向量 |
+沿用宿主认证、预发环境开关和 `/internal/bench` 路径。公共应用不自动挂载接口。
 
-`mode` 可为 `vector`、`keyword`、`both`。`both` 顺序执行两种检索，保留当前存储的锁行为，**不包含业务合并、过滤、精排或查库**。TopK 是存储层的片段数量，可取 1—1000，不是最终 Agent 数。
-筛选支持平铺的字符串、整数、布尔值及字符串／整数列表；最多 16 个字段。
-`sample_index` 从 0 开始。样本编号不存在返回 404；样本集过期、请求进入另一进程、未准备向量却发起向量查询返回 409。
-同一时间仅允许一批样本准备，重复准备返回 409。默认最多 32 个在途搜索，超出返回 429；存储异常返回 503，不伪装成正常空结果。
+| 接口 | 请求及行为 |
+|---|---|
+| `GET /info` | 返回实例、dataset/sample ID、数据条数、维度、`search_scope=direct_qdrant`、过滤字段、Server 准备时的版本及索引状态 |
+| `GET /server-info` | 实时返回 Server 的记录数、索引向量数、集合/优化器状态；Server 不可用返回 503 |
+| `POST /dataset` | `{"include_server":true,"filter_fields":{"fragment_type":"keyword","availability":"keyword","runtime_state":"keyword"}}`；一次性准备两套固定数据。字段类型可选 keyword/integer/bool |
+| `POST /samples` | `{"queries":["告警","查询未解决的缺陷"],"with_vectors":true}`；准备真实 dense 和 sparse 查询向量，返回 sample_set_id。仅测关键词可设 false |
+| `POST /search` | `{"backend":"server","mode":"keyword","sample_set_id":"...","sample_index":0,"top_k":10,"filters":{"fragment_type":"profile"}}` |
 
-## 发起压测
+`backend=local/server`；`mode=keyword/vector`。保留 `both` 兼容旧调用，表示两次顺序查询，但本轮不使用它评估单项能力。
+过滤条件直接传入 Qdrant `query_filter`，先过滤再取 Top K；多字段 AND，字段值列表表示任一匹配。
+过滤字段必须在 `/dataset` 声明；Server 为这些字段创建 payload 索引，Local 不支持这种索引加速。
+Top K 是向量记录数量，不是聚合后的 Agent 数量。返回 ID 和分数，不返回资料和向量。
 
-压测客户端需要 k6。在**另一台机器**发压，固定访问一个已完成索引加载的应用实例，并保持一个应用进程。
-每个进程的样本集不同；脚本发现实例不一致或样本集变化会中止，避免负载均衡导致误测。
+每个应用进程只准备一份数据，重复准备返回 409；更换数据或过滤字段需重启测试进程。
+初始化失败返回错误，可修复后重试；不会回退到 TC 或 Local。
+未准备数据/向量、sample 过期返回 409，未声明过滤字段返回 422，超过默认 32 个在途搜索返回 429。
+Server 不可用返回 503，不能将错误计成正常空结果。关闭测试路由不影响 TC 原接口。
+正常退出删除本进程创建的 Server 测试集合；异常退出可能留下孤立测试集合，可在停止测试后清理独立测试目录。
 
-先在调用环境设置 `BASE_URL`。OCB 预发使用 `BCSFUSE_BENCH_COOKIE` 传入已有登录 Cookie；独立 Bearer 模式使用 `BCSFUSE_BENCH_TOKEN`。凭据不写入脚本、提交记录或报告；脚本不跟随登录重定向，也不会把网关返回的 HTTP 200 登录错误当成正常测试接口。
-在 Avernet 的 `apps/bcsfuse` 目录执行：
+## 机器内操作（无需安装压测依赖）
+
+OCB 分支镜像会复制下列脚本到 `/home/admin/release/bcsfuse/scripts/`。
+固定访问 `127.0.0.1:8765`，避免域名路由到另一台实例。默认 1 QPS、30 秒、8 并发。
 
 ```bash
-MODE=vector RATE=50 DURATION=2m QUERIES_FILE=./retrieval_bench_queries.example.json \
-  k6 run --summary-export /tmp/vector-50.json scripts/retrieval_bench.js
-MODE=keyword RATE=50 DURATION=2m QUERIES_FILE=./retrieval_bench_queries.example.json \
-  k6 run --summary-export /tmp/keyword-50.json scripts/retrieval_bench.js
-MODE=both RATE=50 DURATION=2m QUERIES_FILE=./retrieval_bench_queries.example.json \
-  k6 run --summary-export /tmp/both-50.json scripts/retrieval_bench.js
+cd /home/admin/release/bcsfuse
+# 当前导出的 800 条记录中存在这些字段；新数据集按实际字段调整。
+/home/admin/run/bin/python scripts/qdrant_compare_bench.py prepare \
+  --filter-fields '{"fragment_type":"keyword","availability":"keyword","runtime_state":"keyword"}'
+
+/home/admin/run/bin/python scripts/qdrant_compare_bench.py run --backend local --mode keyword
+/home/admin/run/bin/python scripts/qdrant_compare_bench.py run --backend local --mode vector
+/home/admin/run/bin/python scripts/qdrant_compare_bench.py run --backend local --mode keyword --filters '{"fragment_type":"profile"}'
+/home/admin/run/bin/python scripts/qdrant_compare_bench.py run --backend local --mode vector --filters '{"fragment_type":"profile"}'
+# 将上面四条的 --backend local 改为 --backend server，再依次运行。
+# 逐级增压示例：--qps 5 --seconds 60 --concurrency 8
 ```
 
-k6 的文件路径相对于脚本目录；上例读取 `scripts/retrieval_bench_queries.example.json`。实际样本可用绝对路径指定。
-脚本先检查索引非空并准备样本，再按固定到达率发压。准备模型向量的时间不计入搜索压测。
-默认仅 10 QPS、30 秒；显式设置 RATE/DURATION 后再逐级提高。可用 TOP_K、FILTERS（JSON）、VUS、MAX_VUS 调整样本条件及压测端并发。
-每轮依次尝试 50、100、200、500 QPS，接近瓶颈时缩小步长；候选稳定点至少运行 30 分钟，并追加后台同步／更新场景。
+脚本输出目标/实际 QPS、未发出的请求数、错误、空结果数、HTTP/store/调度 P50/P95/P99。
+出现错误立即停止继续发压；未发出的请求表示发压不足或并发已满，不是服务器主动丢弃。
+机器内发压也占服务机资源，只适合首轮定位。正式容量测试用另一台压测机固定访问目标实例。
+不要用全空结果判断有效容量；选择高/低选择率标签，并记录命中比例。
+现有 800 条导出样本中，fragment_type=profile 有 262 条，availability=public 有 177 条，runtime_state=online 有 345 条；这只是样本分布，不代表预发全部 2637 条。
 
-## 如何读数据
+## k6 固定到达率
 
-- `bench_store_ms`：存储调用总耗时，**包含原有索引锁等待**，没有独立测量锁等待。
-- `bench_vector_ms` / `bench_keyword_ms`：两条路径耗时；`both` 的 QPS 表示每请求执行两次检索。
-- `bench_dispatch_wait_ms`：进入线程池执行前的等待；HTTP 延迟还包括鉴权、JSON、响应及网络。
-- `bench_http_ms`：搜索请求的 HTTP 耗时，报告 P99；不要用包含样本准备请求的全局 `http_req_duration` 作为搜索延迟。
-- `bench_valid`、HTTP 错误和 `dropped_iterations`：拒绝、失败、压测端未发出的请求都不能计为有效 QPS。
-- 同时从实例监控记录 CPU、当前 RSS、磁盘写入、日志目录增长、连接及后台同步状态。info 中 peak RSS 是进程历史峰值，不是当前内存。
+先通过上述接口准备数据和样本，再复用它们运行。认证通过环境注入，不写脚本或日志。
 
-用预期 Agent 数对应的**实际片段数**、真实 4096 或所选维度、不同 TopK 和过滤条件测试。
-固定单个查询只能用于热点诊断，不能代表多样化业务负载；本接口没有结果缓存。
-当前读写共用锁，不要在此实验中直接去掉锁。多进程不能同时打开同一路径的 Qdrant Local 文件；增加进程数不等于自动获得线性扩展。
+```bash
+export BASE_URL='<固定实例地址>' QUERIES_FILE='<查询 JSON 文件绝对路径>'
+export REUSE_SAMPLES=1 BACKEND=local
+RATES='1 5 10' MODES='keyword vector' bash scripts/run_retrieval_bench.sh
+# 改 BACKEND=server 测相同样本；设置 FILTERS='{"fragment_type":"profile"}' 测前置过滤。
+```
 
-## 日志与实例数
-
-先保留现状日志，测每请求字节数、QPS/P99，再用显式 LOG_LEVEL=INFO 对照；必要时用 WARNING 做诊断对照。
-日志级别在部署环境修改后重启，不在压测请求中修改全局 Logger。业务候选明细应另在完整推荐链路验证，本接口不会执行那些日志点。
-info 仅描述 Python Handler；stdout 重定向、网关、sidecar 和容器采集还需查看部署配置，不能据此认定已经异步或有磁盘总量上限。
-日志量估算为有效 QPS × 每请求日志字节数 × 持续秒数，轮转期间应累计活动文件与轮转文件的增量。
-
-本次先给出存储容量，不直接承诺业务实例数。后续完整检索流程测得留有余量的单实例稳定容量 q 后，
-三可用区均匀部署、容忍一个区退出的实例数为 `3 × ceil(1667 / (2 × q))`，再用集群压测验证。
-关闭压测开关并重启即可移除路由；本功能不改变现有数据和业务检索行为。
+每轮记录 dataset/sample/instance ID、实际 QPS、P99、失败率、CPU/RSS、日志增量及 Server 索引状态。
+脚本同时记录 Server 每轮前后的索引状态；索引仍在变化时，不将该轮作为稳态容量。`indexed_vectors_count=0` 表示尚无已建好的 dense HNSW 索引，不能把结果当成 HNSW 能力。
+最终实例数必须按目标机器持续压测和冗余需求计算，不能套用 Mac 的短时结果。

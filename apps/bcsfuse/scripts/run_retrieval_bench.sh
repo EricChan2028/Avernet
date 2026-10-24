@@ -17,7 +17,7 @@ fi
 command -v "$k6_bin" >/dev/null || { echo 'Install k6 or set K6_BIN' >&2; exit 2; }
 
 read -r -a rates <<< "${RATES:-10}"
-read -r -a modes <<< "${MODES:-vector keyword both}"
+read -r -a modes <<< "${MODES:-vector keyword}"
 for rate in "${rates[@]}"; do
   [[ "$rate" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid rate: $rate" >&2; exit 2; }
 done

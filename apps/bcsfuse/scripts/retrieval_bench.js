@@ -7,7 +7,8 @@ import { Rate, Trend } from 'k6/metrics';
 const base = (__ENV.BASE_URL || '').replace(/\/$/, '');
 const token = __ENV['BCSFUSE_BENCH_TOKEN'];
 const loginCookie = __ENV['BCSFUSE_BENCH_COOKIE'];
-const mode = __ENV.MODE || 'both';
+const mode = __ENV.MODE || 'keyword';
+const backend = __ENV.BACKEND || 'local';
 const topK = Number(__ENV.TOP_K || 10);
 const queries = JSON.parse(open(__ENV.QUERIES_FILE || './retrieval_bench_queries.example.json'));
 const filters = JSON.parse(__ENV.FILTERS || '{}');
@@ -64,7 +65,13 @@ export function setup() {
   if (info.storage_only !== true || typeof info.instance_id !== 'string') {
     fail('Response is not benchmark info; check gateway login and deployed benchmark routes');
   }
+  if (info.search_scope !== 'direct_qdrant' || !info.dataset_ready || (backend === 'server' && !info.server_ready)) fail('Prepare direct-Qdrant dataset first');
   if (!(info.vector_count > 0)) fail('Index is empty; do not measure empty-index throughput');
+  if (__ENV.REUSE_SAMPLES === '1') {
+    if (!info.sample_count || (mode !== 'keyword' && info.sample_source !== 'configured_embedding')) fail('Prepare query samples first');
+    console.log(JSON.stringify({ backend, mode, dataset_id: info.dataset_id, sample_set_id: info.sample_set_id, instance_id: info.instance_id, filters, vector_count: info.vector_count }));
+    return info;
+  }
   const prepared = http.post(`${base}/internal/bench/samples`, JSON.stringify({
     queries, with_vectors: mode !== 'keyword',
   }), { headers, redirects: 0, timeout: '9m', tags: { phase: 'setup' } });
@@ -76,14 +83,14 @@ export function setup() {
     sample_source: samples.sample_source, sample_count: samples.sample_count,
     mode, top_k: topK, max_error_rate: maxErrorRate, p99_limit_ms: p99Limit,
     max_inflight: info.max_inflight, logging: info.logging }));
-  return samples;
+  return { ...samples, dataset_id: info.dataset_id };
 }
 
 export default function (samples) {
   const response = http.post(`${base}/internal/bench/search`, JSON.stringify({
     sample_set_id: samples.sample_set_id,
     sample_index: execution.scenario.iterationInTest % samples.sample_count,
-    mode, top_k: topK, filters,
+    mode, backend, top_k: topK, filters,
   }), { headers, redirects: 0, timeout: '10s', tags: { phase: 'search', mode } });
   httpTime.add(response.timings.duration);
   limited.add(response.status === 429);
@@ -97,7 +104,8 @@ export default function (samples) {
   const ok = check(response, {
     'valid storage response': () => response.status === 200 && data &&
       data.sample_set_id === samples.sample_set_id && data.instance_id === samples.instance_id &&
-      data.mode === mode && Array.isArray(data.vector_hits) && Array.isArray(data.keyword_hits) &&
+      data.mode === mode && data.backend === backend && data.dataset_id === samples.dataset_id &&
+      data.search_scope === 'direct_qdrant' && Array.isArray(data.vector_hits) && Array.isArray(data.keyword_hits) &&
       data.timing_ms && Number.isFinite(data.timing_ms.store),
   });
   valid.add(ok);

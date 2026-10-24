@@ -10,8 +10,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.domain.models.vector_point import VectorPoint
-from src.infra.public.vectorstores.qdrant_mysql_vector_store import QdrantMySQLVectorStore
-from src.infra.vectorstore_backends.sqlite_vector_persistence_backend import SQLiteVectorPersistenceBackend
+from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+    QdrantMySQLVectorStore,
+)
+from src.infra.vectorstore_backends.sqlite_vector_persistence_backend import (
+    SQLiteVectorPersistenceBackend,
+)
 
 
 class QueryEmbeddings:
@@ -29,46 +33,90 @@ class QueryEmbeddings:
 @contextmanager
 def bench(tmp_path, **options):
     from src.interfaces.api.retrieval_benchmark import (
-        benchmark_bearer_auth, create_retrieval_benchmark_router,
+        benchmark_bearer_auth,
+        create_retrieval_benchmark_router,
     )
 
     backend = SQLiteVectorPersistenceBackend(str(tmp_path / "vectors.sqlite"))
     store = QdrantMySQLVectorStore(
-        qdrant_path=str(tmp_path / "qdrant"), dimension=3, persistence_backend=backend,
+        qdrant_path=str(tmp_path / "qdrant"),
+        dimension=3,
+        persistence_backend=backend,
     )
-    store.upsert([
-        VectorPoint(id="account:default:description", vector=[1.0, 0.0, 0.0],
-                    payload={"worker_id": "account", "name": "查账", "category": "finance"}),
-        VectorPoint(id="travel:default:description", vector=[0.0, 1.0, 0.0],
-                    payload={"worker_id": "travel", "name": "订票", "category": "travel"}),
-    ])
+    store.upsert(
+        [
+            VectorPoint(
+                id="account:default:description",
+                vector=[1.0, 0.0, 0.0],
+                payload={"worker_id": "account", "name": "查账", "category": "finance"},
+            ),
+            VectorPoint(
+                id="travel:default:description",
+                vector=[0.0, 1.0, 0.0],
+                payload={"worker_id": "travel", "name": "订票", "category": "travel"},
+            ),
+        ]
+    )
     embedding = QueryEmbeddings()
+    from src.infra.public.vectorstores.qdrant_benchmark_stores import (
+        QdrantBenchmarkStores,
+    )
+
+    stores = QdrantBenchmarkStores(store)
     app = FastAPI()
-    app.include_router(create_retrieval_benchmark_router(
-        store=store, embedding=embedding, model_name="test-model", dimension=3,
-        authenticate=benchmark_bearer_auth("unit-test"), **options,
-    ))
+    app.state.benchmark = stores
+    app.include_router(
+        create_retrieval_benchmark_router(
+            store=store,
+            stores=stores,
+            embedding=embedding,
+            model_name="test-model",
+            dimension=3,
+            authenticate=benchmark_bearer_auth("unit-test"),
+            **options,
+        )
+    )
     try:
         with TestClient(app, headers={"Authorization": "Bearer unit-test"}) as client:
+            assert (
+                client.post(
+                    "/internal/bench/dataset",
+                    json={
+                        "include_server": False,
+                        "filter_fields": {"category": "keyword"},
+                    },
+                ).status_code
+                == 200
+            )
             yield client, store, backend, embedding
     finally:
         store.close()
 
 
 def prepare(client, **options):
-    response = client.post("/internal/bench/samples", json={"queries": ["查账"], **options})
+    response = client.post(
+        "/internal/bench/samples", json={"queries": ["查账"], **options}
+    )
     assert response.status_code == 200, response.text
     return response.json()["sample_set_id"]
 
 
 def search(client, sample_set_id, **options):
-    return client.post("/internal/bench/search", json={
-        "sample_set_id": sample_set_id, "sample_index": 0,
-        "mode": "both", "top_k": 1, **options,
-    })
+    return client.post(
+        "/internal/bench/search",
+        json={
+            "sample_set_id": sample_set_id,
+            "sample_index": 0,
+            "mode": "both",
+            "top_k": 1,
+            **options,
+        },
+    )
 
 
-def test_real_queries_are_embedded_once_and_search_never_touches_database(tmp_path, monkeypatch):
+def test_real_queries_are_embedded_once_and_search_never_touches_database(
+    tmp_path, monkeypatch
+):
     with bench(tmp_path) as (client, store, backend, embedding):
         sample_set = prepare(client)
 
@@ -106,10 +154,18 @@ def test_all_routes_require_auth_and_info_contains_no_query_vectors(tmp_path):
     with bench(tmp_path) as (client, *_):
         for method, path, body in [
             ("GET", "/internal/bench/info", None),
+            ("GET", "/internal/bench/server-info", None),
+            ("POST", "/internal/bench/dataset", {"include_server": False}),
             ("POST", "/internal/bench/samples", {"queries": ["查账"]}),
-            ("POST", "/internal/bench/search", {"sample_set_id": "missing", "sample_index": 0}),
+            (
+                "POST",
+                "/internal/bench/search",
+                {"sample_set_id": "missing", "sample_index": 0},
+            ),
         ]:
-            response = client.request(method, path, json=body, headers={"Authorization": "Bearer invalid"})
+            response = client.request(
+                method, path, json=body, headers={"Authorization": "Bearer invalid"}
+            )
             assert response.status_code == 401
         prepare(client)
         info = client.get("/internal/bench/info").json()
@@ -142,7 +198,12 @@ def test_invalid_model_output_does_not_replace_good_samples(tmp_path, bad_vector
     with bench(tmp_path) as (client, _, _, embedding):
         old = prepare(client)
         embedding.vector = bad_vector
-        assert client.post("/internal/bench/samples", json={"queries": ["订票"]}).status_code == 503
+        assert (
+            client.post(
+                "/internal/bench/samples", json={"queries": ["订票"]}
+            ).status_code
+            == 503
+        )
         assert search(client, old).status_code == 200
 
 
@@ -155,31 +216,35 @@ def test_query_bounds_and_unknown_samples_are_rejected(tmp_path):
         assert search(client, samples, sample_index=2).status_code == 404
 
 
-def test_storage_error_is_not_reported_as_successful_empty_result(tmp_path, monkeypatch):
-    with bench(tmp_path) as (client, store, *_):
+def test_storage_error_is_not_reported_as_successful_empty_result(
+    tmp_path, monkeypatch
+):
+    with bench(tmp_path) as (client, _store, *_):
         samples = prepare(client)
 
         def unavailable(*args, **kwargs):
             raise RuntimeError("internal details must not be returned")
 
-        monkeypatch.setattr(store, "text_search", unavailable)
+        monkeypatch.setattr(client.app.state.benchmark, "query", unavailable)
         response = search(client, samples, mode="keyword")
         assert response.status_code == 503
         assert "internal details" not in response.text
 
 
-def test_inflight_limit_rejects_overload_without_blocking_event_loop(tmp_path, monkeypatch):
-    with bench(tmp_path, max_inflight=1) as (client, store, *_):
+def test_inflight_limit_rejects_overload_without_blocking_event_loop(
+    tmp_path, monkeypatch
+):
+    with bench(tmp_path, max_inflight=1) as (client, _store, *_):
         samples = prepare(client)
         entered, release = Event(), Event()
-        original = store.text_search
+        original = client.app.state.benchmark.query
 
         def slow_search(*args, **kwargs):
             entered.set()
             assert release.wait(5), "test search was not released"
             return original(*args, **kwargs)
 
-        monkeypatch.setattr(store, "text_search", slow_search)
+        monkeypatch.setattr(client.app.state.benchmark, "query", slow_search)
         with ThreadPoolExecutor(max_workers=2) as pool:
             pending = pool.submit(search, client, samples, mode="keyword")
             try:
