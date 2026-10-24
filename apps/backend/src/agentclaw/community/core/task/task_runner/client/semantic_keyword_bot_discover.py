@@ -28,6 +28,8 @@ from agentclaw.community.core.task.task_runner.client.catalog_keyword_discover i
 
 logger = logging.getLogger("task.semantic_keyword.search")
 
+SEMANTIC_TOP_K = 5
+
 
 class SemanticKeywordBotDiscover:
     """Query-only candidate retrieval: semantic first, keyword as fallback."""
@@ -79,7 +81,9 @@ class SemanticKeywordBotDiscover:
         Semantic search is intentionally executed with the same system-view
         catalog rules as the keyword adapter. Public availability, runtime
         readiness, and persisted ``agent_code`` are post-filtered so BCSFuse
-        cannot make a non-executable Bot relayable.
+        cannot make a non-executable Bot relayable. The semantic backend is
+        capped at the five most similar, ready Bot candidates; token fallback
+        retains its existing keyword limits.
         """
         normalized = str(query or "").strip()
         if not normalized:
@@ -87,7 +91,7 @@ class SemanticKeywordBotDiscover:
 
         result = await self._semantic_search(
             query=normalized,
-            semantic_top_k=max(1, per_keyword_limit * max_tokens),
+            semantic_top_k=SEMANTIC_TOP_K,
             min_score=min_score,
             filters=filters,
         )
@@ -158,7 +162,7 @@ class SemanticKeywordBotDiscover:
             and _runtime_ready(item)
             and _credential_ready(item)
         ]
-        ready_items = _dedupe_candidates(valid_items)
+        ready_items = _dedupe_candidates(valid_items)[:SEMANTIC_TOP_K]
         bot_ids = tuple(
             str(item.get("bot_uuid") or item.get("bot_id") or "")
             for item in ready_items

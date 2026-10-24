@@ -117,6 +117,33 @@ class SemanticKeywordBotDiscoverTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([item["bot_id"] for item in result.candidates], ["B_KEYWORD"])
 
+    async def test_semantic_search_returns_at_most_top_five_candidates(self) -> None:
+        semantic = _FakeSemantic(
+            [
+                {
+                    "bot_id": f"B_{score}",
+                    "owner_id": f"U{score}",
+                    "bot_uuid": f"B_{score}:U{score}",
+                    "recommend": {"score": score},
+                    "ext": {"passport": {"agent_code": "ac-ready"}},
+                }
+                for score in (0.1, 0.3, 0.5, 0.2, 0.4, 0.6)
+            ]
+        )
+        discover = SemanticKeywordBotDiscover(
+            CatalogKeywordBotDiscover(_KeywordBps()), semantic
+        )
+        response = await TaskSearch(discover, user_id="146836").search_catalog(
+            "存储行业竞争格局深度分析"
+        )
+
+        self.assertEqual(semantic.calls[0]["top_k"], 5)
+        self.assertEqual(len(response["candidates"]), 5)
+        self.assertEqual(
+            [candidate["bot_uuid"] for candidate in response["candidates"]],
+            ["B_0.6:U0.6", "B_0.5:U0.5", "B_0.4:U0.4", "B_0.3:U0.3", "B_0.2:U0.2"],
+        )
+
     async def test_task_search_projection_keeps_response_shape(self) -> None:
         semantic = _FakeSemantic(
             [
