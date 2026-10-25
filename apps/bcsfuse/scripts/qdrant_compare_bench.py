@@ -235,6 +235,9 @@ def main():
         server_after = {}
         if args.backend == "server" and not errors:
             try:
+                # The control connection was idle throughout the load phase.
+                # Reconnect explicitly; do not retry measured search requests.
+                local.connection.close()
                 server_after = request("server-info")
                 if (
                     server_after["instance_id"] != info["instance_id"]
