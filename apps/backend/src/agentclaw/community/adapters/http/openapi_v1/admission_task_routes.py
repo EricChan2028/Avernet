@@ -70,10 +70,6 @@ TASK_BBS_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.OPEN,
     (
         "POST",
-        "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/skills/install-from/{source_bot_id}",
-    ): AdmissionMode.OPEN,
-    (
-        "POST",
         "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-framework",
     ): AdmissionMode.OPEN,
     (

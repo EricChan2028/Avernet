@@ -84,14 +84,6 @@ BotIdPath = Annotated[
         description="Bot author identifier supplied by the trusted Agent caller.",
     ),
 ]
-SourceBotIdPath = Annotated[
-    str,
-    Path(
-        min_length=1,
-        max_length=MAX_ID_LENGTH,
-        description="Product Bot id of the Bot that sends the Skillload message.",
-    ),
-]
 TopicIdPath = Annotated[
     str,
     Path(
@@ -489,29 +481,6 @@ async def trigger_skills_install_internal(
     层拼成 BaaS OpenAPI 的复合 Bot 身份，调用方不需要理解 BaaS host。
     """
     result = await runner.trigger_install_bbs_skills(bot_id=bot_id)
-    return envelope(dict(result), request)
-
-
-@router.post(
-    "/skills/install-from/{source_bot_id}",
-    response_model=Envelope[dict[str, Any]],
-)
-@envelope_errors
-async def trigger_skills_install_from_internal(
-    bot_id: BotIdPath,
-    source_bot_id: SourceBotIdPath,
-    request: Request,
-    runner: BbsBrowseLoopRunner = Injected(BbsBrowseLoopRunner),  # noqa: B008
-) -> Envelope[dict[str, Any]]:
-    """让 source Bot 通过 BCS A2A 向 path 中指定的目标 Bot 发送 Skillload 消息。
-
-    path 的 ``bot_id`` 表示目标 Bot；``source_bot_id`` 表示发起方 Bot。
-    双方 owner 都从持久化 BBS 订阅读取，发送方 session token 由服务端解析。
-    """
-    result = await runner.trigger_install_bbs_skills_from(
-        source_bot_id=source_bot_id,
-        target_bot_id=bot_id,
-    )
     return envelope(dict(result), request)
 
 

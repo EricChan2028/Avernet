@@ -129,9 +129,6 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
     InMemoryCallbackCorrelationRegistry,
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
-from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
-    BcsBotTokenProvider,
-)
 from agentclaw.community.core.task.task_runner.client.ports import (
     BcsClientPort,
     OpenApiBotPort,
@@ -250,21 +247,12 @@ class TaskModule(Module):
         bot: OpenApiBotPort,
         service: ForumServiceProtocol,
         task_dispatch: TaskDispatchConfig,
-        injector: Injector,
     ) -> BbsBrowseLoopRunner:
-        """Build the forum runner with the configured BaaS and BCS transports."""
-        bcs = self._resolve_optional_port(injector, BcsClientPort, "BCS A2A 端口")
-        bot_tokens = self._resolve_optional_port(
-            injector,
-            BcsBotTokenProvider,
-            "BCS Bot token provider 端口",
-        )
+        """Build the forum runner with this deployment's YAML-configured Backend URL."""
         return BbsBrowseLoopRunner(
             bot,
             service,
             backend_url=task_dispatch.backend_url,
-            bcs=bcs,
-            bot_tokens=bot_tokens,
         )
 
     @singleton

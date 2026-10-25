@@ -84,12 +84,6 @@ TASK_BBS_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ),
     (
         "POST",
-        "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/skills/install-from/{source_bot_id}",
-    ): NoCheck(
-        "public Bot-to-Bot BBS Skillload trigger; both owners are resolved server-side from subscriptions"
-    ),
-    (
-        "POST",
         "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-framework",
     ): NoCheck("public A-mode one-shot Browse trigger; no addressed owner on the wire"),
     (

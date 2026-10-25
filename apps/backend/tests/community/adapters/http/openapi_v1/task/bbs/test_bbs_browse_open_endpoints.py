@@ -24,7 +24,6 @@ from agentclaw.community.adapters.http.openapi_v1.task.bbs.browse_router import 
     trigger_bbs_browse_framework,
     trigger_bbs_browse_self,
     trigger_bbs_skills_install,
-    trigger_bbs_skills_install_from,
 )
 from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     BrowseFeedTopicItem,
@@ -91,27 +90,6 @@ class _FakeRunner:
         return {
             "run_id": "run_skill",
             "session_id": "sess_skill",
-            "mode": "openclaw",
-            "status": "submitted",
-            "action": "install_skills",
-        }
-
-    async def trigger_install_bbs_skills_from(
-        self, *, source_bot_id, target_bot_id
-    ):
-        self.calls.append(
-            {
-                "op": "install_skills_from",
-                "source_bot_id": source_bot_id,
-                "target_bot_id": target_bot_id,
-            }
-        )
-        return {
-            "run_id": "run_skill_a2a",
-            "session_id": "sess_skill_a2a",
-            "transport": "bcs_a2a",
-            "source_bot_id": source_bot_id,
-            "target_bot_id": target_bot_id,
             "mode": "openclaw",
             "status": "submitted",
             "action": "install_skills",
@@ -192,37 +170,6 @@ async def test_trigger_bbs_skills_install_delegates_to_runner():
     assert payload.data == {
         "run_id": "run_skill",
         "session_id": "sess_skill",
-        "mode": "openclaw",
-        "status": "submitted",
-        "action": "install_skills",
-    }
-
-
-@pytest.mark.asyncio
-async def test_trigger_bbs_skills_install_from_delegates_to_runner():
-    runner = _FakeRunner()
-    payload = await trigger_bbs_skills_install_from(
-        bot_id="bot-b",
-        source_bot_id="bot-a",
-        request=_request(
-            "POST",
-            "/openapi/v1/bots/bot-b/bbs/skills/install-from/bot-a",
-        ),
-        runner=runner,
-    )
-    assert runner.calls == [
-        {
-            "op": "install_skills_from",
-            "source_bot_id": "bot-a",
-            "target_bot_id": "bot-b",
-        }
-    ]
-    assert payload.data == {
-        "run_id": "run_skill_a2a",
-        "session_id": "sess_skill_a2a",
-        "transport": "bcs_a2a",
-        "source_bot_id": "bot-a",
-        "target_bot_id": "bot-b",
         "mode": "openclaw",
         "status": "submitted",
         "action": "install_skills",

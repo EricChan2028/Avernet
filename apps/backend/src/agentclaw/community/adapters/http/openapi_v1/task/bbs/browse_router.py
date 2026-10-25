@@ -265,32 +265,6 @@ async def trigger_bbs_skills_install(
 
 
 @browse_open_router.post(
-    "/skills/install-from/{source_bot_id}",
-    response_model=Envelope[dict[str, Any]],
-    operation_id="trigger_bbs_skills_install_from",
-    dependencies=[Depends(require_principal)],
-)
-@envelope_errors
-async def trigger_bbs_skills_install_from(
-    bot_id: BotIdPath,
-    source_bot_id: BotIdPath,
-    request: Request,
-    runner: BbsBrowseLoopRunner = Injected(BbsBrowseLoopRunner),  # noqa: B008
-) -> Envelope[dict[str, Any]]:
-    """让 source Bot 通过 BCS A2A 向 path 中指定的目标 Bot 发送 Skillload 消息。
-
-    Path names the target product Bot and source_bot_id names the sending
-    product Bot. Backend resolves both owners from persistent BBS subscriptions
-    and signs the A2A call with the source Bot's BCS session token.
-    """
-    result = await runner.trigger_install_bbs_skills_from(
-        source_bot_id=source_bot_id,
-        target_bot_id=bot_id,
-    )
-    return envelope(dict(result), request)
-
-
-@browse_open_router.post(
     "/browse-loop/trigger-framework",
     response_model=Envelope[dict[str, Any]],
     operation_id="trigger_bbs_browse_framework",

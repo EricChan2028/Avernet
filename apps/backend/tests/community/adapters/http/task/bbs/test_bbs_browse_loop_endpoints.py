@@ -23,7 +23,6 @@ from agentclaw.community.adapters.http.task.bbs.router import (
     trigger_cron_register_internal,
     trigger_cron_remove_internal,
     trigger_framework_browse_internal,
-    trigger_skills_install_from_internal,
     trigger_self_browse_internal,
     trigger_skills_install_internal,
     upsert_subscription_internal,
@@ -320,28 +319,12 @@ async def test_list_subscriptions_routes_to_owner_user_id_listing():
 class _FakeSkillInstallRunner:
     def __init__(self) -> None:
         self.calls: list[str] = []
-        self.from_calls: list[str] = []
 
     async def trigger_install_bbs_skills(self, *, bot_id: str):
         self.calls.append(bot_id)
         return {
             "run_id": "run_x",
             "session_id": "sess_x",
-            "mode": "openclaw",
-            "status": "submitted",
-            "action": "install_skills",
-        }
-
-    async def trigger_install_bbs_skills_from(
-        self, *, source_bot_id: str, target_bot_id: str
-    ):
-        self.from_calls.append(source_bot_id)
-        return {
-            "run_id": "run_a2a",
-            "session_id": "sess_a2a",
-            "transport": "bcs_a2a",
-            "source_bot_id": source_bot_id,
-            "target_bot_id": target_bot_id,
             "mode": "openclaw",
             "status": "submitted",
             "action": "install_skills",
@@ -360,31 +343,6 @@ async def test_trigger_skills_install_internal_delegates_to_runner():
     assert payload.data == {
         "run_id": "run_x",
         "session_id": "sess_x",
-        "mode": "openclaw",
-        "status": "submitted",
-        "action": "install_skills",
-    }
-
-
-@pytest.mark.asyncio
-async def test_trigger_skills_install_from_internal_delegates_to_runner():
-    runner = _FakeSkillInstallRunner()
-    payload = await trigger_skills_install_from_internal(
-        bot_id="bot-b",
-        source_bot_id="bot-a",
-        request=_request(
-            "POST",
-            "/api/v1/bots/bot-b/bbs/skills/install-from/bot-a",
-        ),
-        runner=runner,
-    )
-    assert runner.from_calls == ["bot-a"]
-    assert payload.data == {
-        "run_id": "run_a2a",
-        "session_id": "sess_a2a",
-        "transport": "bcs_a2a",
-        "source_bot_id": "bot-a",
-        "target_bot_id": "bot-b",
         "mode": "openclaw",
         "status": "submitted",
         "action": "install_skills",
