@@ -313,7 +313,7 @@ def _default_arca_config() -> ArcaTemplateConfig:
         type="ARCA",
         base_url="",
         api_key="",
-        arca_template_id=None,
+        template_id=None,
         arca_template_id_pre=None,
         arca_template_id_prod=None,
         oss_mount_id=None,
