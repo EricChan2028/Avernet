@@ -174,7 +174,7 @@ def main():
             }
 
         rows, errors, pending = [], {}, set()
-        attempted = skipped = 0
+        attempted = skipped = skipped_concurrency = skipped_late = 0
 
         def collect(done):
             for future in done:
@@ -198,17 +198,20 @@ def main():
         with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
             for index in range(math.ceil(args.qps * args.seconds)):
                 deadline = started + index / args.qps
-                if deadline > time.perf_counter():
-                    time.sleep(deadline - time.perf_counter())
+                delay = deadline - time.perf_counter()
+                if delay > 0:
+                    time.sleep(delay)
                 done = {future for future in pending if future.done()}
                 pending -= done
                 collect(done)
                 if errors:
                     break
-                if (
-                    len(pending) >= args.concurrency
-                    or time.perf_counter() - deadline > 1 / args.qps
-                ):
+                if len(pending) >= args.concurrency:
+                    skipped_concurrency += 1
+                    skipped += 1
+                    continue
+                if time.perf_counter() - deadline > 1 / args.qps:
+                    skipped_late += 1
                     skipped += 1
                     continue
                 pending.add(pool.submit(one, index))
@@ -270,6 +273,8 @@ def main():
                     "success": len(rows),
                     "success_qps": round(len(rows) / elapsed, 2),
                     "skipped_slots": skipped,
+                    "skipped_concurrency": skipped_concurrency,
+                    "skipped_late": skipped_late,
                     "errors": errors,
                     "model_calls": 0,
                     "empty_results": sum(row["empty"] for row in rows),
