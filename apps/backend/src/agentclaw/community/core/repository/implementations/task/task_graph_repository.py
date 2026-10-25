@@ -34,6 +34,7 @@ from agentclaw.community.core.task.repository.serializers import (
     runtime_from_dict,
     task_spec_to_dict,
 )
+from agentclaw.community.utils.app_utils import get_current_executor_app
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 from agentclaw.community.plugin_api.database import DatabasePlugin
@@ -101,16 +102,22 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
         return Status(raw)
 
     @staticmethod
-    def _require_task_env(info: TaskInfoModel) -> None:
+    def _require_task_scope(info: TaskInfoModel) -> None:
         env = get_current_env()
         if info.env != env:
             raise TaskStateError(
                 f"task environment mismatch: task_id={info.task_id}, "
                 f"task={info.env}, current={env}"
             )
+        executor_app = get_current_executor_app()
+        if info.executor_app != executor_app:
+            raise TaskStateError(
+                f"task executor app mismatch: task_id={info.task_id}, "
+                f"task={info.executor_app}, current={executor_app}"
+            )
 
     @staticmethod
-    def _require_intent_env(intent: TaskDeliveryIntentModel) -> None:
+    def _require_intent_scope(intent: TaskDeliveryIntentModel) -> None:
         env = get_current_env()
         if intent.env != env:
             raise TaskStateError(
@@ -118,12 +125,19 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
                 f"task_id={intent.task_id}, node_id={intent.node_id}, "
                 f"intent={intent.env}, current={env}"
             )
+        executor_app = get_current_executor_app()
+        if intent.executor_app != executor_app:
+            raise TaskStateError(
+                "delivery intent executor app mismatch: "
+                f"task_id={intent.task_id}, node_id={intent.node_id}, "
+                f"intent={intent.executor_app}, current={executor_app}"
+            )
 
-    def _require_task_env_for_id(self, db, task_id: str) -> bool:
+    def _require_task_scope_for_id(self, db, task_id: str) -> bool:
         info = db.query(TaskInfoModel).filter(TaskInfoModel.task_id == task_id).first()
         if info is None:
             return False
-        self._require_task_env(info)
+        self._require_task_scope(info)
         return True
 
     def load_graph(self, task_id: str):
@@ -131,7 +145,7 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
             info = db.query(TaskInfoModel).filter(TaskInfoModel.task_id == task_id).first()
             if info is None:
                 return None
-            self._require_task_env(info)
+            self._require_task_scope(info)
             node_rows = (
                 db.query(TaskNodeModel)
                 .filter(
@@ -214,7 +228,7 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
                 # without a task_info row. Production execute persists the row
                 # first, so this is a compatibility no-op for that isolated path.
                 return 0
-            self._require_task_env(info)
+            self._require_task_scope(info)
             props = dict(graph.extend_props)
             props[_GRAPH_STATUS_KEY] = graph.status.value
             info.status = runtime_status.value
@@ -253,6 +267,7 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
                 task_spec=self._json(task_info.task_spec.to_dict()),
                 status=Status.RUNNING.value,
                 env=get_current_env(),
+                executor_app=get_current_executor_app(),
                 graph_run_id=str(graph.run_id),
                 graph_loop_round=graph.loop_round,
                 graph_output=self._json(graph.output),
@@ -279,7 +294,7 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
             info = db.query(TaskInfoModel).filter(TaskInfoModel.task_id == graph.task_id).with_for_update().first()
             if info is None:
                 return expected_version
-            self._require_task_env(info)
+            self._require_task_scope(info)
             actual = int(info.graph_version or 0)
             if actual != expected_version:
                 raise GraphVersionConflictError(
@@ -421,6 +436,7 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
                     task_id=graph.task_id, node_id=node.node_id,
                     relay_token=relay_token,
                     env=get_current_env(),
+                    executor_app=get_current_executor_app(),
                     state="PENDING", attempt=0,
                 ))
             elif existing.relay_token != relay_token:
@@ -439,6 +455,7 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
                 db.query(TaskDeliveryIntentModel.task_id, TaskDeliveryIntentModel.node_id)
                 .filter(
                     TaskDeliveryIntentModel.env == get_current_env(),
+                    TaskDeliveryIntentModel.executor_app == get_current_executor_app(),
                     or_(
                         TaskDeliveryIntentModel.state == "PENDING",
                         and_(TaskDeliveryIntentModel.state == "DELIVERING",
@@ -458,7 +475,7 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
         with self._transaction() as db:
             info = db.query(TaskInfoModel).filter(TaskInfoModel.task_id == task_id).first()
             if info is not None:
-                self._require_task_env(info)
+                self._require_task_scope(info)
             row = (
                 db.query(TaskDeliveryIntentModel)
                 .filter(
@@ -470,7 +487,7 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
             )
             if row is None:
                 return "MISSING", None
-            self._require_intent_env(row)
+            self._require_intent_scope(row)
             if row.relay_token != relay_token:
                 return "STALE", None
             if not (
@@ -501,7 +518,7 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
             )
             if row is None:
                 raise TaskStateError("delivery intent is not owned by this attempt")
-            self._require_intent_env(row)
+            self._require_intent_scope(row)
             row.state = "DELIVERED" if delivered else "PENDING"
             row.lease_until_ms = None
             row.lease_token = None
@@ -525,7 +542,7 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
             )
             if row is None:
                 raise TaskStateError("delivery intent cannot be requeued")
-            self._require_intent_env(row)
+            self._require_intent_scope(row)
             row.state = "PENDING"
             row.lease_until_ms = None
             row.lease_token = None
@@ -549,7 +566,7 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
             )
             if row is None:
                 return False
-            self._require_intent_env(row)
+            self._require_intent_scope(row)
             if row.state == "DELIVERED":
                 return True
             row.state = "DELIVERED"
@@ -725,14 +742,14 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
             row = db.query(TaskInfoModel).filter(TaskInfoModel.task_id == task_id).first()
             if row is None:
                 return None
-            self._require_task_env(row)
+            self._require_task_scope(row)
             return int(row.graph_version or 0)
 
     def next_action_seq(self, task_id: str, node_id: str) -> int:
         from agentclaw.community.core.task.repository.models import TaskActionLogModel
 
         with self._db.orm_session() as db:
-            self._require_task_env_for_id(db, task_id)
+            self._require_task_scope_for_id(db, task_id)
             row = (
                 db.query(TaskActionLogModel.seq)
                 .filter(
@@ -756,7 +773,7 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
 
         limit = max(1, min(limit, 200))
         with self._db.orm_session() as db:
-            self._require_task_env_for_id(db, task_id)
+            self._require_task_scope_for_id(db, task_id)
             query = db.query(TaskActionLogModel).filter(TaskActionLogModel.task_id == task_id)
             if node_id is not None:
                 query = query.filter(TaskActionLogModel.node_id == node_id)
@@ -788,6 +805,7 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
                 db.query(TaskInfoModel.task_id)
                 .filter(
                     TaskInfoModel.env == get_current_env(),
+                    TaskInfoModel.executor_app == get_current_executor_app(),
                     TaskInfoModel.status.in_(
                         [Status.PENDING.value, Status.PLANNING.value, Status.RUNNING.value]
                     ),
@@ -814,7 +832,7 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
             )
             if row is None:
                 return False
-            self._require_task_env(row)
+            self._require_task_scope(row)
             row.lease_until = until
             row.heartbeat_at = now
             db.flush()
@@ -833,7 +851,7 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
             )
             if row is None:
                 return False
-            self._require_task_env(row)
+            self._require_task_scope(row)
             row.lease_owner = None
             row.lease_until = None
             db.flush()
@@ -852,7 +870,7 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
             )
             if row is None:
                 return False
-            self._require_task_env(row)
+            self._require_task_scope(row)
             row.lease_owner = instance_id
             row.lease_until = until
             row.heartbeat_at = now
@@ -873,7 +891,7 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
         """
         now = int(time.time() * 1000)
         with self._transaction() as db:
-            self._require_task_env_for_id(db, task_id)
+            self._require_task_scope_for_id(db, task_id)
             run_row = (
                 db.query(TaskNodeRunInfoModel)
                 .filter(
@@ -899,7 +917,7 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
     def release_bbs_owner(self, task_id: str, bot_id: str) -> bool:
         """Clear the BBS relay claim held by ``bot_id`` (idempotent release)."""
         with self._transaction() as db:
-            self._require_task_env_for_id(db, task_id)
+            self._require_task_scope_for_id(db, task_id)
             run_row = (
                 db.query(TaskNodeRunInfoModel)
                 .filter(

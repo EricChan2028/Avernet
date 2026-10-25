@@ -12,6 +12,7 @@ from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.core.task.repository.models import TaskInfoModel
 from agentclaw.community.core.task.repository.types import TaskInfoRecord
+from agentclaw.community.utils.app_utils import get_current_executor_app
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
@@ -41,6 +42,7 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
             status=record.status.value,
             graph_run_id=record.graph_run_id,
             env=record.env,
+            executor_app=record.executor_app,
             graph_loop_round=record.graph_loop_round,
             graph_output=json.dumps(record.graph_output) if record.graph_output is not None else None,
             graph_extend_props=(
@@ -63,11 +65,17 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
             return row.to_record()
 
     @staticmethod
-    def _require_env(row: TaskInfoModel) -> None:
+    def _require_scope(row: TaskInfoModel) -> None:
         env = get_current_env()
         if row.env != env:
             raise TaskStateError(
                 f"task environment mismatch: task={row.env}, current={env}"
+            )
+        executor_app = get_current_executor_app()
+        if row.executor_app != executor_app:
+            raise TaskStateError(
+                "task executor app mismatch: "
+                f"task={row.executor_app}, current={executor_app}"
             )
 
     def get(self, task_id: str) -> Optional[TaskInfoRecord]:
@@ -75,7 +83,7 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
             row = db.query(self._model).filter(self._model.task_id == task_id).first()
             if row is None:
                 return None
-            self._require_env(row)
+            self._require_scope(row)
             return row.to_record()
 
     def get_by_intake_session(self, session_id: str) -> Optional[TaskInfoRecord]:
@@ -87,7 +95,7 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
             )
             if row is None:
                 return None
-            self._require_env(row)
+            self._require_scope(row)
             return row.to_record()
 
     def update_status(self, task_id: str, status: Status) -> bool:
@@ -100,7 +108,7 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
             )
             if row is None:
                 return False
-            self._require_env(row)
+            self._require_scope(row)
             row.status = status.value
             db.flush()
             return True
@@ -112,7 +120,10 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
         owner_user_id: Optional[str] = None,
     ) -> list[TaskInfoRecord]:
         with self._db.orm_session() as db:
-            q = db.query(self._model).filter(self._model.env == get_current_env())
+            q = db.query(self._model).filter(
+                self._model.env == get_current_env(),
+                self._model.executor_app == get_current_executor_app(),
+            )
             # status 是运行时态集合:空/None 不过滤,非空按 SQL IN 过滤。
             if status:
                 q = q.filter(self._model.status.in_([s.value for s in status]))
@@ -133,7 +144,10 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
         page_size: int = 20,
     ) -> tuple[list[TaskInfoRecord], int]:
         with self._db.orm_session() as db:
-            q = db.query(self._model).filter(self._model.env == get_current_env())
+            q = db.query(self._model).filter(
+                self._model.env == get_current_env(),
+                self._model.executor_app == get_current_executor_app(),
+            )
             # status 是运行时态集合:空/None 不过滤,非空按 SQL IN 过滤。
             if status:
                 q = q.filter(self._model.status.in_([s.value for s in status]))
@@ -162,6 +176,7 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
             statuses = [status] if isinstance(status, Status) else list(status)
             q = db.query(self._model).filter(
                 self._model.env == get_current_env(),
+                self._model.executor_app == get_current_executor_app(),
                 self._model.status.in_([item.value for item in statuses]),
             )
             if gmt_modified_since is not None:

@@ -1,15 +1,18 @@
-"""Environment scoping for task state and durable relay delivery intents."""
+"""Environment and executor-app scoping for task and relay delivery state."""
 
 from __future__ import annotations
 
 import pytest
 
+from agentclaw.community.core.repository.implementations.task import task_graph_repository
+from agentclaw.community.core.repository.implementations.task import task_info_repository
 from agentclaw.community.core.repository.implementations.task.task_graph_repository import (
     TaskGraphRepository,
 )
 from agentclaw.community.core.repository.implementations.task.task_info_repository import (
     TaskInfoRepository,
 )
+from agentclaw.community.core.task.repository import models as task_models
 
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import (
@@ -29,7 +32,20 @@ def _set_env(monkeypatch, env: str) -> None:
     monkeypatch.setenv("SERVER_ENV", env)
 
 
-def _seed_task_info(db, task_id: str) -> None:
+def _set_executor_app(monkeypatch, executor_app: str) -> None:
+    """Patch all repository import sites for a deterministic application name."""
+    monkeypatch.setattr(
+        task_graph_repository, "get_current_executor_app", lambda: executor_app
+    )
+    monkeypatch.setattr(
+        task_info_repository, "get_current_executor_app", lambda: executor_app
+    )
+    monkeypatch.setattr(
+        task_models, "get_current_executor_app", lambda: executor_app
+    )
+
+
+def _seed_task_info(db, task_id: str, *, executor_app: str = "agentclawengine") -> None:
     TaskInfoRepository(db).insert(TaskInfoRecord(
         id=0,
         task_id=task_id,
@@ -39,6 +55,7 @@ def _seed_task_info(db, task_id: str) -> None:
         execution_config={"orchestration_mode": "relay"},
         task_spec={"metadata": {"task_id": task_id}},
         status=Status.RUNNING,
+        executor_app=executor_app,
     ))
 
 
@@ -68,12 +85,14 @@ def test_delivery_intent_is_scoped_to_task_environment(db, monkeypatch) -> None:
     task_id = "T-ENV-DELIVERY"
     relay_token = "0" * 16
     _set_env(monkeypatch, "pre")
-    _seed_task_info(db, task_id)
+    _set_executor_app(monkeypatch, "agentclawengine")
+    _seed_task_info(db, task_id, executor_app="agentclawengine")
     with db.orm_session() as session:
         session.add(TaskDeliveryIntentModel(
             task_id=task_id,
             node_id="node-2",
             relay_token=relay_token,
+            executor_app="agentclawengine",
             state="PENDING",
             attempt=0,
         ))
@@ -96,6 +115,7 @@ def test_delivery_intent_is_scoped_to_task_environment(db, monkeypatch) -> None:
 def test_graph_mutation_is_rejected_across_environments(db, monkeypatch) -> None:
     task_id = "T-ENV-GRAPH"
     _set_env(monkeypatch, "pre")
+    _set_executor_app(monkeypatch, "agentclawengine")
     _seed_task_info(db, task_id)
     graph = _minimal_graph(task_id)
     repo = TaskGraphRepository(db)
@@ -128,6 +148,7 @@ def test_graph_mutation_is_rejected_across_environments(db, monkeypatch) -> None
 def test_task_info_gateway_reads_and_writes_share_environment(db, monkeypatch) -> None:
     task_id = "T-ENV-INFO"
     _set_env(monkeypatch, "pre")
+    _set_executor_app(monkeypatch, "agentclawengine")
     repo = TaskInfoRepository(db)
     record = TaskInfoRecord(
         id=0,
@@ -138,9 +159,11 @@ def test_task_info_gateway_reads_and_writes_share_environment(db, monkeypatch) -
         execution_config={},
         task_spec={"metadata": {"task_id": task_id}},
         status=Status.PENDING,
+        executor_app="agentclawengine",
     )
     stored = repo.insert(record)
     assert stored.env == "pre"
+    assert stored.executor_app == "agentclawengine"
 
     _set_env(monkeypatch, "prod")
     with pytest.raises(TaskStateError, match="environment mismatch"):
@@ -152,3 +175,47 @@ def test_task_info_gateway_reads_and_writes_share_environment(db, monkeypatch) -
     _set_env(monkeypatch, "pre")
     assert repo.get(task_id).env == "pre"
     assert repo.update_status(task_id, Status.RUNNING) is True
+
+
+def test_delivery_intent_is_scoped_to_executor_app(db, monkeypatch) -> None:
+    task_id = "T-APP-DELIVERY"
+    relay_token = "0" * 16
+    _set_env(monkeypatch, "pre")
+    _set_executor_app(monkeypatch, "agentclawengine")
+    _seed_task_info(db, task_id, executor_app="agentclawengine")
+    with db.orm_session() as session:
+        session.add(TaskDeliveryIntentModel(
+            task_id=task_id,
+            node_id="node-2",
+            relay_token=relay_token,
+            env="pre",
+            executor_app="agentclawengine",
+            state="PENDING",
+            attempt=0,
+        ))
+
+    graph_repo = TaskGraphRepository(db)
+    info_repo = TaskInfoRepository(db)
+    assert graph_repo.list_pending_delivery_intents() == [(task_id, "node-2")]
+
+    _set_executor_app(monkeypatch, "agentclaw")
+    assert graph_repo.list_pending_delivery_intents() == []
+    with pytest.raises(TaskStateError, match="executor app mismatch"):
+        graph_repo.claim_delivery_intent(task_id, "node-2", relay_token)
+    with pytest.raises(TaskStateError, match="executor app mismatch"):
+        info_repo.get(task_id)
+
+    _set_executor_app(monkeypatch, "agentclawengine")
+    assert graph_repo.claim_delivery_intent(task_id, "node-2", relay_token)[0] == "CLAIMED"
+
+
+def test_recoverable_tasks_are_scoped_to_executor_app(db, monkeypatch) -> None:
+    task_id = "T-APP-RECOVERY"
+    _set_env(monkeypatch, "pre")
+    _set_executor_app(monkeypatch, "agentclawengine")
+    _seed_task_info(db, task_id, executor_app="agentclawengine")
+    repo = TaskGraphRepository(db)
+
+    assert repo.list_recoverable() == [task_id]
+    _set_executor_app(monkeypatch, "agentclaw")
+    assert repo.list_recoverable() == []
