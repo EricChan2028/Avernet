@@ -65,7 +65,8 @@ export function setup() {
   if (info.storage_only !== true || typeof info.instance_id !== 'string') {
     fail('Response is not benchmark info; check gateway login and deployed benchmark routes');
   }
-  if (info.search_scope !== 'direct_qdrant' || !info.dataset_ready || (backend === 'server' && !info.server_ready)) fail('Prepare direct-Qdrant dataset first');
+  if (backend === 'server_grpc' && !(info.backends || []).includes(backend)) fail('Deploy the gRPC benchmark first');
+  if (info.search_scope !== 'direct_qdrant' || !info.dataset_ready || (backend !== 'local' && !info.server_ready)) fail('Prepare direct-Qdrant dataset first');
   if (!(info.vector_count > 0)) fail('Index is empty; do not measure empty-index throughput');
   if (__ENV.REUSE_SAMPLES === '1') {
     if (!info.sample_count || (mode !== 'keyword' && info.sample_source !== 'configured_embedding')) fail('Prepare query samples first');

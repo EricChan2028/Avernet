@@ -24,6 +24,7 @@ class Handler(BaseHTTPRequestHandler):
                 dataset_ready=True,
                 sample_count=1,
                 server_ready=True,
+                backends=["local", "server", "server_grpc"],
                 filter_fields={},
                 sample_source="configured_embedding",
                 vector_count=10,
@@ -36,11 +37,11 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
 
     def do_POST(self):
-        self.rfile.read(int(self.headers["Content-Length"]))
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         self.reply(
             dict(
                 IDENTITY,
-                backend="server",
+                backend=body["backend"],
                 search_scope="direct_qdrant",
                 keyword_hits=[{"id": "a"}],
                 timing_ms={"store": 1, "dispatch_wait": 0},
@@ -59,6 +60,12 @@ class Handler(BaseHTTPRequestHandler):
 
 class IdleConnectionTest(unittest.TestCase):
     def test_after_run_status_uses_fresh_connection(self):
+        self.check_backend("server")
+
+    def test_grpc_driver_checks_same_dataset_before_and_after_run(self):
+        self.check_backend("server_grpc")
+
+    def check_backend(self, backend):
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -69,7 +76,7 @@ class IdleConnectionTest(unittest.TestCase):
                     SCRIPT,
                     "run",
                     "--backend",
-                    "server",
+                    backend,
                     "--base",
                     f"http://127.0.0.1:{server.server_port}",
                     "--qps",

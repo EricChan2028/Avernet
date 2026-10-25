@@ -8,7 +8,6 @@ from threading import Event
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 from src.domain.models.vector_point import VectorPoint
 from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
     QdrantMySQLVectorStore,
@@ -99,6 +98,14 @@ def prepare(client, **options):
     )
     assert response.status_code == 200, response.text
     return response.json()["sample_set_id"]
+
+
+def test_unconfigured_grpc_does_not_fall_back_to_local(tmp_path):
+    with bench(tmp_path) as (client, *_):
+        sample_id = prepare(client)
+        response = search(client, sample_id, backend="server_grpc")
+        assert response.status_code == 503
+        assert search(client, sample_id, backend="local").status_code == 200
 
 
 def search(client, sample_set_id, **options):

@@ -28,7 +28,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["prepare", "run"])
     parser.add_argument("--base", default="http://127.0.0.1:8765")
-    parser.add_argument("--backend", choices=["local", "server"], default="local")
+    parser.add_argument(
+        "--backend", choices=["local", "server", "server_grpc"], default="local"
+    )
     parser.add_argument("--mode", choices=["keyword", "vector"], default="keyword")
     parser.add_argument(
         "--filters", default="{}", help="JSON object of prefilter conditions"
@@ -132,14 +134,18 @@ def main():
         filters = json.loads(args.filters)
         if not info["dataset_ready"] or not info["sample_count"]:
             raise RuntimeError("Run prepare first")
-        if args.backend == "server" and not info["server_ready"]:
+        if args.backend != "local" and not info["server_ready"]:
             raise RuntimeError("Server dataset not ready")
+        if args.backend == "server_grpc" and args.backend not in info.get(
+            "backends", []
+        ):
+            raise RuntimeError("Deploy the gRPC benchmark before running this test")
         if any(key not in info["filter_fields"] for key in filters):
             raise RuntimeError("Filter field was not declared during preparation")
         if args.mode == "vector" and info["sample_source"] != "configured_embedding":
             raise RuntimeError("Prepare real query embeddings first")
 
-        server_before = request("server-info") if args.backend == "server" else {}
+        server_before = request("server-info") if args.backend != "local" else {}
         if server_before and (
             server_before["instance_id"] != info["instance_id"]
             or server_before["dataset_id"] != info["dataset_id"]
@@ -236,7 +242,7 @@ def main():
             )
 
         server_after = {}
-        if args.backend == "server" and not errors:
+        if args.backend != "local" and not errors:
             try:
                 # The control connection was idle throughout the load phase.
                 # Reconnect explicitly; do not retry measured search requests.

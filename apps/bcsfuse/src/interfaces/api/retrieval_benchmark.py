@@ -60,7 +60,7 @@ class SearchRequest(BaseModel):
     sample_set_id: str = Field(min_length=1, max_length=128)
     sample_index: int = Field(ge=0, le=63)
     mode: Literal["vector", "keyword", "both"] = "both"
-    backend: Literal["local", "server"] = "local"
+    backend: Literal["local", "server", "server_grpc"] = "local"
     top_k: int = Field(default=10, ge=1, le=1000)
     filters: dict[str, FilterValue] = Field(default_factory=dict, max_length=16)
 
@@ -282,7 +282,7 @@ def create_retrieval_benchmark_router(
         current = samples
         if not stores.ready:
             raise HTTPException(409, "prepare dataset first")
-        if request.backend == "server" and not stores.server_ready:
+        if request.backend != "local" and not stores.server_ready:
             raise HTTPException(503, "server dataset unavailable")
         if any(key not in stores.filter_fields for key in request.filters):
             raise HTTPException(422, "declare filter fields when preparing dataset")

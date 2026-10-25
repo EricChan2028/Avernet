@@ -22,10 +22,21 @@ class QdrantBenchmarkStores:
     """
 
     def __init__(
-        self, source: QdrantMySQLVectorStore, *, server: QdrantClient | None = None
+        self,
+        source: QdrantMySQLVectorStore,
+        *,
+        server: QdrantClient | None = None,
+        server_grpc: QdrantClient | None = None,
     ):
+        if server_grpc is not None and server is None:
+            raise ValueError(
+                "gRPC queries require the HTTP client for dataset preparation"
+            )
         self.source = source
         self.server = server
+        # Both clients address the same Server collection. Prepare/delete it once
+        # through HTTP; only the timed query switches transport.
+        self.server_grpc = server_grpc
         self.local = QdrantClient(location=":memory:")
         self._prepare_lock = threading.Lock()
         self._local_lock = threading.Lock()
@@ -161,6 +172,9 @@ class QdrantBenchmarkStores:
             "dataset_id": self.collection if self.ready else "",
             "vector_count": self.count,
             "server_ready": self.server_ready,
+            "backends": ["local"]
+            + (["server"] if self.server is not None else [])
+            + (["server_grpc"] if self.server_grpc is not None else []),
             "filter_fields": self.filter_fields,
             "local_serialized": True,
             "server_index_at_prepare": self.server_index_at_prepare,
@@ -183,11 +197,20 @@ class QdrantBenchmarkStores:
     def query(self, backend: str, mode: str, vector, top_k: int, filters: dict):
         if not self.ready:
             raise RuntimeError("dataset is not prepared")
-        if backend not in {"local", "server"} or mode not in {"vector", "keyword"}:
+        if backend not in {"local", "server", "server_grpc"} or mode not in {
+            "vector",
+            "keyword",
+        }:
             raise ValueError("unsupported benchmark operation")
-        if backend == "server" and not self.server_ready:
+        if backend != "local" and not self.server_ready:
             raise RuntimeError("server dataset is not prepared")
-        client = self.local if backend == "local" else self.server
+        client = {
+            "local": self.local,
+            "server": self.server,
+            "server_grpc": self.server_grpc,
+        }[backend]
+        if client is None:
+            raise RuntimeError("requested server transport is not configured")
         conditions = [
             models.FieldCondition(
                 key=key,
@@ -228,3 +251,5 @@ class QdrantBenchmarkStores:
         self.local.close()
         if self.server is not None:
             self.server.close()
+        if self.server_grpc is not None:
+            self.server_grpc.close()
