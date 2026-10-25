@@ -27,11 +27,16 @@ from agentclaw.community.core.task.forum.models import (
 )
 
 
-def _sub(*, mode: str = "framework", bot_id: str = "bot-a") -> BrowseSubscriptionRecord:
+def _sub(
+    *,
+    mode: str = "framework",
+    bot_id: str = "bot-a",
+    owner_user_id: str = "111111",
+) -> BrowseSubscriptionRecord:
     now = datetime(2026, 9, 21, 0, 0, tzinfo=timezone.utc)
     return BrowseSubscriptionRecord(
         bot_id=bot_id,
-        owner_user_id="111111",
+        owner_user_id=owner_user_id,
         mode=mode,
         note=None,
         created_at=now,
@@ -64,11 +69,13 @@ class _FakeService:
         return self._sub
 
 
-def _runner(bot, service) -> BbsBrowseLoopRunner:
+def _runner(bot, service, bcs=None, bot_tokens=None) -> BbsBrowseLoopRunner:
     return BbsBrowseLoopRunner(
         bot,
         service,
         backend_url="https://bbs.test",
+        bcs=bcs,
+        bot_tokens=bot_tokens,
     )
 
 
@@ -267,6 +274,103 @@ async def test_trigger_install_bbs_skills_missing_subscription_raises_not_found(
     runner = _runner(_FakeBot(), _FakeService(None))
     with pytest.raises(NotFound):
         await runner.trigger_install_bbs_skills(bot_id="bot-a")
+
+
+class _FakeSubscriptionDirectory:
+    def __init__(self, *subs: BrowseSubscriptionRecord) -> None:
+        self._subs = {sub.bot_id: sub for sub in subs}
+
+    def get_subscription(self, *, bot_id: str) -> BrowseSubscriptionRecord | None:
+        return self._subs.get(bot_id)
+
+
+class _FakeBcsClient:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def send_message_a2a(
+        self,
+        *,
+        target_bot_id: str,
+        target_user_id: str,
+        message: str,
+        session_id: str | None = None,
+        caller_bearer: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> BotSendResult:
+        self.calls.append(
+            {
+                "target_bot_id": target_bot_id,
+                "target_user_id": target_user_id,
+                "message": message,
+                "session_id": session_id,
+                "caller_bearer": caller_bearer,
+                "idempotency_key": idempotency_key,
+            }
+        )
+        return BotSendResult(run_id="run_a2a", session_id="session_a2a")
+
+
+class _FakeBotTokens:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def get_token(self, bot_identity: str) -> str | None:
+        self.calls.append(bot_identity)
+        return "source-token" if bot_identity == "bot-a:111111" else None
+
+
+@pytest.mark.asyncio
+async def test_trigger_install_bbs_skills_from_uses_a2a_source_identity(monkeypatch):
+    monkeypatch.setenv("SERVER_ENV", "dev")
+    service = _FakeSubscriptionDirectory(
+        _sub(mode="openclaw", bot_id="bot-a", owner_user_id="111111"),
+        _sub(mode="openclaw", bot_id="bot-b", owner_user_id="222222"),
+    )
+    bcs = _FakeBcsClient()
+    bot_tokens = _FakeBotTokens()
+    runner = _runner(_FakeBot(), service, bcs=bcs, bot_tokens=bot_tokens)
+
+    result = await runner.trigger_install_bbs_skills_from(
+        source_bot_id="bot-a", target_bot_id="bot-b"
+    )
+
+    assert result == {
+        "run_id": "run_a2a",
+        "session_id": "session_a2a",
+        "transport": "bcs_a2a",
+        "source_bot_id": "bot-a",
+        "target_bot_id": "bot-b",
+        "mode": "openclaw",
+        "status": "submitted",
+        "action": "install_skills",
+    }
+    assert bot_tokens.calls == ["bot-a:111111"]
+    assert len(bcs.calls) == 1
+    sent = bcs.calls[0]
+    assert sent["target_bot_id"] == "bot-b"
+    assert sent["target_user_id"] == "222222"
+    assert sent["caller_bearer"] == "source-token"
+    assert sent["session_id"] is None
+    assert sent["message"].startswith("[BBS-BROWSE-SKILL]")
+    assert "bot_id=bot-b" in sent["message"]
+
+
+@pytest.mark.asyncio
+async def test_trigger_install_bbs_skills_from_requires_source_token():
+    service = _FakeSubscriptionDirectory(
+        _sub(mode="openclaw", bot_id="bot-a"),
+        _sub(mode="openclaw", bot_id="bot-b"),
+    )
+    bot_tokens = _FakeBotTokens()
+    runner = _runner(
+        _FakeBot(), service, bcs=_FakeBcsClient(), bot_tokens=bot_tokens
+    )
+
+    with pytest.raises(ValidationError):
+        await runner.trigger_install_bbs_skills_from(
+            source_bot_id="bot-b", target_bot_id="bot-a"
+        )
 
 
 @pytest.mark.asyncio

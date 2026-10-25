@@ -6,8 +6,9 @@ Single delivery seam shared by:
   event on subscribe/unsubscribe, and a "go browse once now" message when the
   trigger-self endpoint is called.
 
-Heavy Bot transport is delegated to the existing ``OpenApiBotPort`` (bound by
-``task_persistence_module``); this module never touches devices/BCS directly.
+Heavy Bot transport is delegated to the existing ports: single-Bot BaaS calls
+use ``OpenApiBotPort``, while Bot-to-Bot triggering uses ``BcsClientPort`` with
+the source Bot's ``BcsBotTokenProvider``. This module never touches devices.
 """
 
 from __future__ import annotations
@@ -23,16 +24,20 @@ from agentclaw.community.core.task.forum.browsing.messages import (
     browse_once_message,
     cron_event_message,
 )
+from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
+    BcsBotTokenProvider,
+)
+from agentclaw.community.core.task.task_runner.client.ports import (
+    BotSendResult,
+    BcsClientPort,
+    OpenApiBotPort,
+)
 from agentclaw.community.core.task.forum.models import (
     BROWSE_MODE_FRAMEWORK,
     BROWSE_MODE_OPENCLAW,
     BrowseSubscriptionRecord,
 )
 from agentclaw.community.core.task.forum.service_protocol import ForumServiceProtocol
-from agentclaw.community.core.task.task_runner.client.ports import (
-    BotSendResult,
-    OpenApiBotPort,
-)
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -50,10 +55,14 @@ class BbsBrowseLoopRunner:
         service: ForumServiceProtocol,
         *,
         backend_url: str,
+        bcs: BcsClientPort | None = None,
+        bot_tokens: BcsBotTokenProvider | None = None,
     ) -> None:
         self._bot = bot
         self._service = service
         self._backend_url = backend_url.rstrip("/")
+        self._bcs = bcs
+        self._bot_tokens = bot_tokens
 
     async def push_browse_once(
         self,
@@ -138,6 +147,61 @@ class BbsBrowseLoopRunner:
             bot_id=bot_id,
             owner_user_id=subscription.owner_user_id,
         )
+
+    async def trigger_install_bbs_skills_from(
+        self,
+        *,
+        source_bot_id: str,
+        target_bot_id: str,
+    ) -> dict[str, Any]:
+        """Ask ``source_bot_id`` to send the Skillload prompt to ``target_bot_id``.
+
+        BCS A2A identifies the caller by the source Bot's session token; the
+        target is addressed by the product Bot id and its persisted owner.  The
+        server resolves both owners from BBS subscriptions instead of trusting
+        caller-composed identities.
+        """
+        target = self._lookup(target_bot_id)
+        if target.mode != BROWSE_MODE_OPENCLAW:
+            raise ValidationError(
+                "skill install applies only to openclaw-mode subscriptions"
+            )
+        source = self._lookup(source_bot_id)
+        if self._bcs is None:
+            raise ValidationError("BCS A2A transport is not configured")
+        if self._bot_tokens is None:
+            raise ValidationError("BCS Bot token provider is not configured")
+
+        source_identity = compose_bot_identity(
+            source_bot_id, source.owner_user_id
+        )
+        caller_bearer = self._bot_tokens.get_token(source_identity)
+        if not caller_bearer:
+            raise ValidationError(
+                f"source Bot token is unavailable: {source_identity}"
+            )
+
+        result: BotSendResult = await self._bcs.send_message_a2a(
+            target_bot_id=target_bot_id,
+            target_user_id=target.owner_user_id,
+            message=bbs_skill_install_message(bot_id=target_bot_id),
+            caller_bearer=caller_bearer,
+        )
+        logger.info(
+            "[bbs-browse-loop] install_skills_a2a source=%s target=%s",
+            source_bot_id,
+            target_bot_id,
+        )
+        return {
+            "run_id": result.run_id,
+            "session_id": result.session_id,
+            "transport": "bcs_a2a",
+            "source_bot_id": source_bot_id,
+            "target_bot_id": target_bot_id,
+            "mode": BROWSE_MODE_OPENCLAW,
+            "status": "submitted",
+            "action": "install_skills",
+        }
 
     async def send_install_bbs_skills(
         self,

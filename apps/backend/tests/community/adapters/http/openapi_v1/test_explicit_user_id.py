@@ -329,6 +329,10 @@ _NO_USER_DIMENSION = {
     ),
     (
         "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/skills/install-from/{{source_bot_id}}",
+    ),
+    (
+        "post",
         f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/trigger-framework",
     ),
     (
@@ -578,8 +582,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # acli operations add four more (two cancels, the live list and one read):
 # path 192 -> 196.
 # DWS rollout eligibility adds one owner-scoped Bot-path operation.
-# BBS Bot skill-install repair adds one Bot-path operation.
-_BOT_ID_PLACEMENT = {"path": 198, "query": 1, "none": 126}
+# BBS Bot skill-install repair and Bot-to-Bot A2A trigger add Bot-path
+# operations; the latter also carries a second source-bot path parameter.
+_BOT_ID_PLACEMENT = {"path": 199, "query": 1, "none": 126}
 
 
 def _schema() -> dict:

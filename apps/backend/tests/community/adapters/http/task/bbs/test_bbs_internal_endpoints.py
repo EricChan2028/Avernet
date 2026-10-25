@@ -102,6 +102,10 @@ def test_internal_router_mirrors_all_bbs_operations():
             "POST",
             "/api/v1/collaboration/tasks/bots/{bot_id}/bbs/skills/install",
         ),
+        (
+            "POST",
+            "/api/v1/collaboration/tasks/bots/{bot_id}/bbs/skills/install-from/{source_bot_id}",
+        ),
         # BBS Browse Loop — manual triggers (A=framework / B=openclaw).
         ("POST", "/api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-framework"),
         ("POST", "/api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-self"),
