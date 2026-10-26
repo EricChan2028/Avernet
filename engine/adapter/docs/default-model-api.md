@@ -1,7 +1,7 @@
 # Bot default model — engine API contract
 
 **Status:** engine side implemented for `openclaw` and `claude_code` (community
-engines in this repo). Corp engines (`aicoding` / TeamClaw relay, `hermes`,
+engines in this repo), and the public Open API wrapper (§2b) in the backend. Corp engines (`aicoding` / TeamClaw relay, `hermes`,
 `deepseek_harness`) implement the same contract on their side; §4 records where
 each engine keeps the value.
 
@@ -67,6 +67,29 @@ implementation detail; the adapter logs it at debug level):
 
 A `warning` string is attached when the engine declares the capability as
 `limited`.
+
+## 2b. Public Open API (backend)
+
+```
+GET /openapi/v1/bots/{bot_id}/models/default?stage=draft|live
+```
+
+Same gating as `GET …/models` (owner and member-level collaborators of the
+addressed bot, device-wide). The backend relays to the engine route above and
+answers `Envelope[DefaultModel]`, where `DefaultModel` is the public `Model`
+(`model_id`, `name`, `provider`) plus `fallbacks`:
+
+```json
+{ "success": true, "data": { "model_id": "openai-compatible/glm-5.2", "name": "GLM 5.2",
+                             "provider": "openai-compatible", "fallbacks": ["openai/gpt-4"] } }
+```
+
+| Status | When |
+|---|---|
+| 409 `The bot's engine has no default model configured` | the engine answered `error: "default_model_not_configured"` (relay raises `EngineDefaultModelNotConfiguredError`) |
+| 501 | the engine does not declare `model.default.get` |
+| 502 `Engine service error` | any other engine failure |
+| 404 `Not found` | the bot is not the caller's (masked, as on every runtime route) |
 
 ## 3. Plugin contract (inside the adapter)
 
