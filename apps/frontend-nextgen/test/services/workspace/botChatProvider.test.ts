@@ -163,7 +163,7 @@ describe('botChatProvider', () => {
     expect(mockedGetConnection).toHaveBeenCalledWith('b', { user_id: '900003', owner_id: '2088', stage: 'online' });
   });
 
-  it('好友 Bot 的 connection 携带 f_user_id', async () => {
+  it('好友 Bot 的 connection 和 IAM token 使用 online 并携带好友上下文', async () => {
     mockedGetConnection.mockResolvedValue({
       code: 200000,
       data: { engine: 'openclaw', expires_at: 'x', sockets: [{ kind: 'chat', url: 'wss://gw/ws' }] },
@@ -178,8 +178,9 @@ describe('botChatProvider', () => {
       owner_id: '2088',
       f_user_id: '900003',
       session_id: 'sid-1',
-      stage: 'draft',
+      stage: 'online',
     });
+    expect(mockedGetIamToken).toHaveBeenCalledWith('b', '900003', '2088', 'online');
   });
 
   it('request 透传 query + sessionKey,并按需 connect', async () => {

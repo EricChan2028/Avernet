@@ -52,7 +52,7 @@ export interface ChatBotView {
   templateName?: string;
   spaceId?: string;
   spaceName?: string;
-  /** 服务 Bot 的运行阶段；个人 Bot 和好友会话仅使用 draft。 */
+  /** 运行阶段；对话页默认 online，工坊调试可显式指定 draft / verify。 */
   runtimeStage?: BotIamTokenStage;
   /** 标记来自当前用户好友关系，而非当前用户管理的 Bot。 */
   isFriendBot?: boolean;
@@ -109,8 +109,7 @@ export function resolveUserId(userId: string): string {
 
 /** 连接和会话请求共用运行环境，避免 Token 与实际实例选址不一致。 */
 export function resolveChatRuntimeStage(bot: ChatBotView): BotIamTokenStage {
-  if (bot.isFriendBot || bot.botType === 'personal') return 'draft';
-  return bot.runtimeStage ?? (bot.botType === 'service' ? 'online' : 'draft');
+  return bot.runtimeStage ?? 'online';
 }
 
 /** 所有单聊请求补运行环境；好友补 f_user_id，团队补实体 owner。 */
@@ -121,7 +120,7 @@ export function withFriendBotRequestParams<T extends { user_id: string; owner_id
 ): T & { stage: BotIamTokenStage; f_user_id?: string } {
   return {
     ...params,
-    stage: bot.isFriendBot || bot.botType === 'personal' ? 'draft' : params.stage ?? resolveChatRuntimeStage(bot),
+    stage: params.stage ?? resolveChatRuntimeStage(bot),
     ...((bot.isFriendBot || bot.isTeamBot) && bot.ownerId ? { owner_id: bot.ownerId } : {}),
     ...(bot.isFriendBot ? { f_user_id: resolveUserId(userId) } : {}),
   };
@@ -257,7 +256,7 @@ function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
     engine: dto.engine_type ?? dto.engine,
     ...permissions,
     botType: dto.bot_type,
-    runtimeStage: 'draft',
+    runtimeStage: 'online',
     isAgentCodingBot: runtime.isAgentCodingBot,
     templateType: runtime.templateType,
     templateName: runtime.templateName,

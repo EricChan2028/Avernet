@@ -35,6 +35,7 @@ test('entity_id 而不是 owner_id 作为会话 owner 上下文，mine 不标记
       {
         botId: 'shared:team-entity',
         realBotId: 'shared',
+        runtimeStage: 'online',
         ownerId: 'team-entity',
         displayName: '团队助手',
         engine: 'teclaw',

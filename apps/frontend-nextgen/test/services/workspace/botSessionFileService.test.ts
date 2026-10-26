@@ -28,7 +28,7 @@ describe('botSessionFileService.resolveContentUrl', () => {
       'bot-1',
       's1',
       'sr_1',
-      { user_id: '900003', owner_id: '900003' },
+      { user_id: '900003', owner_id: '900003', stage: 'online' },
       'attachment',
     );
     expect(url).toBe('/openapi/v1/bots/bot-1/sessions/s1/files/sr_1/content?x=1');
@@ -105,8 +105,8 @@ describe('botSessionFileService.uploadOne', () => {
     jest.useRealTimers();
   });
 
-  it('完整上传后轮询到 ready', async () => {
-    const pending = botSessionFileService.uploadOne('bot-1', 'sess-1', 'user-1', file('a.pdf'), {});
+  it.each([undefined, 'draft', 'verify', 'online'] as const)('%s 上传阶段贯穿申请、确认和轮询，缺省 online', async (stage) => {
+    const pending = botSessionFileService.uploadOne('bot-1', 'sess-1', 'user-1', file('a.pdf'), { stage });
     await jest.advanceTimersByTimeAsync(2000);
     const res = await pending;
     expect(res.ok).toBe(true);
@@ -118,7 +118,10 @@ describe('botSessionFileService.uploadOne', () => {
       expect.any(ArrayBuffer),
       expect.any(Object),
     );
-    expect(mocked.completeUpload).toHaveBeenCalledWith('bot-1', 'sess-1', expect.any(Object), {
+    const params = { user_id: 'user-1', stage: stage ?? 'online' };
+    expect(mocked.createUploadIntents).toHaveBeenCalledWith('bot-1', 'sess-1', params, expect.any(Object));
+    expect(mocked.getMaterializeStatus).toHaveBeenCalledWith('bot-1', 'sess-1', 'sr_1', params);
+    expect(mocked.completeUpload).toHaveBeenCalledWith('bot-1', 'sess-1', params, {
       resource_id: 'sr_1',
       transfer_id: 'tr_1',
     });
@@ -241,7 +244,7 @@ describe('botSessionFileService 列表/删除/下载', () => {
   it('loadReady 将 human_ 前缀的 user_id 归一化为工号', async () => {
     mocked.listReady.mockResolvedValue({ files: [] });
     await botSessionFileService.loadReady('bot-1', 'sess-1', 'human_900003');
-    expect(mocked.listReady).toHaveBeenCalledWith('bot-1', 'sess-1', { user_id: '900003' });
+    expect(mocked.listReady).toHaveBeenCalledWith('bot-1', 'sess-1', { user_id: '900003', stage: 'online' });
   });
   it('remove 成功', async () => {
     mocked.deleteFile.mockResolvedValue({ deleted: true });

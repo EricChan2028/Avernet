@@ -54,10 +54,27 @@ test.each(['draft', 'verify', 'online'] as const)('%s 的所有会话请求选�
   expect(ctrl.listFavoriteSessions).toHaveBeenCalledWith('service', params);
 });
 
-test('服务 Bot 默认线上；个人和好友 Bot 不接受发布环境覆盖', async () => {
-  expect(resolveChatRuntimeStage(bot)).toBe('online');
-  expect(resolveChatRuntimeStage({ ...bot, botType: 'personal', runtimeStage: 'online' })).toBe('draft');
-  expect(resolveChatRuntimeStage({ ...bot, isFriendBot: true, runtimeStage: 'verify' })).toBe('draft');
-  await botSessionService.listSessions({ ...bot, botType: 'personal', runtimeStage: 'online' }, 'user');
+test.each([
+  { label: 'service', overrides: { botType: 'service' } },
+  { label: 'personal', overrides: { botType: 'personal' } },
+  { label: 'team', overrides: { isTeamBot: true } },
+  { label: 'friend', overrides: { isFriendBot: true } },
+  { label: 'legacy', overrides: { botType: undefined } },
+])('$label Bot 的对话请求默认使用 online', async ({ overrides }) => {
+  const target = { ...bot, ...overrides };
+  expect(resolveChatRuntimeStage(target)).toBe('online');
+  await botSessionService.listSessions(target, 'user');
+  await botSessionService.listFavoriteSessionsPage(target, 'user');
+  await botSessionService.listModels(target, 'user');
+  const params = expect.objectContaining({ stage: 'online' });
+  expect(ctrl.listBotSessions).toHaveBeenCalledWith('service', params);
+  expect(ctrl.listFavoriteSessions).toHaveBeenCalledWith('service', params);
+  expect(ctrl.listBotModels).toHaveBeenCalledWith('service', params);
+});
+
+test('个人 Bot 工坊显式调试阶段不被线上默认值覆盖', async () => {
+  const target = { ...bot, botType: 'personal', runtimeStage: 'draft' as const };
+  expect(resolveChatRuntimeStage(target)).toBe('draft');
+  await botSessionService.listSessions(target, 'user');
   expect(ctrl.listBotSessions).toHaveBeenCalledWith('service', expect.objectContaining({ stage: 'draft' }));
 });

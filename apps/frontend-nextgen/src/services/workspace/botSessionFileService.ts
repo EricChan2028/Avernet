@@ -75,7 +75,7 @@ function buildParams(userId: string, ownerId?: string, stage?: 'draft' | 'verify
   return {
     user_id: resolveUserId(userId),
     ...(ownerId ? { owner_id: ownerId } : {}),
-    ...(stage ? { stage } : {}),
+    stage: stage ?? 'online',
   };
 }
 
