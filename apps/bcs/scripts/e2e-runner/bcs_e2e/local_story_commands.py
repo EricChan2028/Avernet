@@ -63,6 +63,8 @@ LOCAL_STORY_COMMANDS = frozenset({
     'local-caller-execution-report',
     'local-draft-group-run',
     'local-draft-group-report',
+    'local-result-queue-run',
+    'local-result-queue-report',
 })
 
 
@@ -295,6 +297,18 @@ def register_local_story_commands(commands) -> None:
     draft_report = commands.add_parser('local-draft-group-report', help='Verify frozen owned-local Draft group evidence offline')
     draft_report.add_argument('--state-dir', type=Path, required=True)
     draft_report.add_argument('--output-dir', type=Path)
+
+    # Independent local-only slice; intentionally outside the 29-case coverage registry.
+    result_run = commands.add_parser('local-result-queue-run', help='Run the complete owned-local Result queue Story as black-box children beside one owned BCS runtime')
+    for name in ('binary', 'state-dir'):
+        result_run.add_argument('--' + name, type=Path, required=True)
+    for name in ('binary-sha256', 'run-id', 'confirm-run-id'):
+        result_run.add_argument('--' + name, required=True)
+    for name in ('allow-local-processes', 'allow-fixture-write', 'allow-write'):
+        result_run.add_argument('--' + name, action='store_true')
+    result_report = commands.add_parser('local-result-queue-report', help='Verify frozen owned-local Result queue evidence offline')
+    result_report.add_argument('--state-dir', type=Path, required=True)
+    result_report.add_argument('--output-dir', type=Path)
 
 
 def dispatch_local_story_command(args, *, write_reports: Callable) -> tuple[dict, int]:
@@ -649,6 +663,23 @@ def dispatch_local_story_command(args, *, write_reports: Callable) -> tuple[dict
             source_root, destination = args.state_dir.resolve(), args.output_dir.resolve()
             if destination == source_root or source_root in destination.parents:
                 raise RunStateError('Offline Draft group rendering cannot overwrite original evidence')
+        outputs = write_reports(summary, args.output_dir, {'all'}) if args.output_dir is not None else {}
+        report = {'status': summary['status'], 'summary': summary, 'outputs': outputs, 'ready_to_execute': False}
+        rc = 0 if summary['status'] == 'LOCAL_SUITE_PASS' else 130 if summary['status'] == 'CANCELLED' else 2
+    elif args.command == 'local-result-queue-run':
+        from .local_result_queue_run import local_result_queue_run
+        report = local_result_queue_run(binary=args.binary, binary_sha256=args.binary_sha256,
+            state_dir=args.state_dir, run_id=args.run_id, confirm_run_id=args.confirm_run_id,
+            allow_local_processes=args.allow_local_processes, allow_fixture_write=args.allow_fixture_write,
+            allow_write=args.allow_write)
+        rc = 0 if report['status'] == 'LOCAL_RESULT_QUEUE_PASS' else 130 if report['status'] == 'CANCELLED' else 2
+    elif args.command == 'local-result-queue-report':
+        from .local_result_queue_reporting import build_result_queue_report
+        summary = build_result_queue_report(args.state_dir)
+        if args.output_dir is not None:
+            source_root, destination = args.state_dir.resolve(), args.output_dir.resolve()
+            if destination == source_root or source_root in destination.parents:
+                raise RunStateError('Offline Result queue rendering cannot overwrite original evidence')
         outputs = write_reports(summary, args.output_dir, {'all'}) if args.output_dir is not None else {}
         report = {'status': summary['status'], 'summary': summary, 'outputs': outputs, 'ready_to_execute': False}
         rc = 0 if summary['status'] == 'LOCAL_SUITE_PASS' else 130 if summary['status'] == 'CANCELLED' else 2

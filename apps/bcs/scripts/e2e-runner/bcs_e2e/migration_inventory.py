@@ -285,6 +285,10 @@ def migration_plan() -> dict:
     caller_execution = caller_execution_source_binding()
     from .local_draft_group_contract import (CASE_ID as DRAFT_CASE_ID, REQUIREMENTS as DRAFT_REQUIREMENTS,
                                                SUITE as DRAFT_SUITE, draft_group_source_binding)
+    from .local_result_queue_contract import (CASE_ID as RESULT_QUEUE_CASE_ID,
+                                               REQUIREMENTS as RESULT_QUEUE_REQUIREMENTS,
+                                               SUITE as RESULT_QUEUE_SUITE,
+                                               result_queue_source_binding)
     draft_group = draft_group_source_binding()
     caller_execution_slice = {'suite': CALLER_SUITE, 'case_id': CALLER_CASE, 'case_version': 1,
         'legacy_id': 'caller_execution_story', 'status': 'LOCAL_EXECUTOR_ONLY',
@@ -310,6 +314,18 @@ def migration_plan() -> dict:
         'release_parent_denominator': False, 'independent_slice': True,
         'remote_validation': 'NOT_RUN', 'grants_release_credit': False,
         'source_map': 'draft-group-migration-contract.json'}
+    result_queue_slice = {'suite': RESULT_QUEUE_SUITE, 'case_id': RESULT_QUEUE_CASE_ID, 'case_version': 1,
+        'legacy_id': 'story_state_machine_result_queue', 'status': 'LOCAL_EXECUTOR_ONLY',
+        'required_assertion_count': 18, 'requirement_ids': list(RESULT_QUEUE_REQUIREMENTS),
+        'canonical_reporting': 'LOCAL_RUNTIME_BLACKBOX',
+        'execution_command': 'local-result-queue-run', 'report_command': 'local-result-queue-report',
+        'required_parameters': ['binary', 'binary_sha256', 'state_dir', 'run_id', 'confirm_run_id',
+                                'allow_local_processes', 'allow_fixture_write', 'allow_write'],
+        'binary_kind': 'bcs', 'auto_build': False,
+        'environment': {'local': 'LOCAL_EXECUTOR_ONLY', 'preprod': 'REMOTE_UNSUPPORTED'},
+        'release_parent_denominator': False, 'independent_slice': True,
+        'remote_validation': 'NOT_RUN', 'grants_release_credit': False,
+        'source_map': 'result-queue-migration-contract.json'}
     admission = admission_source_binding()
     friend_requests = friend_requests_list_source_binding()
     friend_connections = friend_connections_list_source_binding()
@@ -549,4 +565,4 @@ def migration_plan() -> dict:
                                    for row in fixed_loop_rewrite.environments],
                 'ready_to_execute': False,
                 'grants_release_credit': False}],
-            'local_independent_slices': [caller_execution_slice, draft_group_slice]}
+            'local_independent_slices': [caller_execution_slice, draft_group_slice, result_queue_slice]}

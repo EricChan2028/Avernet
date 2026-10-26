@@ -3988,3 +3988,36 @@ during this command-lifecycle increment.
   isolated immediately afterwards (`17 passed, 9 subtests passed`). No live Singlebox or
   preprod request was executed for this increment; the slice starts no OpenClaw or
   engine-adapter process of its own.
+
+## 2026-10-26 increment — owned-local Result queue contract and run lifecycle (2/3)
+
+- The already unmapped `story_state_machine_result_queue` backlog parent is now a frozen
+  independent slice: `local_result_queue_contract.py` freezes
+  `result_queue_story.py` (SHA256 `b672cc7bc0543686426159d8a694389fe621f9c1cbf9557ee1ae1f1cd41d1dca`,
+  git `71860eae99c62d7bf1349a0f46562f6395acbf1e`), its `fixed_loop_story.py` base
+  (`7e42cff9820a68e9099309d5a313f0f9a9d4814dda66bb7fc89e8aee5dd7aefb`, same git revision) and the
+  carrier mock (`fe56c8c2…`) in `result-queue-migration-contract.json`; 18 disjoint
+  obligations, single fixed marker
+  `Queued result: owner Send, observer Inject, bound context and unique history verified`,
+  and the strict argument freeze `--base-url --mock-url --human`.
+- New commands `local-result-queue-run` / `local-result-queue-report` run the story as a
+  black-box child beside the frozen Provider/Judge mock child and one owned BCS runtime
+  (`BCS_E2E_TEST_BINARY`, `auto_build=false`). The completion gate requires the exact
+  scheduled-callout boundary - exactly three provider webhook observations, zero
+  event-webhook observations and a never-started strict Judge - plus the four-stream
+  bot-token/provider-admin-token/Bearer redaction gate, bounded logs, fixed single
+  marker, unchanged binding/digest/binary and owned runtime STOPPED with returncode 0;
+  SIGTERM canonicalises to CANCELLED and both children use process-group teardown.
+- `local_result_queue_reporting.py` projects the ten frozen sources into the three
+  canonical reports with 18 required assertions; tamper/timing/unpublished evidence
+  produces BLOCKED and offline rendering inside the state directory is rejected.
+- Wiring: CLI 44→46 local-story commands; `migration_inventory.py` exposes a third
+  `local_independent_slices` row (legacy id `story_state_machine_result_queue`, 19
+  fields) while the 29-executor release registry and both pilot manifests stay unchanged;
+  the artifact budget grows 301→304 for this slice's contract, run and report modules.
+- Validation: contract suite green (marker pattern, raw tamper matrix, source drift,
+  anchor/range coverage, fixed-loop base validity); the new run suite is green after
+  port-specific denominators (22 cases plus 12 subtests), including scheduled underflow
+  and overflow gates; focused suites combined 84 cases plus 128 subtests; `compileall`
+  clean. Full e2e-runner discovery: `Ran 2871 tests in 280.250s ... OK (skipped=225)`. No live Singlebox
+  or preprod request was executed, and the slice starts no OpenClaw process of its own.

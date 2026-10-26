@@ -3559,3 +3559,50 @@ This is an independent local-only slice: `release_parent_denominator=false`,
 `grants_release_credit=false`; it is outside the 29-case coverage registry and
 both pilot manifests, and it starts no OpenClaw or engine-adapter process of
 its own.
+
+### Complete owned-local Result queue Story
+
+The upstream one-shot Result-queue Story
+(`apps/bcs/scripts/e2e-test/result_queue_story.py`, inheriting the frozen
+`fixed_loop_story.py` base) is treated as one black-box child beside a second
+black-box mock child and one owned BCS runtime. The Story registers the Human
+principal, a disposable static-bearer native-tool Provider, the release-domain
+driver and observer Bots and their friendship, snapshots and replaces the real
+message-delivery policy through compare-and-swap, starts one state-machine
+run, answers the scheduled node delivery, proves owner Send plus observer
+Inject admission rows, completes and consumes the durable result, re-reads the
+unique published history and restores every owned scope.
+
+The BCS binary stays owner-built and opt-in (`BCS_E2E_TEST_BINARY` /
+`BCS_E2E_TEST_BINARY_SHA256`, `auto_build=false`). Then run and report:
+
+```bash
+python3 runner.py local-result-queue-run \
+  --binary "$BCS_E2E_TEST_BINARY" --binary-sha256 "$BCS_E2E_TEST_BINARY_SHA256" \
+  --state-dir "$FRESH_RUN_DIR" --run-id "$RUN_ID" --confirm-run-id "$RUN_ID" \
+  --allow-local-processes --allow-fixture-write --allow-write
+
+python3 runner.py local-result-queue-report --state-dir "$FRESH_RUN_DIR"
+```
+
+The run rejects a state directory that already exists and requires a
+non-symlink parent; the owned runtime creates the directory and the runner
+freezes permissions, the 18-obligation binding (`LOCAL-RESULT-QUEUE-01`, suite
+`owned-local-result-queue-v1`, Human `39464`) and the BCS binary SHA256 before
+the Provider/Judge mock child starts on an ephemeral port with a ready-file
+handshake. This slice freezes a scheduled-callout boundary rather than a
+zero-traffic one: exactly three provider webhooks (answer node, final result,
+observer followup) must be observed, while the event-webhook counter stays
+zero and the strict Judge never starts. All four child streams pass the
+bot-token/provider-admin-token/Bearer redaction gate before bounded logs land,
+the single fixed Story marker must be present, and both children are terminated
+by process group even on timeout or SIGTERM (SIGTERM canonicalises to
+CANCELLED). RUN and REPORT never rewrite original evidence and offline
+rendering inside the state directory is rejected.
+
+This is an independent local-only slice bound to the already unmapped
+`story_state_machine_result_queue` backlog parent:
+`release_parent_denominator=false`, `independent_slice=true`,
+`remote_validation=NOT_RUN`, `grants_release_credit=false`; it is outside the
+29-case coverage registry and both pilot manifests, and it starts no OpenClaw
+or engine-adapter process of its own.
