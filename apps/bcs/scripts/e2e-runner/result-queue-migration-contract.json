@@ -1,0 +1,254 @@
+{
+  "schema_version": 1,
+  "source_revision": "71860eae99c62d7bf1349a0f46562f6395acbf1e",
+  "source_file_revisions": {
+    "result_queue_story.py": "71860eae99c62d7bf1349a0f46562f6395acbf1e",
+    "fixed_loop_story.py": "71860eae99c62d7bf1349a0f46562f6395acbf1e",
+    "http_provider_judge_mock.py": "c86bc262ea2513d9eb6d13c1f0725ed0ace204d5"
+  },
+  "parent": "story_state_machine_result_queue",
+  "suite": "owned-local-result-queue-v1",
+  "case_id": "LOCAL-RESULT-QUEUE-01",
+  "environment": {
+    "local": "LOCAL_EXECUTOR_ONLY",
+    "preprod": "REMOTE_UNSUPPORTED"
+  },
+  "sources": {
+    "result_queue_story.py": "b672cc7bc0543686426159d8a694389fe621f9c1cbf9557ee1ae1f1cd41d1dca",
+    "fixed_loop_story.py": "7e42cff9820a68e9099309d5a313f0f9a9d4814dda66bb7fc89e8aee5dd7aefb",
+    "http_provider_judge_mock.py": "fe56c8c2d79ce141fe1d2784cc21c184c90000bb8e6908c976168f3bdfad70c4"
+  },
+  "required_story_arguments": [
+    "--base-url",
+    "--mock-url",
+    "--human"
+  ],
+  "source_marker_lines": 1,
+  "owned_runtime_binary": {
+    "package": "bcs",
+    "opt_in_env": [
+      "BCS_E2E_TEST_BINARY",
+      "BCS_E2E_TEST_BINARY_SHA256"
+    ],
+    "build_command": "cargo build -p bcs --bin bcs",
+    "auto_build": false,
+    "required_arguments": [
+      "--binary",
+      "--binary-sha256"
+    ],
+    "hash_algorithm": "sha256"
+  },
+  "mock_child": {
+    "script": "http_provider_judge_mock.py",
+    "ready_protocol": "ready-file",
+    "expected_webhook_requests": 3
+  },
+  "requirements": [
+    {
+      "id": "RESULT-QUEUE.human-registration",
+      "expectation": "Reset the owned harness mock and ensure the configured Human principal before any fixed scope is changed.",
+      "story_lines": [
+        20,
+        22
+      ],
+      "markers": [
+        "result-queue-delivery"
+      ]
+    },
+    {
+      "id": "RESULT-QUEUE.provider-registration",
+      "expectation": "Register the deterministic Result queue Provider with static bearer auth and native-tool coordination.",
+      "story_lines": [
+        23,
+        27
+      ],
+      "markers": [
+        "result-queue-delivery"
+      ]
+    },
+    {
+      "id": "RESULT-QUEUE.recipient-bot-pair",
+      "expectation": "Register the disposable release-domain driver and observer Bot pair with real review skills.",
+      "story_lines": [
+        28,
+        34
+      ],
+      "markers": [
+        "result-queue-delivery"
+      ]
+    },
+    {
+      "id": "RESULT-QUEUE.recipient-visibility-harness",
+      "expectation": "Make both recipient Bots public and establish the driver-to-observer friendship request.",
+      "story_lines": [
+        35,
+        38
+      ],
+      "markers": [
+        "result-queue-delivery"
+      ]
+    },
+    {
+      "id": "RESULT-QUEUE.delivery-policy-baseline",
+      "expectation": "Capture the real message-delivery policy before mutation so cleanup can restore it.",
+      "story_lines": [
+        39,
+        40
+      ],
+      "markers": [
+        "result-queue-delivery"
+      ]
+    },
+    {
+      "id": "RESULT-QUEUE.delivery-policy-replacement",
+      "expectation": "Enable system/group flows and constrain each recipient with enforce ceilings before the run.",
+      "story_lines": [
+        41,
+        46
+      ],
+      "markers": [
+        "result-queue-delivery"
+      ]
+    },
+    {
+      "id": "RESULT-QUEUE.policy-update-cas",
+      "expectation": "Change message-delivery policy only by expected-version compare-and-swap on the admin surface.",
+      "story_lines": [
+        48,
+        52
+      ],
+      "markers": [
+        "result-queue-delivery"
+      ]
+    },
+    {
+      "id": "RESULT-QUEUE.provider-callout-harness",
+      "expectation": "Observe the Provider callout stream only through the owned /control provider request surface.",
+      "story_lines": [
+        54,
+        55
+      ],
+      "markers": [
+        "result-queue-delivery"
+      ]
+    },
+    {
+      "id": "RESULT-QUEUE.final-callback-admission",
+      "expectation": "Accept one final Provider callback with provider identity and runtime token, retrying only transport_conflict.",
+      "story_lines": [
+        57,
+        63
+      ],
+      "markers": [
+        "result-queue-delivery"
+      ]
+    },
+    {
+      "id": "RESULT-QUEUE.result-delivery-ledger",
+      "expectation": "Read durable result admission rows only from the versioned collaboration message-deliveries endpoint.",
+      "story_lines": [
+        65,
+        67
+      ],
+      "markers": [
+        "result-queue-delivery"
+      ]
+    },
+    {
+      "id": "RESULT-QUEUE.group-and-session",
+      "expectation": "Create the owned one-shot collaboration group and Result admission Session for the Human and both Bots.",
+      "story_lines": [
+        69,
+        78
+      ],
+      "markers": [
+        "result-queue-delivery"
+      ]
+    },
+    {
+      "id": "RESULT-QUEUE.state-machine-definition",
+      "expectation": "Install the single final-answer state-machine definition with the coverage provider clearing state before it.",
+      "story_lines": [
+        79,
+        86
+      ],
+      "markers": [
+        "result-queue-delivery"
+      ]
+    },
+    {
+      "id": "RESULT-QUEUE.state-machine-run-admission",
+      "expectation": "Start one state-machine run only with the driver Bot runtime token and the manual worker binding.",
+      "story_lines": [
+        87,
+        91
+      ],
+      "markers": [
+        "result-queue-delivery"
+      ]
+    },
+    {
+      "id": "RESULT-QUEUE.one-shot-node-delivery",
+      "expectation": "Wait for one scheduled answer-node chat.send callout and answer it with the final result callback.",
+      "story_lines": [
+        92,
+        96
+      ],
+      "markers": [
+        "result-queue-delivery"
+      ]
+    },
+    {
+      "id": "RESULT-QUEUE.durable-result-rows",
+      "expectation": "Require exactly two durable admission rows: owner Send and observer Inject for the same result id.",
+      "story_lines": [
+        97,
+        101
+      ],
+      "markers": [
+        "result-queue-delivery"
+      ]
+    },
+    {
+      "id": "RESULT-QUEUE.scheduled-result-delivery",
+      "expectation": "Prove the scheduled result flows the exact queued message and Bearer token to the owner and completes.",
+      "story_lines": [
+        102,
+        110
+      ],
+      "markers": [
+        "result-queue-delivery"
+      ]
+    },
+    {
+      "id": "RESULT-QUEUE.bound-context-and-unique-history",
+      "expectation": "Prove the observer followup receives bound result context and consumes it exactly once.",
+      "story_lines": [
+        111,
+        121
+      ],
+      "markers": [
+        "result-queue-delivery"
+      ]
+    },
+    {
+      "id": "RESULT-QUEUE.run-completion-and-cleanup-disposition",
+      "expectation": "Verify the twice-read history contains exactly one published result, the run completes, and all owned scopes are restored.",
+      "story_lines": [
+        122,
+        140
+      ],
+      "markers": [
+        "result-queue-delivery"
+      ]
+    }
+  ],
+  "story_markers": [
+    "Queued result: owner Send, observer Inject, bound context and unique history verified"
+  ],
+  "remote_validation": "NOT_RUN",
+  "grants_release_credit": false,
+  "release_parent_denominator": false,
+  "independent_slice": true,
+  "evidence_granularity": "OWNED_CHILD_RECEIPT"
+}
