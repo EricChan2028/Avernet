@@ -27,11 +27,12 @@ import pytest
 import yaml
 from referencing import Registry, Resource
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
+from agentclaw.community.core.content_store import (
     canonical_tree_bytes,
     decode_tree_bytes,
 )
-from tests.community.contracts.genome_canonical_json import (
+from agentclaw.community.core.bot_genome.compile import compile_spec
+from agentclaw.community.core.bot_genome.canonical import (
     NotCanonicalizable,
     canonicalize,
     is_canonical_gene_path,
@@ -39,7 +40,8 @@ from tests.community.contracts.genome_canonical_json import (
     revision_id,
     sha256_digest,
 )
-from tests.community.contracts.genome_rewrite import lcs_length, rewrite_flagged, strip_common, to_lines
+from agentclaw.community.core.bot_genome.rewrite import lcs_length, rewrite_flagged, strip_common, to_lines
+from agentclaw.community.core.bot_genome.spec_models import GenomeSpec
 
 _BACKEND = Path(__file__).resolve().parents[3]
 _CONTRACT = _BACKEND / "api-contracts" / "genome" / "v1"
@@ -542,37 +544,18 @@ def test_manifest_v1_case_gets_its_stated_outcome(case: Path) -> None:
     assert compiled == _compile(revision["spec"]), "compiled.yaml must be derived from revision.json"
 
 
-def _store(digest: str) -> dict[str, str]:
-    _blob(digest)
-    return {"protocol": "content_store", "digest": digest}
+class _BlobReader:
+    """The example blobs as the registry's ``ContentReader``."""
+
+    def read(self, digest: str) -> bytes:
+        return _blob(digest)
 
 
 def _compile(spec: dict[str, Any]) -> dict[str, Any]:
-    """M′ from a revision, by manifest-v1-compatibility.md (proposed RSI-04 source spellings)."""
-    skills = []
-    for entry in spec["skills"]:
-        source = (
-            {"protocol": "center", "version": entry["center_version"]}
-            if entry["origin"] == "center"
-            else _store(entry["digest"])
-        )
-        skills.append({"name": entry["name"], "source": source})
-    mcp = []
-    for entry in spec["tools"]["mcp"]:
-        mcp.append({key: value for key, value in entry.items()})
-    script = None
-    if spec["script"] is not None:
-        script = {"body": _blob(spec["script"]["digest"]).decode("utf-8")}
-    return {
-        "schema_version": 1,
-        "manifest": {
-            "identity": [{"type": e["type"], "source": _store(e["digest"])} for e in spec["persona"]],
-            "skills": skills,
-            "resources": [{"path": e["path"], "source": _store(e["digest"])} for e in spec["resources"]],
-            "mcp": mcp,
-        },
-        "script": script,
-    }
+    """M′ from a revision: the registry's own compile (RSI-03), by manifest-v1-compatibility.md."""
+    for entry in spec["persona"] + spec["resources"] + [s for s in spec["skills"] if "digest" in s]:
+        _blob(entry["digest"])  # every digest the document points at is a real example blob
+    return compile_spec(GenomeSpec.from_json(spec), _BlobReader(), revision_id="example").document
 
 
 def test_example_digests_are_well_formed() -> None:

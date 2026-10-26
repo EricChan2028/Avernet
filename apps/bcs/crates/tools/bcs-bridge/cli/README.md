@@ -33,6 +33,14 @@ a `mcporter_mcp` Provider does not match this handshake. V2 fallback remains sup
 
 The only BCS dependency is the `bcs-protocol` contract crate.
 
+## Multiple Providers
+
+A single configuration/daemon can host Bots from multiple Providers in one BCS
+deployment. Legacy TOML is read without rewriting; adding another Provider
+backs up and upgrades the same file to V2. See [compatibility, commands and
+isolation](MULTI_PROVIDER.md). Stop before registration changes; use
+`status --json` to check the selected Bot rather than just process readiness.
+
 ## Usage
 
 ```bash
@@ -77,6 +85,27 @@ bcs-bridge stop
 - One instance runs per user: `start`, `status` and `stop` share
   `~/.bcn-bridge/bridge.lock` and a private control socket.
 
+### Plugin stop and restart
+
+`start --daemon` reports local process initialization, not successful Bot login.
+Check `status --json`: the process can be `running` while `health` is
+`connecting` or `degraded`. Each Plugin Bot must reach `online` before it can
+receive work (`ready` also includes Gateway Providers that are `listening`).
+
+On stop, the Plugin client sends a normal WebSocket Close, waits up to 2 seconds
+for the peer, and attempts TCP/TLS shutdown for up to another 500 ms. The same
+cleanup runs after rejected/interrupted login and identity persistence failures.
+The instance lock remains held through connection and engine cleanup, so `stop`
+does not release the local owner while the Close handshake is still pending.
+Unresponsive/broken peers are logged and dropped after the bounded cleanup;
+`stop` confirms local shutdown, not that remote application occupancy has expired.
+
+If a subsequent `bot.connect` reports `already_connected`, BCS still considers
+that identity occupied. This does not by itself prove another local process is
+alive. Check other bridge instances, the close timeout/failure logs, and remote
+connection expiry. Keep the saved identity and session database; deleting them
+or repeatedly restarting is not a connection-release mechanism.
+
 Configuration written by `register` (gateway example):
 
 ```toml
@@ -99,6 +128,42 @@ cwd = "/home/me/workspace"
 [registration]
 api_url = "https://bcs.example.com/prefix"
 ```
+
+## Claude completion mode (default: `hook_idle`)
+
+Claude-compatible drivers, including `claude-code` and launcher registrations
+such as `cfuse-cc`, default to `hook_idle`. No `engine_options` entry or manual
+Hook configuration is needed. This applies both to `ClaudeCode::new` and to
+factories loading configurations without `completion_mode`; explicitly saved
+mode choices are not overwritten. Codex and QwenWork defaults are unchanged.
+
+- The driver registers a native Stop callback before sending the user prompt.
+  Successful completion requires, in order, an empty `background_tasks` Stop
+  snapshot, a successful result and a fresh idle event for the same main epoch.
+  Background work and intervening activity invalidate stale evidence.
+- The supported native profile is **Claude Code 2.1.199** (validated with cfuse
+  2.6.44). Other versions, unsupported task kinds or missing/conflicting evidence
+  fail explicitly; `hook_idle` never silently falls back to legacy completion.
+  This default change does not certify managed policies, cron/monitor tasks or
+  every nested/resumed-background combination.
+- Initialization is bounded by 30 seconds, result-to-idle waiting by 5 seconds,
+  and ordinary stream inactivity by the 600-second default idle window. A shorter
+  per-turn idle timeout still applies. Failed result frames return an error
+  without waiting for successful Stop/idle evidence (see diagnostics below).
+- Explicit `legacy` and `observe` remain supported. `legacy` uses the previous
+  notification-consumption completion gate without hook initialization;
+  `observe` collects hook evidence but preserves legacy completion behavior.
+
+For an older or unsupported native engine, explicitly opt back into legacy:
+
+```toml
+# Inside the relevant [[bot]] entry:
+engine_options = { completion_mode = "legacy" }
+```
+
+An existing `completion_mode = "hook_idle"` entry is harmless but unnecessary.
+Removing the mode key selects the new default after the updated bridge loads the
+configuration; changing source/configuration does not alter a running process.
 
 ## Owned Codex Unix WebSocket transport
 
@@ -268,6 +333,28 @@ completion for blocking RPC requests, interruption, and connection loss close
 pending forms; late answers
 do not resume a closed turn. Execution approvals remain on their configured
 review policy and are separate from user questions.
+
+## Engine failure diagnostics
+
+Claude-compatible engines (including `cfuse-cc`) report failed result frames as
+terminal chat errors, including in `hook_idle` mode: an error does not wait for
+a successful Stop/idle sequence. Bridge preserves recognized upstream causes in
+the existing `errorMessage` field, for example:
+
+```text
+engine exited: upstream rate_limit_error (HTTP 429): model provider rate limit exceeded; retry later
+```
+
+For failed results, a recognized numeric `api_error_status` takes precedence
+over the `error`, `errors` and `result` fallbacks. Missing, malformed or unknown
+status values retain those fallbacks; successful results remain unchanged.
+Known authentication, permission, request-size, rate-limit and provider-service
+errors are converted to constant diagnostic summaries. Free-form provider
+messages, credentials, prompts and response bodies are not forwarded in the
+terminal error. Unknown failures retain the native result subtype or the
+`engine_result_error` fallback; correlate their run ID with local engine logs.
+The existing `state: error` and `errorKind: runtime_error` wire contract is
+unchanged for Gateway SSE and Plugin WebSocket V2/V3.
 
 ## Event retention and delivery guarantees
 

@@ -109,57 +109,64 @@ the rest.
 
 ## P1 — Versioned bots (useful independently of RSI)
 
-### RSI-03 Genome Registry in Backend
+### RSI-03 Genome Registry in Backend — done
 - **Module**: backend
 - **Goal**: Revisions table, refs with CAS, patch apply/validate, diff,
-  pinned source resolution into the content store, lineage queries.
-  Promotion API that moves `active` and invokes Manifest apply (personal
-  bots) or publishes the revision as the next published version (service
-  bots). The
-  applied-digest → revision mapping and the drift check
+  captured and produced content in the content store, lineage queries.
+  Promotion API that moves `active` by CAS, records the compiled document
+  and its digest, and hands the revision to a `RevisionApplier` seam. The
+  applied → revision mapping and the drift check
   ([01-genome.md](01-genome.md) §5.5).
 - **Depends on**: RSI-02.
 - **Read first**: [01-genome.md](01-genome.md); `core/bot_config_manifest/`.
-- **Done when**: create revision from manifest, from patch; diff any two;
-  move refs with conflict detection; conformance + unit tests; singlebox
-  acceptance story "edit → revision → apply → go back two revisions by
-  promoting an earlier one".
+- **Shipped** (`apps/backend/specs/2026-10-19-bot-genome-registry/`):
+  `core/bot_genome/` with the five tables, capture of a bot's current state
+  (`POST …/genome/revisions:capture`), patches applied to their own base
+  (`POST …/genome/revisions`), the policy operation (`PUT …/genome/policy`),
+  diff, `draft` by CAS, content read/upload, promotions, and the
+  `/openapi/v1/bots/{bot_id}/genome` surface; conformance, repository,
+  wiring and route tests. Promotion's only applier refuses every delivery as
+  `not_appliable` naming RSI-04, before any ref moves, so the singlebox
+  story stops at the refusal.
+- **Left to RSI-04**: delivery itself (personal bots), service-bot publish,
+  pinning the commit of a shared-repository skill (`origin: repo` records
+  the path only), and the apply report carrying `document_digest`. Until
+  then `applied_revision` joins the bot's last Manifest apply to the
+  promotion that started it by apply id.
+- **Follow-up**: capture refuses a platform-managed teclaw bot (teclaw
+  delivery mode `platform`, `CaptureRefused`): it has no device to read, so
+  capturing it means composing its state from the platform's own rows, the
+  way that delivery mode does.
 
-### RSI-04 Manifest changes for the genome
+### RSI-04 Direct delivery of a compiled revision (Stage 2)
 - **Module**: backend
-- **Goal**: The Manifest stays revision-unaware; it gains only these
-  format features and one fact of its own
-  ([01-genome.md](01-genome.md) §8):
-  1. content-store source: an entry may point at a digest in the manifest
-     content store; apply reads the bytes from the store and skips the
-     fetch;
-  2. `engine_config` applies: a materialiser for an allowlist of keys
-     (open decision G-4; may land in P3/P4);
-  3. `memory` category: curated items plus a mode, handed by apply to the
-     engine adapter (`EngineMemoryProjection`; lands after RSI-05);
-  4. produced-content write path for the content store (content created by
-     a patch, not fetched);
-  5. applied-document digest: the apply report records the digest of the
-     exact document it applied; for service bots, the publish record
-     records the digest of the published document;
-  6. Center-skill source: an entry may name a pinned Skill Center version
-     (Manifest v1 cannot declare one, and apply removes every skill a
-     `skills` section omits, so a compiled revision would otherwise remove
-     the bot's Center skills).
-  Compiled revisions must also be able to remove what a revision omits, so
-  this item depends on two Manifest fixes: resource removal
+- **Goal**: Deliver a compiled revision to the bot runtime through the
+  existing apply engine with no Manifest document in between. New
+  components take the compiled revision (every category present, file
+  entries by content-store digest, Center skills by pinned version,
+  shared-repository skills by path) and feed the apply engine's
+  materialisers directly, reading bytes from the content store and
+  resolving Center and repo skills; they plug into the `RevisionApplier`
+  seam RSI-03 leaves. The Manifest grammar gains no new source kinds. The
+  apply report records the digest of the compiled document it applied
+  ([01-genome.md](01-genome.md) §8 item 5); for service bots the publish
+  record records the digest of the published document. A compiled revision
+  must also remove what the revision omits, so this item includes the two
+  totality fixes: resource removal
   ([#2162](https://github.com/inclusionAI/Avernet/issues/2162)) and
   `script: null` ([#2862](https://github.com/inclusionAI/Avernet/issues/2862)).
-  The proposed spellings of the content-store and Center sources are in
-  [`manifest-v1-compatibility.md`](../../api-contracts/genome/v1/manifest-v1-compatibility.md).
-  No revision table, refs, or `revision_id` in the Manifest; the
-  `/config-manifest` endpoints are unchanged. The existing service-bot
-  rollback feature is not changed.
-- **Depends on**: RSI-03.
-- **Done when**: all existing manifest tests pass unchanged; new tests show
-  that a document using content-store sources applies without any fetch and
-  that apply reports and publish records carry the applied document digest;
-  `engine_config` and `memory` tests land with their items.
+  Still Manifest work, landing with their own items: `engine_config`
+  (open decision G-4, [#2858](https://github.com/inclusionAI/Avernet/issues/2858))
+  and the `memory` category (after RSI-05). No revision table, refs, or
+  `revision_id` in the Manifest; the `/config-manifest` endpoints are
+  unchanged. The existing service-bot rollback feature is not changed.
+- **Depends on**: RSI-03 (the seam and the compiled document), #2162, #2862.
+- **Done when**: all existing manifest tests pass unchanged; promoting a
+  revision in singlebox delivers it to a personal bot with no fetch and no
+  Manifest write, the apply report carries the compiled document's digest
+  and `GenomeRegistry.applied_revision` maps it back; going back two
+  revisions by promoting an earlier one restores the bot, removed
+  resources and script included.
 
 ## P2 — Evolution core
 
@@ -363,5 +370,5 @@ evolution run, `V-` verification, `P-` promotion, `A-` API, `O-` meta-evolution.
 | DS-2 (was D-3) | ClawBench as platform default grader | 04-default-strategies.md → RSI-11 |
 | DS-3 (was D-4) | Workflow YAML as gene or separate artifact | 04-default-strategies.md |
 | DS-4 (was D-5) | ClawMind analyzer contract; dormant analyzers wire-or-remove | 04-default-strategies.md |
-| D-6 | Genome storage: DB + content store (recommended) vs git repo per bot | 01-genome.md; RSI-03 |
+| D-6 | Genome storage: DB + content store vs git repo per bot | **Closed (RSI-03):** DB + content store; 01-genome.md §9.2 |
 | A-n | Evolution API open decisions (event delivery; bot run requests postponed) | 09-evolution-api.md |

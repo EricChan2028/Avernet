@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from agentclaw.community.di.modules.owner_handoff_module import OwnerHandoffModule
+
 from injector import Injector, Module
 
 from agentclaw.community.core.skill_center.canonical_center_store import (
@@ -39,6 +41,7 @@ from agentclaw.community.di.modules.bot_collaborator_module import BotCollaborat
 from agentclaw.community.di.modules.bot_dormant_module import BotDormantModule
 from agentclaw.community.di.modules.bot_friend_auth_module import BotFriendAuthModule
 from agentclaw.community.di.modules.bot_inventory_module import BotInventoryModule
+from agentclaw.community.di.modules.bot_genome_module import BotGenomeModule
 from agentclaw.community.di.modules.bot_management_module import BotManagementModule
 from agentclaw.community.di.modules.manifest_delivery_module import (
     ManifestDeliveryModule,
@@ -52,6 +55,7 @@ from agentclaw.community.di.modules.caller_identity_module import CallerIdentity
 from agentclaw.community.di.modules.channel_module import ChannelModule
 from agentclaw.community.di.modules.common_config_module import CommonConfigModule
 from agentclaw.community.di.modules.config_module import ConfigModule
+from agentclaw.community.di.modules.content_store_module import ContentStoreModule
 from agentclaw.community.di.modules.cron_module import CronModule
 from agentclaw.community.di.modules.desktop_bot_module import DesktopBotModule
 from agentclaw.community.di.modules.desktop_skill_recovery_config_module import (
@@ -185,11 +189,16 @@ def build_injector(
         CommonConfigModule(),
         BotManagementModule(),
         ExecutionIdentityModule(),
+        OwnerHandoffModule(),
         DigitalEmployeeModule(),
         AgentSwarmModule(),
         BotQuotaModule(),
         ManifestFetchModule(),
+        # The content store binds after the module that parses its blob root
+        # (cfg.BotConfigManifestConfig) and before its two consumers.
+        ContentStoreModule(),
         ManifestDeliveryModule(),
+        BotGenomeModule(),
         BotInventoryModule(),
         SkillsPoolModule(),
         BotPublicModule(),
@@ -260,6 +269,11 @@ def build_injector(
     # surfaced inside `discover_lifecycle_participants` would silently drop the
     # TaskWorker binding — an app that boots clean and never runs a queued task.
     # Resolving it here makes a bad owner name fail the boot on every profile.
+    from agentclaw.community.core.bot_management.owner_handoff.contracts import (
+        OwnerHandoffPolicy,
+    )
+
+    _app_injector.get(OwnerHandoffPolicy)
     _app_injector.get(TaskQueueConfig)
     _app_injector.get(CanonicalCenterStoreConfig)
     _app_injector.get(DraftContentStoreConfig)

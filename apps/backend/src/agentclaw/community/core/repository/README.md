@@ -1,5 +1,12 @@
 # `agentclaw.community.core.repository`
 
+B5: App Grant's physical owner columns use the existing stable entity locator.
+`get_live_bot_owners_by_entity` batch-projects current Owners for exact stable
+resource addresses; `page_live_bots_by_pks` pages relation targets by existing PK.
+The original
+`filter_live_bots` keeps its strict current-Owner semantics for existing callers.
+Neither method grants user access. No schema change or history rewrite occurs.
+
 Every repository contract and every repository implementation in the backend,
 grouped by domain. Persistence is the one role this package serves; it holds no
 services, no routers, and no domain policy.
@@ -103,6 +110,7 @@ in a comment, rather than an exception to the rule.
 ```yaml
 purpose: "Every repository contract (protocols/) and implementation (implementations/) in the backend, grouped by domain. Persistence only — no services, no routers, no domain policy."
 provides:
+  - OwnerHandoffRepository
   - BuildIgnoreRepository
   - BuildIgnoreRepositoryProtocol
   - BotCommonConfigRepository
@@ -131,8 +139,16 @@ provides:
   - BotCliToolRepositoryProtocol
   - BotStartupScriptRepositoryProtocol
   - CollaboratorRepositoryProtocol
-  - ManifestContentRepositoryProtocol
-  - ManifestContentRepository
+  - ContentStoreRepositoryProtocol
+  - ContentStoreRepository
+  - GenomeRevisionRepositoryProtocol
+  - GenomeRevisionRepository
+  - GenomeRefRepositoryProtocol
+  - GenomeRefRepository
+  - GenomePatchRepositoryProtocol
+  - GenomePatchRepository
+  - GenomePromotionRepositoryProtocol
+  - GenomePromotionRepository
   - RenderScreenRepository
   - TemplateRepository
   - UserMCPConfigRepository
@@ -305,6 +321,7 @@ consumes:
   - get_server_host               # ditto
   - get_current_avernet_tenant    # tenant scoping (utils.avernet_tenant)
 internal_dependencies:
+  - agentclaw.community.core.bot_management.owner_handoff
   - agentclaw.community.kernel.build_ignore
   - agentclaw.community.core.digital_employee.contracts
   - agentclaw.community.plugin_api.database    # DatabasePlugin — the injected session seam
@@ -318,6 +335,8 @@ internal_dependencies:
   - agentclaw.community.core.bot_message_feedback  # BotMessageFeedback ORM model + record DTO used by the repository
   - agentclaw.community.core.bot_public
   - agentclaw.community.core.bot_config_manifest
+  - agentclaw.community.core.bot_genome.repository.models  # the five ac_genome_* ORM models and row records
+  - agentclaw.community.core.content_store.models  # the ac_manifest_content ORM model and record behind the content store repository
   - agentclaw.community.core.bot_startup_script
   - agentclaw.community.core.bot_config_manifest
   - agentclaw.community.core.caller_identity
