@@ -134,6 +134,19 @@ class TaskHarness:
             )
         )
 
+    def _on_harness_safely(self, patch: TaskNodePatch) -> None:
+        """Execute one recovery patch without letting one task kill the poll loop."""
+
+        try:
+            res = self._on_harness_fn(patch)
+            if asyncio.iscoroutine(res):
+                asyncio.run(res)
+        except Exception:  # noqa: BLE001 - harness is a daemon independent of main flow
+            logger.exception(
+                "[task][harness] on_harness failed task=%s node=%s",
+                patch.task_id, patch.node_id,
+            )
+
     def _sla_timeout(self, task_id: str, node=None) -> float:
         """读节点 RUNNING SLA。
 
@@ -606,17 +619,11 @@ class TaskHarness:
             for patch in (*failed_resets, *pending_resets):
                 self._dispatched_at.pop((patch.task_id, patch.node_id), None)
         for p in resets:
-            res = self._on_harness_fn(p)
-            if asyncio.iscoroutine(res):
-                asyncio.run(res)
+            self._on_harness_safely(p)
         for p in failed_resets:
-            res = self._on_harness_fn(p)
-            if asyncio.iscoroutine(res):
-                asyncio.run(res)
+            self._on_harness_safely(p)
         for p in pending_resets:
-            res = self._on_harness_fn(p)
-            if asyncio.iscoroutine(res):
-                asyncio.run(res)
+            self._on_harness_safely(p)
         return [*resets, *relay_patches]
 
     def run_poll_loop(self, stop_event: threading.Event | None = None) -> None:
@@ -626,7 +633,10 @@ class TaskHarness:
         if stop_event is None:
             stop_event = threading.Event()
         while not stop_event.is_set():
-            self._poll_once()
+            try:
+                self._poll_once()
+            except Exception:  # noqa: BLE001 - daemon must survive one bad cycle
+                logger.exception("[task][harness] poll cycle failed")
             self._sleep(self._interval)
 
     def _static_fallback_delay(self, task_id: str) -> float:

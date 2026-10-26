@@ -609,7 +609,44 @@ class TestDoesNotWriteHung:
         assert resets[0].status == Status.PENDING  # 复位 PENDING,不写 HUNG
 
 
+class TestOnHarnessSafely:
+    def test_isolates_each_patch(self, svc, graph):
+        class _FailOnceRecorder(Recorder):
+            def __call__(self, patch):
+                self.patches.append(patch)
+                if len(self.patches) == 1:
+                    raise RuntimeError("first patch failed")
+
+        rec = _FailOnceRecorder()
+        h = TaskHarness(
+            svc, rec, clock=_Clock(0.0), default_sla_timeout=1, interval=0,
+        )
+
+        h._on_harness_safely(_patch("t1", "c1"))
+        h._on_harness_safely(_patch("t1", "c2"))
+
+        assert [p.node_id for p in rec.patches] == ["c1", "c2"]
+
+
 class TestRunPollLoop:
+    def test_poll_once_exception_does_not_kill_daemon(self, svc, graph):
+        calls = {"n": 0}
+        stop = threading.Event()
+        h = TaskHarness(svc, Recorder(), clock=_Clock(0.0), interval=0)
+
+        def fake_poll_once():
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("poll cycle failed")
+            if calls["n"] >= 2:
+                stop.set()
+
+        h._poll_once = fake_poll_once
+        h._sleep = lambda dt: None
+
+        h.run_poll_loop(stop)
+        assert calls["n"] == 2
+
     def test_stops_on_event(self, svc, graph):
         calls = {"n": 0}
 
