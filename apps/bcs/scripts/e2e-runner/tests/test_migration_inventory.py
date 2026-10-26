@@ -12,11 +12,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from bcs_e2e.cli import plan
 from bcs_e2e.inventory import current_manifest
+from bcs_e2e.local_caller_execution_contract import caller_execution_source_binding
 from bcs_e2e.local_operator_cli_contract import (
     collaboration_team_source_binding,
     custom_collaboration_source_binding,
     sessions_services_source_binding,
 )
+from bcs_e2e.local_story_commands import CASES
 from bcs_e2e.migration_inventory import SOURCES, migration_plan, validate_contract
 from bcs_e2e.profile import load
 from bcs_e2e.run_state import RunStateError
@@ -348,3 +350,54 @@ class MigrationInventoryTests(unittest.TestCase):
         next(s for s in manifest['legacy_inventory'] if s['id'] == 'story_session_file_workspace')['migration_status'] = 'MIGRATED'
         with patch('bcs_e2e.inventory.current_manifest', return_value=manifest), self.assertRaises(RunStateError):
             migration_plan()
+
+    def test_caller_execution_is_one_independent_local_slice_with_no_release_credit(self):
+        result = migration_plan()
+        self.assertEqual(len(result['local_registered_executors']), 29)
+        slices = result['local_independent_slices']
+        self.assertEqual(len(slices), 1)
+        row = slices[0]
+        self.assertEqual(row['suite'], 'owned-local-caller-execution-v1')
+        self.assertEqual(row['case_id'], 'LOCAL-CALLER-EXEC-01')
+        self.assertEqual(row['case_version'], 1)
+        self.assertEqual(row['legacy_id'], 'caller_execution_story')
+        self.assertEqual(row['status'], 'LOCAL_EXECUTOR_ONLY')
+        self.assertEqual(row['required_assertion_count'], 9)
+        self.assertEqual(row['requirement_ids'], [
+            'LOCAL-CALLER-EXEC.provider-bot-binding', 'LOCAL-CALLER-EXEC.binding-mode-guard',
+            'LOCAL-CALLER-EXEC.ingress-rejection', 'LOCAL-CALLER-EXEC.queue-pause',
+            'LOCAL-CALLER-EXEC.caller-context-token', 'LOCAL-CALLER-EXEC.downgrade-no-inherit',
+            'LOCAL-CALLER-EXEC.sse-token', 'LOCAL-CALLER-EXEC.cache-loss-fail-closed',
+            'LOCAL-CALLER-EXEC.token-redaction'])
+        self.assertEqual(row['canonical_reporting'], 'LOCAL_RUNTIME_BLACKBOX')
+        self.assertEqual(row['execution_command'], 'local-caller-execution-run')
+        self.assertEqual(row['report_command'], 'local-caller-execution-report')
+        self.assertEqual(row['required_parameters'], ['binary', 'binary_sha256', 'state_dir',
+                                                      'run_id', 'confirm_run_id',
+                                                      'allow_local_processes',
+                                                      'allow_fixture_write', 'allow_write'])
+        self.assertEqual(row['binary_kind'], 'bcs-caller-e2e-test-utils')
+        self.assertEqual(row['auto_build'], False)
+        self.assertEqual(row['environment'], {'local': 'LOCAL_EXECUTOR_ONLY',
+                                              'preprod': 'REMOTE_UNSUPPORTED'})
+        self.assertEqual(row['release_parent_denominator'], False)
+        self.assertEqual(row['independent_slice'], True)
+        self.assertEqual(row['remote_validation'], 'NOT_RUN')
+        self.assertEqual(row['grants_release_credit'], False)
+        self.assertEqual(row['source_map'], 'caller-execution-migration-contract.json')
+        self.assertEqual(set(row), {'suite', 'case_id', 'case_version', 'legacy_id', 'status',
+                                    'required_assertion_count', 'requirement_ids',
+                                    'canonical_reporting', 'execution_command', 'report_command',
+                                    'required_parameters', 'binary_kind', 'auto_build',
+                                    'environment', 'release_parent_denominator',
+                                    'independent_slice', 'remote_validation',
+                                    'grants_release_credit', 'source_map'})
+        # The slice never joins the 29-case release coverage registry.
+        self.assertNotIn('LOCAL-CALLER-EXEC-01', {case.case_id for case in CASES})
+        for suite in ('preprod-pilot-v1', 'owned-local-trusted-team-v1'):
+            manifest = current_manifest(suite)
+            self.assertNotIn('caller_execution_story',
+                             {entry['id'] for entry in manifest['legacy_inventory']})
+            self.assertNotIn('LOCAL-CALLER-EXEC-01',
+                             {case['id'] for case in manifest['cases']})
+        self.assertEqual(caller_execution_source_binding()['parent'], 'caller_execution_story')

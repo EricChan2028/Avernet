@@ -3470,3 +3470,44 @@ closing the sandbox. Clearing references is not secure memory erasure.
 Fixture tests verify these mechanisms, **not yet** the real BCS one-second
 callback/Judge/continuation chain. That acceptance belongs to the complete Story
 integration, not repeated prerequisite smoke runs.
+
+### Complete owned-local Caller execution Story
+
+The upstream caller-execution Story
+(`apps/bcs/scripts/e2e-test/caller_execution_story.py`, dev
+`74dd751b623b7701608374fc4c7c4a6cf58278da`) is a self-contained Python script: it owns
+its mocked Provider, the instrumented test-utils BCS process, that process' SQLite store
+and the cache-loss restart. The runner treats it as one black-box child process instead
+of porting its code, and freezes the script plus its coverage wrapper before any
+executor exists.
+
+Build the frozen test-utils binary explicitly (auto-build is disabled for this slice):
+
+```bash
+cd apps/bcs && cargo build -p bcs --features test-utils --bin bcs-caller-e2e
+sha256sum target/debug/bcs-caller-e2e
+```
+
+Then run and report:
+
+```bash
+python3 runner.py local-caller-execution-run \
+  --binary "$CALLER_E2E_UTILS" --binary-sha256 "$CALLER_E2E_UTILS_SHA256" \
+  --state-dir "$FRESH_RUN_DIR" --run-id "$RUN_ID" --confirm-run-id "$RUN_ID" \
+  --allow-local-processes --allow-fixture-write --allow-write
+
+python3 runner.py local-caller-execution-report --state-dir "$FRESH_RUN_DIR"
+```
+
+The run freezes permissions, state directory and binary SHA256 before any process
+starts, rejects symlinked or non-fresh state directories, redacts token-bearing child
+streams out of every evidence file, parses the three Story markers in strict order, and
+requires all 9 obligations and the observed HTTP assertion count. The child writes one
+shared receipt; RUN and REPORT never rewrite the original evidence, and offline rendering
+outside the state directory is rejected.
+
+This is an independent local-only slice: `release_parent_denominator=false`,
+`independent_slice=true`, `remote_validation=NOT_RUN`, `grants_release_credit=false`,
+evidence granularity `SHARED_CHILD_RECEIPT`. It is not part of the 29-case coverage
+registry, it does not touch the pilot inventory or trusted-team manifest, and it starts
+no OpenClaw/engine-adapter process of its own.

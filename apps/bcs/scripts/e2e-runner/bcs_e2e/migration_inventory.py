@@ -280,6 +280,21 @@ def migration_plan() -> dict:
     edge_friend_mutation_plans = {case_id: edge_friend_mutation_case_plan(case_id)
                                   for case_id in EDGE_FRIEND_MUTATION_CASE_IDS}
     edge_search_plan = edge_search_case_plan()
+    from .local_caller_execution_contract import (CASE_ID as CALLER_CASE, REQUIREMENTS as CALLER_REQUIREMENTS,
+                                                   SUITE as CALLER_SUITE, caller_execution_source_binding)
+    caller_execution = caller_execution_source_binding()
+    caller_execution_slice = {'suite': CALLER_SUITE, 'case_id': CALLER_CASE, 'case_version': 1,
+        'legacy_id': 'caller_execution_story', 'status': 'LOCAL_EXECUTOR_ONLY',
+        'required_assertion_count': 9, 'requirement_ids': list(CALLER_REQUIREMENTS),
+        'canonical_reporting': 'LOCAL_RUNTIME_BLACKBOX',
+        'execution_command': 'local-caller-execution-run', 'report_command': 'local-caller-execution-report',
+        'required_parameters': ['binary', 'binary_sha256', 'state_dir', 'run_id', 'confirm_run_id',
+                                'allow_local_processes', 'allow_fixture_write', 'allow_write'],
+        'binary_kind': 'bcs-caller-e2e-test-utils', 'auto_build': False,
+        'environment': {'local': 'LOCAL_EXECUTOR_ONLY', 'preprod': 'REMOTE_UNSUPPORTED'},
+        'release_parent_denominator': False, 'independent_slice': True,
+        'remote_validation': 'NOT_RUN', 'grants_release_credit': False,
+        'source_map': 'caller-execution-migration-contract.json'}
     admission = admission_source_binding()
     friend_requests = friend_requests_list_source_binding()
     friend_connections = friend_connections_list_source_binding()
@@ -518,4 +533,5 @@ def migration_plan() -> dict:
                                    'status': row.status, 'blocker': row.blocker}
                                    for row in fixed_loop_rewrite.environments],
                 'ready_to_execute': False,
-                'grants_release_credit': False}]}
+                'grants_release_credit': False}],
+            'local_independent_slices': [caller_execution_slice]}

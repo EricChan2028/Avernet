@@ -79,7 +79,10 @@ def disk_digest() -> str:
     # The dual Group Context product-CLI story adds one focused Case contract,
     # one remote Adapter and one command Run lifecycle, so the allowance grows
     # by exactly those three files.
-    if len(paths) > 295:
+    # The owned-local caller-execution black-box slice adds its focused source
+    # binding contract, run lifecycle and offline report projection modules, so
+    # the focused-module allowance grows by exactly those three files.
+    if len(paths) > 298:
         raise ValueError('executor artifact exceeds its source-file budget')
     digest = hashlib.sha256()
     for path in paths:

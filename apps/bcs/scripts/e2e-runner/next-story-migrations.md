@@ -3915,3 +3915,36 @@ and strict OpenSpec validation passed. The full runner discovery run completed
 `test_local_judge_sandbox` thread-liveness assertion; that focused test passed
 on immediate isolated rerun. No real Singlebox or preprod request was executed
 during this command-lifecycle increment.
+
+## 2026-10-26 increment — owned-local caller-execution black-box slice
+
+- Contract freeze: upstream dev `74dd751b623b7701608374fc4c7c4a6cf58278da`; story SHA256
+  `7d7f565b0b9c6e2d72c1ba4df452027e8af47e0400decb981703d9d10d893945`; coverage wrapper
+  SHA256 `4e4ee24551eca8f0b29a879802f57f8378f0e23f52530694c0dd9e151c6b4cf3`. Per-obligation
+  anchors, the 3 strict markers and the 9 `LOCAL-CALLER-EXEC.*` obligations are frozen in
+  `caller-execution-migration-contract.json` (case `LOCAL-CALLER-EXEC-01`, suite
+  `owned-local-caller-execution-v1`, parent `caller_execution_story`).
+- Runner wiring: new commands `local-caller-execution-run` / `local-caller-execution-report`;
+  new modules `local_caller_execution_run.py` (admission freeze, binding, SIGTERM deadline,
+  stream redaction gate, strict marker order, shared child receipt, drift fence, publication
+  status gate), `local_caller_execution_reporting.py` (offline projection) and
+  `local_caller_execution_contract.py` (source binding); `migration_inventory.py` exposes the
+  slice under `local_independent_slices` (1 row, 19 fields) while `local_registered_executors`
+  stays 29; `artifact.py` focused-module budget grows 295→298.
+- Wiring regression caught by full discovery: the dispatch insertion had accidentally
+  replaced the `local-file-run` elif branch (UnboundLocalError on file admission); the branch
+  was restored verbatim from HEAD and `tests.test_local_file_story` passes 14/14 afterwards.
+- Validation: focused suites caller-execution 16/16, story-commands 17/17,
+  migration-inventory 19/19, coverage-suite 24/24, file-story 14/14 all OK; `py_compile` and
+  `compileall` clean; full e2e-runner discovery `Ran 2802 tests ... OK (skipped=225)`.
+  Intermediate discovery runs also surfaced the wiring regression above plus the known
+  load-dependent judge-sandbox timing flake (`test_scripted_outcomes_are_consumed_in_order`;
+  passes isolated: module 17/17 OK, single test OK); after the dispatch fix the
+  authoritative discovery rerun is fully green.
+- Boundary: independent local-only slice — outside the 29-case release denominator, the case
+  registry and both pilot manifests; `remote_validation=NOT_RUN`, `grants_release_credit=false`,
+  binary `auto_build=false` (`cargo build -p bcs --features test-utils --bin bcs-caller-e2e`
+  runs explicitly by the owner). No live Singlebox or preprod request was made for this
+  slice. The orphaned OpenClaw/engine-adapter uvicorn processes found in this environment
+  were unrelated fixture leakage from earlier runs (killed); this slice's child launch is
+  session-scoped with kill-group teardown.

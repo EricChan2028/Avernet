@@ -59,6 +59,8 @@ LOCAL_STORY_COMMANDS = frozenset({
     'local-workspace-report',
     'local-file-run',
     'local-file-report',
+    'local-caller-execution-run',
+    'local-caller-execution-report',
 })
 
 
@@ -267,6 +269,18 @@ def register_local_story_commands(commands) -> None:
     file_report = commands.add_parser('local-file-report', help='Render bound local CLI File evidence offline')
     file_report.add_argument('--state-dir', type=Path, required=True)
     file_report.add_argument('--output-dir', type=Path)
+
+    # Independent local-only slice; intentionally outside the 29-case coverage registry.
+    caller_run = commands.add_parser('local-caller-execution-run', help='Run the complete owned-local caller-execution Story as one black-box child')
+    for name in ('binary', 'state-dir'):
+        caller_run.add_argument('--' + name, type=Path, required=True)
+    for name in ('binary-sha256', 'run-id', 'confirm-run-id'):
+        caller_run.add_argument('--' + name, required=True)
+    for name in ('allow-local-processes', 'allow-fixture-write', 'allow-write'):
+        caller_run.add_argument('--' + name, action='store_true')
+    caller_report = commands.add_parser('local-caller-execution-report', help='Verify frozen owned-local caller-execution evidence offline')
+    caller_report.add_argument('--state-dir', type=Path, required=True)
+    caller_report.add_argument('--output-dir', type=Path)
 
 
 def dispatch_local_story_command(args, *, write_reports: Callable) -> tuple[dict, int]:
@@ -590,6 +604,23 @@ def dispatch_local_story_command(args, *, write_reports: Callable) -> tuple[dict
             allow_local_processes=args.allow_local_processes, allow_fixture_write=args.allow_fixture_write,
             allow_write=args.allow_write)
         rc = 0 if report['status'] == 'LOCAL_SUITE_PASS' else 130 if report['status'] == 'CANCELLED' else 2
+    elif args.command == 'local-caller-execution-run':
+        from .local_caller_execution_run import local_caller_execution_run
+        report = local_caller_execution_run(binary=args.binary, binary_sha256=args.binary_sha256,
+            state_dir=args.state_dir, run_id=args.run_id, confirm_run_id=args.confirm_run_id,
+            allow_local_processes=args.allow_local_processes, allow_fixture_write=args.allow_fixture_write,
+            allow_write=args.allow_write)
+        rc = 0 if report['status'] == 'LOCAL_CALLER_EXECUTION_PASS' else 130 if report['status'] == 'CANCELLED' else 2
+    elif args.command == 'local-caller-execution-report':
+        from .local_caller_execution_reporting import build_caller_execution_report
+        summary = build_caller_execution_report(args.state_dir)
+        if args.output_dir is not None:
+            source_root, destination = args.state_dir.resolve(), args.output_dir.resolve()
+            if destination == source_root or source_root in destination.parents:
+                raise RunStateError('Offline Caller execution rendering cannot overwrite original evidence')
+        outputs = write_reports(summary, args.output_dir, {'all'}) if args.output_dir is not None else {}
+        report = {'status': summary['status'], 'summary': summary, 'outputs': outputs, 'ready_to_execute': False}
+        rc = 0 if summary['status'] == 'LOCAL_SUITE_PASS' else 130 if summary['status'] == 'CANCELLED' else 2
     return report, rc
 
 
