@@ -88,8 +88,11 @@ def disk_digest() -> str:
     # The owned-local Result-queue black-box slice adds its focused source
     # binding contract and the later run/report projection modules, so the
     # focused-module allowance grows by exactly those three files in advance.
+    # The owned-local Nested fixed-loop black-box slice adds its focused source
+    # binding contract and its run/report projection modules, so the allowance
+    # grows by exactly those three files in advance.
     # The enforced count keeps runner.py alongside the focused modules.
-    if len(paths) > 304:
+    if len(paths) > 307:
         raise ValueError('executor artifact exceeds its source-file budget')
     digest = hashlib.sha256()
     for path in paths:
