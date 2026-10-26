@@ -283,6 +283,9 @@ def migration_plan() -> dict:
     from .local_caller_execution_contract import (CASE_ID as CALLER_CASE, REQUIREMENTS as CALLER_REQUIREMENTS,
                                                    SUITE as CALLER_SUITE, caller_execution_source_binding)
     caller_execution = caller_execution_source_binding()
+    from .local_draft_group_contract import (CASE_ID as DRAFT_CASE_ID, REQUIREMENTS as DRAFT_REQUIREMENTS,
+                                               SUITE as DRAFT_SUITE, draft_group_source_binding)
+    draft_group = draft_group_source_binding()
     caller_execution_slice = {'suite': CALLER_SUITE, 'case_id': CALLER_CASE, 'case_version': 1,
         'legacy_id': 'caller_execution_story', 'status': 'LOCAL_EXECUTOR_ONLY',
         'required_assertion_count': 9, 'requirement_ids': list(CALLER_REQUIREMENTS),
@@ -295,6 +298,18 @@ def migration_plan() -> dict:
         'release_parent_denominator': False, 'independent_slice': True,
         'remote_validation': 'NOT_RUN', 'grants_release_credit': False,
         'source_map': 'caller-execution-migration-contract.json'}
+    draft_group_slice = {'suite': DRAFT_SUITE, 'case_id': DRAFT_CASE_ID, 'case_version': 1,
+        'legacy_id': 'collaboration_draft_group_story', 'status': 'LOCAL_EXECUTOR_ONLY',
+        'required_assertion_count': 17, 'requirement_ids': list(DRAFT_REQUIREMENTS),
+        'canonical_reporting': 'LOCAL_RUNTIME_BLACKBOX',
+        'execution_command': 'local-draft-group-run', 'report_command': 'local-draft-group-report',
+        'required_parameters': ['binary', 'binary_sha256', 'state_dir', 'run_id', 'confirm_run_id',
+                                'allow_local_processes', 'allow_fixture_write', 'allow_write'],
+        'binary_kind': 'bcs', 'auto_build': False,
+        'environment': {'local': 'LOCAL_EXECUTOR_ONLY', 'preprod': 'REMOTE_UNSUPPORTED'},
+        'release_parent_denominator': False, 'independent_slice': True,
+        'remote_validation': 'NOT_RUN', 'grants_release_credit': False,
+        'source_map': 'draft-group-migration-contract.json'}
     admission = admission_source_binding()
     friend_requests = friend_requests_list_source_binding()
     friend_connections = friend_connections_list_source_binding()
@@ -534,4 +549,4 @@ def migration_plan() -> dict:
                                    for row in fixed_loop_rewrite.environments],
                 'ready_to_execute': False,
                 'grants_release_credit': False}],
-            'local_independent_slices': [caller_execution_slice]}
+            'local_independent_slices': [caller_execution_slice, draft_group_slice]}

@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 from bcs_e2e.cli import plan
 from bcs_e2e.inventory import current_manifest
 from bcs_e2e.local_caller_execution_contract import caller_execution_source_binding
+from bcs_e2e.local_draft_group_contract import draft_group_source_binding
 from bcs_e2e.local_operator_cli_contract import (
     collaboration_team_source_binding,
     custom_collaboration_source_binding,
@@ -355,7 +356,7 @@ class MigrationInventoryTests(unittest.TestCase):
         result = migration_plan()
         self.assertEqual(len(result['local_registered_executors']), 29)
         slices = result['local_independent_slices']
-        self.assertEqual(len(slices), 1)
+        self.assertEqual(len(slices), 2)
         row = slices[0]
         self.assertEqual(row['suite'], 'owned-local-caller-execution-v1')
         self.assertEqual(row['case_id'], 'LOCAL-CALLER-EXEC-01')
@@ -401,3 +402,64 @@ class MigrationInventoryTests(unittest.TestCase):
             self.assertNotIn('LOCAL-CALLER-EXEC-01',
                              {case['id'] for case in manifest['cases']})
         self.assertEqual(caller_execution_source_binding()['parent'], 'caller_execution_story')
+
+    def test_draft_group_is_the_second_independent_local_slice_with_no_release_credit(self):
+        result = migration_plan()
+        self.assertEqual(len(result['local_independent_slices']), 2)
+        row = result['local_independent_slices'][1]
+        self.assertEqual(row['suite'], 'owned-local-draft-group-v1')
+        self.assertEqual(row['case_id'], 'LOCAL-DRAFT-GROUP-01')
+        self.assertEqual(row['case_version'], 1)
+        self.assertEqual(row['legacy_id'], 'collaboration_draft_group_story')
+        self.assertEqual(row['status'], 'LOCAL_EXECUTOR_ONLY')
+        self.assertEqual(row['required_assertion_count'], 17)
+        self.assertEqual(row['requirement_ids'], [
+            'LOCAL-DRAFT-GROUP.human-registration',
+            'LOCAL-DRAFT-GROUP.provider-collaborator-friendship',
+            'LOCAL-DRAFT-GROUP.immutable-source-upload',
+            'LOCAL-DRAFT-GROUP.share-reference-issuance',
+            'LOCAL-DRAFT-GROUP.v1-preview-byte-fidelity',
+            'LOCAL-DRAFT-GROUP.shared-validation-binding',
+            'LOCAL-DRAFT-GROUP.grant-negative-matrix',
+            'LOCAL-DRAFT-GROUP.revision-input-guards',
+            'LOCAL-DRAFT-GROUP.browser-identity-chain',
+            'LOCAL-DRAFT-GROUP.originator-selection',
+            'LOCAL-DRAFT-GROUP.group-launch-input',
+            'LOCAL-DRAFT-GROUP.browser-context-submission-guards',
+            'LOCAL-DRAFT-GROUP.impersonation-rejection',
+            'LOCAL-DRAFT-GROUP.group-launch-binding',
+            'LOCAL-DRAFT-GROUP.draft-immutability',
+            'LOCAL-DRAFT-GROUP.share-revocation',
+            'LOCAL-DRAFT-GROUP.cleanup-disposition'])
+        self.assertEqual(row['canonical_reporting'], 'LOCAL_RUNTIME_BLACKBOX')
+        self.assertEqual(row['execution_command'], 'local-draft-group-run')
+        self.assertEqual(row['report_command'], 'local-draft-group-report')
+        self.assertEqual(row['required_parameters'], ['binary', 'binary_sha256', 'state_dir',
+                                                      'run_id', 'confirm_run_id',
+                                                      'allow_local_processes',
+                                                      'allow_fixture_write', 'allow_write'])
+        self.assertEqual(row['binary_kind'], 'bcs')
+        self.assertEqual(row['auto_build'], False)
+        self.assertEqual(row['environment'], {'local': 'LOCAL_EXECUTOR_ONLY',
+                                              'preprod': 'REMOTE_UNSUPPORTED'})
+        self.assertEqual(row['release_parent_denominator'], False)
+        self.assertEqual(row['independent_slice'], True)
+        self.assertEqual(row['remote_validation'], 'NOT_RUN')
+        self.assertEqual(row['grants_release_credit'], False)
+        self.assertEqual(row['source_map'], 'draft-group-migration-contract.json')
+        self.assertEqual(set(row), {'suite', 'case_id', 'case_version', 'legacy_id', 'status',
+                                    'required_assertion_count', 'requirement_ids',
+                                    'canonical_reporting', 'execution_command', 'report_command',
+                                    'required_parameters', 'binary_kind', 'auto_build',
+                                    'environment', 'release_parent_denominator',
+                                    'independent_slice', 'remote_validation',
+                                    'grants_release_credit', 'source_map'})
+        # The slice never joins the 29-case release coverage registry.
+        self.assertNotIn('LOCAL-DRAFT-GROUP-01', {case.case_id for case in CASES})
+        for suite in ('preprod-pilot-v1', 'owned-local-trusted-team-v1'):
+            manifest = current_manifest(suite)
+            self.assertNotIn('collaboration_draft_group_story',
+                             {entry['id'] for entry in manifest['legacy_inventory']})
+            self.assertNotIn('LOCAL-DRAFT-GROUP-01',
+                             {case['id'] for case in manifest['cases']})
+        self.assertEqual(draft_group_source_binding()['parent'], 'collaboration_draft_group_story')

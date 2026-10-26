@@ -3948,3 +3948,43 @@ during this command-lifecycle increment.
   slice. The orphaned OpenClaw/engine-adapter uvicorn processes found in this environment
   were unrelated fixture leakage from earlier runs (killed); this slice's child launch is
   session-scoped with kill-group teardown.
+
+## 2026-10-26 increment — owned-local Draft group run lifecycle and reporting (2/3)
+
+- New commands `local-draft-group-run` / `local-draft-group-report` execute the complete
+  upstream Draft group Story as black-box children beside one owned BCS runtime.
+  `bcs_e2e/local_draft_group_run.py` freezes permissions, the fresh non-symlink state
+  directory, the 34-story independence fence, the 17-obligation `LOCAL-DRAFT-GROUP-01`
+  binding (Human `39464`, suite `owned-local-draft-group-v1`) and the BCS binary SHA256
+  before the frozen Provider/Judge mock child starts on an ephemeral port with a
+  ready-file handshake; the binary remains owner-built with `BCS_E2E_TEST_BINARY`
+  (`auto_build=false`).
+- The requirement proof has no ambient route: the strict Judge never starts, the Story
+  child has a 900-second deadline with group-signalling teardown, SIGTERM canonicalises
+  to CANCELLED, all four child streams pass the bot-token / provider-admin-token / Bearer
+  redaction gate before bounded logs land, and the single marker must prove live HTTP
+  assertions including cleanup. Success additionally requires zero observed provider and
+  event-webhook requests, an unchanged executor digest / binding / binary, and owned
+  runtime disposition STOPPED with returncode 0.
+- `bcs_e2e/local_draft_group_reporting.py` is the offline projection: 10 sources, three
+  outputs, completion marker `owned-local-draft-group-completion-v1` and 17 required
+  assertions; tampering the case, traffic evidence, runtime disposition or a missing child
+ receipt produces BLOCKED, and offline rendering inside the state directory is rejected.
+  The friend-auth-sync / work-order count surfaces stay disclosed as not independently
+  observable instead of being invented.
+- Wiring: `migration_inventory.py` exposes a second `local_independent_slices` row
+  (`draft_group_slice`, legacy id `collaboration_draft_group_story`, 19 fields) while the
+  29-executor release registry is unchanged; the runner CLI registers 44 local-story
+  commands; `artifact.py` focused-module budget grows 300→301.
+- Handoff-blocking test repair: normalize state-path expectations with `Path.resolve()`
+  (macOS `/var` → `/private/var`), add the missing `story_seam(stderr=...)` seam, fix the
+  wrapped `story` overrides, and reference the tamper class' own mock launcher. After the
+  repair the new suite is fully green (22 pytest cases plus 11 subtests).
+- Validation: focused `test_local_draft_group_run`, `test_local_draft_group_contract`,
+  `test_local_story_commands`, `test_migration_inventory` and `test_inventory` combined
+  passed 57 cases plus 114 subtests; `compileall` clean. Full e2e-runner discovery:
+  `Ran 2836 tests in 264.028s ... FAILED (failures=1, skipped=225)`; the single failure was
+  the known load-dependent `test_local_judge_sandbox` thread-liveness flake, which passes
+  isolated immediately afterwards (`17 passed, 9 subtests passed`). No live Singlebox or
+  preprod request was executed for this increment; the slice starts no OpenClaw or
+  engine-adapter process of its own.

@@ -63,6 +63,8 @@ COMMAND_ORDER = (
     'local-file-report',
     'local-caller-execution-run',
     'local-caller-execution-report',
+    'local-draft-group-run',
+    'local-draft-group-report',
 )
 
 
@@ -149,6 +151,27 @@ class LocalStoryParserTests(unittest.TestCase):
             ['local-caller-execution-report', '--state-dir', '/state'])
         self.assertEqual(vars(report), {
             'command': 'local-caller-execution-report',
+            'state_dir': Path('/state'),
+            'output_dir': None,
+        })
+
+    def test_draft_group_namespaces_require_no_cli_binary(self):
+        run = parser()[0].parse_args(run_arguments('local-draft-group-run'))
+        self.assertEqual(vars(run), {
+            'command': 'local-draft-group-run',
+            'binary': Path('/bcs'),
+            'binary_sha256': 'bcs-sha',
+            'state_dir': Path('/state'),
+            'run_id': 'run-1',
+            'confirm_run_id': 'run-1',
+            'allow_local_processes': False,
+            'allow_fixture_write': False,
+            'allow_write': False,
+        })
+        report = parser()[0].parse_args(
+            ['local-draft-group-report', '--state-dir', '/state'])
+        self.assertEqual(vars(report), {
+            'command': 'local-draft-group-report',
             'state_dir': Path('/state'),
             'output_dir': None,
         })
@@ -344,6 +367,23 @@ class LocalStoryDispatchTests(unittest.TestCase):
             self.assertEqual((report, rc), ({'status': status}, expected_rc))
             execute.assert_called_once_with(**expected)
 
+    def test_draft_group_kwargs_and_pass_blocked_cancelled_return_codes(self):
+        args = self.parse(run_arguments(
+            'local-draft-group-run', '--allow-local-processes',
+            '--allow-fixture-write', '--allow-write'))
+        expected = dict(
+            binary=Path('/bcs'), binary_sha256='bcs-sha',
+            state_dir=Path('/state'), run_id='run-1', confirm_run_id='run-1',
+            allow_local_processes=True, allow_fixture_write=True, allow_write=True)
+        for status, expected_rc in (
+                ('LOCAL_DRAFT_GROUP_PASS', 0), ('BLOCKED', 2), ('CANCELLED', 130)):
+            with self.subTest(status=status), patch(
+                    'bcs_e2e.local_draft_group_run.local_draft_group_run',
+                    return_value={'status': status}) as execute:
+                report, rc = dispatch_local_story_command(args, write_reports=Mock())
+            self.assertEqual((report, rc), ({'status': status}, expected_rc))
+            execute.assert_called_once_with(**expected)
+
     def test_caller_execution_report_renders_only_outside_original_evidence(self):
         args = self.parse(['local-caller-execution-report', '--state-dir', '/state',
                            '--output-dir', '/out/reports'])
@@ -365,6 +405,29 @@ class LocalStoryDispatchTests(unittest.TestCase):
                    return_value={'status': 'LOCAL_SUITE_PASS'}), self.assertRaisesRegex(
                        RunStateError,
                        'Offline Caller execution rendering cannot overwrite original evidence'):
+            dispatch_local_story_command(guard, write_reports=Mock())
+
+    def test_draft_group_report_renders_only_outside_original_evidence(self):
+        args = self.parse(['local-draft-group-report', '--state-dir', '/state',
+                           '--output-dir', '/out/reports'])
+        with patch('bcs_e2e.local_draft_group_reporting.build_draft_group_report',
+                   return_value={'status': 'LOCAL_SUITE_PASS'}) as build:
+            writes = Mock()
+            report, rc = dispatch_local_story_command(args, write_reports=writes)
+        self.assertEqual(report, {
+            'status': 'LOCAL_SUITE_PASS', 'summary': build.return_value,
+            'outputs': writes.return_value, 'ready_to_execute': False,
+        })
+        self.assertEqual(rc, 0)
+        build.assert_called_once_with(args.state_dir)
+        writes.assert_called_once_with(build.return_value, args.output_dir, {'all'})
+
+        guard = self.parse(['local-draft-group-report', '--state-dir', '/state',
+                            '--output-dir', '/state/reports'])
+        with patch('bcs_e2e.local_draft_group_reporting.build_draft_group_report',
+                   return_value={'status': 'LOCAL_SUITE_PASS'}), self.assertRaisesRegex(
+                       RunStateError,
+                       'Offline Draft group rendering cannot overwrite original evidence'):
             dispatch_local_story_command(guard, write_reports=Mock())
 
     def test_main_skips_profile_and_passes_cli_writer_explicitly(self):

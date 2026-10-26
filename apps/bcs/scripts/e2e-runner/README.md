@@ -3511,3 +3511,51 @@ This is an independent local-only slice: `release_parent_denominator=false`,
 evidence granularity `SHARED_CHILD_RECEIPT`. It is not part of the 29-case coverage
 registry, it does not touch the pilot inventory or trusted-team manifest, and it starts
 no OpenClaw/engine-adapter process of its own.
+
+### Complete owned-local Draft group Story
+
+The upstream collaboration Draft-group Story
+(`apps/bcs/scripts/e2e-test/collaboration_draft_group_story.py` with the frozen
+`indentation-regression.json` fixture and `http_provider_judge_mock.py`) is
+treated as one black-box child beside a second black-box mock child and one
+owned BCS runtime. The Story registers the local Human principal and a
+disposable author Bot, registers the scripted coverage Provider and its
+driver/reviewer provider Bots, completes friendship, authors an immutable
+Draft revision, shares the V1 preview reference, runs grant and browser guard
+negative matrices, launches the edited collaboration through the browser API,
+asserts persistence and Draft immutability, revokes the share and tears every
+resource down.
+
+The BCS binary stays owner-built and opt-in (`BCS_E2E_TEST_BINARY` /
+`BCS_E2E_TEST_BINARY_SHA256`, `auto_build=false`). Then run and report:
+
+```bash
+python3 runner.py local-draft-group-run \
+  --binary "$BCS_E2E_TEST_BINARY" --binary-sha256 "$BCS_E2E_TEST_BINARY_SHA256" \
+  --state-dir "$FRESH_RUN_DIR" --run-id "$RUN_ID" --confirm-run-id "$RUN_ID" \
+  --allow-local-processes --allow-fixture-write --allow-write
+
+python3 runner.py local-draft-group-report --state-dir "$FRESH_RUN_DIR"
+```
+
+The run rejects a state directory that already exists and requires a
+non-symlink parent; the owned runtime creates the directory and the runner
+freezes permissions, the 17-obligation binding (`LOCAL-DRAFT-GROUP-01`,
+suite `owned-local-draft-group-v1`, Human `39464`), the 34-story release
+independence fence and the BCS binary SHA256 before the coverage mock child
+starts. The mock child publishes a ready file on an ephemeral port and the Run
+requires zero observed Provider and event-webhook requests with the strict
+Judge never started; both children are terminated by process group even on
+timeout or SIGTERM (SIGTERM canonicalises to CANCELLED). The four child
+streams pass a bot-token/provider-admin-token/Bearer redaction gate before any
+bounded log or receipt is written, the single Story marker must prove live
+HTTP assertions including cleanup, and the binding, binary, executor digest
+and every evidence file stay under the drift fence. RUN and REPORT never
+rewrite original evidence and offline rendering inside the state directory is
+rejected.
+
+This is an independent local-only slice: `release_parent_denominator=false`,
+`independent_slice=true`, `remote_validation=NOT_RUN`,
+`grants_release_credit=false`; it is outside the 29-case coverage registry and
+both pilot manifests, and it starts no OpenClaw or engine-adapter process of
+its own.
