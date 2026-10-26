@@ -75,7 +75,7 @@ function buildParams(userId: string, ownerId?: string, stage?: 'draft' | 'verify
   return {
     user_id: resolveUserId(userId),
     ...(ownerId ? { owner_id: ownerId } : {}),
-    stage: stage ?? 'online',
+    ...(stage ? { stage } : {}),
   };
 }
 
@@ -169,9 +169,10 @@ export const botSessionFileService = {
     sessionId: string,
     userId: string,
     ownerId?: string,
+    stage?: BotRequestParams['stage'],
   ): Promise<DomainResult<BotSessionFileListResult>> {
     try {
-      const data = await listReadyApi(botId, sessionId, buildParams(userId, ownerId));
+      const data = await listReadyApi(botId, sessionId, buildParams(userId, ownerId, stage));
       const items = (data.files ?? []).map(mapView);
       return { ok: true, data: { items, total: items.length } };
     } catch (err) {
@@ -187,8 +188,9 @@ export const botSessionFileService = {
     userId: string,
     ownerId?: string,
     disposition?: 'inline' | 'attachment',
+    stage?: BotRequestParams['stage'],
   ): string {
-    const path = buildBotSessionFileContentUrl(botId, sessionId, resourceId, buildParams(userId, ownerId), disposition);
+    const path = buildBotSessionFileContentUrl(botId, sessionId, resourceId, buildParams(userId, ownerId, stage), disposition);
     const origin = resolveGroupGatewayOrigin();
     return origin ? `${origin}${path}` : path;
   },
@@ -200,12 +202,13 @@ export const botSessionFileService = {
     resourceId: string,
     userId: string,
     ownerId?: string,
+    stage?: BotRequestParams['stage'],
   ): Promise<string> {
     const contentUrl = buildBotSessionFileContentUrl(
       botId,
       sessionId,
       resourceId,
-      buildParams(userId, ownerId),
+      buildParams(userId, ownerId, stage),
       'attachment',
     );
     return fetchExternalDownloadUrl(contentUrl);
@@ -217,9 +220,10 @@ export const botSessionFileService = {
     resourceId: string,
     userId: string,
     ownerId?: string,
+    stage?: BotRequestParams['stage'],
   ): Promise<DomainResult<boolean>> {
     try {
-      await deleteFile(botId, sessionId, resourceId, buildParams(userId, ownerId));
+      await deleteFile(botId, sessionId, resourceId, buildParams(userId, ownerId, stage));
       return { ok: true, data: true };
     } catch (err) {
       return { ok: false, error: toDomainError(err, '删除失败') };
@@ -233,9 +237,10 @@ export const botSessionFileService = {
     userId: string,
     ownerId?: string,
     disposition?: 'inline' | 'attachment',
+    stage?: BotRequestParams['stage'],
   ): Promise<DomainResult<Blob>> {
     try {
-      const blob = await getContentBlob(botId, sessionId, resourceId, buildParams(userId, ownerId), disposition);
+      const blob = await getContentBlob(botId, sessionId, resourceId, buildParams(userId, ownerId, stage), disposition);
       return { ok: true, data: blob };
     } catch (err) {
       return { ok: false, error: toDomainError(err, '下载失败') };

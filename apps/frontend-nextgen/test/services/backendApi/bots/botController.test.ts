@@ -95,7 +95,7 @@ describe('botController OpenAPI contracts', () => {
     );
   });
 
-  test('engine-version inspection carries the caller, owner, draft stage and selected device', async () => {
+  test('engine-version inspection omits unspecified stage and preserves caller, owner and device', async () => {
     const spy = jest.spyOn(globalThis, 'fetch').mockImplementation(() => response({ comparison: 'older' }));
 
     await getBotEngineVersion('bot-1', {
@@ -105,14 +105,14 @@ describe('botController OpenAPI contracts', () => {
     });
 
     expect(spy).toHaveBeenCalledWith(
-      '/openapi/v1/bots/bot-1/engine-version?user_id=900001&entity_id=owner-1&stage=draft&device_uuid=device-1',
+      '/openapi/v1/bots/bot-1/engine-version?user_id=900001&entity_id=owner-1&device_uuid=device-1',
       expect.objectContaining({ method: 'GET' }),
     );
   });
 
   test('engine status and restart keep the same explicit draft instance identity', async () => {
     const spy = jest.spyOn(globalThis, 'fetch').mockImplementation(() => response({ running: true }));
-    const target = { userId: '900001', ownerId: 'owner-1', deviceUuid: 'device-1' };
+    const target = { userId: '900001', ownerId: 'owner-1', deviceUuid: 'device-1', stage: 'draft' as const };
 
     await getBotEngineStatus('bot-1', target);
     await restartBotEngine('bot-1', target);

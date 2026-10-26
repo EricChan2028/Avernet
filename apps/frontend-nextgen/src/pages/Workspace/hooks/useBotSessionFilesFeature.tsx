@@ -12,7 +12,7 @@ import { useBotSessionFiles } from '@/pages/Workspace/hooks/useBotSessionFiles';
 import { useBotSkills } from '@/pages/Workspace/hooks/useBotSkills';
 import type { BotSessionFileView } from '@/services/workspace/botSessionFileService';
 import { useBotSessionFileStore } from '@/stores/botSessionFileStore';
-import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
+import { resolveChatRuntimeStage, type BotChatSessionView, type ChatBotView } from '@/services/workspace/botSessionService';
 import type { CommandConfig, CommandItem, FileChipConfig, PendingFileChip, SenderRef } from '@tc-chat/ui/es/Sender';
 import { FileIcon, Zap } from 'lucide-react';
 import { useCallback, useMemo, useRef, useState } from 'react';
@@ -46,9 +46,10 @@ export function useBotSessionFilesFeature(
   const botId = bot?.botType === 'desktop' ? null : bot?.realBotId ?? null;
   const sessionId = session?.sessionId ?? null;
   const ownerId = bot?.ownerId;
+  const stage = bot ? resolveChatRuntimeStage(bot) : undefined;
 
-  const files = useBotSessionFiles(botId, sessionId, userId, ownerId);
-  const upload = useBotSessionFileUpload(botId, sessionId, userId, ownerId);
+  const files = useBotSessionFiles(botId, sessionId, userId, ownerId, stage);
+  const upload = useBotSessionFileUpload(botId, sessionId, userId, ownerId, stage);
   const skillsState = useBotSkills(bot, userId);
   // 「通用协作能力」能力集装配：好友 Bot / 不可会话 Bot 为 null（文案区随之隐藏）。
   const capabilitySets = useBotCapabilitySets(bot, userId);
@@ -213,6 +214,7 @@ export function useBotSessionFilesFeature(
             sessionId={sessionId ?? undefined}
             userId={userId ?? undefined}
             ownerId={ownerId}
+            stage={stage}
             onClose={closeFileDrawer}
             onUploadClick={() => setUploadOpen(true)}
             onOpen={() => void files.refresh()}

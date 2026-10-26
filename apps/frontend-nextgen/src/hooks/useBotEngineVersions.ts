@@ -67,7 +67,8 @@ function inspectionTarget(
     botId: target.botId,
     userId: target.userId || '',
     ownerId: target.ownerId,
-    stage: 'draft',
+    // 对话页省略阶段，由后端使用既有默认；工坊保留显式草稿检查。
+    ...(target.permissionSource === 'backend' ? {} : { stage: 'draft' as const }),
     deviceUuid,
     signal,
   };

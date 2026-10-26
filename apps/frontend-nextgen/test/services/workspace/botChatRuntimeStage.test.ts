@@ -5,7 +5,7 @@ jest.mock('@/services/backendApi/bots/privateBotSessionController');
 
 const bot: ChatBotView = {
   botId: 'service:owner', realBotId: 'service', ownerId: 'owner', botType: 'service',
-  displayName: 'Service Bot', online: true, chatable: true, isTeamBot: true,
+  displayName: 'Service Bot', online: true, chatable: true,
 };
 const session = { session_id: 's', title: '验证', model: 'm', agent_id: '', message_count: 0, gmt_create: '', gmt_modified: '' };
 
@@ -25,7 +25,7 @@ beforeEach(() => {
 
 test.each(['draft', 'verify', 'online'] as const)('%s 的所有会话请求选择同一运行环境', async (stage) => {
   const target = { ...bot, runtimeStage: stage };
-  const params = expect.objectContaining({ user_id: 'user', owner_id: 'owner', stage });
+  const params = expect.objectContaining({ user_id: 'user', stage });
   await botSessionService.listSessions(target, 'user');
   await botSessionService.listSessionsPage(target, 'user', 2);
   await botSessionService.createSession(target, 'user');
@@ -55,21 +55,35 @@ test.each(['draft', 'verify', 'online'] as const)('%s 的所有会话请求选�
 });
 
 test.each([
-  { label: 'service', overrides: { botType: 'service' } },
-  { label: 'personal', overrides: { botType: 'personal' } },
-  { label: 'team', overrides: { isTeamBot: true } },
-  { label: 'friend', overrides: { isFriendBot: true } },
-  { label: 'legacy', overrides: { botType: undefined } },
-])('$label Bot 的对话请求默认使用 online', async ({ overrides }) => {
+  { label: '我的服务 Bot', overrides: { botType: 'service' }, stage: 'online' },
+  { label: '我的个人 Bot', overrides: { botType: 'personal' }, stage: undefined },
+  { label: '团队服务 Bot', overrides: { isTeamBot: true }, stage: undefined },
+  { label: '好友服务 Bot', overrides: { isFriendBot: true }, stage: undefined },
+  { label: '未声明类型 Bot', overrides: { botType: undefined }, stage: undefined },
+])('$label 仅在我的服务 Bot 请求中携带 stage', async ({ overrides, stage }) => {
   const target = { ...bot, ...overrides };
-  expect(resolveChatRuntimeStage(target)).toBe('online');
+  expect(resolveChatRuntimeStage(target)).toBe(stage);
   await botSessionService.listSessions(target, 'user');
+  await botSessionService.listSessionsPage(target, 'user');
   await botSessionService.listFavoriteSessionsPage(target, 'user');
   await botSessionService.listModels(target, 'user');
-  const params = expect.objectContaining({ stage: 'online' });
-  expect(ctrl.listBotSessions).toHaveBeenCalledWith('service', params);
-  expect(ctrl.listFavoriteSessions).toHaveBeenCalledWith('service', params);
-  expect(ctrl.listBotModels).toHaveBeenCalledWith('service', params);
+  await botSessionService.createSession(target, 'user');
+  await botSessionService.getSessionDetail(target, 'user', 's');
+  await botSessionService.listMessagesPage(target, 'user', 's');
+  await botSessionService.updateSessionModel(target, 'user', 's', 'new-model');
+  await botSessionService.updateSessionTitle(target, 'user', 's', '新标题');
+  await botSessionService.clearContext(target, 'user', 's');
+  await botSessionService.deleteSession(target, 'user', 's');
+  await botSessionService.toggleFavorite(target, 'user', 's', true);
+  await botSessionService.toggleFavorite(target, 'user', 's', false);
+  for (const method of Object.values(ctrl)) {
+    if (!jest.isMockFunction(method)) continue;
+    for (const args of method.mock.calls) {
+      const params = args.find((arg: unknown) => arg && typeof arg === 'object' && 'user_id' in arg);
+      expect(params).toEqual(expect.objectContaining(stage ? { stage } : {}));
+      expect(Object.prototype.hasOwnProperty.call(params, 'stage')).toBe(stage !== undefined);
+    }
+  }
 });
 
 test('个人 Bot 工坊显式调试阶段不被线上默认值覆盖', async () => {

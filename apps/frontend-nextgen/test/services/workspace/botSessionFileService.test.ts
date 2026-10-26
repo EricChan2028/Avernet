@@ -28,7 +28,7 @@ describe('botSessionFileService.resolveContentUrl', () => {
       'bot-1',
       's1',
       'sr_1',
-      { user_id: '900003', owner_id: '900003', stage: 'online' },
+      { user_id: '900003', owner_id: '900003' },
       'attachment',
     );
     expect(url).toBe('/openapi/v1/bots/bot-1/sessions/s1/files/sr_1/content?x=1');
@@ -105,7 +105,7 @@ describe('botSessionFileService.uploadOne', () => {
     jest.useRealTimers();
   });
 
-  it.each([undefined, 'draft', 'verify', 'online'] as const)('%s 上传阶段贯穿申请、确认和轮询，缺省 online', async (stage) => {
+  it.each([undefined, 'draft', 'verify', 'online'] as const)('%s 上传阶段贯穿申请、确认和轮询，缺省不传 stage', async (stage) => {
     const pending = botSessionFileService.uploadOne('bot-1', 'sess-1', 'user-1', file('a.pdf'), { stage });
     await jest.advanceTimersByTimeAsync(2000);
     const res = await pending;
@@ -118,7 +118,7 @@ describe('botSessionFileService.uploadOne', () => {
       expect.any(ArrayBuffer),
       expect.any(Object),
     );
-    const params = { user_id: 'user-1', stage: stage ?? 'online' };
+    const params = { user_id: 'user-1', ...(stage ? { stage } : {}) };
     expect(mocked.createUploadIntents).toHaveBeenCalledWith('bot-1', 'sess-1', params, expect.any(Object));
     expect(mocked.getMaterializeStatus).toHaveBeenCalledWith('bot-1', 'sess-1', 'sr_1', params);
     expect(mocked.completeUpload).toHaveBeenCalledWith('bot-1', 'sess-1', params, {
@@ -244,11 +244,26 @@ describe('botSessionFileService 列表/删除/下载', () => {
   it('loadReady 将 human_ 前缀的 user_id 归一化为工号', async () => {
     mocked.listReady.mockResolvedValue({ files: [] });
     await botSessionFileService.loadReady('bot-1', 'sess-1', 'human_900003');
-    expect(mocked.listReady).toHaveBeenCalledWith('bot-1', 'sess-1', { user_id: '900003', stage: 'online' });
+    expect(mocked.listReady).toHaveBeenCalledWith('bot-1', 'sess-1', { user_id: '900003' });
   });
   it('remove 成功', async () => {
     mocked.deleteFile.mockResolvedValue({ deleted: true });
     const res = await botSessionFileService.remove('bot-1', 'sess-1', 'sr_1', 'user-1');
     expect(res.ok).toBe(true);
   });
+});
+
+it.each([undefined, 'online'] as const)('%s 文件查询、删除和内容地址按需携带阶段', async (stage) => {
+  mocked.listReady.mockResolvedValue({ files: [] });
+  mocked.deleteFile.mockResolvedValue({ deleted: true });
+  mocked.getContentBlob.mockResolvedValue(new Blob(['file']));
+  const params = { user_id: 'user', owner_id: 'owner', ...(stage ? { stage } : {}) };
+  await botSessionFileService.loadReady('bot', 'session', 'user', 'owner', stage);
+  await botSessionFileService.remove('bot', 'session', 'resource', 'user', 'owner', stage);
+  await botSessionFileService.fetchBlob('bot', 'session', 'resource', 'user', 'owner', 'inline', stage);
+  botSessionFileService.resolveContentUrl('bot', 'session', 'resource', 'user', 'owner', 'attachment', stage);
+  expect(mocked.listReady).toHaveBeenLastCalledWith('bot', 'session', params);
+  expect(mocked.deleteFile).toHaveBeenLastCalledWith('bot', 'session', 'resource', params);
+  expect(mocked.getContentBlob).toHaveBeenLastCalledWith('bot', 'session', 'resource', params, 'inline');
+  expect(mocked.buildBotSessionFileContentUrl).toHaveBeenLastCalledWith('bot', 'session', 'resource', params, 'attachment');
 });

@@ -60,7 +60,7 @@ const bot = {
   displayName: 'B',
   online: true,
   chatable: true,
-  runtimeStage: 'online' as const,
+  botType: 'service',
 };
 
 describe('botChatProvider', () => {
@@ -163,7 +163,7 @@ describe('botChatProvider', () => {
     expect(mockedGetConnection).toHaveBeenCalledWith('b', { user_id: '900003', owner_id: '2088', stage: 'online' });
   });
 
-  it('好友 Bot 的 connection 和 IAM token 使用 online 并携带好友上下文', async () => {
+  it('好友 Bot 的 connection 和 IAM token 省略 stage 并携带好友上下文', async () => {
     mockedGetConnection.mockResolvedValue({
       code: 200000,
       data: { engine: 'openclaw', expires_at: 'x', sockets: [{ kind: 'chat', url: 'wss://gw/ws' }] },
@@ -178,9 +178,8 @@ describe('botChatProvider', () => {
       owner_id: '2088',
       f_user_id: '900003',
       session_id: 'sid-1',
-      stage: 'online',
     });
-    expect(mockedGetIamToken).toHaveBeenCalledWith('b', '900003', '2088', 'online');
+    expect(mockedGetIamToken).toHaveBeenCalledWith('b', '900003', '2088', undefined);
   });
 
   it('request 透传 query + sessionKey,并按需 connect', async () => {
@@ -399,8 +398,8 @@ it('团队连接、IAM 和消息历史使用登录用户与 entity owner，不�
   const provider = createBotChatProvider({ bot: teamBot, userId: 'human_viewer', sessionId: 'team-session' });
   await provider.connect();
   await provider.loadHistory();
-  expect(mockedGetConnection).toHaveBeenCalledWith('shared', { user_id: 'viewer', owner_id: 'team-entity', stage: 'online' });
-  expect(mockedGetIamToken).toHaveBeenCalledWith('shared', 'viewer', 'team-entity', 'online');
+  expect(mockedGetConnection).toHaveBeenCalledWith('shared', { user_id: 'viewer', owner_id: 'team-entity' });
+  expect(mockedGetIamToken).toHaveBeenCalledWith('shared', 'viewer', 'team-entity', undefined);
   expect(botSessionService.botSessionService.listMessagesPage).toHaveBeenCalledWith(
     teamBot,
     'human_viewer',

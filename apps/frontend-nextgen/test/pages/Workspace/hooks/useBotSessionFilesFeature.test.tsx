@@ -95,3 +95,12 @@ it('对话资源面板点击外部收起，入口再次点击不会先关闭又�
   fireEvent.pointerDown(screen.getByText('聊天消息'));
   expect(screen.queryByLabelText('资源管理面板')).not.toBeInTheDocument();
 });
+
+it.each([
+  { botType: 'service', stage: 'online' },
+  { botType: 'personal', stage: undefined },
+])('我的 $botType Bot 的文件和上传使用同一阶段', ({ botType, stage }) => {
+  renderHook(() => useBotSessionFilesFeature({ ...bot, botType }, session, 'human_900003', jest.fn()));
+  expect(mockedUseBotSessionFiles).toHaveBeenLastCalledWith('bot', 'session-1', 'human_900003', '2088', stage);
+  expect(mockedUseBotSessionFileUpload).toHaveBeenLastCalledWith('bot', 'session-1', 'human_900003', '2088', stage);
+});

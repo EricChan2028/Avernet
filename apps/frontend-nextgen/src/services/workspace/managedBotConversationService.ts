@@ -128,12 +128,13 @@ export const managedBotConversationService = {
       return { ok: false, error: INVALID_CONTEXT_ERROR };
     }
     try {
+      const stage = resolveChatRuntimeStage(bot);
       // 身份链路保持既有语义(所有者视角 + 好友 f_user_id);session_key 为原始字符串,空条件省略。
       const response = await listBotSessions(context.realBotId, {
         user_id: context.ownerId,
         owner_id: context.ownerId,
         f_user_id: friendId,
-        stage: resolveChatRuntimeStage(bot),
+        ...(stage ? { stage } : {}),
         page,
         page_size: pageSize,
         ...(sessionKey ? { session_key: sessionKey } : {}),
@@ -176,11 +177,12 @@ export const managedBotConversationService = {
       return { ok: false, error: INVALID_CONTEXT_ERROR };
     }
     try {
+      const stage = resolveChatRuntimeStage(bot);
       const response = await listBotSessionMessages(context.realBotId, sessionId, {
         user_id: context.ownerId,
         owner_id: context.ownerId,
         f_user_id: friendId,
-        stage: resolveChatRuntimeStage(bot),
+        ...(stage ? { stage } : {}),
         page,
         page_size: pageSize,
       });

@@ -30,3 +30,20 @@ describe('iamTokenController OpenAPI contract', () => {
     );
   });
 });
+
+test('Bot IAM Token 未指定阶段时省略 stage 查询参数', async () => {
+  const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+    ok: true,
+    headers: new Headers({ 'content-type': 'application/json' }),
+    json: async () => ({ code: 200000, data: { iam_token: 'bot-token' } }),
+  } as Response);
+  try {
+    await expect(getBotIamToken('bot-1', 'u1', 'owner-1')).resolves.toBe('bot-token');
+    expect(fetch).toHaveBeenCalledWith(
+      '/openapi/v1/bots/bot-1/iam-token?user_id=u1&entity_id=owner-1',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  } finally {
+    fetch.mockRestore();
+  }
+});

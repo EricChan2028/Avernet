@@ -154,7 +154,7 @@ export const botEngineVersionService = {
     const requestTarget: BotEngineRuntimeRequestOptions = {
       userId,
       ownerId,
-      stage: 'draft',
+      ...(target.stage ? { stage: target.stage } : {}),
       deviceUuid: target.deviceUuid,
       signal: target.signal,
     };
@@ -199,7 +199,7 @@ export const botEngineVersionService = {
     const requestTarget: BotEngineRuntimeRequestOptions = {
       userId: target.userId,
       ownerId,
-      stage: 'draft',
+      ...(target.stage ? { stage: target.stage } : {}),
       deviceUuid,
       signal: target.signal,
     };

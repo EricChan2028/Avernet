@@ -31,7 +31,7 @@ afterEach(() => {
 });
 
 describe('botEngineVersionService.inspect', () => {
-  test('queries one explicitly selected draft instance with caller and owner identity', async () => {
+  test('queries one selected instance without injecting a default stage', async () => {
     jest.mocked(botController.getBotEngineVersion).mockResolvedValue({
       code: 200000,
       data: observation,
@@ -47,7 +47,6 @@ describe('botEngineVersionService.inspect', () => {
     expect(botController.getBotEngineVersion).toHaveBeenCalledWith('bot-1', {
       userId: 'caller-1',
       ownerId: 'owner-1',
-      stage: 'draft',
       deviceUuid: 'device-1',
     });
     expect(result).toEqual({ kind: 'ready', observation, deviceUuid: 'device-1' });
@@ -95,6 +94,7 @@ describe('botEngineVersionService.restartAndConfirmUpdate', () => {
     userId: 'caller-1',
     ownerId: 'owner-1',
     deviceUuid: 'device-1',
+    stage: 'draft' as const,
     restartPermission: { actions: ['restart'], serviceBot: true, runtimeStage: 'draft' as const },
   };
   const canonical = {

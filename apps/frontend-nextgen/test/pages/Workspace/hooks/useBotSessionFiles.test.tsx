@@ -51,7 +51,7 @@ describe('useBotSessionFiles（单聊会话文件 hook）', () => {
       await result.current.refresh();
     });
     expect(mockLoadReady).toHaveBeenCalledTimes(1);
-    expect(mockLoadReady).toHaveBeenCalledWith('bot-1', 's1', 'u1', 'owner-1');
+    expect(mockLoadReady).toHaveBeenCalledWith('bot-1', 's1', 'u1', 'owner-1', undefined);
     expect(result.current.readyFiles.map((file) => file.resourceId)).toEqual(['r1']);
     // 本地缓存变化(上传就绪)不触发请求。
     act(() => result.current.addReadyFile(makeFile('uploaded', 'new.txt')));
@@ -166,4 +166,19 @@ describe('useBotSessionFiles（单聊会话文件 hook）', () => {
     await act(async () => resolveOld({ ok: true, data: { items: [makeFile('old', 'old.txt')], total: 1 } }));
     expect(readyFiles()).toEqual(['new']);
   });
+});
+
+it('我的服务 Bot 的文件列表透传 online，切阶段时清理旧缓存', async () => {
+  mockLoadReady.mockResolvedValue({ ok: true, data: { items: [], total: 0 } });
+  const { result, rerender } = renderHook(
+    ({ stage }: { stage: 'online' | undefined }) => useBotSessionFiles('bot', 'session', 'user', 'owner', stage),
+    { initialProps: { stage: 'online' as 'online' | undefined } },
+  );
+  await act(async () => { await result.current.refresh(); });
+  expect(mockLoadReady).toHaveBeenLastCalledWith('bot', 'session', 'user', 'owner', 'online');
+  act(() => result.current.addReadyFile(makeFile('online-file', 'a.txt')));
+  rerender({ stage: undefined });
+  expect(result.current.readyFiles).toEqual([]);
+  await act(async () => { await result.current.refresh(); });
+  expect(mockLoadReady).toHaveBeenLastCalledWith('bot', 'session', 'user', 'owner', undefined);
 });

@@ -1,3 +1,4 @@
+import type { BotRuntimeStage } from '@/domain/botWorkshop';
 import { Button, Empty, IconButton, Skeleton } from '@/components/ui';
 import { TooltipProvider } from '@/components/ui/Tooltip';
 import { useBotSessionFilePreview } from '@/pages/Workspace/hooks/useBotSessionFilePreview';
@@ -20,6 +21,7 @@ export interface BotSessionFilesPanelProps {
   sessionId?: string;
   userId?: string;
   ownerId?: string;
+  stage?: BotRuntimeStage;
   onClose: () => void;
   onUploadClick: () => void;
   onOpen: () => void;
@@ -44,6 +46,7 @@ export function BotSessionFilesPanel({
   sessionId,
   userId,
   ownerId,
+  stage,
   onClose,
   onUploadClick,
   onOpen,
@@ -61,7 +64,7 @@ export function BotSessionFilesPanel({
   onOpenRef.current = onOpen;
   useEffect(() => {
     onOpenRef.current();
-  }, [sessionId]);
+  }, [sessionId, stage]);
 
   // 类型筛选 Tab（对齐设计稿「全部/文档/代码」形态）：不做设计稿外的计数装饰，
   // 按实际存在的大类动态生成；单聊无 mimeType，按文件名判定（与其预览 Hook 口径一致）。
@@ -95,6 +98,7 @@ export function BotSessionFilesPanel({
     sessionId: sessionId ?? null,
     userId: userId ?? null,
     ownerId,
+    stage,
   });
 
   const previewFile: { name: string; size: number } | null = selectedFile

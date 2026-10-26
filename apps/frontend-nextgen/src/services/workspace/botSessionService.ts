@@ -52,7 +52,7 @@ export interface ChatBotView {
   templateName?: string;
   spaceId?: string;
   spaceName?: string;
-  /** 运行阶段；对话页默认 online，工坊调试可显式指定 draft / verify。 */
+  /** 显式运行阶段；对话页仅我的服务 Bot 使用 online，工坊调试可指定 draft / verify。 */
   runtimeStage?: BotIamTokenStage;
   /** 标记来自当前用户好友关系，而非当前用户管理的 Bot。 */
   isFriendBot?: boolean;
@@ -108,19 +108,22 @@ export function resolveUserId(userId: string): string {
 }
 
 /** 连接和会话请求共用运行环境，避免 Token 与实际实例选址不一致。 */
-export function resolveChatRuntimeStage(bot: ChatBotView): BotIamTokenStage {
-  return bot.runtimeStage ?? 'online';
+export function resolveChatRuntimeStage(bot: ChatBotView): BotIamTokenStage | undefined {
+  if (bot.isFriendBot || bot.isTeamBot) return undefined;
+  return bot.runtimeStage ?? (bot.botType === 'service' ? 'online' : undefined);
 }
 
-/** 所有单聊请求补运行环境；好友补 f_user_id，团队补实体 owner。 */
+/** 按对话上下文选择是否携带阶段；好友补 f_user_id，团队补实体 owner。 */
 export function withFriendBotRequestParams<T extends { user_id: string; owner_id?: string; stage?: BotIamTokenStage }>(
   bot: ChatBotView,
   userId: string,
   params: T,
-): T & { stage: BotIamTokenStage; f_user_id?: string } {
+): Omit<T, 'stage'> & { stage?: BotIamTokenStage; f_user_id?: string } {
+  const { stage: requestedStage, ...requestParams } = params;
+  const stage = bot.isFriendBot || bot.isTeamBot ? undefined : requestedStage ?? resolveChatRuntimeStage(bot);
   return {
-    ...params,
-    stage: params.stage ?? resolveChatRuntimeStage(bot),
+    ...requestParams,
+    ...(stage ? { stage } : {}),
     ...((bot.isFriendBot || bot.isTeamBot) && bot.ownerId ? { owner_id: bot.ownerId } : {}),
     ...(bot.isFriendBot ? { f_user_id: resolveUserId(userId) } : {}),
   };
@@ -256,7 +259,7 @@ function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
     engine: dto.engine_type ?? dto.engine,
     ...permissions,
     botType: dto.bot_type,
-    runtimeStage: 'online',
+    ...(dto.bot_type === 'service' ? { runtimeStage: 'online' as const } : {}),
     isAgentCodingBot: runtime.isAgentCodingBot,
     templateType: runtime.templateType,
     templateName: runtime.templateName,

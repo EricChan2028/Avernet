@@ -89,6 +89,7 @@ jest.mock('@/services/workspace/managedBotConversationService', () => ({
 }));
 
 jest.mock('@/services/workspace/botSessionService', () => ({
+  ...jest.requireActual<typeof import('@/services/workspace/botSessionService')>('@/services/workspace/botSessionService'),
   botSessionService: {
     updateSessionTitle: jest.fn().mockResolvedValue({ ok: true, data: { sessionId: 's1', title: 't' } }),
     clearContext: jest.fn().mockResolvedValue({ ok: true, data: null }),
@@ -357,9 +358,9 @@ describe('ConversationPage(Task 8 组合页)', () => {
         expect.objectContaining({
           userId: '101',
           ownerId: '1',
-          stage: 'draft',
         }),
       );
+      expect(getVersion.mock.calls[0][1]).not.toHaveProperty('stage');
       fireEvent.click(screen.getByRole('button', { name: '关闭当前会话的引擎更新提示' }));
       expect(screen.queryByTestId('chat-engine-version-notice')).not.toBeInTheDocument();
 
