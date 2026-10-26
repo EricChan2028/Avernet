@@ -111,6 +111,7 @@ from agentclaw.community.di.modules.skill_center_group4_module import (
 )
 from agentclaw.community.di.modules.skill_version_module import SkillVersionModule
 from agentclaw.community.di.modules.skills_pool_module import SkillsPoolModule
+from agentclaw.community.di.modules.bot_knowledge_module import BotKnowledgeModule
 from agentclaw.community.di.modules.space_knowledge_module import SpaceKnowledgeModule
 from agentclaw.community.di.space_knowledge_capture_config import SpaceKnowledgeCaptureConfig
 from agentclaw.community.di.modules.spaces_module import SpacesModule
@@ -222,6 +223,7 @@ def build_injector(
         SessionResourcesModule(),
         TcFileUploadIntegrationModule(local=profile is not DeployProfile.CORP),
         SpacesModule(),
+        BotKnowledgeModule(profile),
         SpaceKnowledgeModule(),
         WorkOrdersModule(),
         BotFriendAuthModule(),
