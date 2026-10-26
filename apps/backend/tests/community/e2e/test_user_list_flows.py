@@ -111,3 +111,10 @@ def test_user_list_correction_logs_write_failure(app_with_testing_modules, world
         assert field in caplog.text
     assert "user_list.correction.success" not in caplog.text
     assert "private-test-auth-value" not in caplog.text
+
+
+@pytest.fixture(autouse=True)
+def _correction_super_admins(monkeypatch):
+    from agentclaw.community.core.access import admin_scopes
+
+    monkeypatch.setattr(admin_scopes, "super_admin", lambda: frozenset(['e2e_user', 'correction_operator']))

@@ -395,6 +395,7 @@ internal_dependencies:
   - agentclaw.community.core.user_list
   - agentclaw.community.core.workspace
   - agentclaw.community.log
+  - agentclaw.community.utils.app_utils
   - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.env_utils
 ```

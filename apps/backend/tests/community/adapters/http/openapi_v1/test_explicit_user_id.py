@@ -577,10 +577,10 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # DWS owner management adds eight Bot-path-addressed operations.
 # acli operations add four more (two cancels, the live list and one read):
 # path 192 -> 196.
-# DWS rollout eligibility adds one owner-scoped Bot-path operation: 196 -> 197.
+# DWS rollout eligibility adds one owner-scoped Bot-path operation.
+# BBS Bot skill-install repair adds one Bot-path operation: 197 -> 198.
 # The genome registry (RSI-03) adds thirteen path-addressed, user-scoped
-# operations under /bots/{bot_id}/genome: path 197 -> 210.
-# BBS Bot skill-install repair adds one Bot-path operation: path 210 -> 211.
+# operations under /bots/{bot_id}/genome: path 198 -> 211.
 _BOT_ID_PLACEMENT = {"path": 211, "query": 1, "none": 126}
 
 
