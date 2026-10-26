@@ -4021,3 +4021,30 @@ during this command-lifecycle increment.
   and overflow gates; focused suites combined 84 cases plus 128 subtests; `compileall`
   clean. Full e2e-runner discovery: `Ran 2871 tests in 280.250s ... OK (skipped=225)`. No live Singlebox
   or preprod request was executed, and the slice starts no OpenClaw process of its own.
+
+## 2026-10-26 increment — owned-local Nested fixed-loop run lifecycle (2/2)
+
+- The already unmapped `story_nested_fixed_loop_workflows` backlog parent now has its
+  executable local slice. `local_nested_fixed_loop_run.py` launches the frozen combined
+  Bot/Human Story as one black-box child beside the Provider/Judge mock child and one
+  owned BCS runtime. It requires the real product CLI input (`--cli-binary`) and the
+  frozen Story `--driver` argument in addition to the owner-supplied BCS binary SHA256.
+- Success requires both complete markers:
+  `  Nested Bot: 17/15/2 routing, paths, history and stale callback verified` and
+  `  Nested Human: three levels, parent isolation, stale reply and outer subtree skip verified`.
+  It also requires the post-cleanup zero-traffic boundary (provider/event counters zero
+  and the strict Judge never started), the four-stream bot-token/provider-admin-token/Bearer
+  redaction gate, unchanged executor digest/binding/Binary/CLI bytes, and owned runtime
+  disposition STOPPED with returncode 0. SIGTERM canonicalises to CANCELLED and both children
+  use process-group teardown.
+- `local_nested_fixed_loop_reporting.py` projects the ten frozen sources into the three
+  canonical reports with 16 required assertions; missing, changed or unpublished evidence
+  is BLOCKED, and offline rendering inside the state directory is rejected.
+- Wiring: CLI 46→48 local-story commands; `migration_inventory.py` exposes a fourth
+  `local_independent_slices` row (legacy id `story_nested_fixed_loop_workflows`, 19 fields)
+  while the release registry and pilot manifests stay unchanged; the previously reserved
+  artifact budget remains 307.
+- Validation: `compileall` clean; the focused contract/run/CLI/inventory regression set passed
+  `Ran 168 tests ... OK`; full e2e-runner discovery passed
+  `Ran 2909 tests in 292.971s ... OK (skipped=225)`. No live Singlebox or preprod request was
+  executed, and the slice starts no OpenClaw or engine-adapter process of its own.

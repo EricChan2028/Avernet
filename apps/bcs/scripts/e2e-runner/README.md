@@ -3606,3 +3606,47 @@ This is an independent local-only slice bound to the already unmapped
 `remote_validation=NOT_RUN`, `grants_release_credit=false`; it is outside the
 29-case coverage registry and both pilot manifests, and it starts no OpenClaw
 or engine-adapter process of its own.
+
+### Complete owned-local Nested fixed-loop Story
+
+The upstream nested fixed-loop Story
+(`apps/bcs/scripts/e2e-test/nested_fixed_loop_story.py`, inheriting the frozen
+`fixed_loop_story.py` base) is treated as one black-box child beside a second
+Provider/Judge mock child and one owned BCS runtime. The Story validates both
+nested definitions through the real product CLI, executes the two-level Bot
+loop (17 nodes, 15 completed and 2 skipped) and three-level Human loop
+(31 nodes, 21 completed and 10 skipped), proves terminal-callback replay
+rejection, pending-node scheduling, iteration-context isolation and Human
+authentication boundaries, verifies machine-output equality and finally clears
+the mock carrier.
+
+The BCS and product CLI binaries stay owner-supplied and opt-in. Then run and
+report:
+
+```bash
+python3 runner.py local-nested-fixed-loop-run \
+  --binary "$BCS_E2E_TEST_BINARY" --binary-sha256 "$BCS_E2E_TEST_BINARY_SHA256" \
+  --cli-binary "$CLI_BINARY" --driver "$DRIVER_ARGUMENT" \
+  --state-dir "$FRESH_RUN_DIR" --run-id "$RUN_ID" --confirm-run-id "$RUN_ID" \
+  --allow-local-processes --allow-fixture-write --allow-write
+
+python3 runner.py local-nested-fixed-loop-report --state-dir "$FRESH_RUN_DIR"
+```
+
+The run rejects symlinked, non-executable CLI input, a stale state directory
+and mismatched permissions before any child starts. It freezes the 16-obligation
+binding (`LOCAL-NESTED-FIXED-LOOP-01`, suite
+`owned-local-nested-fixed-loop-v1`, Human `39464`), both binary inputs, the
+executor digest and the Story CLI arguments. Both complete Bot and Human
+markdown markers must appear exactly as frozen, while the post-cleanup control
+plane must show zero provider webhooks, zero event webhooks and a strict Judge
+that never started. All four child streams pass the token redaction gate before
+bounded evidence lands; Run and Report never rewrite original evidence and
+offline rendering inside the state directory is rejected.
+
+This is an independent local-only slice bound to the already unmapped
+`story_nested_fixed_loop_workflows` backlog parent:
+`release_parent_denominator=false`, `independent_slice=true`,
+`remote_validation=NOT_RUN`, `grants_release_credit=false`; it is outside the
+29-case coverage registry and both pilot manifests, and it starts no OpenClaw
+or engine-adapter process of its own.

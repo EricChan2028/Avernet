@@ -289,6 +289,10 @@ def migration_plan() -> dict:
                                                REQUIREMENTS as RESULT_QUEUE_REQUIREMENTS,
                                                SUITE as RESULT_QUEUE_SUITE,
                                                result_queue_source_binding)
+    from .local_nested_fixed_loop_contract import (CASE_ID as NESTED_FIXED_LOOP_CASE_ID,
+                                                   REQUIREMENTS as NESTED_FIXED_LOOP_REQUIREMENTS,
+                                                   SUITE as NESTED_FIXED_LOOP_SUITE,
+                                                   nested_fixed_loop_source_binding)
     draft_group = draft_group_source_binding()
     caller_execution_slice = {'suite': CALLER_SUITE, 'case_id': CALLER_CASE, 'case_version': 1,
         'legacy_id': 'caller_execution_story', 'status': 'LOCAL_EXECUTOR_ONLY',
@@ -326,6 +330,22 @@ def migration_plan() -> dict:
         'release_parent_denominator': False, 'independent_slice': True,
         'remote_validation': 'NOT_RUN', 'grants_release_credit': False,
         'source_map': 'result-queue-migration-contract.json'}
+    nested_fixed_loop_slice = {'suite': NESTED_FIXED_LOOP_SUITE,
+        'case_id': NESTED_FIXED_LOOP_CASE_ID, 'case_version': 1,
+        'legacy_id': 'story_nested_fixed_loop_workflows', 'status': 'LOCAL_EXECUTOR_ONLY',
+        'required_assertion_count': 16,
+        'requirement_ids': list(NESTED_FIXED_LOOP_REQUIREMENTS),
+        'canonical_reporting': 'LOCAL_RUNTIME_BLACKBOX',
+        'execution_command': 'local-nested-fixed-loop-run',
+        'report_command': 'local-nested-fixed-loop-report',
+        'required_parameters': ['binary', 'binary_sha256', 'cli_binary', 'driver',
+                                'state_dir', 'run_id', 'confirm_run_id',
+                                'allow_local_processes', 'allow_fixture_write', 'allow_write'],
+        'binary_kind': 'bcs', 'auto_build': False,
+        'environment': {'local': 'LOCAL_EXECUTOR_ONLY', 'preprod': 'REMOTE_UNSUPPORTED'},
+        'release_parent_denominator': False, 'independent_slice': True,
+        'remote_validation': 'NOT_RUN', 'grants_release_credit': False,
+        'source_map': 'nested-fixed-loop-migration-contract.json'}
     admission = admission_source_binding()
     friend_requests = friend_requests_list_source_binding()
     friend_connections = friend_connections_list_source_binding()
@@ -565,4 +585,4 @@ def migration_plan() -> dict:
                                    for row in fixed_loop_rewrite.environments],
                 'ready_to_execute': False,
                 'grants_release_credit': False}],
-            'local_independent_slices': [caller_execution_slice, draft_group_slice, result_queue_slice]}
+            'local_independent_slices': [caller_execution_slice, draft_group_slice, result_queue_slice, nested_fixed_loop_slice]}

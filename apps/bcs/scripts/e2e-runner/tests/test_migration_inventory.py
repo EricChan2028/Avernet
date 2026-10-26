@@ -14,6 +14,8 @@ from bcs_e2e.cli import plan
 from bcs_e2e.inventory import current_manifest
 from bcs_e2e.local_caller_execution_contract import caller_execution_source_binding
 from bcs_e2e.local_draft_group_contract import draft_group_source_binding
+from bcs_e2e.local_nested_fixed_loop_contract import (
+    nested_fixed_loop_source_binding)
 from bcs_e2e.local_result_queue_contract import result_queue_source_binding
 from bcs_e2e.local_operator_cli_contract import (
     collaboration_team_source_binding,
@@ -357,7 +359,7 @@ class MigrationInventoryTests(unittest.TestCase):
         result = migration_plan()
         self.assertEqual(len(result['local_registered_executors']), 29)
         slices = result['local_independent_slices']
-        self.assertEqual(len(slices), 3)
+        self.assertEqual(len(slices), 4)
         row = slices[0]
         self.assertEqual(row['suite'], 'owned-local-caller-execution-v1')
         self.assertEqual(row['case_id'], 'LOCAL-CALLER-EXEC-01')
@@ -406,7 +408,7 @@ class MigrationInventoryTests(unittest.TestCase):
 
     def test_draft_group_is_the_second_independent_local_slice_with_no_release_credit(self):
         result = migration_plan()
-        self.assertEqual(len(result['local_independent_slices']), 3)
+        self.assertEqual(len(result['local_independent_slices']), 4)
         row = result['local_independent_slices'][1]
         self.assertEqual(row['suite'], 'owned-local-draft-group-v1')
         self.assertEqual(row['case_id'], 'LOCAL-DRAFT-GROUP-01')
@@ -467,7 +469,7 @@ class MigrationInventoryTests(unittest.TestCase):
 
     def test_result_queue_is_the_third_independent_local_slice_with_no_release_credit(self):
         result = migration_plan()
-        self.assertEqual(len(result['local_independent_slices']), 3)
+        self.assertEqual(len(result['local_independent_slices']), 4)
         row = result['local_independent_slices'][2]
         self.assertEqual(row['suite'], 'owned-local-result-queue-v1')
         self.assertEqual(row['case_id'], 'LOCAL-RESULT-QUEUE-01')
@@ -527,3 +529,45 @@ class MigrationInventoryTests(unittest.TestCase):
         legacy = current_manifest()['legacy_inventory']
         self.assertIn('story_state_machine_result_queue', {entry['id'] for entry in legacy})
         self.assertEqual(result_queue_source_binding()['parent'], 'story_state_machine_result_queue')
+
+    def test_nested_fixed_loop_is_the_fourth_independent_local_slice_with_no_release_credit(self):
+        result = migration_plan()
+        self.assertEqual(len(result['local_independent_slices']), 4)
+        row = result['local_independent_slices'][3]
+        self.assertEqual(row['suite'], 'owned-local-nested-fixed-loop-v1')
+        self.assertEqual(row['case_id'], 'LOCAL-NESTED-FIXED-LOOP-01')
+        self.assertEqual(row['case_version'], 1)
+        self.assertEqual(row['legacy_id'], 'story_nested_fixed_loop_workflows')
+        self.assertEqual(row['status'], 'LOCAL_EXECUTOR_ONLY')
+        self.assertEqual(row['required_assertion_count'], 16)
+        self.assertEqual(row['requirement_ids'][0], 'NESTED-LOOP.nested-bot-loop-definition')
+        self.assertEqual(row['requirement_ids'][-1],
+                         'NESTED-LOOP.main-required-args-and-two-story-orchestration')
+        self.assertEqual(row['canonical_reporting'], 'LOCAL_RUNTIME_BLACKBOX')
+        self.assertEqual(row['execution_command'], 'local-nested-fixed-loop-run')
+        self.assertEqual(row['report_command'], 'local-nested-fixed-loop-report')
+        self.assertEqual(row['required_parameters'],
+                        ['binary', 'binary_sha256', 'cli_binary', 'driver', 'state_dir',
+                         'run_id', 'confirm_run_id', 'allow_local_processes',
+                         'allow_fixture_write', 'allow_write'])
+        self.assertEqual(row['binary_kind'], 'bcs')
+        self.assertEqual(row['auto_build'], False)
+        self.assertEqual(row['environment'], {'local': 'LOCAL_EXECUTOR_ONLY',
+                                              'preprod': 'REMOTE_UNSUPPORTED'})
+        self.assertEqual(row['release_parent_denominator'], False)
+        self.assertEqual(row['independent_slice'], True)
+        self.assertEqual(row['remote_validation'], 'NOT_RUN')
+        self.assertEqual(row['grants_release_credit'], False)
+        self.assertEqual(row['source_map'], 'nested-fixed-loop-migration-contract.json')
+        self.assertEqual(set(row), {'suite', 'case_id', 'case_version', 'legacy_id', 'status',
+                                    'required_assertion_count', 'requirement_ids',
+                                    'canonical_reporting', 'execution_command', 'report_command',
+                                    'required_parameters', 'binary_kind', 'auto_build',
+                                    'environment', 'release_parent_denominator',
+                                    'independent_slice', 'remote_validation',
+                                    'grants_release_credit', 'source_map'})
+        self.assertNotIn('LOCAL-NESTED-FIXED-LOOP-01', {case.case_id for case in CASES})
+        legacy = current_manifest()['legacy_inventory']
+        self.assertIn('story_nested_fixed_loop_workflows', {entry['id'] for entry in legacy})
+        self.assertEqual(nested_fixed_loop_source_binding()['parent'],
+                         'story_nested_fixed_loop_workflows')

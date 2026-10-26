@@ -65,6 +65,8 @@ LOCAL_STORY_COMMANDS = frozenset({
     'local-draft-group-report',
     'local-result-queue-run',
     'local-result-queue-report',
+    'local-nested-fixed-loop-run',
+    'local-nested-fixed-loop-report',
 })
 
 
@@ -309,6 +311,18 @@ def register_local_story_commands(commands) -> None:
     result_report = commands.add_parser('local-result-queue-report', help='Verify frozen owned-local Result queue evidence offline')
     result_report.add_argument('--state-dir', type=Path, required=True)
     result_report.add_argument('--output-dir', type=Path)
+
+    # Independent local-only slice; intentionally outside the 29-case coverage registry.
+    nested_run = commands.add_parser('local-nested-fixed-loop-run', help='Run the complete owned-local Nested fixed-loop Story as black-box children beside one owned BCS runtime')
+    for name in ('binary', 'cli-binary', 'state-dir'):
+        nested_run.add_argument('--' + name, type=Path, required=True)
+    for name in ('binary-sha256', 'driver', 'run-id', 'confirm-run-id'):
+        nested_run.add_argument('--' + name, required=True)
+    for name in ('allow-local-processes', 'allow-fixture-write', 'allow-write'):
+        nested_run.add_argument('--' + name, action='store_true')
+    nested_report = commands.add_parser('local-nested-fixed-loop-report', help='Verify frozen owned-local Nested fixed-loop evidence offline')
+    nested_report.add_argument('--state-dir', type=Path, required=True)
+    nested_report.add_argument('--output-dir', type=Path)
 
 
 def dispatch_local_story_command(args, *, write_reports: Callable) -> tuple[dict, int]:
@@ -680,6 +694,24 @@ def dispatch_local_story_command(args, *, write_reports: Callable) -> tuple[dict
             source_root, destination = args.state_dir.resolve(), args.output_dir.resolve()
             if destination == source_root or source_root in destination.parents:
                 raise RunStateError('Offline Result queue rendering cannot overwrite original evidence')
+        outputs = write_reports(summary, args.output_dir, {'all'}) if args.output_dir is not None else {}
+        report = {'status': summary['status'], 'summary': summary, 'outputs': outputs, 'ready_to_execute': False}
+        rc = 0 if summary['status'] == 'LOCAL_SUITE_PASS' else 130 if summary['status'] == 'CANCELLED' else 2
+    elif args.command == 'local-nested-fixed-loop-run':
+        from .local_nested_fixed_loop_run import local_nested_fixed_loop_run
+        report = local_nested_fixed_loop_run(binary=args.binary, binary_sha256=args.binary_sha256,
+            cli_binary=args.cli_binary, driver=args.driver,
+            state_dir=args.state_dir, run_id=args.run_id, confirm_run_id=args.confirm_run_id,
+            allow_local_processes=args.allow_local_processes, allow_fixture_write=args.allow_fixture_write,
+            allow_write=args.allow_write)
+        rc = 0 if report['status'] == 'LOCAL_NESTED_FIXED_LOOP_PASS' else 130 if report['status'] == 'CANCELLED' else 2
+    elif args.command == 'local-nested-fixed-loop-report':
+        from .local_nested_fixed_loop_reporting import build_nested_fixed_loop_report
+        summary = build_nested_fixed_loop_report(args.state_dir)
+        if args.output_dir is not None:
+            source_root, destination = args.state_dir.resolve(), args.output_dir.resolve()
+            if destination == source_root or source_root in destination.parents:
+                raise RunStateError('Offline Nested fixed-loop rendering cannot overwrite original evidence')
         outputs = write_reports(summary, args.output_dir, {'all'}) if args.output_dir is not None else {}
         report = {'status': summary['status'], 'summary': summary, 'outputs': outputs, 'ready_to_execute': False}
         rc = 0 if summary['status'] == 'LOCAL_SUITE_PASS' else 130 if summary['status'] == 'CANCELLED' else 2

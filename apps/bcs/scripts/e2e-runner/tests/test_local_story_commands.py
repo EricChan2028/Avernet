@@ -67,6 +67,8 @@ COMMAND_ORDER = (
     'local-draft-group-report',
     'local-result-queue-run',
     'local-result-queue-report',
+    'local-nested-fixed-loop-run',
+    'local-nested-fixed-loop-report',
 )
 
 
@@ -90,6 +92,8 @@ def run_arguments(command, *extra):
                    'local-session-run',
                    'local-session-sharing-run', 'local-workspace-run'}:
         common[1:1] = ['--cli-binary', '/cli', '--cli-binary-sha256', 'cli-sha']
+    if command == 'local-nested-fixed-loop-run':
+        common[1:1] = ['--cli-binary', '/cli', '--driver', 'driver-bot']
     return [*common, *extra]
 
 
@@ -174,6 +178,29 @@ class LocalStoryParserTests(unittest.TestCase):
             ['local-result-queue-report', '--state-dir', '/state'])
         self.assertEqual(vars(report), {
             'command': 'local-result-queue-report',
+            'state_dir': Path('/state'),
+            'output_dir': None,
+        })
+
+    def test_nested_fixed_loop_namespace_requires_real_cli_and_driver(self):
+        run = parser()[0].parse_args(run_arguments('local-nested-fixed-loop-run'))
+        self.assertEqual(vars(run), {
+            'command': 'local-nested-fixed-loop-run',
+            'binary': Path('/bcs'),
+            'binary_sha256': 'bcs-sha',
+            'cli_binary': Path('/cli'),
+            'driver': 'driver-bot',
+            'state_dir': Path('/state'),
+            'run_id': 'run-1',
+            'confirm_run_id': 'run-1',
+            'allow_local_processes': False,
+            'allow_fixture_write': False,
+            'allow_write': False,
+        })
+        report = parser()[0].parse_args(
+            ['local-nested-fixed-loop-report', '--state-dir', '/state'])
+        self.assertEqual(vars(report), {
+            'command': 'local-nested-fixed-loop-report',
             'state_dir': Path('/state'),
             'output_dir': None,
         })
@@ -407,6 +434,24 @@ class LocalStoryDispatchTests(unittest.TestCase):
             self.assertEqual((report, rc), ({'status': status}, expected_rc))
             execute.assert_called_once_with(**expected)
 
+    def test_nested_fixed_loop_kwargs_and_pass_blocked_cancelled_return_codes(self):
+        args = self.parse(run_arguments(
+            'local-nested-fixed-loop-run', '--allow-local-processes',
+            '--allow-fixture-write', '--allow-write'))
+        expected = dict(
+            binary=Path('/bcs'), binary_sha256='bcs-sha', cli_binary=Path('/cli'),
+            driver='driver-bot', state_dir=Path('/state'), run_id='run-1',
+            confirm_run_id='run-1', allow_local_processes=True,
+            allow_fixture_write=True, allow_write=True)
+        for status, expected_rc in (
+                ('LOCAL_NESTED_FIXED_LOOP_PASS', 0), ('BLOCKED', 2), ('CANCELLED', 130)):
+            with self.subTest(status=status), patch(
+                    'bcs_e2e.local_nested_fixed_loop_run.local_nested_fixed_loop_run',
+                    return_value={'status': status}) as execute:
+                report, rc = dispatch_local_story_command(args, write_reports=Mock())
+            self.assertEqual((report, rc), ({'status': status}, expected_rc))
+            execute.assert_called_once_with(**expected)
+
     def test_draft_group_kwargs_and_pass_blocked_cancelled_return_codes(self):
         args = self.parse(run_arguments(
             'local-draft-group-run', '--allow-local-processes',
@@ -468,6 +513,29 @@ class LocalStoryDispatchTests(unittest.TestCase):
                    return_value={'status': 'LOCAL_SUITE_PASS'}), self.assertRaisesRegex(
                        RunStateError,
                        'Offline Result queue rendering cannot overwrite original evidence'):
+            dispatch_local_story_command(guard, write_reports=Mock())
+
+    def test_nested_fixed_loop_report_renders_only_outside_original_evidence(self):
+        args = self.parse(['local-nested-fixed-loop-report', '--state-dir', '/state',
+                           '--output-dir', '/out/reports'])
+        with patch('bcs_e2e.local_nested_fixed_loop_reporting.build_nested_fixed_loop_report',
+                   return_value={'status': 'LOCAL_SUITE_PASS'}) as build:
+            writes = Mock()
+            report, rc = dispatch_local_story_command(args, write_reports=writes)
+        self.assertEqual(report, {
+            'status': 'LOCAL_SUITE_PASS', 'summary': build.return_value,
+            'outputs': writes.return_value, 'ready_to_execute': False,
+        })
+        self.assertEqual(rc, 0)
+        build.assert_called_once_with(args.state_dir)
+        writes.assert_called_once_with(build.return_value, args.output_dir, {'all'})
+
+        guard = self.parse(['local-nested-fixed-loop-report', '--state-dir', '/state',
+                            '--output-dir', '/state/reports'])
+        with patch('bcs_e2e.local_nested_fixed_loop_reporting.build_nested_fixed_loop_report',
+                   return_value={'status': 'LOCAL_SUITE_PASS'}), self.assertRaisesRegex(
+                       RunStateError,
+                       'Offline Nested fixed-loop rendering cannot overwrite original evidence'):
             dispatch_local_story_command(guard, write_reports=Mock())
 
     def test_draft_group_report_renders_only_outside_original_evidence(self):
