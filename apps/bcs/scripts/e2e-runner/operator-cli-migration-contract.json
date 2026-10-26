@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "source_revision": "33baf134e8bbdefaf96d5c7f3d000eb7de28825d",
+  "parent": "story_operator_coordinates_with_cli",
+  "sources": {
+    "stories.sh": "b2df5aad7ca67b36d072e70e31f7038050431557f982702b3c628df4bac44b86",
+    "cli.sh": "70b77d816d0fb089ccee0a8e272b4126316d386144daa2c9ab174eac36ee4193",
+    "cli-stories.sh": "779672ec0d0c02405e5f3fee0f50aec9fbe1febac0808c05ec6844a1e4a39efc",
+    "common.sh": "ca4d2571f58f8de3b13c0516b6db3c07c76e0028592b890aff19dc7bea678815",
+    "group.sh": "2bbb82c417261900265ce39f69aebb01633bb0700c4d7c71c1a2c9d7d9131c1d"
+  },
+  "requirements": [
+    {
+      "id": "OPERATOR-CLI.health",
+      "command": "bcs-cli health",
+      "expectation": "Product CLI health exits zero without any Bot credential and prints a health payload."
+    },
+    {
+      "id": "OPERATOR-CLI.list",
+      "command": "bcs-cli list",
+      "expectation": "Product CLI list exits zero and echoes all five trusted-team fixture Bot UUIDs."
+    },
+    {
+      "id": "OPERATOR-CLI.get",
+      "command": "bcs-cli get <uuid>",
+      "expectation": "Product CLI get exits zero and echoes the requested fixture Bot UUID."
+    },
+    {
+      "id": "OPERATOR-CLI.discover",
+      "command": "bcs-cli discover --query",
+      "expectation": "Product CLI discover exits zero and returns the CS fixture Bot UUID for the CS fixture-name query."
+    },
+    {
+      "id": "OPERATOR-CLI.visibility",
+      "command": "bcs-cli visibility get/set",
+      "expectation": "Product CLI visibility get exposes the original value; set public takes effect and an exact restore returns to the original value."
+    },
+    {
+      "id": "OPERATOR-CLI.connect",
+      "command": "bcs-cli connect",
+      "expectation": "Product CLI connect exits zero and returns JSON with the fixture Bot UUID and a non-empty token."
+    },
+    {
+      "id": "OPERATOR-CLI.onboard-web",
+      "command": "bcs-cli onboard --web",
+      "expectation": "Product CLI onboard --web exits zero, prints a registration URL containing the probe name, and registers no Bot."
+    },
+    {
+      "id": "OPERATOR-CLI.direct-onboard",
+      "command": "bcs-cli onboard",
+      "expectation": "Product CLI onboard persists a freshly registered temporary agent with its registered id, onboarded true and matching name; the agent reads back once and is deleted exactly once, then reads 404."
+    },
+    {
+      "id": "OPERATOR-CLI.update-status",
+      "command": "bcs-cli update-status",
+      "expectation": "Product CLI update-status exits zero and prints a Status acknowledgement; the independent Bot read before and after the broadcast shows the registry record unchanged (presence broadcast is echoed, not retained); the best-effort busy restore exits zero."
+    },
+    {
+      "id": "OPERATOR-CLI.create-group",
+      "command": "bcs-cli create-group + get-group",
+      "expectation": "Product CLI create-group creates the exact PM/ENG Group; get-group echoes its exact Group ID and owned participants; the created group is removed by an exact creator-scoped HTTP DELETE and reads back 404."
+    },
+    {
+      "id": "OPERATOR-CLI.chat",
+      "command": "bcs-cli chat",
+      "expectation": "Product CLI chat exits zero with --detach (or a blocking retry) and returns a JSON run/session handle; the original release order paired CEO<->PM in friends.sh first, so the owned-local executor bootstraps the same prerequisite friendship pair in-case and records both admissions."
+    },
+    {
+      "id": "OPERATOR-CLI.list-groups",
+      "command": "bcs-cli list-groups",
+      "expectation": "Product CLI list-groups returns the paginated shape {items, returned, total, has_more} with returned equal to the item count."
+    },
+    {
+      "id": "OPERATOR-CLI.friend-list",
+      "command": "bcs-cli friend list",
+      "expectation": "After the case admits exactly one CEO-ENG friendship, product CLI friend list exits zero and contains the ENG fixture Bot UUID."
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "source_revision": "71860eae99c62d7bf1349a0f46562f6395acbf1e",
+  "parent": "test_ep_friend_connections_friend_requests_list",
+  "sources": {
+    "edge_permission.sh": "e395ff4f203cd4fb0a7396230240c2542a8caadd0675eaa8b9dc5a8294986983"
+  },
+  "requirements": [
+    {
+      "id": "EDGE-FRIEND-REQUESTS.received",
+      "kind": "http",
+      "method": "GET",
+      "path": "/collaboration/friend-connections/requests",
+      "actor": "CEO_BOT",
+      "expectation": "Authenticated CEO Bot reads received requests with200 and exact response request identity; list contents must be filtered to the dedicated fixture and bounded pagination contract."
+    },
+    {
+      "id": "EDGE-FRIEND-REQUESTS.sent",
+      "kind": "http",
+      "method": "GET",
+      "path": "/collaboration/friend-connections/requests?direction=sent",
+      "actor": "CEO_BOT",
+      "expectation": "Authenticated CEO Bot reads sent requests with a strict direction response contract; source only dispatched the request, so the rewrite must add explicit status and fixture-scope assertions."
+    },
+    {
+      "id": "EDGE-FRIEND-REQUESTS.all",
+      "kind": "http",
+      "method": "GET",
+      "path": "/collaboration/friend-connections/requests?direction=all",
+      "actor": "CEO_BOT",
+      "expectation": "Authenticated CEO Bot reads all-direction requests with a strict direction response contract; this is read-only and must not create or consume pending requests."
+    }
+  ]
+}

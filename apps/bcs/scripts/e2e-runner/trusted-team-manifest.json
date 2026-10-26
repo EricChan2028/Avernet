@@ -1,0 +1,388 @@
+{
+  "schema_version": 1,
+  "baseline_commit": "a7369c67712db5aaccaedbfbccf4bacef6f9d0f2",
+  "suite": "owned-local-trusted-team-v1",
+  "legacy_inventory": [
+    {
+      "id": "story_human_manages_delivery_policy",
+      "source": "stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_user_prepares_agent_network",
+      "source": "stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_user_builds_trusted_team",
+      "source": "stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_user_operates_group_workspace",
+      "source": "stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_user_runs_and_shares_sessions",
+      "source": "stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_user_has_direct_agent_conversation",
+      "source": "stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_user_runs_structured_collaboration",
+      "source": "stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_provider_operator_publishes_agent",
+      "source": "stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_user_validates_external_channel_setup",
+      "source": "stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_operator_coordinates_with_cli",
+      "source": "stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_cli_operator_creates_custom_collaboration",
+      "source": "cli-stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_cli_operator_builds_collaboration_team",
+      "source": "cli-stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_cli_operator_runs_sessions_and_services",
+      "source": "cli-stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_cli_operator_validates_channel_management",
+      "source": "cli-stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_cli_operator_manages_group_context",
+      "source": "cli-stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_session_file_workspace",
+      "source": "session_files.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_user_receives_group_event_webhooks",
+      "source": "stories.sh",
+      "conditional": true,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_provider_callback_survives_slow_judge",
+      "source": "stories.sh",
+      "conditional": true,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_fixed_loop_human_editor_workflow",
+      "source": "fixed_loop_story.sh",
+      "conditional": true,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_nested_fixed_loop_workflows",
+      "source": "fixed_loop_story.sh",
+      "conditional": true,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_state_machine_result_queue",
+      "source": "fixed_loop_story.sh",
+      "conditional": true,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_admission",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_friend_connections_friend_request_and_list",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_friend_connections_friend_accept_reject_cancel",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_friend_connections_friend_revoke",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_friend_connections_friend_requests_list",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_ensure_bot",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_friend_connections_full_lifecycle",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_friend_connections_mutual_auto_approve",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_bot_search",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_error_and_admission_branches",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_connect_private_and_discover_branches",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_tc_friend_auth_sync_readdressed_principal",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_dept_scope_parses_object_friend_ext_entries",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    }
+  ],
+  "cases": [
+    {
+      "id": "LOCAL-TRUST-API-CLI-01",
+      "version": 1,
+      "title": "Build a trusted team through API and product CLI",
+      "legacy_id": "story_user_builds_trusted_team",
+      "roles": [
+        "CEO",
+        "ENG",
+        "PM",
+        "QA",
+        "CS"
+      ],
+      "steps": [
+        "public-auto-accept",
+        "protected-accept",
+        "protected-reject",
+        "friend-list",
+        "cli-request-list-accept-list",
+        "restore-visibility"
+      ],
+      "effects": [
+        "mutate:owned_visibility",
+        "create:owned_friend_request",
+        "accept:owned_friend_request",
+        "reject:owned_friend_request",
+        "restore:owned_visibility",
+        "retain:owned_friend_history",
+        "stop:owned_runtime"
+      ],
+      "required_evidence": [
+        "api",
+        "cli",
+        "sqlite"
+      ],
+      "diagnostic_evidence": [],
+      "assertions": [
+        "LOCAL-TRUST-API-CLI-01.CEO-ENG-accepted-received",
+        "LOCAL-TRUST-API-CLI-01.CEO-ENG-accepted-sent",
+        "LOCAL-TRUST-API-CLI-01.CEO-ENG-accepted-stored",
+        "LOCAL-TRUST-API-CLI-01.CEO-ENG-created",
+        "LOCAL-TRUST-API-CLI-01.CEO-ENG-friends",
+        "LOCAL-TRUST-API-CLI-01.CEO-PM-accepted-received",
+        "LOCAL-TRUST-API-CLI-01.CEO-PM-accepted-sent",
+        "LOCAL-TRUST-API-CLI-01.CEO-PM-accepted-stored",
+        "LOCAL-TRUST-API-CLI-01.CEO-PM-created",
+        "LOCAL-TRUST-API-CLI-01.CEO-PM-friends",
+        "LOCAL-TRUST-API-CLI-01.CEO-PM-pending-cleared",
+        "LOCAL-TRUST-API-CLI-01.CEO-PM-pending-received",
+        "LOCAL-TRUST-API-CLI-01.CEO-PM-pending-sent",
+        "LOCAL-TRUST-API-CLI-01.CEO-PM-pending-stored",
+        "LOCAL-TRUST-API-CLI-01.CEO-final-original-visibility",
+        "LOCAL-TRUST-API-CLI-01.CEO-final-visibility-stored",
+        "LOCAL-TRUST-API-CLI-01.CS-ENG-friends",
+        "LOCAL-TRUST-API-CLI-01.CS-final-original-visibility",
+        "LOCAL-TRUST-API-CLI-01.CS-final-visibility-stored",
+        "LOCAL-TRUST-API-CLI-01.CS-target-visibility-stored-protected",
+        "LOCAL-TRUST-API-CLI-01.CS-visibility-readback",
+        "LOCAL-TRUST-API-CLI-01.ENG-CEO-friends",
+        "LOCAL-TRUST-API-CLI-01.ENG-CS-created",
+        "LOCAL-TRUST-API-CLI-01.ENG-CS-friends",
+        "LOCAL-TRUST-API-CLI-01.ENG-CS-pending-cleared",
+        "LOCAL-TRUST-API-CLI-01.ENG-CS-pending-received",
+        "LOCAL-TRUST-API-CLI-01.ENG-CS-pending-sent",
+        "LOCAL-TRUST-API-CLI-01.ENG-CS-pending-stored",
+        "LOCAL-TRUST-API-CLI-01.ENG-CS-rejected-received",
+        "LOCAL-TRUST-API-CLI-01.ENG-CS-rejected-sent",
+        "LOCAL-TRUST-API-CLI-01.ENG-CS-rejected-stored",
+        "LOCAL-TRUST-API-CLI-01.ENG-final-original-visibility",
+        "LOCAL-TRUST-API-CLI-01.ENG-final-visibility-stored",
+        "LOCAL-TRUST-API-CLI-01.ENG-target-visibility-stored-public",
+        "LOCAL-TRUST-API-CLI-01.ENG-visibility-readback",
+        "LOCAL-TRUST-API-CLI-01.PM-CEO-friends",
+        "LOCAL-TRUST-API-CLI-01.PM-QA-friends",
+        "LOCAL-TRUST-API-CLI-01.PM-final-original-visibility",
+        "LOCAL-TRUST-API-CLI-01.PM-final-visibility-stored",
+        "LOCAL-TRUST-API-CLI-01.PM-target-visibility-stored-protected",
+        "LOCAL-TRUST-API-CLI-01.PM-visibility-readback",
+        "LOCAL-TRUST-API-CLI-01.QA-PM-accepted-received",
+        "LOCAL-TRUST-API-CLI-01.QA-PM-accepted-sent",
+        "LOCAL-TRUST-API-CLI-01.QA-PM-accepted-stored",
+        "LOCAL-TRUST-API-CLI-01.QA-PM-created",
+        "LOCAL-TRUST-API-CLI-01.QA-PM-friends",
+        "LOCAL-TRUST-API-CLI-01.QA-PM-pending-cleared",
+        "LOCAL-TRUST-API-CLI-01.QA-PM-pending-received",
+        "LOCAL-TRUST-API-CLI-01.QA-PM-pending-sent",
+        "LOCAL-TRUST-API-CLI-01.QA-PM-pending-stored",
+        "LOCAL-TRUST-API-CLI-01.QA-final-original-visibility",
+        "LOCAL-TRUST-API-CLI-01.QA-final-visibility-stored",
+        "LOCAL-TRUST-API-CLI-01.cli-accept-output",
+        "LOCAL-TRUST-API-CLI-01.cli-ceo-list-includes-pm",
+        "LOCAL-TRUST-API-CLI-01.cli-received-exact-request",
+        "LOCAL-TRUST-API-CLI-01.cli-request-output",
+        "LOCAL-TRUST-API-CLI-01.complete-owned-friend-inventory",
+        "LOCAL-TRUST-API-CLI-01.complete-owned-request-inventory"
+      ],
+      "requirements": {
+        "FRIEND.public-accept": [
+          "LOCAL-TRUST-API-CLI-01.CEO-ENG-created",
+          "LOCAL-TRUST-API-CLI-01.CEO-ENG-accepted-stored",
+          "LOCAL-TRUST-API-CLI-01.CEO-ENG-accepted-sent",
+          "LOCAL-TRUST-API-CLI-01.CEO-ENG-accepted-received",
+          "LOCAL-TRUST-API-CLI-01.CEO-ENG-friends",
+          "LOCAL-TRUST-API-CLI-01.ENG-CEO-friends",
+          "LOCAL-TRUST-API-CLI-01.ENG-visibility-readback",
+          "LOCAL-TRUST-API-CLI-01.ENG-target-visibility-stored-public"
+        ],
+        "FRIEND.protected-accept": [
+          "LOCAL-TRUST-API-CLI-01.QA-PM-created",
+          "LOCAL-TRUST-API-CLI-01.QA-PM-accepted-stored",
+          "LOCAL-TRUST-API-CLI-01.QA-PM-accepted-sent",
+          "LOCAL-TRUST-API-CLI-01.QA-PM-accepted-received",
+          "LOCAL-TRUST-API-CLI-01.QA-PM-friends",
+          "LOCAL-TRUST-API-CLI-01.PM-QA-friends",
+          "LOCAL-TRUST-API-CLI-01.QA-PM-pending-stored",
+          "LOCAL-TRUST-API-CLI-01.QA-PM-pending-sent",
+          "LOCAL-TRUST-API-CLI-01.QA-PM-pending-received",
+          "LOCAL-TRUST-API-CLI-01.QA-PM-pending-cleared",
+          "LOCAL-TRUST-API-CLI-01.PM-visibility-readback",
+          "LOCAL-TRUST-API-CLI-01.PM-target-visibility-stored-protected"
+        ],
+        "FRIEND.protected-reject": [
+          "LOCAL-TRUST-API-CLI-01.ENG-CS-created",
+          "LOCAL-TRUST-API-CLI-01.ENG-CS-rejected-stored",
+          "LOCAL-TRUST-API-CLI-01.ENG-CS-rejected-sent",
+          "LOCAL-TRUST-API-CLI-01.ENG-CS-rejected-received",
+          "LOCAL-TRUST-API-CLI-01.ENG-CS-friends",
+          "LOCAL-TRUST-API-CLI-01.CS-ENG-friends",
+          "LOCAL-TRUST-API-CLI-01.ENG-CS-pending-stored",
+          "LOCAL-TRUST-API-CLI-01.ENG-CS-pending-sent",
+          "LOCAL-TRUST-API-CLI-01.ENG-CS-pending-received",
+          "LOCAL-TRUST-API-CLI-01.ENG-CS-pending-cleared",
+          "LOCAL-TRUST-API-CLI-01.CS-visibility-readback",
+          "LOCAL-TRUST-API-CLI-01.CS-target-visibility-stored-protected"
+        ],
+        "FRIEND.list": [
+          "LOCAL-TRUST-API-CLI-01.CEO-ENG-friends"
+        ],
+        "FRIEND.cli-accept": [
+          "LOCAL-TRUST-API-CLI-01.CEO-PM-created",
+          "LOCAL-TRUST-API-CLI-01.CEO-PM-accepted-stored",
+          "LOCAL-TRUST-API-CLI-01.CEO-PM-accepted-sent",
+          "LOCAL-TRUST-API-CLI-01.CEO-PM-accepted-received",
+          "LOCAL-TRUST-API-CLI-01.CEO-PM-friends",
+          "LOCAL-TRUST-API-CLI-01.PM-CEO-friends",
+          "LOCAL-TRUST-API-CLI-01.CEO-PM-pending-stored",
+          "LOCAL-TRUST-API-CLI-01.CEO-PM-pending-sent",
+          "LOCAL-TRUST-API-CLI-01.CEO-PM-pending-received",
+          "LOCAL-TRUST-API-CLI-01.CEO-PM-pending-cleared",
+          "LOCAL-TRUST-API-CLI-01.cli-request-output",
+          "LOCAL-TRUST-API-CLI-01.cli-received-exact-request",
+          "LOCAL-TRUST-API-CLI-01.cli-accept-output",
+          "LOCAL-TRUST-API-CLI-01.cli-ceo-list-includes-pm"
+        ]
+      },
+      "finalization_assertions": [
+        "LOCAL-TRUST-API-CLI-01.CEO-final-original-visibility",
+        "LOCAL-TRUST-API-CLI-01.CEO-final-visibility-stored",
+        "LOCAL-TRUST-API-CLI-01.ENG-final-original-visibility",
+        "LOCAL-TRUST-API-CLI-01.ENG-final-visibility-stored",
+        "LOCAL-TRUST-API-CLI-01.PM-final-original-visibility",
+        "LOCAL-TRUST-API-CLI-01.PM-final-visibility-stored",
+        "LOCAL-TRUST-API-CLI-01.QA-final-original-visibility",
+        "LOCAL-TRUST-API-CLI-01.QA-final-visibility-stored",
+        "LOCAL-TRUST-API-CLI-01.CS-final-original-visibility",
+        "LOCAL-TRUST-API-CLI-01.CS-final-visibility-stored",
+        "LOCAL-TRUST-API-CLI-01.complete-owned-request-inventory",
+        "LOCAL-TRUST-API-CLI-01.complete-owned-friend-inventory"
+      ],
+      "finalization": "owned-local-retain-history",
+      "remote_validation": "NOT_RUN",
+      "allowed_environments": [
+        "owned-local"
+      ],
+      "registration_status": "LOCAL_EXECUTOR_ONLY"
+    }
+  ]
+}

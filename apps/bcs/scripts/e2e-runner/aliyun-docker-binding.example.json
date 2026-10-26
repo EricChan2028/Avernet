@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "environment": {
+    "lifecycle": "remote-attach",
+    "deployment": "docker",
+    "provider": "aliyun"
+  },
+  "target": {
+    "kind": "REPLACE_WITH_TARGET_KIND",
+    "resource_id": "REPLACE_WITH_TARGET_RESOURCE_ID",
+    "image_digest": "REPLACE_WITH_TARGET_IMAGE_DIGEST"
+  },
+  "runner": {
+    "image_digest": "REPLACE_WITH_RUNNER_IMAGE_DIGEST"
+  },
+  "mounts": {
+    "profile": {
+      "source": "/REPLACE_WITH_PROFILE_SOURCE",
+      "target": "/etc/bcs-e2e/profile.json",
+      "read_only": true
+    },
+    "secret": {
+      "source": "/REPLACE_WITH_SECRET_SOURCE",
+      "target": "/etc/bcs-e2e/secret.env",
+      "read_only": true
+    },
+    "report": {
+      "source": "/REPLACE_WITH_REPORT_SOURCE",
+      "target": "/var/lib/bcs-e2e/reports",
+      "read_only": false
+    }
+  },
+  "network": {
+    "api_origin": "REPLACE_WITH_API_ORIGIN",
+    "callback": "REPLACE_WITH_CALLBACK",
+    "protocols": ["HTTPS"]
+  },
+  "security": {
+    "tls": {
+      "min_version": "TLS1_2",
+      "verification": "SYSTEM_TRUSTED_CA"
+    }
+  },
+  "observer": {
+    "kind": "alisddbquery",
+    "server": "REPLACE_WITH_OBSERVER_SERVER",
+    "database": "REPLACE_WITH_OBSERVER_DATABASE",
+    "environment": "REPLACE_WITH_PREPROD_OR_PRODUCTION",
+    "binding_confirmed": false
+  },
+  "runtime": {
+    "termination_signal": "SIGTERM",
+    "kill_signal": "SIGKILL",
+    "timeout_seconds": 600
+  }
+}

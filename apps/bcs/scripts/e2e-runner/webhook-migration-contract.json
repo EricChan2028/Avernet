@@ -1,0 +1,173 @@
+{
+  "schema_version": 1,
+  "source_revision": "71860eae99c62d7bf1349a0f46562f6395acbf1e",
+  "parent": "story_user_receives_group_event_webhooks",
+  "sources": {
+    "stories.sh": "b2df5aad7ca67b36d072e70e31f7038050431557f982702b3c628df4bac44b86",
+    "common.sh": "ca4d2571f58f8de3b13c0516b6db3c07c76e0028592b890aff19dc7bea678815",
+    "http_provider_judge_mock.py": "fe56c8c2d79ce141fe1d2784cc21c184c90000bb8e6908c976168f3bdfad70c4",
+    "group_session_ws_probe.py": "954b4b962f2eaffd5aba06db2b9702221c3ef2cd443185987e157980a51eec04"
+  },
+  "requirements": [
+    {
+      "id": "WEBHOOK.receiver-empty",
+      "kind": "fixture",
+      "method": "POST",
+      "path": "${BCS_E2E_MOCK_BASE_URL}/control/event-webhook/clear",
+      "actor": "LOCAL_CONTROL",
+      "expectation": "Fresh per-Run empty receiver replaces shared control reset; never reset any existing endpoint."
+    },
+    {
+      "id": "WEBHOOK.local-principal",
+      "kind": "identity",
+      "method": "NONE",
+      "path": "group_session_ws_probe.py principal",
+      "actor": "LOCAL_HUMAN",
+      "expectation": "Original Human principal generated only with fresh owned-local signing key; no remote signing authority."
+    },
+    {
+      "id": "WEBHOOK.group-create",
+      "kind": "http",
+      "method": "POST",
+      "path": "${public_prefix}/groups",
+      "actor": "HUMAN_PRINCIPAL",
+      "expectation": "HTTP201 returns exact Group and inline Subscription IDs."
+    },
+    {
+      "id": "WEBHOOK.group-event",
+      "kind": "delivery",
+      "method": "POST",
+      "path": "${OWNED_RECEIVER}",
+      "actor": "BCS_EVENT_WORKER",
+      "expectation": "Actual group.created with exact Group scope and no Authorization reaches receiver."
+    },
+    {
+      "id": "WEBHOOK.subscription-list",
+      "kind": "http",
+      "method": "GET",
+      "path": "${public_prefix}/event-subscriptions?scope_type=group&scope_id=$(urlencode \"$group_id\")&limit=20",
+      "actor": "HUMAN_PRINCIPAL",
+      "expectation": "HTTP200 first item matches exact inline Subscription."
+    },
+    {
+      "id": "WEBHOOK.subscription-read",
+      "kind": "http",
+      "method": "GET",
+      "path": "${public_prefix}/event-subscriptions/${subscription_id}",
+      "actor": "HUMAN_PRINCIPAL",
+      "expectation": "HTTP200 active redacted Subscription revision1."
+    },
+    {
+      "id": "WEBHOOK.subscription-test",
+      "kind": "http",
+      "method": "POST",
+      "path": "${public_prefix}/event-subscriptions/${subscription_id}:test",
+      "actor": "HUMAN_PRINCIPAL",
+      "expectation": "HTTP200 synchronous test says delivered=true."
+    },
+    {
+      "id": "WEBHOOK.test-event",
+      "kind": "delivery",
+      "method": "POST",
+      "path": "${OWNED_RECEIVER}",
+      "actor": "BCS_EVENT_WORKER",
+      "expectation": "Actual event_subscription.test reaches same receiver and Group scope."
+    },
+    {
+      "id": "WEBHOOK.subscription-disable",
+      "kind": "http",
+      "method": "PATCH",
+      "path": "${public_prefix}/event-subscriptions/${subscription_id}",
+      "actor": "HUMAN_PRINCIPAL",
+      "expectation": "Optimistic revision1 patch disables Subscription and advances to2."
+    },
+    {
+      "id": "WEBHOOK.subscription-enable",
+      "kind": "http",
+      "method": "PATCH",
+      "path": "${public_prefix}/event-subscriptions/${subscription_id}",
+      "actor": "HUMAN_PRINCIPAL",
+      "expectation": "Optimistic revision2 patch reactivates Subscription and advances to3."
+    },
+    {
+      "id": "WEBHOOK.session-create",
+      "kind": "http",
+      "method": "POST",
+      "path": "${public_prefix}/groups/${group_id}/sessions",
+      "actor": "HUMAN_PRINCIPAL",
+      "expectation": "HTTP201 creates exact Session under subscribed Group; retain implicit Session effects too."
+    },
+    {
+      "id": "WEBHOOK.session-event",
+      "kind": "delivery",
+      "method": "POST",
+      "path": "${OWNED_RECEIVER}",
+      "actor": "BCS_EVENT_WORKER",
+      "expectation": "Actual session.created reaches subscribed Group receiver; do not substitute a fabricated receipt."
+    },
+    {
+      "id": "WEBHOOK.message-create",
+      "kind": "http",
+      "method": "POST",
+      "path": "/groups/${group_id}/messages",
+      "actor": "HUMAN_LOCAL",
+      "expectation": "HTTP200 persists original PM message via original legacy route."
+    },
+    {
+      "id": "WEBHOOK.message-event",
+      "kind": "delivery",
+      "method": "POST",
+      "path": "${OWNED_RECEIVER}",
+      "actor": "BCS_EVENT_WORKER",
+      "expectation": "Actual message.created reaches subscribed Group receiver."
+    },
+    {
+      "id": "WEBHOOK.stream-order",
+      "kind": "observation",
+      "method": "NONE",
+      "path": "${OWNED_RECEIVER_RECORDS}",
+      "actor": "LOCAL_OBSERVER",
+      "expectation": "Nonempty event streams with integer sequences strictly increasing and unique within each stream."
+    },
+    {
+      "id": "WEBHOOK.deliveries-list",
+      "kind": "http",
+      "method": "GET",
+      "path": "${public_prefix}/event-subscriptions/${subscription_id}/deliveries?status=succeeded&limit=20",
+      "actor": "HUMAN_PRINCIPAL",
+      "expectation": "HTTP200 successful delivery list has nonempty exact Delivery ID."
+    },
+    {
+      "id": "WEBHOOK.delivery-read",
+      "kind": "http",
+      "method": "GET",
+      "path": "${public_prefix}/event-deliveries/${delivery_id}",
+      "actor": "HUMAN_PRINCIPAL",
+      "expectation": "HTTP200 Delivery and Attempts belong to inline Subscription."
+    },
+    {
+      "id": "WEBHOOK.subscription-delete",
+      "kind": "http",
+      "method": "DELETE",
+      "path": "${public_prefix}/event-subscriptions/${subscription_id}?revision=3",
+      "actor": "HUMAN_PRINCIPAL",
+      "expectation": "HTTP200 Subscription tombstone status deleted and revision4, not physical purge."
+    },
+    {
+      "id": "WEBHOOK.session-delete",
+      "kind": "http",
+      "method": "DELETE",
+      "path": "${public_prefix}/sessions/${session_id}",
+      "actor": "HUMAN_PRINCIPAL",
+      "expectation": "HTTP200 exact explicit Session business deletion; no broad cleanup."
+    },
+    {
+      "id": "WEBHOOK.group-delete",
+      "kind": "http",
+      "method": "DELETE",
+      "path": "${public_prefix}/groups/${group_id}",
+      "actor": "HUMAN_PRINCIPAL",
+      "expectation": "HTTP200 exact Group business deletion; retain associated delivery/event histories per real storage semantics."
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "source_revision": "71860eae99c62d7bf1349a0f46562f6395acbf1e",
+  "parent": "story_cli_operator_creates_custom_collaboration",
+  "sources": {
+    "cli-stories.sh": "779672ec0d0c02405e5f3fee0f50aec9fbe1febac0808c05ec6844a1e4a39efc"
+  },
+  "requirements": [
+    {
+      "id": "CUSTOM-COLLABORATION.validate-yaml",
+      "command": "bcs-cli collaboration validate <yaml>",
+      "expectation": "Product CLI validation reports valid=true with exactly two participants and two nodes, without persisting resources or exposing YAML contents."
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.create-persistent-group",
+      "command": "bcs-cli collaboration create <yaml> --driver <driver> --binding planner=<driver> --binding reviewer=<reviewer> --context <context> --topic <topic>",
+      "expectation": "Product CLI creates the exact two-role custom collaboration Group with its initial Session handle; CLI readback reports driver, participants, and group_strategy=state_machine before cleanup."
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.trial-one-shot-lifecycle",
+      "command": "bcs-cli create-group + session add-member + collaborate permission + collaborate run + collaborate query --graph/--pending + collaborate respond guard + session messages + run cancel/session read/group delete",
+      "expectation": "Product CLI creates the owned temporary chat Group, joins the exact Human session member, confirms current-session state-machine permission, starts the one-shot Run with fixed bindings/input, reads the exact graph, pending Human, guarded respond refusal, restored state-machine history, then cancels the Run and deletes the temporary Group while the Session remains running."
+    }
+  ]
+}

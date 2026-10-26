@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "environment": {
+    "tier": "local",
+    "id": "local-singlebox",
+    "expected_bcs_env": "local",
+    "lifecycle": "local-provision",
+    "deployment": "singlebox",
+    "provider": "local"
+  },
+  "entrypoint": {
+    "kind": "singlebox",
+    "origin": "http://127.0.0.1:21000",
+    "api_face": "public-v1",
+    "manifest_face": "internal-v1"
+  },
+  "human": {
+    "user_id": "REPLACE_WITH_LOCAL_HUMAN_ID"
+  },
+  "actors": {
+    "driver": {
+      "bot_id": "REPLACE_WITH_LOCAL_DRIVER_BOT_ID",
+      "owner_id": "REPLACE_WITH_LOCAL_HUMAN_ID",
+      "dedicated": true
+    },
+    "member": {
+      "bot_id": "REPLACE_WITH_LOCAL_MEMBER_BOT_ID",
+      "owner_id": "REPLACE_WITH_LOCAL_HUMAN_ID",
+      "dedicated": true
+    }
+  },
+  "auth": {
+    "header_env": {
+      "Cookie": "BCS_E2E_LOCAL_COOKIE"
+    }
+  },
+  "observer": {
+    "kind": "local-mock",
+    "server": "local-mock",
+    "database": "local-mock",
+    "environment_binding_confirmed": true
+  },
+  "policy": {
+    "fixture_pool": "local-singlebox-pool",
+    "exclusive_use_confirmed": true,
+    "timeout_seconds": 30,
+    "max_response_bytes": 1048576,
+    "failure_retention_hours": 24
+  },
+  "route_bindings": {
+    "group.create": {
+      "method": "POST",
+      "path": "/openapi/v1/collaboration/groups",
+      "api_face": "public-v1",
+      "auth": "human_or_owned_bot",
+      "response": "public-envelope",
+      "traceparent": "disabled"
+    },
+    "group.read": {
+      "method": "GET",
+      "path": "/openapi/v1/collaboration/groups/{group_id}",
+      "api_face": "public-v1",
+      "auth": "human_or_owned_bot",
+      "response": "public-envelope",
+      "traceparent": "disabled"
+    },
+    "group.update": {
+      "method": "PATCH",
+      "path": "/openapi/v1/collaboration/groups/{group_id}",
+      "api_face": "public-v1",
+      "auth": "human_or_owned_bot",
+      "response": "public-envelope",
+      "traceparent": "disabled"
+    },
+    "group.delete": {
+      "method": "DELETE",
+      "path": "/openapi/v1/collaboration/groups/{group_id}",
+      "api_face": "public-v1",
+      "auth": "human_or_owned_bot",
+      "response": "public-envelope",
+      "traceparent": "disabled"
+    },
+    "group.verify_deleted": {
+      "method": "GET",
+      "path": "/openapi/v1/collaboration/groups/{group_id}",
+      "api_face": "public-v1",
+      "auth": "human_or_owned_bot",
+      "response": "public-envelope",
+      "traceparent": "disabled"
+    },
+    "session.create": {
+      "method": "POST",
+      "path": "/openapi/v1/collaboration/groups/{group_id}/sessions",
+      "api_face": "public-v1",
+      "auth": "human_or_owned_bot",
+      "response": "public-envelope",
+      "traceparent": "disabled"
+    },
+    "session.read": {
+      "method": "GET",
+      "path": "/openapi/v1/collaboration/sessions/{session_id}",
+      "api_face": "public-v1",
+      "auth": "human_or_owned_bot",
+      "response": "public-envelope",
+      "traceparent": "disabled"
+    },
+    "session.update": {
+      "method": "PATCH",
+      "path": "/openapi/v1/collaboration/sessions/{session_id}",
+      "api_face": "public-v1",
+      "auth": "human_or_owned_bot",
+      "response": "public-envelope",
+      "traceparent": "disabled"
+    },
+    "session.messages": {
+      "method": "GET",
+      "path": "/openapi/v1/collaboration/sessions/{session_id}/messages?limit=50",
+      "api_face": "public-v1",
+      "auth": "human_or_owned_bot",
+      "response": "public-envelope",
+      "traceparent": "disabled"
+    },
+    "session.token": {
+      "method": "POST",
+      "path": "/openapi/v1/collaboration/sessions/{session_id}/token",
+      "api_face": "public-v1",
+      "auth": "human_or_owned_bot",
+      "response": "public-envelope",
+      "traceparent": "disabled"
+    },
+    "session.delete": {
+      "method": "DELETE",
+      "path": "/openapi/v1/collaboration/sessions/{session_id}",
+      "api_face": "public-v1",
+      "auth": "human_or_owned_bot",
+      "response": "public-envelope",
+      "traceparent": "disabled"
+    },
+    "session.verify_deleted": {
+      "method": "GET",
+      "path": "/openapi/v1/collaboration/sessions/{session_id}",
+      "api_face": "public-v1",
+      "auth": "human_or_owned_bot",
+      "response": "public-envelope",
+      "traceparent": "disabled"
+    }
+  },
+  "relationships": {
+    "friendship": "unchanged"
+  }
+}

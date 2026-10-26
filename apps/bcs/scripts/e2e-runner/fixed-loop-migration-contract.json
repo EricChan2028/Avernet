@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "source_revision": "71860eae99c62d7bf1349a0f46562f6395acbf1e",
+  "parent": "story_fixed_loop_human_editor_workflow",
+  "sources": {
+    "fixed_loop_story.sh": "14939d995cd1134b6be626a44f823a53dcf134f5b702187e0d8639fb6b15b92d",
+    "fixed_loop_story.py": "7e42cff9820a68e9099309d5a313f0f9a9d4814dda66bb7fc89e8aee5dd7aefb",
+    "common.sh": "ca4d2571f58f8de3b13c0516b6db3c07c76e0028592b890aff19dc7bea678815"
+  },
+  "requirements": [
+    {
+      "id": "FIXED_LOOP.sandbox-isolation",
+      "kind": "fixture",
+      "method": "NONE",
+      "path": "${OWNED_FIXED_LOOP_SANDBOX}",
+      "actor": "LOCAL_CONTROL",
+      "expectation": "Fresh per-Run Provider and deterministic Judge sandbox replaces shared /control/reset; no existing endpoint or service state is reset."
+    },
+    {
+      "id": "FIXED_LOOP.fixture-setup",
+      "kind": "http",
+      "method": "POST",
+      "path": "/me/ensure-human",
+      "actor": "HUMAN_LOCAL",
+      "expectation": "Local Human, Provider, Provider Bot, public visibility and original driver-to-worker trust fixture are created and bound before the first Run."
+    },
+    {
+      "id": "FIXED_LOOP.approved-loop",
+      "kind": "http",
+      "method": "POST",
+      "path": "/groups/${group_id}/state-machine-runs",
+      "actor": "HUMAN_LOCAL",
+      "expectation": "Validated fixed-editorial definition executes approved Loop: two iterations preserve prior output, reject stale response_ref, route approved to polish, and finish the Run."
+    },
+    {
+      "id": "FIXED_LOOP.exhausted-loop",
+      "kind": "http",
+      "method": "POST",
+      "path": "/groups/${group_id}/sessions",
+      "actor": "HUMAN_LOCAL",
+      "expectation": "One-shot Session Run with exhausted fixed Loop preserves previous output, records revise/exhausted route, and continues through rewrite rather than fabricating approval."
+    },
+    {
+      "id": "FIXED_LOOP.one-shot-publication",
+      "kind": "http",
+      "method": "GET",
+      "path": "/sessions/${session_id}",
+      "actor": "HUMAN_LOCAL",
+      "expectation": "After Loop completion the explicit Session remains running and its editorial output is published to chat exactly once, distinct from the six state-machine node outputs."
+    },
+    {
+      "id": "FIXED_LOOP.history-graph",
+      "kind": "poll",
+      "method": "GET",
+      "path": "/state-machine-runs/${run_id}/graph",
+      "actor": "HUMAN_LOCAL",
+      "expectation": "Graph and message history agree across completed and skipped nodes, exact execution metadata, six one-output events, immutable reload, and a single final output."
+    },
+    {
+      "id": "FIXED_LOOP.exact-cleanup",
+      "kind": "http",
+      "method": "DELETE",
+      "path": "/groups/${group_id}?bot_id=${driver_bot_id}",
+      "actor": "HUMAN_LOCAL",
+      "expectation": "Only the two created Groups and the new Provider Bot are deleted through original business APIs; retained histories, associations and non-target state remain explicit."
+    },
+    {
+      "id": "FIXED_LOOP.reset-replacement",
+      "kind": "fixture",
+      "method": "NONE",
+      "path": "/control/judge/outcomes",
+      "actor": "LOCAL_CONTROL",
+      "expectation": "Shared /control/provider/clear and broad reset become per-Run immutable Provider receipts plus explicit deterministic Judge results; each Run receives its approved or exhausted fixture without cross-Run leakage."
+    }
+  ]
+}

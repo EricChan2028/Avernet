@@ -1,0 +1,348 @@
+"""Source-bound parent Stories cannot be replaced by pilot slices or soft PASS."""
+import copy
+import json
+from pathlib import Path
+import shutil
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from bcs_e2e.cli import plan
+from bcs_e2e.inventory import current_manifest
+from bcs_e2e.local_operator_cli_contract import (
+    collaboration_team_source_binding,
+    custom_collaboration_source_binding,
+    sessions_services_source_binding,
+)
+from bcs_e2e.migration_inventory import SOURCES, migration_plan, validate_contract
+from bcs_e2e.profile import load
+from bcs_e2e.run_state import RunStateError
+
+
+class MigrationInventoryTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.source = Path(temporary.name)
+        for name in SOURCES:
+            shutil.copyfile(ROOT.parent / 'e2e-test' / name, self.source / name)
+        self.contract = json.loads((ROOT / 'migration-contracts.json').read_text())
+
+    def test_original_source_and_complete_three_parent_inventory_match(self):
+        self.assertEqual(validate_contract(self.contract, source_root=self.source), self.contract)
+        result = migration_plan()
+        self.assertEqual(result['legacy_inventory_count'], 34)
+        self.assertEqual(result['mapped_story_count'], 3)
+        self.assertEqual([len(s['steps']) for s in result['stories']], [17, 5, 1])
+        self.assertEqual([len(s['requirements']) for s in result['stories']], [18, 5, 10])
+        self.assertEqual(result['migrated_story_count'], 0)
+        self.assertEqual(result['passed_assertion_count'], 0)
+        self.assertFalse(result['ready_to_execute'])
+        self.assertTrue(all(s['migration_status'] == 'NOT_MIGRATED' for s in result['stories']))
+
+    def test_collaboration_team_source_binding_freezes_the_full_parent_map(self):
+        binding = collaboration_team_source_binding()
+        expected_ids = (
+            'CLI-COLLAB-TEAM.protect-visibility',
+            'CLI-COLLAB-TEAM.friend-request-reject',
+            'CLI-COLLAB-TEAM.group-create-read',
+            'CLI-COLLAB-TEAM.group-add-member',
+            'CLI-COLLAB-TEAM.group-list',
+            'CLI-COLLAB-TEAM.group-fuse',
+            'CLI-COLLAB-TEAM.group-complete',
+            'CLI-COLLAB-TEAM.group-terminate',
+        )
+        self.assertEqual(binding['parent'], 'story_cli_operator_builds_collaboration_team')
+        self.assertEqual([row['id'] for row in binding['requirements']], list(expected_ids))
+        self.assertEqual(len(binding['requirements']), 8)
+        self.assertTrue(all(row['expectation'] for row in binding['requirements']))
+        for mutation in ('remove', 'command', 'expectation'):
+            value = copy.deepcopy(binding)
+            if mutation == 'remove':
+                value['requirements'].pop()
+            elif mutation == 'command':
+                value['requirements'][0]['command'] = 'bcs-cli foreign'
+            else:
+                value['requirements'][0]['expectation'] = 1
+            with self.subTest(mutation=mutation), \
+                 patch('bcs_e2e.local_operator_cli_contract.read', return_value=value), \
+                 self.assertRaises(RunStateError):
+                collaboration_team_source_binding()
+
+    def test_migration_plan_exposes_collaboration_team_map_without_migrated_story_credit(self):
+        result = migration_plan()
+        row = next(r for r in result['additional_source_maps']
+                   if r['parent'] == 'story_cli_operator_builds_collaboration_team')
+        self.assertEqual(len(row['requirements']), 8)
+        self.assertEqual(result['legacy_inventory_count'], 34)
+        self.assertEqual(result['migrated_story_count'], 0)
+        self.assertEqual(result['mapped_story_count'], 3)
+        self.assertEqual(result['passed_assertion_count'], 0)
+
+    def test_sessions_services_source_binding_freezes_four_business_obligations(self):
+        binding = sessions_services_source_binding()
+        expected_ids = (
+            'CLI-SESSION-SERVICE.session-lifecycle',
+            'CLI-SESSION-SERVICE.member-chat-lifecycle',
+            'CLI-SESSION-SERVICE.session-complete',
+            'CLI-SESSION-SERVICE.service-roundtrip',
+        )
+        self.assertEqual(binding['parent'], 'story_cli_operator_runs_sessions_and_services')
+        self.assertEqual([row['id'] for row in binding['requirements']], list(expected_ids))
+        self.assertTrue(all(row['expectation'] for row in binding['requirements']))
+        for mutation in ('remove', 'command', 'expectation'):
+            value = copy.deepcopy(binding)
+            if mutation == 'remove':
+                value['requirements'].pop()
+            elif mutation == 'command':
+                value['requirements'][0]['command'] = 'bcs-cli foreign command'
+            else:
+                value['requirements'][0]['expectation'] = 1
+            with self.subTest(mutation=mutation), \
+                 patch('bcs_e2e.local_operator_cli_contract.read', return_value=value), \
+                 self.assertRaises(RunStateError):
+                sessions_services_source_binding()
+
+    def test_migration_plan_exposes_sessions_services_map_without_story_credit(self):
+        result = migration_plan()
+        row = next(r for r in result['additional_source_maps']
+                   if r['parent'] == 'story_cli_operator_runs_sessions_and_services')
+        self.assertEqual(len(row['requirements']), 4)
+        self.assertEqual(result['legacy_inventory_count'], 34)
+        self.assertEqual(result['migrated_story_count'], 0)
+        self.assertEqual(result['mapped_story_count'], 3)
+        self.assertEqual(result['passed_assertion_count'], 0)
+
+    def test_session_service_parent_case_closes_all_four_local_obligations(self):
+        result = migration_plan()
+        local = next(r for r in result['local_registered_executors']
+                     if r['case_id'] == 'LOCAL-SESSION-SERVICE-PARENT-01')
+        self.assertEqual(local['legacy_id'], 'story_cli_operator_runs_sessions_and_services')
+        self.assertEqual(local['status'], 'LOCAL_EXECUTOR_ONLY')
+        self.assertEqual(local['required_assertion_count'], 4)
+        self.assertEqual(local['execution_command'], 'execute_local_session_service_parent_case')
+        self.assertEqual(local['requirement_ids'], [
+            'CLI-SESSION-SERVICE.session-lifecycle',
+            'CLI-SESSION-SERVICE.member-chat-lifecycle',
+            'CLI-SESSION-SERVICE.session-complete',
+            'CLI-SESSION-SERVICE.service-roundtrip',
+        ])
+        self.assertEqual(local['canonical_reporting'], 'INTEGRATED_LOCAL')
+        self.assertEqual(local['remote_validation'], 'NOT_RUN')
+        self.assertFalse(local['grants_release_credit'])
+        superseded = {'LOCAL-SESSION-SERVICE-LIFECYCLE-01',
+                      'LOCAL-SESSION-SERVICE-MEMBER-CHAT-01',
+                      'LOCAL-SESSION-SERVICE-COMPLETE-01',
+                      'LOCAL-SESSION-SERVICE-ROUNDTRIP-01'}
+        self.assertFalse(any(r['case_id'] in superseded for r in result['local_partial_executors']))
+        parent = next(r for r in result['cross_environment_product_cli_case_slices']
+                      if r['case_id'] == 'LOCAL-SESSION-SERVICE-PARENT-01')
+        self.assertEqual(parent['local_executor_status'], 'LOCAL_FULL_PARENT_EXECUTOR')
+        self.assertEqual(parent['remote_validation'], 'NOT_RUN')
+        self.assertFalse(parent['grants_release_credit'])
+        self.assertIn('preprod', parent['blocker'])
+
+    def test_custom_collaboration_source_binding_freezes_validate_create_and_trial_paths(self):
+        binding = custom_collaboration_source_binding()
+        self.assertEqual(binding['parent'], 'story_cli_operator_creates_custom_collaboration')
+        self.assertEqual([row['id'] for row in binding['requirements']],
+                         ['CUSTOM-COLLABORATION.validate-yaml',
+                          'CUSTOM-COLLABORATION.create-persistent-group',
+                          'CUSTOM-COLLABORATION.trial-one-shot-lifecycle'])
+        self.assertEqual([row['command'] for row in binding['requirements']],
+                         ['bcs-cli collaboration validate <yaml>',
+                          'bcs-cli collaboration create <yaml> --driver <driver> '
+                          '--binding planner=<driver> --binding reviewer=<reviewer> '
+                          '--context <context> --topic <topic>',
+                          'bcs-cli create-group + session add-member + collaborate permission '
+                          '+ collaborate run + collaborate query --graph/--pending '
+                          '+ collaborate respond guard + session messages '
+                          '+ run cancel/session read/group delete'])
+        self.assertEqual(binding['requirements'][0]['expectation'],
+                         'Product CLI validation reports valid=true with exactly two '
+                         'participants and two nodes, without persisting resources '
+                         'or exposing YAML contents.')
+        self.assertEqual(binding['requirements'][1]['expectation'],
+                         'Product CLI creates the exact two-role custom collaboration '
+                         'Group with its initial Session handle; CLI readback reports '
+                         'driver, participants, and group_strategy=state_machine '
+                         'before cleanup.')
+        self.assertEqual(binding['requirements'][2]['expectation'],
+                         'Product CLI creates the owned temporary chat Group, joins the '
+                         'exact Human session member, confirms current-session '
+                         'state-machine permission, starts the one-shot Run with fixed '
+                         'bindings/input, reads the exact graph, pending Human, guarded '
+                         'respond refusal, restored state-machine history, then cancels '
+                         'the Run and deletes the temporary Group while the Session '
+                         'remains running.')
+        for scenario in ('remove', 'command', 'expectation'):
+            value = copy.deepcopy(binding)
+            if scenario == 'remove':
+                value['requirements'].pop()
+            elif scenario == 'command':
+                value['requirements'][0]['command'] = 'bcs-cli foreign command'
+            else:
+                value['requirements'][0]['expectation'] = 1
+            with self.subTest(mutation=scenario), \
+                 patch('bcs_e2e.local_operator_cli_contract.read', return_value=value), \
+                 self.assertRaises(RunStateError):
+                custom_collaboration_source_binding()
+
+    def test_custom_collaboration_full_local_case_never_creates_remote_credit(self):
+        result = migration_plan()
+        local = next(r for r in result['local_registered_executors']
+                     if r['case_id'] == 'LOCAL-CUSTOM-COLLABORATION-LIFECYCLE-01')
+        self.assertEqual(local['legacy_id'], 'story_cli_operator_creates_custom_collaboration')
+        self.assertEqual(local['status'], 'LOCAL_EXECUTOR_ONLY')
+        self.assertEqual(local['required_assertion_count'], 3)
+        self.assertEqual(local['requirement_ids'], [
+            'CUSTOM-COLLABORATION.validate-yaml',
+            'CUSTOM-COLLABORATION.create-persistent-group',
+            'CUSTOM-COLLABORATION.trial-one-shot-lifecycle',
+        ])
+        self.assertEqual(local['canonical_reporting'], 'INTEGRATED_LOCAL')
+        self.assertEqual(local['execution_command'], 'run_custom_collaboration_case')
+        self.assertEqual(local['remote_validation'], 'NOT_RUN')
+        self.assertFalse(local['grants_release_credit'])
+        superseded = {'LOCAL-CUSTOM-COLLAB-VALIDATE-01',
+                      'LOCAL-CUSTOM-COLLAB-CREATE-01',
+                      'LOCAL-CUSTOM-COLLAB-TRIAL-01'}
+        self.assertFalse(any(r['case_id'] in superseded for r in result['local_partial_executors']))
+        custom_slice = next(r for r in result['cross_environment_product_cli_case_slices']
+                            if r['case_id'] == 'LOCAL-CUSTOM-COLLABORATION-LIFECYCLE-01')
+        self.assertEqual(custom_slice['local_executor_status'], 'LOCAL_FULL_PARENT_EXECUTOR')
+        self.assertEqual(custom_slice['remote_validation'], 'NOT_RUN')
+        self.assertFalse(custom_slice['grants_release_credit'])
+        self.assertIn('preprod', custom_slice['blocker'])
+        self.assertEqual(result['legacy_inventory_count'], 34)
+        self.assertEqual(result['migrated_story_count'], 0)
+        self.assertEqual(result['passed_assertion_count'], 0)
+
+    def test_workspace_full_flow_supersedes_all_increment_slices(self):
+        result = migration_plan()
+        flow = next(row for row in result['local_registered_executors']
+                    if row['case_id'] == 'LOCAL-WORKSPACE-FLOW-01')
+        self.assertEqual(len(flow['requirement_ids']), 18)
+        self.assertEqual(flow['canonical_reporting'], 'INTEGRATED_LOCAL')
+        self.assertEqual(flow['report_command'], 'local-workspace-report')
+        self.assertFalse(flow['grants_release_credit'])
+        workspace_partials = {
+            'LOCAL-WORKSPACE-API-01', 'LOCAL-WORKSPACE-API-CLI-01',
+            'LOCAL-WORKSPACE-CONFIG-01', 'LOCAL-WORKSPACE-MESSAGING-01',
+            'LOCAL-WORKSPACE-INCIDENT-ROUNDTRIP-01'}
+        self.assertFalse(any(row['case_id'] in workspace_partials
+                             for row in result['local_partial_executors']))
+        slow_judge = next(row for row in result['local_registered_executors']
+                          if row['case_id'] == 'LOCAL-SLOW-JUDGE-01')
+        self.assertEqual(slow_judge['report_command'], 'local-slow-judge-report')
+        self.assertEqual(len(slow_judge['requirement_ids']), 22)
+        self.assertFalse(slow_judge['grants_release_credit'])
+        self.assertFalse(result['ready_to_execute'])
+
+    def test_local_migration_set_covers_the_29_reviewed_release_parent_stories(self):
+        result = migration_plan()
+        self.assertEqual(len(result['local_registered_executors']), 29)
+        self.assertEqual(result['local_partial_executors'], [])
+        all_inventory = {row['id'] for row in current_manifest()['legacy_inventory']}
+        known_unmapped = {
+            'story_cli_operator_manages_group_context',
+            'story_nested_fixed_loop_workflows',
+            'story_state_machine_result_queue',
+            'test_ep_tc_friend_auth_sync_readdressed_principal',
+            'test_ep_dept_scope_parses_object_friend_ext_entries',
+        }
+        expected_parents = all_inventory - known_unmapped
+        actual_parents = {row['legacy_id'] for row in result['local_registered_executors']}
+        self.assertEqual(actual_parents, expected_parents)
+        self.assertEqual(all_inventory - expected_parents, known_unmapped)
+        duplicate_cases = [row['case_id'] for row in result['local_registered_executors']]
+        self.assertEqual(len(duplicate_cases), len(set(duplicate_cases)))
+        self.assertTrue(all(row['remote_validation'] == 'NOT_RUN'
+                            and row['grants_release_credit'] is False
+                            for row in result['local_registered_executors']))
+
+    def test_shared_identity_helpers_and_final_cli_friend_outcome_are_explicit(self):
+        self.assertIn('common.sh', self.contract['sources'])
+        friend = self.contract['stories'][1]
+        requirement = next(r for r in friend['requirements'] if r['id'] == 'FRIEND.cli-accept')
+        self.assertIn("PM is present in CEO's final CLI friend list", requirement['expectation'])
+        path = self.source / 'common.sh'
+        source = path.read_text()
+        self.assertIn('BOT_DATA_DIR', source)
+        path.write_text(source.replace('BOT_DATA_DIR', 'OTHER_BOT_DATA_DIR', 1))
+        with self.assertRaises(RunStateError): validate_contract(self.contract, source_root=self.source)
+
+    def test_plan_is_offline_and_does_not_acquire_leases_or_change_pilot_inventory(self):
+        manifest = current_manifest()
+        with patch('bcs_e2e.cli.ReadClient', side_effect=AssertionError('no network')), \
+             patch('bcs_e2e.prepare.PoolLease.acquire', side_effect=AssertionError('no lease')):
+            result = plan(load(ROOT / 'profiles/local.mock.json'))
+        self.assertEqual(result['cases'], manifest['cases'])
+        self.assertFalse(result['ready_to_execute'])
+        migration = result['next_story_migrations']
+        self.assertEqual(migration['status'], 'PLANNED_NOT_EXECUTABLE')
+        self.assertEqual(migration['migrated_story_count'], 0)
+        self.assertEqual([len(s['required_bot_roles']) for s in migration['stories']], [4, 5, 2])
+
+    def test_any_source_change_requires_review_including_nested_helper_changes(self):
+        for name in SOURCES:
+            path = self.source / name
+            original = path.read_bytes()
+            path.write_bytes(original + b'\n# source drift\n')
+            with self.subTest(name=name), self.assertRaises(RunStateError):
+                validate_contract(self.contract, source_root=self.source)
+            path.write_bytes(original)
+
+    def test_missing_reordered_or_foreign_parent_step_is_rejected(self):
+        for edit in ('remove', 'reverse', 'wrong-source', 'duplicate', 'foreign'):
+            contract = copy.deepcopy(self.contract)
+            steps = contract['stories'][0]['steps']
+            if edit == 'remove': steps.pop()
+            elif edit == 'reverse': steps.reverse()
+            elif edit == 'wrong-source': steps[0]['source'] = 'friends.sh'
+            elif edit == 'duplicate': steps.append(steps[0])
+            else: steps[0]['function'] = 'run_pre01'
+            with self.subTest(edit=edit), self.assertRaises(RunStateError):
+                validate_contract(contract, source_root=self.source)
+
+    def test_each_business_requirement_and_role_cannot_be_silently_dropped(self):
+        for index, story in enumerate(self.contract['stories']):
+            for field in ('requirements', 'required_bot_roles'):
+                for position in range(len(story[field])):
+                    contract = copy.deepcopy(self.contract)
+                    contract['stories'][index][field].pop(position)
+                    with self.subTest(index=index, field=field, position=position), self.assertRaises(RunStateError):
+                        validate_contract(contract, source_root=self.source)
+
+    def test_fake_migration_assertion_count_or_duplicate_requirement_never_admitted(self):
+        for edit in ('pass', 'count', 'duplicate', 'unbound'):
+            contract = copy.deepcopy(self.contract)
+            story = contract['stories'][2]
+            if edit == 'pass': story['migration_status'] = 'MIGRATED'
+            elif edit == 'count': story['passed_assertion_count'] = 10
+            elif edit == 'duplicate': story['requirements'].append(story['requirements'][0])
+            else: story['requirements'][0]['functions'] = ['run_pre03']
+            with self.subTest(edit=edit), self.assertRaises(RunStateError):
+                validate_contract(contract, source_root=self.source)
+
+    def test_path_traversal_symlink_missing_and_oversized_sources_are_rejected(self):
+        contract = copy.deepcopy(self.contract)
+        contract['sources']['../external.sh'] = contract['sources'].pop('group.sh')
+        with self.assertRaises(RunStateError): validate_contract(contract, source_root=self.source)
+        path = self.source / 'group.sh'
+        original = path.read_bytes(); path.unlink()
+        with self.assertRaises(RunStateError): validate_contract(self.contract, source_root=self.source)
+        path.symlink_to(ROOT.parent / 'e2e-test/group.sh')
+        with self.assertRaises(RunStateError): validate_contract(self.contract, source_root=self.source)
+        path.unlink(); path.write_bytes(b'x' * 1_048_577)
+        with self.assertRaises(RunStateError): validate_contract(self.contract, source_root=self.source)
+        path.write_bytes(original)
+
+    def test_inventory_cannot_claim_partial_map_is_already_migrated(self):
+        manifest = current_manifest()
+        next(s for s in manifest['legacy_inventory'] if s['id'] == 'story_session_file_workspace')['migration_status'] = 'MIGRATED'
+        with patch('bcs_e2e.inventory.current_manifest', return_value=manifest), self.assertRaises(RunStateError):
+            migration_plan()

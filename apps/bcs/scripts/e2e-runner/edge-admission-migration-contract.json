@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "source_revision": "71860eae99c62d7bf1349a0f46562f6395acbf1e",
+  "parent": "test_ep_admission",
+  "sources": {
+    "edge_permission.sh": "e395ff4f203cd4fb0a7396230240c2542a8caadd0675eaa8b9dc5a8294986983"
+  },
+  "requirements": [
+    {
+      "id": "EDGE-ADMISSION.human-actor",
+      "kind": "http",
+      "method": "GET",
+      "path": "/bots/$BOT_CEO_UUID/admission?actor=human_88001",
+      "actor": "UNAUTHENTICATED",
+      "expectation": "Exact dedicated CEO admission read returns200; the original warning fallback must become an explicit assertion, and no fixture or relationship is changed."
+    },
+    {
+      "id": "EDGE-ADMISSION.actor-kind",
+      "kind": "http",
+      "method": "GET",
+      "path": "/bots/$BOT_CEO_UUID/admission?actor=88001&actor_kind=human",
+      "actor": "UNAUTHENTICATED",
+      "expectation": "Equivalent admission read with actor_kind=human returns200; exact Bot and human identity bindings remain required in each environment."
+    }
+  ]
+}

@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "source_revision": "71860eae99c62d7bf1349a0f46562f6395acbf1e",
+  "parent": "story_human_manages_delivery_policy",
+  "sources": {
+    "stories.sh": "b2df5aad7ca67b36d072e70e31f7038050431557f982702b3c628df4bac44b86"
+  },
+  "requirements": [
+    {
+      "id": "DELIVERY.human-read",
+      "method": "GET",
+      "path": "/admin/message-delivery/policy",
+      "actor": "human",
+      "kind": "http",
+      "expectation": "Human identity reads the effective delivery policy; version is a non-negative integer and policy is a complete object."
+    },
+    {
+      "id": "DELIVERY.bot-read-denied",
+      "method": "GET",
+      "path": "/admin/message-delivery/policy",
+      "actor": "bot",
+      "kind": "http",
+      "expectation": "A Bot token is rejected with 403; Bot credentials cannot administer delivery policy."
+    },
+    {
+      "id": "DELIVERY.bot-write-denied",
+      "method": "PUT",
+      "path": "/admin/message-delivery/policy",
+      "actor": "bot",
+      "kind": "http",
+      "expectation": "A Bot token PUT is rejected with 403 and never replaces the policy."
+    },
+    {
+      "id": "DELIVERY.denied-preserves",
+      "method": "GET",
+      "path": "/admin/message-delivery/policy",
+      "actor": "human",
+      "kind": "http",
+      "expectation": "After denied Bot writes the human read-back keeps the identical version and complete policy."
+    },
+    {
+      "id": "DELIVERY.cas-update",
+      "method": "PUT",
+      "path": "/admin/message-delivery/policy",
+      "actor": "human",
+      "kind": "http",
+      "expectation": "Human PUT with the matching expected_version replaces the policy; response records version+1, updated_by as the human actor, and the complete updated policy."
+    },
+    {
+      "id": "DELIVERY.readback",
+      "method": "GET",
+      "path": "/admin/message-delivery/policy",
+      "actor": "human",
+      "kind": "http",
+      "expectation": "Independent human read-back exposes the incremented version and the complete updated policy."
+    },
+    {
+      "id": "DELIVERY.stale-rejected",
+      "method": "PUT",
+      "path": "/admin/message-delivery/policy",
+      "actor": "human",
+      "kind": "http",
+      "expectation": "Human PUT with a stale expected_version is rejected 409 with error delivery_policy_version_conflict."
+    },
+    {
+      "id": "DELIVERY.conflict-preserves",
+      "method": "GET",
+      "path": "/admin/message-delivery/policy",
+      "actor": "human",
+      "kind": "http",
+      "expectation": "After the stale-write conflict the human read-back keeps the version and policy unchanged."
+    },
+    {
+      "id": "DELIVERY.restore",
+      "method": "PUT",
+      "path": "/admin/message-delivery/policy",
+      "actor": "human",
+      "kind": "http",
+      "expectation": "Human PUT restoring the original policy with the current expected_version succeeds and records version+1 again."
+    },
+    {
+      "id": "DELIVERY.restored",
+      "method": "GET",
+      "path": "/admin/message-delivery/policy",
+      "actor": "human",
+      "kind": "http",
+      "expectation": "Final human read-back exposes the once-incremented version and the exact original policy for following stories."
+    }
+  ]
+}

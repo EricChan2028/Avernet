@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "source_revision": "71860eae99c62d7bf1349a0f46562f6395acbf1e",
+  "parent": "story_user_validates_external_channel_setup",
+  "sources": {
+    "stories.sh": "b2df5aad7ca67b36d072e70e31f7038050431557f982702b3c628df4bac44b86"
+  },
+  "requirements": [
+    {
+      "id": "CHANNEL.bind-denied",
+      "method": "POST",
+      "path": "/channels/bindings",
+      "expectation": "Human binding of uninstalled channel returns400 bad_request and disabled-bridge diagnostic; no resource created."
+    },
+    {
+      "id": "CHANNEL.list-before",
+      "method": "GET",
+      "path": "/channels/bindings",
+      "expectation": "Human list returns200 items array; isolated local baseline remains empty."
+    },
+    {
+      "id": "CHANNEL.target-empty",
+      "method": "GET",
+      "path": "/channels/bindings/by-target?target_type=bot&target_id=${encoded_bot_id}&channel_type=e2e-uninstalled-channel",
+      "expectation": "Exact owned CEO Bot target list returns200 empty items."
+    },
+    {
+      "id": "CHANNEL.pause-missing",
+      "method": "PATCH",
+      "path": "/channels/bindings/${missing_binding}",
+      "expectation": "Pause a run-unique absent binding returns200 ok=true under disabled-bridge no-op contract only."
+    },
+    {
+      "id": "CHANNEL.delete-missing",
+      "method": "DELETE",
+      "path": "/channels/bindings/${missing_binding}",
+      "expectation": "Delete same proved-absent binding returns200 ok=true; never cleanup an existing binding."
+    },
+    {
+      "id": "CHANNEL.list-after",
+      "method": "GET",
+      "path": "/channels/bindings",
+      "expectation": "Final list returns200 empty items; no phantom binding or conversation and fixtures unchanged."
+    }
+  ]
+}

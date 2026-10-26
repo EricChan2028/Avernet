@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "source_revision": "71860eae99c62d7bf1349a0f46562f6395acbf1e",
+  "parent": "story_user_runs_structured_collaboration",
+  "sources": {
+    "stories.sh": "b2df5aad7ca67b36d072e70e31f7038050431557f982702b3c628df4bac44b86",
+    "common.sh": "ca4d2571f58f8de3b13c0516b6db3c07c76e0028592b890aff19dc7bea678815"
+  },
+  "requirements": [
+    {
+      "id": "STRUCTURED.templates-list",
+      "method": "GET",
+      "path": "/collaboration/templates?lang=zh-CN",
+      "actor": "HUMAN",
+      "expectation": "Template list zh-CN includes single-bot-guided-answer."
+    },
+    {
+      "id": "STRUCTURED.template-detail",
+      "method": "GET",
+      "path": "/collaboration/templates/single-bot-guided-answer?lang=zh-CN&format=json",
+      "actor": "HUMAN",
+      "expectation": "Template detail preserves exact id/lang and nonempty authoring YAML."
+    },
+    {
+      "id": "STRUCTURED.group-create",
+      "method": "POST",
+      "path": "/groups",
+      "actor": "CEO",
+      "expectation": "CEO creates exact CEO/PM state_machine Group with original inline definition and label; generated Group ID bound before later calls."
+    },
+    {
+      "id": "STRUCTURED.group-read",
+      "method": "GET",
+      "path": "/groups/${group_id}",
+      "actor": "HUMAN",
+      "expectation": "Group read confirms exact state_machine strategy."
+    },
+    {
+      "id": "STRUCTURED.definition-read",
+      "method": "GET",
+      "path": "/groups/${group_id}/collaboration-definition",
+      "actor": "HUMAN",
+      "expectation": "Bound definition has ID/version and yaml_source original."
+    },
+    {
+      "id": "STRUCTURED.definition-patch",
+      "method": "PATCH",
+      "path": "/groups/${group_id}/collaboration-definition",
+      "actor": "HUMAN",
+      "expectation": "Patch using exact base definition increments version by1 and includes revised Draft and verify instruction."
+    },
+    {
+      "id": "STRUCTURED.upgrade-missing",
+      "method": "POST",
+      "path": "/groups/${group_id}/collaboration-definition/upgrade",
+      "actor": "HUMAN",
+      "expectation": "Upgrade to patched version+100 returns404 naming exact definition and @version; no silent creation."
+    },
+    {
+      "id": "STRUCTURED.run-start",
+      "method": "POST",
+      "path": "/groups/${group_id}/state-machine-runs",
+      "actor": "HUMAN",
+      "expectation": "Start bound workflow returns202,exact Run/Group IDs and node identity; preserve actual execution behavior."
+    },
+    {
+      "id": "STRUCTURED.run-read",
+      "method": "GET",
+      "path": "/state-machine-runs/${run_id}",
+      "actor": "HUMAN",
+      "expectation": "Run read keeps exact Run identity and exposes lifecycle state."
+    },
+    {
+      "id": "STRUCTURED.graph-read",
+      "method": "GET",
+      "path": "/state-machine-runs/${run_id}/graph",
+      "actor": "HUMAN",
+      "expectation": "Graph refers to same Run and answer node."
+    },
+    {
+      "id": "STRUCTURED.node-read",
+      "method": "GET",
+      "path": "/state-machine-runs/${run_id}/nodes/answer",
+      "actor": "HUMAN",
+      "expectation": "Node detail answer belongs to exact Run."
+    },
+    {
+      "id": "STRUCTURED.pending-human-empty",
+      "method": "GET",
+      "path": "/state-machine-runs/${run_id}/pending-human-nodes",
+      "actor": "HUMAN",
+      "expectation": "Bot-only workflow pending-Human list is empty."
+    },
+    {
+      "id": "STRUCTURED.human-response-denied",
+      "method": "POST",
+      "path": "/state-machine-runs/${run_id}/nodes/answer/respond",
+      "actor": "HUMAN",
+      "expectation": "Human response to bot_task returns400 with not a human_input node diagnostic."
+    },
+    {
+      "id": "STRUCTURED.run-cancel",
+      "method": "POST",
+      "path": "/state-machine-runs/${run_id}/cancel",
+      "actor": "HUMAN",
+      "expectation": "Exact owned Run cancellation returns200,run.status aborted; not externalengine completion proof."
+    },
+    {
+      "id": "STRUCTURED.run-terminal",
+      "method": "GET",
+      "path": "/state-machine-runs/${run_id}",
+      "actor": "HUMAN",
+      "expectation": "Readback confirms same Run remains aborted."
+    },
+    {
+      "id": "STRUCTURED.rerun-aborted-denied",
+      "method": "POST",
+      "path": "/state-machine-runs/${run_id}/reruns",
+      "actor": "HUMAN",
+      "expectation": "Rerun aborted source returns409 with must be failed before rerun diagnostic."
+    },
+    {
+      "id": "STRUCTURED.group-delete",
+      "method": "DELETE",
+      "path": "/groups/${group_id}?bot_id=${BOT_CEO_UUID}",
+      "actor": "HUMAN",
+      "expectation": "Original creator-scoped Group delete returns200; no broad cleanup and retain/report associated definitions/run/node/history according to actual API effects."
+    }
+  ]
+}
