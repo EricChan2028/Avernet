@@ -90,9 +90,12 @@ def disk_digest() -> str:
     # focused-module allowance grows by exactly those three files in advance.
     # The owned-local Nested fixed-loop black-box slice adds its focused source
     # binding contract and its run/report projection modules, so the allowance
-    # grows by exactly those three files in advance.
+    # grew by exactly those three files in advance.
+    # The Edge friend-mutation backlog split moves the fixture service-key
+    # adapter into its own focused module and adds one independent extras
+    # mixin, so the allowance grows by two more focused files.
     # The enforced count keeps runner.py alongside the focused modules.
-    if len(paths) > 307:
+    if len(paths) > 309:
         raise ValueError('executor artifact exceeds its source-file budget')
     digest = hashlib.sha256()
     for path in paths:

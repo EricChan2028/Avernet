@@ -272,13 +272,17 @@ def migration_plan() -> dict:
     )
     from .edge_search_contract import bot_search_source_binding
     bot_search = bot_search_source_binding()
-    from .edge_friend_mutation_case import (CASE_IDS as EDGE_FRIEND_MUTATION_CASE_IDS,
+    from .edge_friend_mutation_case import (BACKLOG_CASE_IDS as EDGE_FRIEND_BACKLOG_CASE_IDS,
+                                             RELEASE_CASE_IDS as EDGE_FRIEND_RELEASE_CASE_IDS,
+                                             CASE_IDS as EDGE_FRIEND_MUTATION_CASE_IDS,
                                              edge_friend_mutation_case_plan,
                                              edge_friend_mutation_source_binding)
     edge_friend_mutation_maps = [edge_friend_mutation_source_binding(case_id)
                                  for case_id in EDGE_FRIEND_MUTATION_CASE_IDS]
-    edge_friend_mutation_plans = {case_id: edge_friend_mutation_case_plan(case_id)
-                                  for case_id in EDGE_FRIEND_MUTATION_CASE_IDS}
+    edge_friend_release_plans = {case_id: edge_friend_mutation_case_plan(case_id)
+                                 for case_id in EDGE_FRIEND_RELEASE_CASE_IDS}
+    edge_friend_backlog_plans = {case_id: edge_friend_mutation_case_plan(case_id)
+                                 for case_id in EDGE_FRIEND_BACKLOG_CASE_IDS}
     edge_search_plan = edge_search_case_plan()
     from .local_caller_execution_contract import (CASE_ID as CALLER_CASE, REQUIREMENTS as CALLER_REQUIREMENTS,
                                                    SUITE as CALLER_SUITE, caller_execution_source_binding)
@@ -484,7 +488,21 @@ def migration_plan() -> dict:
                'requirement_ids':list(plan.requirement_ids),
                'canonical_reporting':'INTEGRATED_LOCAL','execution_command':'local-edge-friend-mutations-run',
                'report_command':'local-edge-friend-mutations-report','remote_validation':'NOT_RUN','grants_release_credit':False}
-              for plan in edge_friend_mutation_plans.values()]],
+              for plan in edge_friend_release_plans.values()]],
+            'local_backlog_case_slices': [
+                {'suite': 'owned-local-edge-friend-mutations-v1',
+                 'case_id': plan.case_id, 'case_version': 1,
+                 'legacy_id': plan.parent_id, 'status': 'LOCAL_EXECUTOR_ONLY_BACKLOG',
+                 'required_assertion_count': len(plan.requirements),
+                 'requirement_ids': list(plan.requirement_ids),
+                 'canonical_reporting': 'INTEGRATED_LOCAL',
+                 'execution_command': 'local-edge-friend-mutations-run',
+                 'report_command': 'local-edge-friend-mutations-report',
+                 'remote_validation': 'NOT_RUN',
+                 'release_parent_denominator': False,
+                 'independent_slice': True,
+                 'grants_release_credit': False}
+                for plan in edge_friend_backlog_plans.values()],
             'local_partial_executors': [],
             'status': 'PLANNED_NOT_EXECUTABLE', 'ready_to_execute': False,
             'source_revision': contract['source_revision'], 'source_integrity': 'MATCHED',

@@ -2,6 +2,7 @@
 admission gates. None of these tests may create a runtime or touch the
 network; every gate must fail closed before any owned work begins."""
 from pathlib import Path
+import json
 import sys
 import tempfile
 import unittest
@@ -106,6 +107,96 @@ class EdgeFriendMutationGatingTests(unittest.TestCase):
             OwnedEdgeFriendMutationsAdapter(
                 runtime, identities, admission,
                 case_id=CASE_IDS[0], allow_write=True)
+
+    @staticmethod
+    def _admission(root: Path):
+        admission = OwnedEdgeFriendFixtureAdmission.__new__(
+            OwnedEdgeFriendFixtureAdmission)
+        admission.runtime = OwnedBcsProcess.__new__(OwnedBcsProcess)
+        admission.runtime.root = root
+        admission.runtime.run_id = 'run-1'
+        admission.runtime.port = 45123
+        admission.runtime.state = 'RUNNING'
+        admission.runtime.ready = True
+        admission.runtime.child = object()
+        admission.bot_id = 'base-owned-bot'
+        admission.path = root / 'edge-friend-ensure-admission.json'
+        admission.attempted = True
+        admission._service_key = 'private-service-key'
+        admission.state = {
+            'schema_version': 1, 'status': 'PASS',
+            'requirement_id': 'EDGE_FRIEND_MUTATIONS.ensure-bot',
+            'case_id': 'LOCAL-EDGE-ENSURE-BOT-01',
+            'run_id': 'run-1', 'service_key_in_evidence': False,
+            'case_fixture_ensures': [],
+        }
+        return admission
+
+    def test_case_bot_ensure_contract_is_exact_fails_closed_and_secret_free(self):
+        root = self.base / 'fixture'
+        admission = self._admission(root)
+
+        class Response:
+            status = 200
+            length = 0
+            def __init__(self):
+                self._payload = json.dumps(
+                    {'ensured': True, 'created': False,
+                     'bot_uuid': 'case-owned-bot'}).encode()
+            def read(self, *_args):
+                value, self._payload = self._payload, b''
+                return value
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                return False
+
+        class Connection:
+            def __init__(self, *_args, **_kwargs):
+                self.requests = []
+                self.closed = False
+            def request(self, method, path, body=None, headers=None):
+                self.requests.append((method, path, json.loads(body), headers))
+            def getresponse(self):
+                return Response()
+            def close(self):
+                self.closed = True
+
+        with patch(
+                'bcs_e2e.local_edge_friend_fixture_admission.HTTPConnection',
+                Connection) as factory:
+            receipt = admission.ensure_case_bot(
+                case_id='LOCAL-EDGE-TC-FRIEND-AUTH-SYNC-01',
+                bot_id='case-owned-bot', staff_no='85020',
+                visibility='protected', user_visibility='protected',
+                allow_write=True)
+        self.assertEqual(receipt['case_id'], 'LOCAL-EDGE-TC-FRIEND-AUTH-SYNC-01')
+        self.assertEqual(receipt['bot_uuid'], 'case-owned-bot')
+        self.assertTrue(receipt['ensured'])
+        self.assertFalse(receipt['created'])
+        receipt_text = admission.path.read_text(encoding='utf-8')
+        self.assertNotIn('private-service-key', receipt_text)
+
+        invalid = {
+            'case': {'case_id': 'LOCAL-EDGE-BOGUS-01'},
+            'write': {'case_id': 'LOCAL-EDGE-DEPT-SCOPE-FRIEND-EXT-01',
+                      'allow_write': False},
+        }
+        for name, kwargs in invalid.items():
+            base = {'bot_id': 'another-bot', 'staff_no': '85020',
+                    'visibility': 'protected', 'allow_write': True}
+            base.update(kwargs)
+            with self.subTest(name=name), self.assertRaises(RunStateError):
+                admission.ensure_case_bot(**base)
+
+        with patch(
+                'bcs_e2e.local_edge_friend_fixture_admission.HTTPConnection',
+                Connection):
+            with self.assertRaises(RunStateError):
+                admission.ensure_case_bot(
+                    case_id='LOCAL-EDGE-TC-FRIEND-AUTH-SYNC-01',
+                    bot_id='case-owned-bot', staff_no='85020',
+                    visibility='protected', allow_write=True)
 
     def test_offline_report_of_missing_evidence_fails_closed(self):
         with self.assertRaises(RunStateError):

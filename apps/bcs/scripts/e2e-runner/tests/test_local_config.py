@@ -70,6 +70,38 @@ class LocalConfigTests(unittest.TestCase):
                                              loop_execution_enabled=value)
             self.assertFalse((Path(tmp)/'invalid').exists())
 
+    def test_friend_work_order_base_url_requires_exact_owned_loopback_origin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            default = prepare_local_bcs_inputs(root / 'default', run_id='default', port=45001)
+            self.assertIsNone(json.loads(default.config_path.read_text())[
+                'friend_work_order_base_url'])
+            self.assertEqual(json.loads(default.config_path.read_text())['security']['outbound_url'],
+                            {'block_private_networks': True, 'allow_loopback': False})
+            inputs = prepare_local_bcs_inputs(
+                root / 'enabled', run_id='enabled', port=45002,
+                friend_work_order_base_url='http://127.0.0.1:45123')
+            config = json.loads(inputs.config_path.read_text())
+            self.assertEqual(config['friend_work_order_base_url'],
+                             'http://127.0.0.1:45123')
+            self.assertEqual(config['security']['outbound_url'],
+                            {'block_private_networks': True, 'allow_loopback': True})
+            invalid = {
+                'non-http': 'https://127.0.0.1:45123',
+                'non-loopback': 'http://localhost:45123',
+                'private-host': 'http://10.0.0.1:45123',
+                'path': 'http://127.0.0.1:45123/path',
+                'query': 'http://127.0.0.1:45123?q=1',
+                'userinfo': 'http://user@127.0.0.1:45123',
+                'port': 'http://127.0.0.1:80',
+                'type': True,
+            }
+            for name, value in invalid.items():
+                with self.subTest(value=name), self.assertRaises(RuntimeContractError):
+                    prepare_local_bcs_inputs(root / ('invalid-' + name), run_id=name,
+                                             port=45003, friend_work_order_base_url=value)
+                self.assertFalse((root / ('invalid-' + name)).exists())
+
     def test_local_identity_can_be_disabled_without_enabling_ambient_inheritance(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

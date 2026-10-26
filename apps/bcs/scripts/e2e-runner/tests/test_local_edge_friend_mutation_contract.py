@@ -1,14 +1,16 @@
-"""The seven edge friend-mutation source maps freeze behavior before
-any executor exists, and register one local executor per legacy
-entrypoint without release credit."""
+"""All nine Edge friend-mutation source maps freeze behavior before any
+executor exists; seven reviewed parents join the release registry and two
+migrated TestCases remain backlog slices without release credit."""
 from pathlib import Path
 import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bcs_e2e.edge_friend_mutation_case import (
+    BACKLOG_CASE_IDS,
     CASE_IDS,
     PARENTS,
+    RELEASE_CASE_IDS,
     SUITE,
     _function_body,
     edge_friend_mutation_case_plan,
@@ -47,16 +49,26 @@ MAPPED = (
      'test_ep_connect_private_and_discover_branches',
      'EDGE_FRIEND_MUTATIONS.connect-private-discover',
      'run_connect_private_discover'),
+    ('LOCAL-EDGE-TC-FRIEND-AUTH-SYNC-01',
+     'test_ep_tc_friend_auth_sync_readdressed_principal',
+     'EDGE_FRIEND_MUTATIONS.tc-friend-auth-sync-readdress',
+     'run_tc_friend_auth_sync_readdress'),
+    ('LOCAL-EDGE-DEPT-SCOPE-FRIEND-EXT-01',
+     'test_ep_dept_scope_parses_object_friend_ext_entries',
+     'EDGE_FRIEND_MUTATIONS.dept-scope-friend-ext',
+     'run_dept_scope_friend_ext'),
 )
 
 
 class EdgeFriendMutationContractTests(unittest.TestCase):
 
-    def test_seven_plans_freeze_exactly_one_obligation_each(self):
-        self.assertEqual(len(CASE_IDS), 7)
+    def test_nine_plans_freeze_exactly_one_obligation_each(self):
+        self.assertEqual(len(CASE_IDS), 9)
         self.assertEqual(PARENTS, tuple(row[1] for row in MAPPED))
         self.assertEqual(CASE_IDS, tuple(row[0] for row in MAPPED))
-        self.assertEqual(len(set(PARENTS)), 7)
+        self.assertEqual(RELEASE_CASE_IDS, tuple(row[0] for row in MAPPED[:7]))
+        self.assertEqual(BACKLOG_CASE_IDS, tuple(row[0] for row in MAPPED[7:]))
+        self.assertEqual(len(set(PARENTS)), 9)
         for case_id, parent, requirement, adapter_method in MAPPED:
             with self.subTest(case_id=case_id):
                 plan = edge_friend_mutation_case_plan(case_id)
@@ -105,8 +117,8 @@ class EdgeFriendMutationContractTests(unittest.TestCase):
                 self.assertEqual(
                     len(binding['requirements']), 1)
         rows = [row for row in plan['local_registered_executors']
-                if row['legacy_id'] in set(PARENTS)]
-        self.assertEqual([row['case_id'] for row in rows], list(CASE_IDS))
+                if row['case_id'] in set(RELEASE_CASE_IDS)]
+        self.assertEqual([row['case_id'] for row in rows], list(RELEASE_CASE_IDS))
         for row, (_, parent, requirement, _) in zip(rows, MAPPED):
             with self.subTest(case_id=row['case_id']):
                 self.assertEqual(row['legacy_id'], parent)
@@ -125,6 +137,22 @@ class EdgeFriendMutationContractTests(unittest.TestCase):
         self.assertEqual(plan['legacy_inventory_count'], 34)
         self.assertEqual(plan['migrated_story_count'], 0)
         self.assertEqual(plan['passed_assertion_count'], 0)
+
+    def test_backlog_testcases_stay_outside_the_release_parent_registry(self):
+        plan = migration_plan()
+        registered = {row['case_id'] for row in plan['local_registered_executors']}
+        backlog = plan['local_backlog_case_slices']
+        self.assertEqual([row['case_id'] for row in backlog], list(BACKLOG_CASE_IDS))
+        for row in backlog:
+            with self.subTest(case_id=row['case_id']):
+                self.assertNotIn(row['case_id'], registered)
+                self.assertTrue(row['independent_slice'])
+                self.assertFalse(row['release_parent_denominator'])
+                self.assertFalse(row['grants_release_credit'])
+                self.assertEqual(row['status'], 'LOCAL_EXECUTOR_ONLY_BACKLOG')
+                self.assertEqual(row['suite'], SUITE)
+                self.assertEqual(row['execution_command'],
+                                 'local-edge-friend-mutations-run')
 
 
 if __name__ == '__main__':

@@ -47,7 +47,8 @@ class OwnedBcsProcess:
                  event_sink: OwnedLocalEventSink | None = None,
                  judge_sandbox: OwnedLocalJudgeSandbox | None = None,
                  allow_ambient_local_identity: bool = True,
-                 loop_execution_enabled: bool = False):
+                 loop_execution_enabled: bool = False,
+                 friend_work_order_base_url: str | None = None):
         identifier(run_id, 'runtime.run_id')
         if judge_sandbox is not None:
             if (type(judge_sandbox) is not OwnedLocalJudgeSandbox or provider_sink is not None
@@ -94,6 +95,7 @@ class OwnedBcsProcess:
         self.binary = binary.resolve()
         self.binary_sha256 = binary_sha256
         self.allow_ambient_local_identity = allow_ambient_local_identity
+        self.friend_work_order_base_url = friend_work_order_base_url
         self.root, self.run_id, self.port = root, run_id, port
         self.startup_timeout, self.stop_timeout = startup_timeout, stop_timeout
         self.inputs = None
@@ -150,7 +152,8 @@ class OwnedBcsProcess:
                                                    store_messages=self.store_messages, panel_asset=self.panel_asset,
                                                    template_asset=self.template_asset, provider_sink=self.provider_sink, event_sink=self.event_sink,
                                                    judge_sandbox=self.judge_sandbox, allow_ambient_local_identity=self.allow_ambient_local_identity,
-                                                   loop_execution_enabled=self.loop_execution_enabled)
+                                                   loop_execution_enabled=self.loop_execution_enabled,
+                                                   friend_work_order_base_url=self.friend_work_order_base_url)
             self.root = self.inputs.root
             self.state = 'STARTING'
             self._persist()

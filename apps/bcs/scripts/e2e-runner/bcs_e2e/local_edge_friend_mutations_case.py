@@ -1,5 +1,5 @@
-"""Owned-local adapter for the seven edge-permission
-friend-connection mutation entrypoints.
+"""Owned-local adapter for the seven reviewed Edge friend-mutation parents plus
+the two backlog TestCase extras.
 
 Each seam maps one legacy ``edge_permission.sh`` obligation to live,
 runner-owned BCS exchanges against the loopback runtime. Every
@@ -52,6 +52,8 @@ from .case_adapters import AdapterCall
 from .inventory import executor_digest as _executor_digest
 from .local_role_identity import OwnedLocalRoleIdentity
 from .owned_bcs import OwnedBcsProcess
+from .local_edge_friend_fixture_admission import OwnedEdgeFriendFixtureAdmission
+from .local_edge_friend_mutation_extras import OwnedEdgeFriendMutationExtrasMixin
 from .profile import fingerprint, identifier, unique_keys
 from .run_state import RunStateError, read, write
 
@@ -62,106 +64,7 @@ _ROLE_MUTATIONS = ('CEO', 'PM', 'ENG', 'QA')
 _DECISION_STATUSES = {'reject': 'rejected', 'cancel': 'cancelled'}
 
 
-class OwnedEdgeFriendFixtureAdmission:
-    """Owns the single service-credential admin ensure of the ensure-bot
-    obligation. The key is generated for this live, empty local registry."""
-
-    def __init__(self, runtime: OwnedBcsProcess, *, bot_id: str):
-        if type(runtime) is not OwnedBcsProcess:
-            raise RunStateError('Edge friend-mutation fixture admission requires the exact owned runtime')
-        if (runtime.inputs is None or runtime.state != 'RUNNING'
-                or runtime.ready is not True or runtime.child is None
-                or runtime.child.poll() is not None):
-            raise RunStateError('Edge friend-mutation fixture admission requires a live owned runtime')
-        self.runtime = runtime
-        self.bot_id = identifier(bot_id, 'Edge friend-mutation fixture Bot ID')
-        self.path = runtime.root / 'edge-friend-ensure-admission.json'
-        if self.path.exists() or self.path.is_symlink():
-            raise RunStateError('Edge friend-mutation fixture admission was already attempted')
-        self.attempted = False
-        self._service_key = 'e2e-' + secrets.token_hex(32)
-        self.state = {
-            'schema_version': 1, 'status': 'PENDING',
-            'requirement_id': 'EDGE_FRIEND_MUTATIONS.ensure-bot',
-            'case_id': 'LOCAL-EDGE-ENSURE-BOT-01',
-            'actor': 'SERVICE_KEY', 'effect': 'MUTATION',
-            'ownership_scope': 'CASE_SEAM', 'run_id': runtime.run_id,
-            'bot_uuid': self.bot_id, 'staff_no': '',
-            'api_face': 'legacy-local-admin', 'http_method': 'POST',
-            'service_key_in_evidence': False,
-        }
-
-    def _save(self) -> None:
-        encoded = json.dumps(self.state, ensure_ascii=True, sort_keys=True, allow_nan=False)
-        if self._service_key in encoded:
-            raise RunStateError('Edge friend-mutation fixture receipt must not expose its service key')
-        write(self.path, self.state)
-
-    def validate_for_runtime(self, runtime: OwnedBcsProcess) -> None:
-        if (type(runtime) is not OwnedBcsProcess or runtime is not self.runtime
-                or self.attempted is not True
-                or self.state.get('status') != 'PASS'
-                or runtime.root != self.runtime.root
-                or runtime.run_id != self.runtime.run_id
-                or fingerprint(read(self.path)) != fingerprint(self.state)):
-            raise RunStateError('Edge friend-mutation fixture admission ownership differs')
-
-    def admit(self, *, allow_write: bool) -> dict:
-        if allow_write is not True:
-            raise RunStateError('Edge friend-mutation fixture admission requires explicit write permission')
-        if self.attempted:
-            raise RunStateError('Edge friend-mutation fixture admission cannot be retried')
-        self.attempted = True
-        self.state['status'] = 'APPLYING'
-        self._save()
-        body = json.dumps({'name': self.bot_id, 'staff_no': ''},
-                          ensure_ascii=True, sort_keys=True).encode('ascii')
-        headers = {
-            'Accept': 'application/json', 'Content-Type': 'application/json',
-            'X-Request-ID': 'e2e-edge-friend-ensure-' + self.runtime.run_id,
-            # The created key is internal to this live, empty local registry.
-            'X-BCS-Service-Key': self._service_key,
-        }
-        connection = HTTPConnection('127.0.0.1', self.runtime.port, timeout=_TRANSPORT_TIMEOUT_SECONDS)
-        try:
-            connection.request('POST', '/admin/bots/' + quote(self.bot_id, safe='') + '/ensure',
-                               body=body, headers=headers)
-            response = connection.getresponse()
-            with response:
-                status = response.status
-                raw = bytearray()
-                while True:
-                    chunk = response.read(4096)
-                    if not chunk:
-                        break
-                    raw.extend(chunk)
-                    if len(raw) > _MAX_BODY_BYTES:
-                        raise RunStateError('Edge friend-mutation fixture response exceeds its byte budget')
-                if response.length not in (None, 0):
-                    raise RunStateError('Edge friend-mutation fixture response was truncated')
-            if status != 200:
-                raise RunStateError('Edge friend-mutation fixture ensure was not accepted')
-            value = json.loads(raw.decode('utf-8'), object_pairs_hook=unique_keys) if raw else {}
-            if (not isinstance(value, dict) or value.get('ensured') is not True
-                    or value.get('created') is not False
-                    or value.get('bot_uuid') != self.bot_id):
-                raise RunStateError('Edge friend-mutation fixture ensure contract differs for an existing bot')
-            self.state.update(http_status=status, ensured=True, created=False, status='PASS')
-            self._save()
-            return dict(self.state)
-        except BaseException:
-            self.state['status'] = 'BLOCKED'
-            self.state['service_key_in_evidence'] = False
-            try:
-                self._save()
-            except BaseException:
-                pass
-            raise
-        finally:
-            connection.close()
-
-
-class OwnedEdgeFriendMutationsAdapter:
+class _OwnedEdgeFriendMutationsSevenAdapter:
     """Live owned-local implementation of the seven mutation seams."""
 
     def __init__(self, runtime: OwnedBcsProcess,
@@ -974,3 +877,9 @@ class OwnedEdgeFriendMutationsAdapter:
         except BaseException as error:
             self._blocked(row, error)
             raise
+
+
+class OwnedEdgeFriendMutationsAdapter(
+        _OwnedEdgeFriendMutationsSevenAdapter,
+        OwnedEdgeFriendMutationExtrasMixin):
+    """The seven reviewed parent cases plus the two backlog TestCase slices."""

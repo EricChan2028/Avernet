@@ -82,8 +82,8 @@ class CaseAdapterTests(unittest.TestCase):
         for case_id in EDGE_FRIEND_MUTATION_CASE_IDS:
             plan = edge_friend_mutation_case_plan(case_id)
             names.extend(plan.adapters[name] for name in plan.requirement_ids)
-        self.assertEqual(len(names), 7)
-        self.assertEqual(len(set(names)), 7)
+        self.assertEqual(len(names), 9)
+        self.assertEqual(len(set(names)), 9)
         for name in names:
             setattr(Complete, name, lambda self: AdapterCall({}, {}))
         for case_id in EDGE_FRIEND_MUTATION_CASE_IDS:

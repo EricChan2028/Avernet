@@ -68,8 +68,8 @@ def _bound(root: Path) -> dict:
              and binding.get('adapter_family') == 'OwnedLocalCaseAdapter'
              and binding.get('source_binding', {}).get('parent') == PARENT
              and [row.get('id') for row in binding['source_binding']['requirements']] == list(plan.requirement_ids)
-             and len(binding.get('legacy_inventory', [])) == 34
-             and len({row.get('id') for row in binding['legacy_inventory']}) == 34,
+             and len(binding.get('legacy_inventory', [])) == 29
+             and len({row.get('id') for row in binding['legacy_inventory']}) == 29,
              'Slow Judge frozen complete binding is invalid')
     return binding
 

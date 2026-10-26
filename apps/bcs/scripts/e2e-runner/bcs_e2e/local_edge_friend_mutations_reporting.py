@@ -1,5 +1,5 @@
-"""Offline verification and reports for the seven owned-local
-edge friend-mutation cases."""
+"""Offline verification and reports for the seven reviewed release-parent
+Edge friend-mutation cases plus the two backlog TestCase slices."""
 from __future__ import annotations
 
 import hashlib
@@ -9,8 +9,10 @@ from pathlib import Path
 import stat
 
 from .edge_friend_mutation_case import (
+    BACKLOG_CASE_IDS,
     CASE_IDS,
     PARENTS,
+    RELEASE_CASE_IDS,
     edge_friend_mutation_case_plan,
 )
 from .inventory import executor_digest
@@ -22,7 +24,7 @@ SUITE = 'owned-local-edge-friend-mutations-v1'
 COMPLETION = 'owned-local-edge-friend-mutations-completion-v1'
 JOURNALS = tuple(journal_filename(case_id) for case_id in CASE_IDS)
 SOURCES = (
-    'edge-friend-mutations-binding.json',
+    'edge-friend-mutations-binding.json', 'edge-friend-mock.json',
     'edge-friend-mutations-flow-report.json', 'bcs-config.json',
     'owned-bcs.json', 'local-fixtures.json',
     'edge-friend-ensure-admission.json', *JOURNALS,
@@ -76,6 +78,8 @@ def _bound(root: Path):
     _require(binding.get('contract') == SUITE and binding.get('suite') == SUITE
              and binding.get('runtime_dir') == str(root)
              and binding.get('case_ids') == list(CASE_IDS)
+             and binding.get('release_parent_case_ids') == list(RELEASE_CASE_IDS)
+             and binding.get('backlog_case_ids') == list(BACKLOG_CASE_IDS)
              and binding.get('expected_assertion_count') == len(CASE_IDS)
              and set(binding.get('source_bindings', {})) == set(CASE_IDS)
              and set(binding.get('selected_requirement_ids', {})) == set(CASE_IDS)
@@ -94,16 +98,38 @@ def _bound(root: Path):
     return binding
 
 
+def _mock(root: Path, binding: dict) -> dict:
+    mock = read(root / 'edge-friend-mock.json')
+    _require(mock.get('schema_version') == 1
+             and mock.get('run_id') == binding['run_id']
+             and mock.get('script') == 'http_provider_judge_mock.py'
+             and mock.get('status') == 'STOPPED'
+             and mock.get('ready') is True
+             and mock.get('stop_signal_accepted') is True
+             and mock.get('engine_process') == 'NOT_STARTED'
+             and mock.get('origin') == binding.get('friend_work_order_base_url')
+             and type(mock.get('returncode')) is int,
+             'Edge friend-mutation mock child differs from its binding')
+    _require(mock.get('stdout_bytes') <= 1024 * 1024
+             and mock.get('stderr_bytes') <= 1024 * 1024,
+             'Edge friend-mutation mock child exceeded its evidence budget')
+    return mock
+
+
 def _project(root: Path, binding: dict):
     flow = read(root / 'edge-friend-mutations-flow-report.json')
     runtime = read(root / 'owned-bcs.json')
+    mock = _mock(root, binding)
     journals = [read(root / journal_filename(case_id)) for case_id in CASE_IDS]
     summary_cases = flow.get('cases', [])
     _require(flow.get('run_id') == binding['run_id']
              and flow.get('suite') == SUITE
              and flow.get('case_ids') == list(binding['case_ids'])
+             and flow.get('release_parent_case_ids') == list(RELEASE_CASE_IDS)
+             and flow.get('backlog_case_ids') == list(BACKLOG_CASE_IDS)
              and flow.get('executor_digest') == binding['executor_digest']
              and flow.get('shutdown') == runtime
+             and flow.get('mock_child') == mock
              and [row.get('case_id') for row in summary_cases] == list(binding['case_ids'])
              and [row.get('status') for row in summary_cases] == ['PASS'] * len(CASE_IDS)
              and [row.get('status') for row in journals] == ['PASS'] * len(CASE_IDS),
@@ -148,7 +174,9 @@ def _project(root: Path, binding: dict):
             })
     stopped = (runtime.get('status') == 'STOPPED'
                and type(runtime.get('returncode')) is int
-               and runtime['returncode'] == 0)
+               and runtime['returncode'] == 0
+               and mock.get('status') == 'STOPPED'
+               and mock.get('stop_signal_accepted') is True)
     cleared = flow.get('credentials', {}).get('credential_memory') == 'CLEARED'
     complete = (functional and evidence and stopped and cleared
                 and flow.get('status') == 'LOCAL_EDGE_FRIEND_MUTATIONS_PASS')
@@ -167,6 +195,8 @@ def _project(root: Path, binding: dict):
             'functional': 'PASS' if functional and complete_case else 'INCOMPLETE',
             'evidence_status': 'PASS' if evidence and complete_case else 'INCOMPLETE',
             'cleanup': 'PASS' if stopped and cleared else 'BLOCKED',
+            'release_parent_denominator': case['case_id'] in RELEASE_CASE_IDS,
+            'backlog_slice': case['case_id'] in BACKLOG_CASE_IDS,
             'resource_disposition':
                 'FRIEND_EDGES_REVOKED_BY_BUSINESS_API_REQUEST_ROWS_RETAINED_IN_OWNED_RUNTIME',
         })
@@ -186,7 +216,11 @@ def _summary(binding: dict, projected: dict, issues: list[str]):
         'status': 'LOCAL_SUITE_PASS' if status == 'PASS' else status,
         'target': {'tier': 'local', 'environment_id': binding['run_id']},
         'scope': {'suite': SUITE, 'selected_cases': list(binding['case_ids']),
+                  'release_parent_cases': list(RELEASE_CASE_IDS),
+                  'backlog_cases': list(BACKLOG_CASE_IDS),
                   'legacy_inventory_count': 34,
+                  'release_parent_denominator': 29,
+                  'backlog_case_count': len(BACKLOG_CASE_IDS),
                   'full_release_status': 'NOT_QUALIFIED',
                   'full_story_status': 'LOCAL_EXECUTOR_ONLY' if status == 'PASS' else 'NOT_QUALIFIED',
                   'remote_validation': 'NOT_RUN', 'manifest_digest': fingerprint(binding)},

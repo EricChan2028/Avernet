@@ -1,5 +1,5 @@
-"""Source binding and declarative rewrite plans for the seven unmigrated
-edge-permission friend-connection entrypoints.
+"""Source binding and declarative rewrite plans for the seven reviewed
+release-parent Edge friend-mutation entrypoints and two backlog TestCases.
 
 Each legacy entrypoint in ``edge_permission.sh`` keeps its own CaseRewritePlan
 (one obligation, one adapter seam) so the migration mapping stays per-story,
@@ -191,10 +191,61 @@ CASES = (
             '/bots/discover', 'collaborate_bot=', 'role=contributor',
             'organization_code='),
     ),
+    EdgeFriendMutationCase(
+        parent='test_ep_tc_friend_auth_sync_readdressed_principal',
+        case_id='LOCAL-EDGE-TC-FRIEND-AUTH-SYNC-01',
+        requirement_id='EDGE_FRIEND_MUTATIONS.tc-friend-auth-sync-readdress',
+        kind='http', method='POST',
+        path='/collaboration/friend-connections/requests/{id}/accept',
+        actor='FORWARDED_HUMAN', adapter_method='run_tc_friend_auth_sync_readdress',
+        expectation=(
+            'a backend-issued forwarded Human principal on create and accept '
+            'produces one TC friend-auth sync with the same approver identity '
+            're-addressed as a bcs-issued backend token and no credential '
+            'echo'),
+        function_name='test_ep_tc_friend_auth_sync_readdressed_principal',
+        required_literals=(
+            'X-Avernet-Principal: $principal',
+            '/admin/bots/${tc_bot}/ensure',
+            '/collaboration/friend-connections/requests',
+            'control/friend-auth-sync/requests',
+            '("iss", "bcs"),',
+            '("aud", "backend"),',
+            '("owner_work_no", owner_work_no),',
+            '("action", "grant"),',
+        ),
+    ),
+    EdgeFriendMutationCase(
+        parent='test_ep_dept_scope_parses_object_friend_ext_entries',
+        case_id='LOCAL-EDGE-DEPT-SCOPE-FRIEND-EXT-01',
+        requirement_id='EDGE_FRIEND_MUTATIONS.dept-scope-friend-ext',
+        kind='http', method='PATCH',
+        path='/openapi/v1/collaboration/bots/{bot_id}',
+        actor='BOT_OWNER', adapter_method='run_dept_scope_friend_ext',
+        expectation=(
+            'the owner writes mixed object/string/garbage department-scope '
+            'entries; both Human and Bot create paths execute the parser, '
+            'and the re-patch of a non-empty user scope remains accepted '
+            'without silently forgiving a missing scope'),
+        function_name='test_ep_dept_scope_parses_object_friend_ext_entries',
+        required_literals=(
+            '/admin/bots/e2e-friend-ext-bot/ensure',
+            'openapi/v1/collaboration/bots/e2e-friend-ext-bot',
+            'DEPT_FREE',
+            'X-Mock-User-Id: 511488',
+            'F4858',
+            'deptNo',
+            'priority": 7',
+        ),
+    ),
 )
 
 CASE_IDS = tuple(row.case_id for row in CASES)
 PARENTS = tuple(row.parent for row in CASES)
+RELEASE_CASE_IDS = tuple(row.case_id for row in CASES[:7])
+RELEASE_PARENT_IDS = tuple(row.parent for row in CASES[:7])
+BACKLOG_CASE_IDS = tuple(row.case_id for row in CASES[7:])
+BACKLOG_PARENT_IDS = tuple(row.parent for row in CASES[7:])
 
 
 def _source_digest() -> str:

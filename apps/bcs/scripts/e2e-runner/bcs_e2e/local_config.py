@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+from urllib.parse import urlsplit
 
 from .profile import identifier
 from .runtime import RuntimeContractError
@@ -38,6 +39,7 @@ def prepare_local_bcs_inputs(root: Path, *, run_id: str, port: int,
                              event_sink: OwnedLocalEventSink | None = None,
                              allow_ambient_local_identity: bool = True,
                              loop_execution_enabled: bool = False,
+                             friend_work_order_base_url: str | None = None,
                              judge_sandbox: OwnedLocalJudgeSandbox | None = None) -> LocalBcsInputs:
     """Create a fresh runtime directory, refusing to adopt or overwrite one."""
     identifier(run_id, 'local runtime run_id')
@@ -68,6 +70,19 @@ def prepare_local_bcs_inputs(root: Path, *, run_id: str, port: int,
         raise RuntimeContractError('local identity selection must be boolean')
     if type(loop_execution_enabled) is not bool:
         raise RuntimeContractError('local loop execution selection must be boolean')
+    if friend_work_order_base_url is not None:
+        if not isinstance(friend_work_order_base_url, str):
+            raise RuntimeContractError('friend work-order base URL must be a loopback HTTP origin')
+        parsed = urlsplit(friend_work_order_base_url)
+        try:
+            parsed_port = parsed.port
+        except ValueError:
+            parsed_port = None
+        if (parsed.scheme != 'http' or parsed.hostname != '127.0.0.1'
+                or parsed_port is None or not 1024 <= parsed_port <= 65535
+                or parsed.username is not None or parsed.password is not None
+                or parsed.path not in ('', '/') or parsed.query or parsed.fragment):
+            raise RuntimeContractError('friend work-order base URL must be an exact loopback HTTP origin')
     if type(port) is not int or not 1024 <= port <= 65535:
         raise RuntimeContractError('local BCS port must be between 1024 and 65535')
     if root.is_symlink():
@@ -98,6 +113,7 @@ def prepare_local_bcs_inputs(root: Path, *, run_id: str, port: int,
         'bind': '127.0.0.1', 'port': port, 'bots_base_dir': str(root / 'bots'),
         'bcs_endpoint': origin, 'botchat_url': origin,
         'store_messages': store_messages, 'dingtalk_accounts': [], 'api_keys': [],
+        'friend_work_order_base_url': friend_work_order_base_url,
         'allowed_switch_provider_ids': [], 'onboard_binding_enabled': False,
         'group_chat_delay_min_ms': 0, 'group_chat_delay_max_ms': 0,
         'llm': {'type': 'none'}, 'leader_election': {'enabled': False},
@@ -125,7 +141,8 @@ def prepare_local_bcs_inputs(root: Path, *, run_id: str, port: int,
              'targets': ['bcs_http_access'], 'max_keep_days': 0}]},
         'cors': {'allowed_origins': [origin]},
         'security_gateway': {'provider': 'noop'},
-        'security': {'outbound_url': {'block_private_networks': True, 'allow_loopback': provider_sink is not None or judge_sandbox is not None}},
+        'security': {'outbound_url': {'block_private_networks': True, 'allow_loopback': (provider_sink is not None or judge_sandbox is not None
+                                     or friend_work_order_base_url is not None)}},
         'invite': {'token_secret': '${BCS_E2E_INVITE_SECRET}', 'public_claim_enabled': False,
                    'base_url': origin, 'group_link_url': origin + '/groups/{group_id}',
                    'session_link_url': origin + '/sessions/{session_id}'},

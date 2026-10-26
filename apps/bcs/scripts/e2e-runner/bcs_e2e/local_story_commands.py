@@ -122,7 +122,7 @@ def register_local_story_commands(commands) -> None:
     fixed_loop_report = commands.add_parser('local-fixed-loop-report', help='Verify frozen owned-local fixed-Loop evidence offline')
     fixed_loop_report.add_argument('--state-dir', type=Path, required=True)
     fixed_loop_report.add_argument('--output-dir', type=Path)
-    edge_friend_mutations = commands.add_parser('local-edge-friend-mutations-run', help='Run all seven owned-local Edge friend-mutation cases in one owned runtime')
+    edge_friend_mutations = commands.add_parser('local-edge-friend-mutations-run', help='Run all nine owned-local Edge friend-mutation cases in one owned runtime')
     for name in ('binary', 'state-dir'):
         edge_friend_mutations.add_argument('--'+name, type=Path, required=True)
     for name in ('binary-sha256', 'run-id', 'confirm-run-id'):
