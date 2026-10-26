@@ -28,7 +28,7 @@ CLI_DIGEST=os.environ.get('BCS_E2E_TEST_CLI_BINARY_SHA256','')
 
 
 def args(root):
-    return ['local-workspace-run','--with-proposal','--state-dir',str(root),
+    return ['local-workspace-run','--with-incident-delete','--state-dir',str(root),
             '--run-id','workspace-report','--confirm-run-id','workspace-report',
             '--binary',BINARY,'--binary-sha256',DIGEST,'--cli-binary',CLI,'--cli-binary-sha256',CLI_DIGEST,
             '--allow-local-processes','--allow-fixture-write','--allow-write']
@@ -63,14 +63,14 @@ class WorkspaceReportingLiveTests(unittest.TestCase):
         with patch.object(socket,'create_connection',side_effect=AssertionError('offline must not connect')):
             summary=build_workspace_report(self.root)
         self.assertEqual(summary,self.result['canonical_summary'])
-        self.assertEqual(summary['reports'],{'expected_assertion_count':18,'observed_assertion_count':18})
+        self.assertEqual(summary['reports'],{'expected_assertion_count':17,'observed_assertion_count':17})
         self.assertEqual(summary['cases'][0]['status'],'PASS')
         self.assertEqual(summary['scope']['full_release_status'],'NOT_QUALIFIED')
         xml=ET.parse(self.root/'reports'/'junit.xml').getroot()
         self.assertEqual(xml.attrib['tests'],'1')
         self.assertEqual(xml.attrib['failures'],'0')
         self.assertEqual(xml.attrib['skipped'],'0')
-        self.assertIn('WORKSPACE.proposal',(self.root/'reports'/'summary.md').read_text())
+        self.assertIn('WORKSPACE.incident-delete',(self.root/'reports'/'summary.md').read_text())
         self.assertEqual(read(self.root/'reports'/'summary.json'),summary)
         self.assertEqual(summary['cases'][0]['retained_visibility']['restoration'],'NOT_PERFORMED')
 
@@ -114,10 +114,10 @@ class WorkspaceReportingLiveTests(unittest.TestCase):
         self.assertEqual(build_workspace_report(root)['status'],'BLOCKED')
 
     def test_missing_obligation_does_not_pass_when_outer_flow_claims_success(self):
-        root=self.copy();flow=read(root/'workspace-flow-report.json')
+        root=self.copy();flow=read(root/'workspace-incident-roundtrip-report.json')
         journal=read(root/'local-workspace-messages.json');journal['assertions']=[]
         flow['message_case']=journal
-        write(root/'local-workspace-messages.json',journal);write(root/'workspace-flow-report.json',flow)
+        write(root/'local-workspace-messages.json',journal);write(root/'workspace-incident-roundtrip-report.json',flow)
         case=_project(root,_bound(root))
         self.assertEqual(case['status'],'BLOCKED')
         self.assertEqual(next(r for r in case['requirements'] if r['id']=='WORKSPACE.messages')['status'],'NOT_RUN')

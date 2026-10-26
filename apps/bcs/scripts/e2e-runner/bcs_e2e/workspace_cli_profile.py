@@ -28,10 +28,6 @@ WORKSPACE_INCIDENT_CORE_PROFILE_CONTRACT = (
     "dual-workspace-incident-core-profile-v1")
 WORKSPACE_ROUNDTRIP_PROFILE_CONTRACT = (
     "dual-workspace-roundtrip-profile-v1")
-WORKSPACE_PROPOSAL_PROFILE_CONTRACT = (
-    "dual-workspace-proposal-profile-v1")
-
-
 WORKSPACE_GROUP_CREATE_OPERATION = "workspace_group.create"
 WORKSPACE_GROUP_DETAIL_OPERATION = "workspace_group.detail"
 WORKSPACE_GROUP_PATCH_OPERATION = "workspace_group.patch"
@@ -61,18 +57,6 @@ WORKSPACE_ROUNDTRIP_CALLBACK_OPERATION = (
     "workspace_roundtrip.callback")
 WORKSPACE_ROUNDTRIP_DELETE_OPERATION = (
     "workspace_roundtrip.delete")
-WORKSPACE_PROPOSAL_REQUEST_OPERATION = (
-    "workspace_proposal.request")
-WORKSPACE_PROPOSAL_CONFIRM_PAGE_OPERATION = (
-    "workspace_proposal.confirm_page")
-WORKSPACE_PROPOSAL_CONFIRM_OPERATION = (
-    "workspace_proposal.confirm")
-WORKSPACE_PROPOSAL_DETAIL_OPERATION = (
-    "workspace_proposal.detail")
-WORKSPACE_PROPOSAL_DELETE_OPERATION = (
-    "workspace_proposal.delete")
-
-
 PROFILE_EFFECTS = {
     SESSION_CLI_CREATE_GET_PROFILE_CONTRACT: {
         "group": "bounded-owned-bots-cli-session-create-list-get",
@@ -161,13 +145,6 @@ PROFILE_EFFECTS = {
         "finalization": "exact-owned-group-delete-and-not-found",
     },
 
-    WORKSPACE_PROPOSAL_PROFILE_CONTRACT: {
-        "proposal": "finalized-bounded-owned-bots-group-proposal",
-        "confirmation": (
-            "finalized-bounded-owned-bots-proposal-confirmation"),
-        "finalization": "exact-owned-group-delete-and-not-found",
-    },
-
     WORKSPACE_CLI_MEMBER_PROFILE_CONTRACT: {
         "group": "bounded-owned-bots-retained-cli-create-add-member",
         "initial_session": "retained",
@@ -247,8 +224,7 @@ def _validate_workspace_cli_profile(raw: object, contract_name: str) -> dict:
         {"driver", "member", "qa"}
         if contract_name in {SESSION_CLI_COLLECTION_PROFILE_CONTRACT,
                                WORKSPACE_INCIDENT_CORE_PROFILE_CONTRACT,
-                               WORKSPACE_ROUNDTRIP_PROFILE_CONTRACT,
-                               WORKSPACE_PROPOSAL_PROFILE_CONTRACT}
+                               WORKSPACE_ROUNDTRIP_PROFILE_CONTRACT}
         else {"driver", "member"})
     actors = object_keys(profile["actors"], expected_actors, "actors")
     actors["driver"] = _actor(actors["driver"], "driver", human["user_id"])
@@ -311,18 +287,6 @@ def _validate_workspace_cli_profile(raw: object, contract_name: str) -> dict:
                 "Workspace unavailability for")
         _env_ref(auth["driver_token_env"], "auth.driver_token_env")
         _env_ref(auth["cookie_env"], "auth.cookie_env")
-    elif contract_name == WORKSPACE_PROPOSAL_PROFILE_CONTRACT:
-        auth = object_keys(
-            profile["auth"],
-            {"kind", "driver_token_env", "cookie_env"}, "auth")
-        if auth["kind"] != "proposal-bundle":
-            raise ConfigError(
-                "auth.kind: workspace proposal confirmation requires "
-                "the owned proposal credential bundle; the Human "
-                "Cookie owns the dedicated driver pool Bot it "
-                "confirms the proposed Group for")
-        _env_ref(auth["driver_token_env"], "auth.driver_token_env")
-        _env_ref(auth["cookie_env"], "auth.cookie_env")
     elif contract_name == SESSION_CLI_COMPLETE_INVOKE_PROFILE_CONTRACT:
         auth = object_keys(
             profile["auth"], {"kind", "driver_token_env", "member_token_env"},
@@ -373,11 +337,6 @@ def _validate_workspace_cli_profile(raw: object, contract_name: str) -> dict:
             profile["relationships"],
             {"creation", "workspace", "routing_service", "messaging",
              "finalization"},
-            "relationships")
-    elif contract_name == WORKSPACE_PROPOSAL_PROFILE_CONTRACT:
-        relationships = object_keys(
-            profile["relationships"],
-            {"proposal", "confirmation", "finalization"},
             "relationships")
     else:
         relationships = object_keys(profile["relationships"],
@@ -714,58 +673,6 @@ def validate_workspace_roundtrip_profile(raw: object) -> dict:
             "cli.command_family: workspace round trip requires "
             "the group command family")
     profile["route_bindings"] = validate_workspace_roundtrip_bindings(
-        bindings,
-        profile["actors"]["driver"]["bot_id"],
-        profile["actors"]["member"]["bot_id"],
-        profile["actors"]["qa"]["bot_id"])
-    return profile
-
-
-def validate_workspace_proposal_bindings(
-        value: object, driver_id: str, member_id: str,
-        qa_id: str) -> dict:
-    """Validate the five exact legacy routes of the dual-environment
-    Workspace proposal confirmation. The confirmation page and action
-    are minted-token scoped routes; the case derives and re-validates
-    the exact token path from the create response instead of admitting
-    an arbitrary URL."""
-    expected = {
-        WORKSPACE_PROPOSAL_REQUEST_OPERATION: {
-            "method": "POST", "path": "/groups/request"},
-        WORKSPACE_PROPOSAL_CONFIRM_PAGE_OPERATION: {
-            "method": "GET", "path": "/groups/{confirm_token}/confirm"},
-        WORKSPACE_PROPOSAL_CONFIRM_OPERATION: {
-            "method": "POST", "path": "/groups/{confirm_token}/confirm"},
-        WORKSPACE_PROPOSAL_DETAIL_OPERATION: {
-            "method": "GET", "path": "/groups/{group_id}"},
-        WORKSPACE_PROPOSAL_DELETE_OPERATION: {
-            "method": "DELETE",
-            "path": "/groups/{group_id}?bot_id={driver_actor_id}"},
-    }
-    result = _validate_exact_legacy_route_bindings(
-        value, expected, "workspace proposal")
-    if (identifier(driver_id, "actors.driver.bot_id") != driver_id
-            or identifier(member_id, "actors.member.bot_id") != member_id
-            or identifier(qa_id, "actors.qa.bot_id") != qa_id):
-        raise ConfigError(
-            "workspace proposal actor binding is invalid")
-    return result
-
-
-def validate_workspace_proposal_profile(raw: object) -> dict:
-    """Validate a three-Bot Workspace proposal Profile."""
-    if not isinstance(raw, dict) or type(raw.get("route_bindings")) is not dict:
-        raise ConfigError(
-            "workspace proposal profile requires route bindings")
-    bindings = raw["route_bindings"]
-    base = {key: value for key, value in raw.items() if key != "route_bindings"}
-    profile = _validate_workspace_cli_profile(
-        base, WORKSPACE_PROPOSAL_PROFILE_CONTRACT)
-    if profile["cli"]["command_family"] != "group":
-        raise ConfigError(
-            "cli.command_family: workspace proposal requires "
-            "the group command family")
-    profile["route_bindings"] = validate_workspace_proposal_bindings(
         bindings,
         profile["actors"]["driver"]["bot_id"],
         profile["actors"]["member"]["bot_id"],

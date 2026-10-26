@@ -111,7 +111,6 @@ class IncidentGuardTests(unittest.TestCase):
             self.assertNotIn(forbidden, source)
         self.assertIn("'messages': 'NOT_RUN'", source)
         self.assertIn("'incident_delete': 'NOT_RUN'", source)
-        self.assertIn("'proposal': 'NOT_RUN'", source)
         self.assertIn("'ready_to_execute': False", source)
         self.assertIn("'workspace_routes': 'DEPRECATED_HTTP_404'", source)
 
@@ -153,7 +152,6 @@ class IncidentLiveTests(unittest.TestCase):
         self.assertFalse(result['ready_to_execute'])
         self.assertEqual(result['messages'], 'NOT_RUN')
         self.assertEqual(result['incident_delete'], 'NOT_RUN')
-        self.assertEqual(result['proposal'], 'NOT_RUN')
         with sqlite3.connect(self.root/'bcs.sqlite') as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM bcs_groups WHERE env='local'").fetchone()[0], 5)
         with sqlite3.connect(self.root/'workspace-incident-resources.sqlite') as db:

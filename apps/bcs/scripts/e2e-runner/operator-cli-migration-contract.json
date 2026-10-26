@@ -3,7 +3,7 @@
   "source_revision": "33baf134e8bbdefaf96d5c7f3d000eb7de28825d",
   "parent": "story_operator_coordinates_with_cli",
   "sources": {
-    "stories.sh": "b2df5aad7ca67b36d072e70e31f7038050431557f982702b3c628df4bac44b86",
+    "stories.sh": "5c4d77f99e8574b5b1132ac4550aeffb7eedf7cb59f82b2d8ee52eb4a704fea4",
     "cli.sh": "70b77d816d0fb089ccee0a8e272b4126316d386144daa2c9ab174eac36ee4193",
     "cli-stories.sh": "779672ec0d0c02405e5f3fee0f50aec9fbe1febac0808c05ec6844a1e4a39efc",
     "common.sh": "ca4d2571f58f8de3b13c0516b6db3c07c76e0028592b890aff19dc7bea678815",

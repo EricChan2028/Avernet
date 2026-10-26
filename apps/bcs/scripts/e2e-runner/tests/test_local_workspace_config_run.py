@@ -67,9 +67,8 @@ class ConfigRunLiveTests(unittest.TestCase):
         self.assertEqual(result['requirements'][:15], [{'id': name, 'status': 'PASS'} for name in expected])
         self.assertEqual(result['requirements'][15:], [
             {'id':'WORKSPACE.messages','status':'NOT_RUN'},
-            {'id':'WORKSPACE.incident-delete','status':'NOT_RUN'},
-            {'id':'WORKSPACE.proposal','status':'NOT_RUN'}])
-        self.assertEqual(result['parent_requirement_count'], 18)
+            {'id':'WORKSPACE.incident-delete','status':'NOT_RUN'}])
+        self.assertEqual(result['parent_requirement_count'], 17)
         self.assertEqual(result['legacy_inventory_count'], 34)
         self.assertEqual(result['full_story_status'], 'NOT_MIGRATED')
         self.assertFalse(result['automatic_delete'])

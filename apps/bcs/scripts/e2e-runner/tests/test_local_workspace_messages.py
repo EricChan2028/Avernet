@@ -96,8 +96,8 @@ class WorkspaceMessagesLiveTests(unittest.TestCase):
         self.assertEqual(rc, 0, result.get('message_case'))
         self.assertEqual(result['status'], 'LOCAL_WORKSPACE_MESSAGING_PASS')
         self.assertEqual(result['selected_requirement_count'], 16)
-        self.assertEqual(result['parent_requirement_count'], 18)
-        self.assertEqual([r['status'] for r in result['requirements']], ['PASS']*16+['NOT_RUN']*2)
+        self.assertEqual(result['parent_requirement_count'], 17)
+        self.assertEqual([r['status'] for r in result['requirements']], ['PASS']*16+['NOT_RUN'])
         self.assertEqual(result['message_case']['receiver_state'], 'CLOSED')
         self.assertEqual(len(result['message_case']['wire_receipts']), 8)
         self.assertTrue(all(r['status'] == 'TRANSPORT_RECEIVED_ONLY' and not r['success_ack_sent']

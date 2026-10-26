@@ -2,8 +2,8 @@
 
 This adapter runs only after the successful Workspace API and CLI journals in
 one still-live owned runtime.  It retains the incident Group and its implicit
-initial Session; messages, deletion, callbacks, proposals, remote execution and
-broad cleanup remain outside this slice.
+initial Session; messages, deletion, callbacks, remote execution and broad
+cleanup remain outside this slice.
 """
 from __future__ import annotations
 
@@ -454,9 +454,9 @@ class OwnedLocalWorkspaceIncident:
             'storage_verification': {'status': 'NOT_RUN'},
             'resource_disposition': 'RETAINED_LOCAL_DATABASE', 'automatic_delete': False,
             'messages': 'NOT_RUN', 'chat': 'NOT_RUN', 'callback': 'NOT_RUN',
-            'incident_delete': 'NOT_RUN', 'proposal': 'NOT_RUN', 'remote_execution': 'NOT_RUN',
+            'incident_delete': 'NOT_RUN', 'remote_execution': 'NOT_RUN',
             'broad_delete': 'NOT_USED', 'full_story_status': 'NOT_MIGRATED',
-            'original_parent_requirement_count': 18, 'ready_to_execute': False,
+            'original_parent_requirement_count': 17, 'ready_to_execute': False,
         }
         self._save()
         with Ledger(self.ledger_path, self.runtime.run_id, self.binding_digest, create=True) as ledger:

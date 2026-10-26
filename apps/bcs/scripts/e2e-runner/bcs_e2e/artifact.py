@@ -11,9 +11,11 @@ def disk_digest() -> str:
     paths = [ROOT / 'runner.py', *sorted((ROOT / 'bcs_e2e').glob('*.py'))]
     # Keep the executor inventory small, but leave room for focused modules;
     # the old hard cap blocked splitting oversized adapters while still
-    # enforcing the stricter per-file 1,000-line CI limit. The dual
-    # Workspace round-trip and proposal confirmation contracts each
-    # add one focused Case-executor module, the structured-collaboration
+    # enforcing the stricter per-file 1,000-line CI limit. The dual Workspace
+    # round-trip contract added one focused Case-executor module; its proposal
+    # counterpart was retired upstream with the group proposal surface
+    # (dev 72f9dff36, Avernet #3114), returning the allowance two files; the
+    # structured-collaboration
     # core slice adds its Case contract and remote adapter, and the
     # register-onboard register core slice adds its Case contract and
     # remote adapter, so the focused-module allowance grows by exactly
@@ -64,8 +66,8 @@ def disk_digest() -> str:
     # The dual Session, Channel, Session-file and friendship product-CLI
     # command lifecycles each add one focused module, so the focused-module
     # allowance grows by exactly those four files. The remaining Workspace
-    # incident/roundtrip/proposal and collaboration-team command lifecycles
-    # add two further focused modules.
+    # incident/roundtrip (proposal slice later retired upstream) and
+    # collaboration-team command lifecycles add two further focused modules.
     # The Channel-binding, Edge read, actor-status, register,
     # structured-core, structured-templates, friend-decision,
     # friend-public-accept and network-read command lifecycles add nine
@@ -77,7 +79,7 @@ def disk_digest() -> str:
     # The dual Group Context product-CLI story adds one focused Case contract,
     # one remote Adapter and one command Run lifecycle, so the allowance grows
     # by exactly those three files.
-    if len(paths) > 297:
+    if len(paths) > 295:
         raise ValueError('executor artifact exceeds its source-file budget')
     digest = hashlib.sha256()
     for path in paths:

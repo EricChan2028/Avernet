@@ -74,8 +74,8 @@ class WorkspaceDeleteLiveTests(unittest.TestCase):
         rc,result=self.execute()
         self.assertEqual(rc,0,result.get('delete_case'))
         self.assertEqual(result['status'],'LOCAL_WORKSPACE_INCIDENT_ROUNDTRIP_PASS')
-        self.assertEqual([r['status'] for r in result['requirements']],['PASS']*17+['NOT_RUN'])
-        self.assertEqual(result['parent_requirement_count'],18)
+        self.assertEqual([r['status'] for r in result['requirements']],['PASS']*17)
+        self.assertEqual(result['parent_requirement_count'],17)
         case=result['delete_case']
         self.assertEqual(case['admission']['business_session_terminal'],'NOT_CLAIMED')
         self.assertEqual(case['storage_verification']['group_rows'],0)

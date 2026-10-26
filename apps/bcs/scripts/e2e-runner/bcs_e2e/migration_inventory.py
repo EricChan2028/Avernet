@@ -24,10 +24,13 @@ STORIES = {
 }
 # Reviewed business obligations are finite. Dropping one must not be hidden by
 # another requirement pointing to the same large legacy function.
+# 2026-10-26 migration review: upstream dev 72f9dff36 removed the obsolete group
+# proposal/confirmation product surface end to end; WORKSPACE.proposal and its
+# stories.sh sub-story are retired from this frozen map (evidence: Avernet #3114).
 REQUIRED_IDS = {
     'WORKSPACE': ('create', 'detail', 'patch', 'list', 'members', 'label', 'visibility',
                   'cli-create-get', 'cli-add-member', 'cli-fuse', 'cli-status', 'incident-group',
-                  'participant-mode', 'workspace', 'routing-service', 'messages', 'incident-delete', 'proposal'),
+                  'participant-mode', 'workspace', 'routing-service', 'messages', 'incident-delete'),
     'FRIEND': ('public-accept', 'protected-accept', 'protected-reject', 'list', 'cli-accept'),
     'CLI-FILE': ('setup', 'upload', 'list', 'capabilities', 'metadata', 'download', 'share',
                  'shared-metadata', 'shared-content', 'delete'),
@@ -133,7 +136,7 @@ def migration_plan() -> dict:
     local_manifest = current_manifest('owned-local-trusted-team-v1')
     local_case = local_manifest['cases'][0]
     from .local_file_story import SUITE as FILE_SUITE, CASE_ID as FILE_CASE, REQUIREMENTS as FILE_REQUIREMENTS
-    from .local_workspace_run import CASE_ID as WORKSPACE_CASE, REQUIREMENTS as WORKSPACE_REQUIREMENTS, CLI_REQUIREMENTS as WORKSPACE_CLI_REQUIREMENTS, INCIDENT_REQUIREMENTS as WORKSPACE_INCIDENT_REQUIREMENTS, MESSAGE_REQUIREMENTS as WORKSPACE_MESSAGE_REQUIREMENTS, DELETE_REQUIREMENTS as WORKSPACE_DELETE_REQUIREMENTS, PROPOSAL_REQUIREMENTS as WORKSPACE_PROPOSAL_REQUIREMENTS
+    from .local_workspace_run import CASE_ID as WORKSPACE_CASE, REQUIREMENTS as WORKSPACE_REQUIREMENTS, CLI_REQUIREMENTS as WORKSPACE_CLI_REQUIREMENTS, INCIDENT_REQUIREMENTS as WORKSPACE_INCIDENT_REQUIREMENTS, MESSAGE_REQUIREMENTS as WORKSPACE_MESSAGE_REQUIREMENTS, DELETE_REQUIREMENTS as WORKSPACE_DELETE_REQUIREMENTS
     from .local_channel_public_contract import channel_bindings_adaptability
     from .local_network_actor_status_contract import network_actor_status_adaptability
     from .local_friend_connection_decision_contract import friend_connection_decision_adaptability
@@ -158,9 +161,6 @@ def migration_plan() -> dict:
     )
     from .workspace_roundtrip_contract import (
         workspace_roundtrip_adaptability,
-    )
-    from .workspace_proposal_contract import (
-        workspace_proposal_adaptability,
     )
     from .session_file_core_contract import (
     session_cli_bot_groups_adaptability,
@@ -296,11 +296,11 @@ def migration_plan() -> dict:
              'requirement_ids':['CLI-FILE.'+name for name in FILE_REQUIREMENTS],
              'canonical_reporting':'INTEGRATED_LOCAL', 'execution_command':'local-file-run',
              'report_command':'local-file-report', 'remote_validation':'NOT_RUN', 'grants_release_credit':False},
-            {'suite':'owned-local-workspace-v1','case_id':'LOCAL-WORKSPACE-FLOW-01','case_version':1,
+            {'suite':'owned-local-workspace-v1','case_id':'LOCAL-WORKSPACE-INCIDENT-ROUNDTRIP-01','case_version':1,
              'legacy_id':'story_user_operates_group_workspace','status':'LOCAL_EXECUTOR_ONLY',
-             'required_assertion_count':18,
-             'requirement_ids':list(WORKSPACE_REQUIREMENTS+WORKSPACE_CLI_REQUIREMENTS+WORKSPACE_INCIDENT_REQUIREMENTS+WORKSPACE_MESSAGE_REQUIREMENTS+WORKSPACE_DELETE_REQUIREMENTS+WORKSPACE_PROPOSAL_REQUIREMENTS),
-             'canonical_reporting':'INTEGRATED_LOCAL','execution_command':'local-workspace-run --with-proposal',
+             'required_assertion_count':17,
+             'requirement_ids':list(WORKSPACE_REQUIREMENTS+WORKSPACE_CLI_REQUIREMENTS+WORKSPACE_INCIDENT_REQUIREMENTS+WORKSPACE_MESSAGE_REQUIREMENTS+WORKSPACE_DELETE_REQUIREMENTS),
+             'canonical_reporting':'INTEGRATED_LOCAL','execution_command':'local-workspace-run --with-incident-delete',
              'report_command':'local-workspace-report','remote_validation':'NOT_RUN','grants_release_credit':False},
             {'suite':NETWORK_SUITE,'case_id':NETWORK_CASE,'case_version':1,
              'legacy_id':network['parent'],'status':'LOCAL_EXECUTOR_ONLY',
@@ -487,7 +487,6 @@ def migration_plan() -> dict:
                 workspace_group_governance_adaptability(),
                 workspace_incident_core_adaptability(),
                 workspace_roundtrip_adaptability(),
-                workspace_proposal_adaptability(),
                 channel_cli_adaptability()],
             'case_rewrite_plans': [{
                 'case_id': slow_judge_rewrite.case_id,

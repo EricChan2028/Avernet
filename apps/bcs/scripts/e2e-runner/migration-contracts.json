@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "source_revision": "71860eae99c62d7bf1349a0f46562f6395acbf1e",
+  "source_revision": "74dd751b623b7701608374fc4c7c4a6cf58278da",
   "sources": {
-    "stories.sh": "b2df5aad7ca67b36d072e70e31f7038050431557f982702b3c628df4bac44b86",
+    "stories.sh": "5c4d77f99e8574b5b1132ac4550aeffb7eedf7cb59f82b2d8ee52eb4a704fea4",
     "group.sh": "2bbb82c417261900265ce39f69aebb01633bb0700c4d7c71c1a2c9d7d9131c1d",
     "friends.sh": "80c76bb471dbe42a2e891e10558d920723d133510e6661b8cb3457381050b946",
     "session_files.sh": "836d05d1798da0592c7eb027bed4f1fc762510bcbae083c5e129ac7deebfc724",
@@ -81,10 +81,6 @@
         },
         {
           "function": "_story_group_metadata_without_workspace",
-          "source": "stories.sh"
-        },
-        {
-          "function": "_story_group_proposal_confirmation",
           "source": "stories.sh"
         }
       ],
@@ -211,20 +207,13 @@
           "functions": [
             "_story_group_metadata_without_workspace"
           ]
-        },
-        {
-          "id": "WORKSPACE.proposal",
-          "expectation": "Proposal preview preserves topic and same-token form action; confirmation creates a queryable group with the proposed driver, followed by exact cleanup.",
-          "functions": [
-            "_story_group_proposal_confirmation"
-          ]
         }
       ],
       "capability_gaps": [
         "Expanded owned-local actors can now be provisioned; versioned Story bindings and legitimate per-operation identities remain required.",
         "Legacy workspace/mode/routing/service/message/callback and full CLI contracts are not migrated.",
         "Current V1 contract has no workspace equivalent; no inferred native or gateway fallback is permitted.",
-        "Bootstrap, chat, callback, fusion and proposal effects need admission and terminal/retention handling."
+        "Bootstrap, chat, callback and fusion effects need admission and terminal/retention handling."
       ],
       "corrections": [
         "Do not count a label 401 as PASS.",

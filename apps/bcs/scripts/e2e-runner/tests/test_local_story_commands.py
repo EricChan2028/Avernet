@@ -116,14 +116,13 @@ class LocalStoryParserTests(unittest.TestCase):
     def test_workspace_optional_flags_and_report_defaults_are_unchanged(self):
         parsed = parser()[0].parse_args(run_arguments(
             'local-workspace-run', '--allow-local-processes', '--allow-write',
-            '--with-messages', '--with-proposal'))
+            '--with-messages', '--with-incident-delete'))
         self.assertTrue(parsed.allow_local_processes)
         self.assertFalse(parsed.allow_fixture_write)
         self.assertTrue(parsed.allow_write)
         self.assertFalse(parsed.with_incident_config)
         self.assertTrue(parsed.with_messages)
-        self.assertFalse(parsed.with_incident_delete)
-        self.assertTrue(parsed.with_proposal)
+        self.assertTrue(parsed.with_incident_delete)
         report = parser()[0].parse_args(['local-workspace-report', '--state-dir', '/state'])
         self.assertEqual(vars(report), {
             'command': 'local-workspace-report',
@@ -274,9 +273,9 @@ class LocalStoryDispatchTests(unittest.TestCase):
     def test_workspace_run_preserves_optional_flags(self):
         args = self.parse(run_arguments(
             'local-workspace-run', '--with-incident-config', '--with-messages',
-            '--with-incident-delete', '--with-proposal'))
+            '--with-incident-delete'))
         with patch('bcs_e2e.local_workspace_run.local_workspace_api_run',
-                   return_value={'status': 'LOCAL_WORKSPACE_FLOW_PASS'}) as execute:
+                   return_value={'status': 'LOCAL_WORKSPACE_INCIDENT_ROUNDTRIP_PASS'}) as execute:
             _, rc = dispatch_local_story_command(args, write_reports=Mock())
         self.assertEqual(rc, 0)
         execute.assert_called_once_with(
@@ -284,7 +283,7 @@ class LocalStoryDispatchTests(unittest.TestCase):
             run_id='run-1', confirm_run_id='run-1', allow_local_processes=False,
             allow_fixture_write=False, allow_write=False, cli_binary=Path('/cli'),
             cli_binary_sha256='cli-sha', with_incident=True, with_messages=True,
-            with_delete=True, with_proposal=True)
+            with_delete=True)
 
     def test_report_output_guard_and_file_report_exception_are_preserved(self):
         workspace = self.parse([

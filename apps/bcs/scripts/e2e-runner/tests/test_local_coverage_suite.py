@@ -325,7 +325,7 @@ class BindingTests(unittest.TestCase):
                 parsed = parser.parse_args(argv)
                 self.assertEqual(parsed.state_dir, values['state_dir'])
                 if case.command == 'local-workspace-run':
-                    self.assertTrue(parsed.with_proposal)
+                    self.assertTrue(parsed.with_incident_delete)
                 return {'status': 'PASS'}, 0
             with self.subTest(case=case.case_id), patch(
                     'bcs_e2e.local_story_commands.dispatch_local_story_command', side_effect=dispatch):

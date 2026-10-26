@@ -248,7 +248,7 @@ def register_local_story_commands(commands) -> None:
         workspace.add_argument('--'+name, required=True)
     for name in ('allow-local-processes', 'allow-fixture-write', 'allow-write'):
         workspace.add_argument('--'+name, action='store_true')
-    workspace_cli = commands.add_parser('local-workspace-run', help='Run owned Workspace API and actual CLI obligations; incident/proposal remain unmigrated')
+    workspace_cli = commands.add_parser('local-workspace-run', help='Run owned Workspace API and actual CLI obligations; incident/messaging/deletion remain unmigrated')
     for name in ('binary', 'cli-binary', 'state-dir'):
         workspace_cli.add_argument('--'+name, type=Path, required=True)
     for name in ('binary-sha256', 'cli-binary-sha256', 'run-id', 'confirm-run-id'):
@@ -256,13 +256,11 @@ def register_local_story_commands(commands) -> None:
     for name in ('allow-local-processes', 'allow-fixture-write', 'allow-write'):
         workspace_cli.add_argument('--'+name, action='store_true')
     workspace_cli.add_argument('--with-incident-config', action='store_true',
-                               help='Also run owned incident configuration; messages/deletion/proposal remain NOT_RUN')
+                               help='Also run owned incident configuration; messages/deletion remain NOT_RUN')
     workspace_cli.add_argument('--with-messages', action='store_true',
-                               help='Include incident configuration and actual local Bot transport reception; no deletion/proposal')
+                               help='Include incident configuration and actual local Bot transport reception; no deletion')
     workspace_cli.add_argument('--with-incident-delete', action='store_true',
                                help='Include message stage and exact owned-local Incident deletion; no remote cleanup')
-    workspace_cli.add_argument('--with-proposal', action='store_true',
-                               help='Execute all local Workspace obligations including two exact business deletes; canonical reporting pending')
     workspace_report = commands.add_parser('local-workspace-report', help='Verify frozen complete Workspace evidence offline')
     workspace_report.add_argument('--state-dir', type=Path, required=True)
     workspace_report.add_argument('--output-dir', type=Path)
@@ -581,9 +579,9 @@ def dispatch_local_story_command(args, *, write_reports: Callable) -> tuple[dict
             allow_local_processes=args.allow_local_processes, allow_fixture_write=args.allow_fixture_write,
             allow_write=args.allow_write,
             **({'cli_binary': args.cli_binary, 'cli_binary_sha256': args.cli_binary_sha256,
-                'with_incident': args.with_incident_config, 'with_messages': args.with_messages, 'with_delete': args.with_incident_delete, 'with_proposal': args.with_proposal}
+                'with_incident': args.with_incident_config, 'with_messages': args.with_messages, 'with_delete': args.with_incident_delete}
                if args.command == 'local-workspace-run' else {}))
-        rc = 0 if report['status'] in ('LOCAL_WORKSPACE_API_PASS', 'LOCAL_WORKSPACE_API_CLI_PASS', 'LOCAL_WORKSPACE_CONFIG_PASS', 'LOCAL_WORKSPACE_MESSAGING_PASS', 'LOCAL_WORKSPACE_INCIDENT_ROUNDTRIP_PASS', 'LOCAL_WORKSPACE_FLOW_PASS') else 130 if report['status'] == 'CANCELLED' else 2
+        rc = 0 if report['status'] in ('LOCAL_WORKSPACE_API_PASS', 'LOCAL_WORKSPACE_API_CLI_PASS', 'LOCAL_WORKSPACE_CONFIG_PASS', 'LOCAL_WORKSPACE_MESSAGING_PASS', 'LOCAL_WORKSPACE_INCIDENT_ROUNDTRIP_PASS') else 130 if report['status'] == 'CANCELLED' else 2
     elif args.command == 'local-file-run':
         from .local_file_story import local_file_run
         report = local_file_run(binary=args.binary, binary_sha256=args.binary_sha256,
@@ -612,7 +610,7 @@ CASES = (
     CaseBinding('LOCAL-TRUST-API-CLI-01', 'local-trust-run', True,
                 function='owned_bcs.local_runtime_smoke'),
     CaseBinding('LOCAL-CLI-FILE-01', 'local-file-run', True),
-    CaseBinding('LOCAL-WORKSPACE-FLOW-01', 'local-workspace-run', True, ('with_proposal',)),
+    CaseBinding('LOCAL-WORKSPACE-INCIDENT-ROUNDTRIP-01', 'local-workspace-run', True, ('with_incident_delete',)),
     CaseBinding('LOCAL-NETWORK-01', 'local-network-run'),
     CaseBinding('LOCAL-SESSION-FLOW-01', 'local-session-run', True),
     CaseBinding('LOCAL-PROVIDER-01', 'local-provider-run'),
@@ -780,7 +778,7 @@ def _execute(case: CaseBinding, kwargs: dict, panel: dict) -> tuple[dict, int]:
     from .reporting import write_reports
     args = Namespace(command=case.command, **kwargs)
     if case.command == 'local-workspace-run':
-        for flag in ('with_proposal', 'with_incident_config', 'with_messages', 'with_incident_delete'):
+        for flag in ('with_incident_config', 'with_messages', 'with_incident_delete'):
             setattr(args, flag, flag in case.flags)
     if case.command == 'local-network-run':
         args.panel_asset, args.panel_sha256 = Path(panel['path']), panel['sha256']

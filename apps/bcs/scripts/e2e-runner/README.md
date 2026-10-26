@@ -2764,8 +2764,8 @@ command contacts PRE or claims legacy coverage/full-release qualification.
 `story_user_operates_group_workspace`, not a substitute for the full parent.
 It starts one private owned BCS process, provisions fresh CEO/PM/ENG/QA roles,
 and executes create/detail/patch/list/member/label/visibility business checks.
-The frozen parent mapping retains all 18 obligations: seven selected API
-obligations and eleven CLI/incident/proposal obligations not run here. The
+The frozen parent mapping retains all 17 obligations: seven selected API
+obligations and ten CLI/incident/messaging/deletion obligations not run here. The
 original 29-Story release inventory and all remote admission gates remain unchanged.
 
 ```bash
@@ -2809,8 +2809,8 @@ python3 runner.py local-workspace-run \
   --allow-local-processes --allow-fixture-write --allow-write
 ```
 
-The complete parent denominator is still 18: this increment selects eleven
-API/CLI obligations, while seven incident/proposal obligations remain NOT_RUN.
+The complete parent denominator is still 17: this increment selects eleven
+API/CLI obligations, while six incident/messaging/deletion obligations remain NOT_RUN.
 The final `workspace-api-cli-report.json` does not qualify the full parent,
 remote environment or release gate. The existing `local-workspace-api` command
 retains its API-only scope and does not require a CLI binary or fusion fixtures.
@@ -2841,10 +2841,10 @@ DELETE or broad Bot stop is exposed by this increment.
 
 Add `--with-incident-config` to `local-workspace-run` to continue after the API
 and CLI stages with a new CEO/PM/ENG incident Group. The selected requirements
-become fifteen of the original eighteen: exact incident creation, ENG self-mute,
+become fifteen of the original seventeen: exact incident creation, ENG self-mute,
 Workspace replacement/readback and structured routing/service settings join the
-eleven API/CLI requirements. `WORKSPACE.messages`, `WORKSPACE.incident-delete`
-and `WORKSPACE.proposal` remain NOT_RUN. The outcome is written separately to
+eleven API/CLI requirements. `WORKSPACE.messages` and `WORKSPACE.incident-delete`
+remain NOT_RUN. The outcome is written separately to
 `workspace-config-report.json`; `LOCAL_WORKSPACE_CONFIG_PASS` is not full-parent
 or release qualification. The two existing commands without this option retain
 their earlier scopes.
@@ -2873,21 +2873,20 @@ name. Receiver evidence means transport reception only: no LLM/engine reasoning,
 no synthetic Bot reply or execution-terminal event, and no remote authorization
 proof. Group/Session resources remain local and retained.
 
-The selection contains 16 of 18 Workspace requirements; Incident deletion and
-Proposal remain NOT_RUN. This is not a full migrated Story or release gate.
+The selection contains 16 of 17 Workspace requirements; Incident deletion
+remains NOT_RUN. This is not a full migrated Story or release gate.
 The original approved binary exposed a legacy persistence defect returning HTTP
 500 when eventing was disabled. The separately tested product repair resolves
 the default Session for ingress. Use a binary built with that repair; the runner
 does not hide HTTP failures or substitute a different API. A legacy API message
 ID can differ from its durable repository ID; both are retained and not conflated.
 
-### Workspace Incident deletion and Proposal round trip
+### Workspace incident deletion round trip
 
 `local-workspace-run --with-incident-delete` includes messages and deletes only
-the newly created Incident Group through the original product API.
-`local-workspace-run --with-proposal` then runs the original Proposal
-create/preview/confirm/read/delete sequence, selecting all eighteen Workspace
-obligations. Its private execution report is `workspace-flow-report.json`;
+the newly created Incident Group through the original product API, selecting
+all seventeen Workspace obligations of the frozen report-v1 inventory. Its
+private execution report is `workspace-incident-roundtrip-report.json`;
 complete runs now publish bound JSON/JUnit/Markdown reports. This is local
 executor integration only; the multi-environment release inventory remains unqualified.
 
@@ -2904,27 +2903,28 @@ message history and the other four Groups/Sessions remain in the isolated local
 DB. No SQL delete, prefix delete, retry after unknown response or remote cleanup
 is available through this path.
 
-Proposal confirmation is a local token-capability route; its full URL must match
-the owned origin and UUID path. Only its digest/redacted route enters reports.
-The HTML must contain the expected topic/participants and a single same-token
-POST form. Native confirmation and legacy query-actor deletion are not proof of
-remote authentication. The product currently interpolates HTML values without
-escaping; the plain original Story does not claim general XSS/escaping coverage.
+Retirement note (2026-10-26): upstream dev `72f9dff36` (Avernet #3114) removed
+the group proposal/confirmation product surface end to end. The local Proposal
+executor, `dual-workspace-proposal-profile-v1` contract and
+`DUAL-WORKSPACE-PROPOSAL-01` case are retired from this runner with it; the
+complete Workspace round trip now ends at Incident deletion with exactly
+seventeen obligations. The 2026-10-15 flow record and the 2026-10-20 proposal
+slice section above remain as history and are not executable claims.
 
 ### Complete Workspace canonical reports
 
-A new `local-workspace-run --with-proposal` run freezes the report-v1 inventory
+A new `local-workspace-run --with-incident-delete` run freezes the report-v1 inventory
 before fixtures or business effects. After owned process stop it publishes:
 
-- `report-LOCAL-WORKSPACE-FLOW-01.json`: the canonical complete Story projection;
+- `report-LOCAL-WORKSPACE-INCIDENT-ROUNDTRIP-01.json`: the canonical complete Story projection;
 - `reports/summary.json`, `reports/junit.xml`, `reports/summary.md`;
 - `workspace-completion.json`: exact source and output digests.
 
 The completion protocol uses an exclusive pending marker. Failed writes,
 missing obligations, changed journals/ledgers/fusion inputs or changed output
-files cannot qualify as PASS. The seven stage journals remain original evidence;
-Proposal confirmation is not retrospectively rewritten as completed cleanup.
-All eighteen obligations, four retained Group/default Session pairs, retained
+files cannot qualify as PASS. The five stage journals remain original evidence; the retired
+upstream Proposal confirmation surface is not retrospectively rewritten as completed cleanup.
+All seventeen obligations, four retained Group/default Session pairs, retained
 history and public local fixture visibility are represented without claiming
 remote auth, engine reasoning, business Session terminality or release coverage.
 

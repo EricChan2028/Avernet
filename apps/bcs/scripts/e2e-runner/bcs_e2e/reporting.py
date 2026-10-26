@@ -569,6 +569,8 @@ def render_markdown(summary: dict) -> str:
                if summary.get("cleanup", {}).get("verification_scope") == "OWNED_FILE_AND_RUNTIME_ONLY" else
                "- Cleanup scope: owned Incident and Proposal Groups/Sessions only; other Groups and message history retained."
                if summary.get("cleanup", {}).get("verification_scope") == "OWNED_INCIDENT_AND_PROPOSAL_ONLY" else
+               "- Cleanup scope: owned Incident Group and its initial Session only; other Groups and message history retained."
+               if summary.get("cleanup", {}).get("verification_scope") == "OWNED_INCIDENT_ONLY" else
                "- Cleanup scope: registered-resource API convergence only; not complete physical erasure."),
               f"- Physical data erasure: {summary.get('cleanup', {}).get('physical_data_erasure', 'NOT_VERIFIED')}",
               f"- Associated history purge: {summary.get('cleanup', {}).get('associated_history_purge', 'NOT_VERIFIED')}",

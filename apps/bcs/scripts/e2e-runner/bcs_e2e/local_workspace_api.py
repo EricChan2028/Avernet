@@ -47,7 +47,6 @@ REMAINING_PARENT_OBLIGATIONS = (
     'WORKSPACE.routing-service',
     'WORKSPACE.messages',
     'WORKSPACE.incident-delete',
-    'WORKSPACE.proposal',
 )
 ROLES = ('CEO', 'PM', 'ENG', 'QA')
 WRITE_SEQUENCE = (

@@ -38,7 +38,7 @@ class LocalWorkspaceApiGuardTests(unittest.TestCase):
         self.assertEqual(list(OBLIGATIONS), binding['covered_obligations'])
         self.assertEqual(list(REMAINING_PARENT_OBLIGATIONS), binding['remaining_obligations'])
         self.assertEqual(len(OBLIGATIONS), 7)
-        self.assertEqual(len(REMAINING_PARENT_OBLIGATIONS), 11)
+        self.assertEqual(len(REMAINING_PARENT_OBLIGATIONS), 10)
         self.assertEqual(MAX_WRITE_OPERATIONS, 10)
 
     def test_constructor_rejects_unmanaged_or_wrong_fixture_identity(self):

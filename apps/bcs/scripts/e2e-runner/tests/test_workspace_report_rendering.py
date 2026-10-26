@@ -14,7 +14,7 @@ REQUIREMENTS = [f"WORKSPACE.{name}" for name in (
     "create", "detail", "patch", "list", "members", "label", "visibility",
     "cli-create-get", "cli-add-member", "cli-fuse", "cli-status",
     "incident-group", "participant-mode", "workspace", "routing-service",
-    "messages", "incident-delete", "proposal",
+    "messages", "incident-delete",
 )]
 
 
@@ -33,7 +33,7 @@ def summary(case_status="PASS"):
         "runner": {"executor_digest": "executor"},
         "observer_binding": {},
         "cases": [{
-            "id": "LOCAL-WORKSPACE-FLOW-01",
+            "id": "LOCAL-WORKSPACE-INCIDENT-ROUNDTRIP-01",
             "version": 1,
             "status": case_status,
             "functional": "PASS" if not nonpassing else case_status,
@@ -52,8 +52,8 @@ def summary(case_status="PASS"):
         "reports": {
             "case_count": 1,
             "declared_case_count": 1,
-            "expected_assertion_count": 18,
-            "observed_assertion_count": 18,
+            "expected_assertion_count": 17,
+            "observed_assertion_count": 17,
         },
         "cleanup": {
             "verification_scope": "OWNED_INCIDENT_AND_PROPOSAL_ONLY",
@@ -81,9 +81,9 @@ class WorkspaceReportRenderingTests(unittest.TestCase):
             item.get("name"): item.get("value")
             for item in xml.findall("./properties/property")
         }
-        self.assertEqual(suite_properties["expected_assertion_count"], "18")
-        self.assertEqual(suite_properties["observed_assertion_count"], "18")
-        self.assertEqual(len([name for name in suite_properties if name.startswith("requirement.")]), 18)
+        self.assertEqual(suite_properties["expected_assertion_count"], "17")
+        self.assertEqual(suite_properties["observed_assertion_count"], "17")
+        self.assertEqual(len([name for name in suite_properties if name.startswith("requirement.")]), 17)
         for requirement in REQUIREMENTS:
             self.assertEqual(suite_properties[f"requirement.{requirement}"], "PASS")
 
@@ -102,11 +102,11 @@ class WorkspaceReportRenderingTests(unittest.TestCase):
                          "NOT_PERFORMED")
 
         markdown = render_markdown(report)
-        self.assertIn("- Required assertions: 18", markdown)
-        self.assertIn("- Observed assertions: 18", markdown)
+        self.assertIn("- Required assertions: 17", markdown)
+        self.assertIn("- Observed assertions: 17", markdown)
         for requirement in REQUIREMENTS:
             self.assertIn(f"| {requirement} | PASS |", markdown)
-        self.assertEqual(sum(line.startswith("| WORKSPACE.") for line in markdown.splitlines()), 18)
+        self.assertEqual(sum(line.startswith("| WORKSPACE.") for line in markdown.splitlines()), 17)
         self.assertIn("scope=OWNED_LOCAL_FIXTURES", markdown)
         self.assertIn("roles=CEO,PM,ENG,QA", markdown)
         self.assertIn("setup_visibility=public", markdown)
@@ -125,7 +125,7 @@ class WorkspaceReportRenderingTests(unittest.TestCase):
                 self.assertEqual((xml.get("failures"), xml.get("skipped")), count)
                 self.assertIsNotNone(xml.find(f"testcase/{element}"))
                 markdown = render_markdown(report)
-                self.assertIn(f"| LOCAL-WORKSPACE-FLOW-01 | 1 | {status} |", markdown)
+                self.assertIn(f"| LOCAL-WORKSPACE-INCIDENT-ROUNDTRIP-01 | 1 | {status} |", markdown)
                 self.assertNotIn("- Status: **LOCAL_SUITE_PASS**", markdown)
 
 

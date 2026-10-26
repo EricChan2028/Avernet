@@ -83,9 +83,9 @@ def register_case_commands(commands) -> None:
     session_public_case.add_argument("--allow-write", action="store_true")
     story_case = commands.add_parser(
         "dual-workspace-story-run",
-        help="Run the reviewed dual Workspace incident/roundtrip/proposal stories through Singlebox or preprod HTTP")
+        help="Run the reviewed dual Workspace incident/roundtrip stories through Singlebox or preprod HTTP")
     story_case.add_argument("--profile", type=Path, required=True)
-    story_case.add_argument("--case", choices=("incident-core", "roundtrip", "proposal"), required=True)
+    story_case.add_argument("--case", choices=("incident-core", "roundtrip"), required=True)
     story_case.add_argument("--state-dir", type=Path, required=True)
     story_case.add_argument("--run-id", required=True)
     story_case.add_argument("--confirm-run-id", required=True)

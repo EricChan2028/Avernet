@@ -3335,6 +3335,22 @@ contract-level: no live Singlebox or preprod request was
 executed, `remote_validation=NOT_RUN`, and
 `grants_release_credit=false`.
 
+Retirement note (2026-10-26): upstream dev commit `72f9dff36` (Avernet #3114)
+removed the group proposal/confirmation product surface end to end. The local
+WORKSPACE.proposal executor family (`local_workspace_proposal.py`,
+`workspace_proposal_contract.py`, the profile contract and `PROFILE_EFFECTS`
+entry, the case registration and the focused tests) is retired from this
+runner with it. The complete Workspace story becomes the incident round trip:
+17 obligations, `local-workspace-run --with-incident-delete`, case
+`LOCAL-WORKSPACE-INCIDENT-ROUNDTRIP-01`, execution report
+`workspace-incident-roundtrip-report.json`, canonical projection
+`report-LOCAL-WORKSPACE-INCIDENT-ROUNDTRIP-01.json`, cleanup scope
+`OWNED_INCIDENT_ONLY`. The historical 2026-10-15 flow record and the 2026-10-20
+proposal slice description above remain as history (not executable claims).
+No live Singlebox or preprod request was made for this retirement; local
+regression evidence and the `stories.sh` drift re-freeze are recorded in the
+OpenSpec tasks log.
+
 ## 2026-10-25 Remaining Workspace command lifecycle
 
 The reviewed `DUAL-WORKSPACE-INCIDENT-CORE-01`,

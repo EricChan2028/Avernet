@@ -17,7 +17,7 @@ from .profile import fingerprint
 from .run_state import RunStateError, read
 
 SUITE = 'owned-local-workspace-v1'
-CASE_ID = 'LOCAL-WORKSPACE-FLOW-01'
+CASE_ID = 'LOCAL-WORKSPACE-INCIDENT-ROUNDTRIP-01'
 CONTRACT = 'owned-local-workspace-report-binding-v1'
 COMPLETION = 'owned-local-workspace-completion-v1'
 # Versioned report-v1 schema is independent of current executable inventories.
@@ -26,7 +26,7 @@ V1_REQUIREMENTS = tuple('WORKSPACE.'+name for name in (
     'create','detail','patch','list','members','label','visibility',
     'cli-create-get','cli-add-member','cli-fuse','cli-status',
     'incident-group','participant-mode','workspace','routing-service',
-    'messages','incident-delete','proposal'))
+    'messages','incident-delete'))
 ALL_REQUIREMENTS = V1_REQUIREMENTS
 STAGES = (
     ('api', 'LOCAL-WORKSPACE-API-01', 'LOCAL_WORKSPACE_API_PASS', V1_REQUIREMENTS[:7]),
@@ -34,8 +34,6 @@ STAGES = (
     ('incident', 'LOCAL-WORKSPACE-INCIDENT-01', 'LOCAL_WORKSPACE_INCIDENT_CONFIG_PASS', V1_REQUIREMENTS[11:15]),
     ('messages', 'LOCAL-WORKSPACE-MESSAGES-01', 'LOCAL_WORKSPACE_MESSAGES_PASS', V1_REQUIREMENTS[15:16]),
     ('delete', 'LOCAL-WORKSPACE-DELETE-01', 'LOCAL_WORKSPACE_DELETE_PASS', V1_REQUIREMENTS[16:17]),
-    ('proposal', 'LOCAL-WORKSPACE-PROPOSAL-01', 'LOCAL_WORKSPACE_PROPOSAL_CONFIRMED_AWAITING_DELETE', ()),
-    ('proposal-delete', 'LOCAL-WORKSPACE-PROPOSAL-DELETE-01', 'LOCAL_WORKSPACE_PROPOSAL_DELETE_PASS', V1_REQUIREMENTS[17:]),
 )
 V1_OPERATIONS = {
     'api': ('fixture-ceo-visibility-public','fixture-pm-visibility-public','fixture-eng-visibility-public',
@@ -46,8 +44,7 @@ V1_OPERATIONS = {
     'incident': ('incident-create','incident-detail','participant-mode','workspace-put','workspace-get',
                  'routing-policy-put','settings-patch','incident-readback'),
     'messages': ('persistent-message','live-chat','agent-callback'),
-    'proposal': ('proposal-create','proposal-preview','proposal-confirm','proposal-group-get'),
-    'delete': ('incident-delete',), 'proposal-delete': ('incident-delete',),
+    'delete': ('incident-delete',),
 }
 
 
@@ -57,8 +54,8 @@ def frozen_inventory():
 
 
 LEDGERS = {'api':'workspace-resources.sqlite', 'cli':'workspace-cli-resources.sqlite',
-           'incident':'workspace-incident-resources.sqlite', 'proposal':'workspace-proposal-resources.sqlite'}
-SOURCES = ('workspace-binding.json', 'workspace-flow-report.json', 'bcs-config.json', 'owned-bcs.json',
+           'incident':'workspace-incident-resources.sqlite'}
+SOURCES = ('workspace-binding.json', 'workspace-incident-roundtrip-report.json', 'bcs-config.json', 'owned-bcs.json',
            'local-fixtures.json', 'workspace-fusion-context.json',
            *(f'local-workspace-{name}.json' for name, *_ in STAGES), *LEDGERS.values())
 REPORT_NAME = 'report-'+CASE_ID+'.json'
@@ -138,7 +135,7 @@ def _ledger_valid(root, binding, name, journal, deleted):
 
 
 def _project(root,binding):
-    flow=read(root/'workspace-flow-report.json')
+    flow=read(root/'workspace-incident-roundtrip-report.json')
     runtime=read(root/'owned-bcs.json')
     _require(flow.get('run_id')==binding['run_id'] and flow.get('case_id')==CASE_ID
              and flow.get('executor_digest')==binding['executor_digest'], 'Workspace flow binding differs')
@@ -146,7 +143,7 @@ def _project(root,binding):
              and runtime==flow.get('shutdown'),'Workspace runtime evidence differs from execution')
     stages={name:read(root/f'local-workspace-{name}.json') for name,*_ in STAGES if (root/f'local-workspace-{name}.json').exists()}
     keys={'api':'case','cli':'cli_case','incident':'incident_case','messages':'message_case',
-          'delete':'delete_case','proposal':'proposal_case','proposal-delete':'proposal_delete'}
+          'delete':'delete_case'}
     complete=True
     observed=[]
     for name,stage_id,status,requirements in STAGES:
@@ -155,28 +152,25 @@ def _project(root,binding):
             _require(stage.get('run_id')==binding['run_id'] and stage.get('case_id')==stage_id
                      and stage.get('executor_digest')==binding['executor_digest']
                      and stage==flow.get(keys[name]),'Workspace stage does not match its original journal')
-        assertions=stage.get('assertions',[]) if name!='proposal' else []
+        assertions=stage.get('assertions',[])
         observed.extend(assertions)
         complete = complete and (stage.get('status')==status
-            and (name=='proposal' or assertions==[{'id':r,'status':'PASS'} for r in requirements])
+            and assertions==[{'id':r,'status':'PASS'} for r in requirements]
             and bool(stage.get('operations')) and all(op.get('status')=='ACKNOWLEDGED' for op in stage['operations']))
     expected=[{'id':r,'status':'PASS'} for r in binding['report_inventory']['requirements']]
     complete=complete and observed==expected and flow.get('requirements')==expected and set(SOURCES)<=_sources(root)
     if complete:
-        api,cli,incident,messages,deleted,proposal,pdeleted=(stages[n] for n,*_ in STAGES)
-        complete = (all(_ledger_valid(root,binding,n,stages[n],n in ('incident','proposal')) for n in LEDGERS)
+        api,cli,incident,messages,deleted=(stages[n] for n,*_ in STAGES)
+        complete = (all(_ledger_valid(root,binding,n,stages[n],n=='incident') for n in LEDGERS)
             and cli.get('api_journal_digest')==fingerprint(api)
             and incident.get('api_journal_digest')==fingerprint(api) and incident.get('cli_journal_digest')==fingerprint(cli)
             and messages.get('incident_digest')==fingerprint(incident)
-            and deleted.get('message_journal_digest')==fingerprint(messages)
-            and proposal.get('incident_digest')==fingerprint(incident)
-            and pdeleted.get('message_journal_digest')==fingerprint(messages)
-            and pdeleted.get('admission',{}).get('proposal_execution_digest')==fingerprint(proposal))
-        complete = complete and all(stages[n].get('storage_verification',{}).get('status')=='PASS' for n in ('api','cli','incident','messages','proposal','delete','proposal-delete'))
+            and deleted.get('message_journal_digest')==fingerprint(messages))
+        complete = complete and all(stages[n].get('storage_verification',{}).get('status')=='PASS' for n in ('api','cli','incident','messages','delete'))
         for name,operations in binding['report_inventory']['operations'].items():
             complete=complete and [op.get('operation') for op in stages[name]['operations']]==operations
         fixture_digest=fingerprint(read(root/'local-fixtures.json'))
-        complete=complete and all(stages[n].get('fixture_digest')==fixture_digest for n in ('api','cli','incident','proposal'))
+        complete=complete and all(stages[n].get('fixture_digest')==fixture_digest for n in ('api','cli','incident'))
         context=read(root/'workspace-fusion-context.json')
         complete=complete and cli.get('context_digest')==fingerprint(context) and len(context.get('files',[]))==4
         for item in context.get('files',[]):
@@ -184,15 +178,12 @@ def _project(root,binding):
             _require(role in ('PM','ENG') and leaf in ('SOUL.md','MEMORY.md'),'Workspace context file outside fixed scope')
             path=root/'bots'/context['roles'][role]/leaf
             complete=complete and _sha(path)==item.get('sha256')
-        complete=complete and (proposal.get('url_validation',{}).get('status')=='PASS'
-                              and proposal.get('html_validation',{}).get('status')=='PASS')
         complete = complete and (messages.get('receiver_state')=='CLOSED'
             and len(messages.get('wire_receipts',[]))==8
             and all(r.get('status')=='TRANSPORT_RECEIVED_ONLY' and r.get('success_ack_sent') is False for r in messages['wire_receipts'])
             and messages['storage_verification'].get('new_rows')==3
-            and messages['storage_verification'].get('baseline_unchanged') is True
-            and proposal.get('capability',{}).get('memory')=='CLEARED_REFERENCE_ONLY')
-        for name,resource in (('delete',incident['resources']['incident']),('proposal-delete',proposal['resources']['proposal_group'])):
+            and messages['storage_verification'].get('baseline_unchanged') is True)
+        for name,resource in (('delete',incident['resources']['incident']),):
             d=stages[name]
             complete = complete and (d.get('group_id')==resource['id'] and d.get('initial_session_id')==resource['initial_session']['id']
                 and d.get('not_found')=={'status':'PASS','http_status':404,'group_id':resource['id']}
@@ -206,7 +197,7 @@ def _project(root,binding):
     stopped=runtime.get('status')=='STOPPED' and type(runtime.get('returncode')) is int and runtime['returncode']==0
     cleared=flow.get('credentials',{}).get('credential_memory')=='CLEARED'
     status=('CANCELLED' if flow.get('status')=='CANCELLED' else
-            'PASS' if complete and stopped and cleared and flow.get('status')=='LOCAL_WORKSPACE_FLOW_PASS' else
+            'PASS' if complete and stopped and cleared and flow.get('status')=='LOCAL_WORKSPACE_INCIDENT_ROUNDTRIP_PASS' else
             'FAIL' if any(r.get('status')=='FAIL' for r in observed) else 'BLOCKED')
     requirements=[{'id':name,'status':next((r['status'] for r in observed if r.get('id')==name),'NOT_RUN')} for name in binding['report_inventory']['requirements']]
     visibility={'scope':'OWNED_LOCAL_FIXTURES','roles':'CEO,PM,ENG,QA','setup_visibility':'NOT_VERIFIED',
@@ -235,9 +226,9 @@ def _summary(binding,case,issues):
                   'resource_disposition':case.get('resource_disposition','UNVERIFIED'),
                   'retained_visibility':case.get('retained_visibility',{})}],
         'requirements':case.get('requirements',[{'id':r,'status':'NOT_RUN'} for r in binding['report_inventory']['requirements']]),
-        'reports':{'expected_assertion_count':18,'observed_assertion_count':len(case.get('assertions',[]))},
+        'reports':{'expected_assertion_count':17,'observed_assertion_count':len(case.get('assertions',[]))},
         'integrity':{'status':'PASS' if not issues else 'BLOCKED','issues':issues},'routes':[],
-        'cleanup':{'verification_scope':'OWNED_INCIDENT_AND_PROPOSAL_ONLY','physical_data_erasure':'NOT_VERIFIED',
+        'cleanup':{'verification_scope':'OWNED_INCIDENT_ONLY','physical_data_erasure':'NOT_VERIFIED',
                    'associated_history_purge':'NOT_PERFORMED'},
         'mock_boundary':{'not_proven':['remote gateway authentication','Bot engine reasoning','business Session terminality',
                                      'legacy run-context terminality','full release coverage']},
@@ -247,7 +238,7 @@ def _summary(binding,case,issues):
 def publish_workspace(runtime,binding,flow):
     root=runtime.root
     _require(_bound(root)==binding and executor_digest()==binding['executor_digest'],'Workspace source changed before publication')
-    _require(read(root/'workspace-flow-report.json')==flow and read(root/'owned-bcs.json')==runtime._record(),
+    _require(read(root/'workspace-incident-roundtrip-report.json')==flow and read(root/'owned-bcs.json')==runtime._record(),
              'Workspace publication must follow actual stopped-process result')
     pending=root/'workspace-publication-pending.json'
     pending_digest=_exclusive(pending,{'schema_version':1,'run_id':binding['run_id']})

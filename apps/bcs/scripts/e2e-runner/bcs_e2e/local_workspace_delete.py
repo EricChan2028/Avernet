@@ -238,39 +238,3 @@ class OwnedLocalWorkspaceDelete:
                 except BaseException:pass
                 if has_cancellation(error):raise KeyboardInterrupt() from None
                 raise RunStateError('Incident deletion not qualified; inspect retained evidence') from None
-
-
-class OwnedLocalProposalDelete(OwnedLocalWorkspaceDelete):
-    """Same exact product cascade, only for the completed live proposal object."""
-    case_id = 'LOCAL-WORKSPACE-PROPOSAL-DELETE-01'
-    obligation = 'WORKSPACE.proposal'
-    success_status = 'LOCAL_WORKSPACE_PROPOSAL_DELETE_PASS'
-
-    def __init__(self, proposal_execution, message_execution):
-        from .local_workspace_proposal import OwnedLocalWorkspaceProposal
-        if type(proposal_execution) is not OwnedLocalWorkspaceProposal or not proposal_execution._completed:
-            raise RunStateError('Proposal deletion requires its live completed create/confirm execution')
-        super().__init__(message_execution)
-        self.proposal = proposal_execution
-        if self.proposal.identities is not self.identities or self.proposal.runtime is not self.runtime:
-            raise RunStateError('Proposal deletion cannot cross runtime identities')
-        self.scope = self.proposal.scope
-        self.resource = self.proposal.state['resources']['proposal_group']
-        self.group_id, self.session_id = self.resource['id'], self.resource['initial_session']['id']
-        self.path = self.runtime.root/'local-workspace-proposal-delete.json'
-        self.ledger_path, self.binding_digest = self.proposal.ledger_path, self.proposal.binding_digest
-
-    def _admit(self):
-        from .local_workspace_proposal import CASE_ID as PROPOSAL_CASE
-        self.proposal._active()
-        result = self._closed_local_execution()
-        group = self.scope.ledger._get(self.resource['handle'])
-        session = self.scope.ledger._get(self.resource['initial_session']['handle'])
-        if (group['kind'] != 'group' or session['kind'] != 'session'
-                or group['resource_id'] != self.group_id or session['resource_id'] != self.session_id
-                or group['parent'] is not None or session['parent'] != group['handle']
-                or any(row['case_id'] != PROPOSAL_CASE or row['attempt'] != 1
-                       or row['origin'] != 'created' or row['state'] != 'live' for row in (group,session))):
-            raise RunStateError('Proposal deletion resource scope changed')
-        result['proposal_execution_digest'] = self.proposal._journal_digest
-        return result

@@ -28,14 +28,12 @@ from bcs_e2e.workspace_story_case_run import (
 )
 
 from test_workspace_incident_core import profile_value as incident_profile
-from test_workspace_proposal import profile_value as proposal_profile
 from test_workspace_roundtrip import profile_value as roundtrip_profile
 
 RUN_ID = "workspace-story-run-1"
 PROFILE_BUILDERS = {
     "incident-core": incident_profile,
     "roundtrip": roundtrip_profile,
-    "proposal": proposal_profile,
 }
 
 
@@ -94,7 +92,6 @@ class WorkspaceStoryCaseRunTests(unittest.TestCase):
         self.assertEqual(case_ids, {
             "DUAL-WORKSPACE-INCIDENT-CORE-01",
             "DUAL-WORKSPACE-ROUNDTRIP-01",
-            "DUAL-WORKSPACE-PROPOSAL-01",
         })
         self.assertTrue(case_ids <= rows)
         self.assertEqual(tuple(CASE_KEYS), CASE_KEYS)
@@ -118,15 +115,6 @@ class WorkspaceStoryCaseRunTests(unittest.TestCase):
                 self.assertEqual(
                     read(state_dir / f"workspace-{case_key}-run.json"), report)
                 self.assertNotIn("owned-driver-token", json.dumps(report, sort_keys=True))
-
-    def test_preprod_proposal_records_cookie_kind_without_cookie_secret(self):
-        report, _, _, _ = self.invoke_case("proposal", preprod=True)
-        self.assertEqual(report["status"], "PASS")
-        self.assertEqual(report["credential_kind"], "human_cookie")
-        self.assertEqual(report["environment"]["entrypoint_kind"], "gateway")
-        raw = json.dumps(report, sort_keys=True)
-        self.assertNotIn("human-proposal-cookie", raw)
-        self.assertNotIn("BCS_E2E_HUMAN_COOKIE=Cookie:", raw)
 
     def test_permissions_and_fresh_state_are_enforced(self):
         profile_path = self.root / "guard-profile.json"

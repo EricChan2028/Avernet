@@ -36,8 +36,8 @@ class MigrationInventoryTests(unittest.TestCase):
         result = migration_plan()
         self.assertEqual(result['legacy_inventory_count'], 34)
         self.assertEqual(result['mapped_story_count'], 3)
-        self.assertEqual([len(s['steps']) for s in result['stories']], [17, 5, 1])
-        self.assertEqual([len(s['requirements']) for s in result['stories']], [18, 5, 10])
+        self.assertEqual([len(s['steps']) for s in result['stories']], [16, 5, 1])
+        self.assertEqual([len(s['requirements']) for s in result['stories']], [17, 5, 10])
         self.assertEqual(result['migrated_story_count'], 0)
         self.assertEqual(result['passed_assertion_count'], 0)
         self.assertFalse(result['ready_to_execute'])
@@ -224,10 +224,12 @@ class MigrationInventoryTests(unittest.TestCase):
     def test_workspace_full_flow_supersedes_all_increment_slices(self):
         result = migration_plan()
         flow = next(row for row in result['local_registered_executors']
-                    if row['case_id'] == 'LOCAL-WORKSPACE-FLOW-01')
-        self.assertEqual(len(flow['requirement_ids']), 18)
+                    if row['case_id'] == 'LOCAL-WORKSPACE-INCIDENT-ROUNDTRIP-01')
+        self.assertEqual(len(flow['requirement_ids']), 17)
         self.assertEqual(flow['canonical_reporting'], 'INTEGRATED_LOCAL')
         self.assertEqual(flow['report_command'], 'local-workspace-report')
+        self.assertEqual(flow['execution_command'], 'local-workspace-run --with-incident-delete')
+        self.assertEqual(flow['required_assertion_count'], 17)
         self.assertFalse(flow['grants_release_credit'])
         workspace_partials = {
             'LOCAL-WORKSPACE-API-01', 'LOCAL-WORKSPACE-API-CLI-01',

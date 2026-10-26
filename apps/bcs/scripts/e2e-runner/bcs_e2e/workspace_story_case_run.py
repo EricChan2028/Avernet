@@ -1,9 +1,9 @@
 """Command entry for the remaining dual Workspace HTTP stories.
 
-The incident core, Workspace round trip, and proposal confirmation already
-have reviewed Case contracts and adapters.  This entry only binds a strict
-Profile to a fresh Run, executes one selected Case, and writes the same
-three-file local receipt contract used by the other command entries.
+The incident core and Workspace round trip already have reviewed Case
+contracts and adapters.  This entry only binds a strict Profile to a fresh
+Run, executes one selected Case, and writes the same three-file local receipt
+contract used by the other command entries.
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ from .profile import ConfigError, fingerprint, identifier, require_resolved, uni
 from .run_state import RunStateError, write
 from .workspace_cli_profile import (
     validate_workspace_incident_core_profile,
-    validate_workspace_proposal_profile,
     validate_workspace_roundtrip_profile,
 )
 from .workspace_incident_core_contract import (
@@ -25,12 +24,6 @@ from .workspace_incident_core_contract import (
     WORKSPACE_PARENT,
     RemoteWorkspaceIncidentCoreAdapter,
     execute_workspace_incident_core_case,
-)
-from .workspace_proposal_contract import (
-    CASE_ID as PROPOSAL_CASE_ID,
-    FIXTURE_EFFECT as PROPOSAL_EFFECT,
-    RemoteWorkspaceProposalAdapter,
-    execute_workspace_proposal_case,
 )
 from .workspace_roundtrip_contract import (
     CASE_ID as ROUNDTRIP_CASE_ID,
@@ -41,7 +34,7 @@ from .workspace_roundtrip_contract import (
 
 SCHEMA_VERSION = 1
 REPORT_CONTRACT = "dual-workspace-story-case-run-v1"
-CASE_KEYS = ("incident-core", "roundtrip", "proposal")
+CASE_KEYS = ("incident-core", "roundtrip")
 _CASES = {
     "incident-core": {
         "case_id": INCIDENT_CASE_ID,
@@ -57,20 +50,13 @@ _CASES = {
         "execute": execute_workspace_roundtrip_case,
         "fixture_effect": ROUNDTRIP_EFFECT,
     },
-    "proposal": {
-        "case_id": PROPOSAL_CASE_ID,
-        "validator": validate_workspace_proposal_profile,
-        "adapter": RemoteWorkspaceProposalAdapter,
-        "execute": execute_workspace_proposal_case,
-        "fixture_effect": PROPOSAL_EFFECT,
-    },
 }
 
 
 def load_workspace_story_case_profile(path: Path, case_key: str) -> dict:
     if case_key not in CASE_KEYS:
         raise ConfigError(
-            "workspace_story_case must be incident-core, roundtrip or proposal")
+            "workspace_story_case must be incident-core or roundtrip")
     if path.is_symlink() or not path.is_file():
         raise ConfigError(f"workspace {case_key} profile must be a regular file")
     try:
@@ -91,7 +77,7 @@ def dual_workspace_story_case_run(
 ) -> dict:
     if case_key not in CASE_KEYS:
         raise ConfigError(
-            "workspace_story_case must be incident-core, roundtrip or proposal")
+            "workspace_story_case must be incident-core or roundtrip")
     run_id = identifier(run_id, f"workspace {case_key} run ID")
     if allow_write is not True or confirm_run_id != run_id:
         raise ConfigError(

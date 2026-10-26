@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "source_revision": "71860eae99c62d7bf1349a0f46562f6395acbf1e",
+  "source_revision": "74dd751b623b7701608374fc4c7c4a6cf58278da",
   "parent": "story_user_receives_group_event_webhooks",
   "sources": {
-    "stories.sh": "b2df5aad7ca67b36d072e70e31f7038050431557f982702b3c628df4bac44b86",
+    "stories.sh": "5c4d77f99e8574b5b1132ac4550aeffb7eedf7cb59f82b2d8ee52eb4a704fea4",
     "common.sh": "ca4d2571f58f8de3b13c0516b6db3c07c76e0028592b890aff19dc7bea678815",
     "http_provider_judge_mock.py": "fe56c8c2d79ce141fe1d2784cc21c184c90000bb8e6908c976168f3bdfad70c4",
     "group_session_ws_probe.py": "954b4b962f2eaffd5aba06db2b9702221c3ef2cd443185987e157980a51eec04"

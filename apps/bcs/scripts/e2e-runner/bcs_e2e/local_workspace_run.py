@@ -28,23 +28,18 @@ INCIDENT_REQUIREMENTS = tuple('WORKSPACE.' + name for name in
 
 MESSAGE_REQUIREMENTS = ('WORKSPACE.messages',)
 DELETE_REQUIREMENTS = ('WORKSPACE.incident-delete',)
-PROPOSAL_REQUIREMENTS = ('WORKSPACE.proposal',)
 
 def local_workspace_api_run(*, binary: Path, binary_sha256: str, state_dir: Path,
                             run_id: str, confirm_run_id: str, allow_local_processes: bool,
                             allow_fixture_write: bool, allow_write: bool,
                             cli_binary: Path | None = None, cli_binary_sha256: str | None = None,
                             with_incident: bool = False, with_messages: bool = False,
-                            with_delete: bool = False, with_proposal: bool = False) -> dict:
+                            with_delete: bool = False) -> dict:
     if not (allow_local_processes is True and allow_fixture_write is True
             and allow_write is True and confirm_run_id == run_id):
         raise RunStateError('Workspace API requires process, fixture and business permissions plus exact Run confirmation')
     if (cli_binary is None) != (cli_binary_sha256 is None):
         raise RunStateError('Workspace CLI requires both an approved binary and its SHA256')
-    if type(with_proposal) is not bool:
-        raise RunStateError('Workspace proposal selection must be boolean')
-    if with_proposal:
-        with_delete = True
     if type(with_delete) is not bool:
         raise RunStateError('Workspace deletion selection must be boolean')
     if with_delete:
@@ -59,7 +54,7 @@ def local_workspace_api_run(*, binary: Path, binary_sha256: str, state_dir: Path
     if with_cli:
         from .local_cli import require_cli_binary
         require_cli_binary(cli_binary, cli_binary_sha256)
-    selected = REQUIREMENTS + (CLI_REQUIREMENTS if with_cli else ()) + (INCIDENT_REQUIREMENTS if with_incident else ()) + (MESSAGE_REQUIREMENTS if with_messages else ()) + (DELETE_REQUIREMENTS if with_delete else ()) + (PROPOSAL_REQUIREMENTS if with_proposal else ())
+    selected = REQUIREMENTS + (CLI_REQUIREMENTS if with_cli else ()) + (INCIDENT_REQUIREMENTS if with_incident else ()) + (MESSAGE_REQUIREMENTS if with_messages else ()) + (DELETE_REQUIREMENTS if with_delete else ())
     result_case_id = 'LOCAL-WORKSPACE-API-CLI-01' if with_cli else CASE_ID
     if with_incident:
         result_case_id = 'LOCAL-WORKSPACE-CONFIG-01'
@@ -67,8 +62,6 @@ def local_workspace_api_run(*, binary: Path, binary_sha256: str, state_dir: Path
         result_case_id = 'LOCAL-WORKSPACE-MESSAGING-01'
     if with_delete:
         result_case_id = 'LOCAL-WORKSPACE-INCIDENT-ROUNDTRIP-01'
-    if with_proposal:
-        result_case_id = 'LOCAL-WORKSPACE-FLOW-01'
     identifier(run_id, 'Workspace Run ID')
     if state_dir.exists() or state_dir.is_symlink():
         raise RunStateError('Workspace API requires a fresh owned state directory')
@@ -92,8 +85,6 @@ def local_workspace_api_run(*, binary: Path, binary_sha256: str, state_dir: Path
     if with_messages:
         binding.update(contract='owned-local-workspace-messaging-v1', case_id=result_case_id, store_messages=True)
     if with_delete:
-        binding.update(contract='owned-local-workspace-incident-roundtrip-v1', case_id=result_case_id)
-    if with_proposal:
         from .local_workspace_reporting import frozen_inventory
         binding.update(report_inventory=frozen_inventory(), contract='owned-local-workspace-report-binding-v1', case_id=result_case_id,
                        suite='owned-local-workspace-v1', runtime_dir=str(state_dir.resolve()))
@@ -104,8 +95,6 @@ def local_workspace_api_run(*, binary: Path, binary_sha256: str, state_dir: Path
     incident_case = {}
     message_case = {}
     delete_case = {}
-    proposal_case = {}
-    proposal_delete = {}
     error = None
     previous = signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     try:
@@ -135,12 +124,6 @@ def local_workspace_api_run(*, binary: Path, binary_sha256: str, state_dir: Path
                     if with_delete:
                         from .local_workspace_delete import OwnedLocalWorkspaceDelete
                         delete_case = OwnedLocalWorkspaceDelete(message_execution).run()
-                    if with_proposal:
-                        from .local_workspace_proposal import OwnedLocalWorkspaceProposal
-                        from .local_workspace_delete import OwnedLocalProposalDelete
-                        proposal_execution = OwnedLocalWorkspaceProposal(identities)
-                        proposal_case = proposal_execution.run_create_confirm()
-                        proposal_delete = OwnedLocalProposalDelete(proposal_execution, message_execution).run()
 
         except BaseException as failure:
             error = failure
@@ -173,16 +156,6 @@ def local_workspace_api_run(*, binary: Path, binary_sha256: str, state_dir: Path
             if (saved.get('case_id') == 'LOCAL-WORKSPACE-DELETE-01' and saved.get('run_id') == run_id
                     and saved.get('executor_digest') == source):
                 delete_case = saved
-        if with_proposal:
-            for filename, expected_id in (('local-workspace-proposal.json', 'LOCAL-WORKSPACE-PROPOSAL-01'),
-                                          ('local-workspace-proposal-delete.json', 'LOCAL-WORKSPACE-PROPOSAL-DELETE-01')):
-                if (runtime.root/filename).is_file():
-                    saved = read(runtime.root/filename)
-                    if saved.get('case_id') == expected_id and saved.get('run_id') == run_id and saved.get('executor_digest') == source:
-                        if filename == 'local-workspace-proposal.json':
-                            proposal_case = saved
-                        else:
-                            proposal_delete = saved
         shutdown = runtime._record()
         credentials = identities.summary() if identities is not None else {
             'credential_memory': 'NOT_CAPTURED'}
@@ -218,22 +191,14 @@ def local_workspace_api_run(*, binary: Path, binary_sha256: str, state_dir: Path
                       and delete_case.get('case_id') == 'LOCAL-WORKSPACE-DELETE-01'
                       and delete_case.get('run_id') == run_id
                       and read(runtime.root/'local-workspace-delete.json') == delete_case)
-        if with_proposal:
-            passed = (passed and proposal_case.get('status') == 'LOCAL_WORKSPACE_PROPOSAL_CONFIRMED_AWAITING_DELETE'
-                      and proposal_delete.get('status') == 'LOCAL_WORKSPACE_PROPOSAL_DELETE_PASS'
-                      and proposal_delete.get('assertions') == [{'id': 'WORKSPACE.proposal', 'status': 'PASS'}]
-                      and proposal_delete.get('admission', {}).get('proposal_execution_digest') == fingerprint(proposal_case)
-                      and read(runtime.root/'local-workspace-proposal.json') == proposal_case
-                      and read(runtime.root/'local-workspace-proposal-delete.json') == proposal_delete)
         status = ('CANCELLED' if error is not None and has_cancellation(error) else
-                  ('LOCAL_WORKSPACE_FLOW_PASS' if with_proposal else
-                   'LOCAL_WORKSPACE_INCIDENT_ROUNDTRIP_PASS' if with_delete else
+                  ('LOCAL_WORKSPACE_INCIDENT_ROUNDTRIP_PASS' if with_delete else
                    'LOCAL_WORKSPACE_MESSAGING_PASS' if with_messages else
                    'LOCAL_WORKSPACE_CONFIG_PASS' if with_incident else
                    'LOCAL_WORKSPACE_API_CLI_PASS' if with_cli else 'LOCAL_WORKSPACE_API_PASS') if passed else 'BLOCKED')
         # Errors after writes remain in the API's original journal. Never repair
         # its status or infer a successful obligation from partial API evidence.
-        observed = {item['id']: item['status'] for item in case.get('assertions', []) + cli_case.get('assertions', []) + incident_case.get('assertions', []) + message_case.get('assertions', []) + delete_case.get('assertions', []) + proposal_delete.get('assertions', [])
+        observed = {item['id']: item['status'] for item in case.get('assertions', []) + cli_case.get('assertions', []) + incident_case.get('assertions', []) + message_case.get('assertions', []) + delete_case.get('assertions', [])
                     if isinstance(item, dict) and item.get('id') in selected
                     and item.get('status') in ('PASS', 'FAIL')}
         result = {'schema_version': 1, 'status': status, 'run_id': run_id, 'case_id': result_case_id,
@@ -245,47 +210,40 @@ def local_workspace_api_run(*, binary: Path, binary_sha256: str, state_dir: Path
                   'parent_requirement_count': len(parent_ids),
                   'legacy_inventory_count': len(binding['legacy_inventory']),
                   'full_story_status': 'NOT_MIGRATED', 'full_release_status': 'NOT_QUALIFIED',
-                  'remaining_parent_steps': 'CLI_INCIDENT_AND_PROPOSAL_NOT_RUN',
+                  'remaining_parent_steps': 'CLI_MESSAGES_INCIDENT_DELETE_NOT_RUN',
                   'resource_disposition': 'RETAINED_LOCAL_DATABASE',
                   'automatic_delete': False, 'remote_validation': 'NOT_RUN',
                   'api_journal': 'local-workspace-api.json',
-                  'scope_note': 'Local API increment only; no CLI, incident or proposal qualification',
+                  'scope_note': 'Local API increment only; no CLI, incident, messaging or deletion qualification',
                   'ready_to_execute': False}
         if with_cli:
             result.update(cli_case=cli_case, cli_journal='local-workspace-cli.json',
-                          remaining_parent_steps='INCIDENT_AND_PROPOSAL_NOT_RUN',
+                          remaining_parent_steps='INCIDENT_MESSAGES_DELETE_NOT_RUN',
                           scope_note='Local API and CLI increment; full Workspace Story not qualified',
                           fusion_mode='PRODUCT_LOCAL_SIMPLE_FUSION_NO_LLM')
         if with_incident:
             result.update(incident_case=incident_case, incident_journal='local-workspace-incident.json',
-                          remaining_parent_steps='MESSAGES_INCIDENT_DELETE_AND_PROPOSAL_NOT_RUN',
+                          remaining_parent_steps='MESSAGES_INCIDENT_DELETE_NOT_RUN',
                           scope_note='Local API, CLI and incident configuration; full Story not qualified')
         if with_messages:
             result.update(message_case=message_case, message_journal='local-workspace-messages.json',
-                          remaining_parent_steps='INCIDENT_DELETE_AND_PROPOSAL_NOT_RUN',
+                          remaining_parent_steps='INCIDENT_DELETE_NOT_RUN',
                           scope_note='Local API, CLI, incident configuration and transport reception; no engine reasoning or full Story qualification')
         if with_delete:
             result.update(delete_case=delete_case, delete_journal='local-workspace-delete.json',
-                          remaining_parent_steps='PROPOSAL_NOT_RUN',
-                          resource_disposition=('INCIDENT_GROUP_SESSION_DELETED_OTHER_RESOURCES_RETAINED'
+                          remaining_parent_steps=('NONE_CANONICAL_REPORTING_PENDING' if delete_case.get('status') == 'LOCAL_WORKSPACE_DELETE_PASS'
+                                                  else 'LOCAL_ROUNDTRIP_INCOMPLETE'),
+                          resource_disposition=('INCIDENT_GROUP_SESSION_DELETED_HISTORY_AND_OTHER_GROUPS_RETAINED'
                                                 if delete_case.get('status') == 'LOCAL_WORKSPACE_DELETE_PASS'
                                                 else 'INCIDENT_DELETION_UNCONFIRMED_OTHER_RESOURCES_RETAINED'),
-                          scope_note='Local incident round-trip; Proposal and full Story reporting remain incomplete')
-        if with_proposal:
-            result.update(proposal_case=proposal_case, proposal_delete=proposal_delete,
-                          remaining_parent_steps=('NONE_CANONICAL_REPORTING_PENDING' if passed else 'LOCAL_FLOW_INCOMPLETE'),
-                          resource_disposition=('INCIDENT_AND_PROPOSAL_GROUPS_DELETED_HISTORY_AND_OTHER_GROUPS_RETAINED'
-                                                if proposal_delete.get('status') == 'LOCAL_WORKSPACE_PROPOSAL_DELETE_PASS'
-                                                else 'PROPOSAL_CLEANUP_UNCONFIRMED_OTHER_RESOURCES_RETAINED'),
-                          scope_note='All eighteen local Workspace obligations executed; canonical integration and remote qualification pending')
+                          scope_note='All seventeen local Workspace obligations executed; canonical integration done, remote qualification pending')
         if error is not None:
             result['error_type'] = type(error).__name__
-        write(runtime.root/('workspace-flow-report.json' if with_proposal else
-                                 'workspace-incident-roundtrip-report.json' if with_delete else
+        write(runtime.root/('workspace-incident-roundtrip-report.json' if with_delete else
                                  'workspace-messaging-report.json' if with_messages else
                                  'workspace-config-report.json' if with_incident else
                                  'workspace-api-cli-report.json' if with_cli else 'workspace-api-report.json'), result)
-        if with_proposal:
+        if with_delete:
             from .local_workspace_reporting import publish_workspace
             canonical = publish_workspace(runtime, binding, result)
             result = {**result, 'canonical_status': canonical['status'],

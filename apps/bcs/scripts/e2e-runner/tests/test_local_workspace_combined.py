@@ -75,8 +75,8 @@ class WorkspaceCombinedLiveTests(unittest.TestCase):
         self.assertEqual(result['selected_requirement_count'], 11)
         self.assertEqual(result['requirements'][:11], [
             {'id': name, 'status': 'PASS'} for name in REQUIREMENTS+CLI_REQUIREMENTS])
-        self.assertEqual([r['status'] for r in result['requirements'][11:]], ['NOT_RUN']*7)
-        self.assertEqual(result['parent_requirement_count'], 18)
+        self.assertEqual([r['status'] for r in result['requirements'][11:]], ['NOT_RUN']*6)
+        self.assertEqual(result['parent_requirement_count'], 17)
         self.assertEqual(result['legacy_inventory_count'], 34)
         self.assertEqual(result['full_story_status'], 'NOT_MIGRATED')
         self.assertEqual(result['remote_validation'], 'NOT_RUN')
