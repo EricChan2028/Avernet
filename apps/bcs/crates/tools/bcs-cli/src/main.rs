@@ -3802,6 +3802,16 @@ pub async fn run() -> Result<()> {
             all,
         } => {
             let token = get_token(token.as_deref())?;
+            let cookie_session = if bcs_cookie.is_some() && token.is_empty() {
+                load_optional_session_info()?
+            } else {
+                None
+            };
+            let cookie_bot_uuid = cookie_owned_bot_uuid(
+                bcs_cookie.as_deref(),
+                &token,
+                cookie_session.as_ref(),
+            );
             let client = create_client(
                 &bcs_url,
                 &token,
@@ -3816,6 +3826,45 @@ pub async fn run() -> Result<()> {
             let mut groups = Vec::new();
             let mut actor_id = None;
             let (next_offset, total) = loop {
+                if let Some(bot_uuid) = cookie_bot_uuid.as_deref() {
+                    debug_request!(
+                        debug,
+                        "GET",
+                        &format!("/bots/{}/groups", urlencoding::encode(bot_uuid)),
+                        json!({
+                            "include_session_groups": false,
+                            "offset": offset,
+                            "limit": batch_size,
+                        })
+                    );
+                    let page = client
+                        .list_owned_bot_groups(bot_uuid, offset, batch_size)
+                        .await?;
+                    if page.offset != offset {
+                        return Err(anyhow!(
+                            "Invalid owned bot groups pagination response: requested offset={}, received offset={}",
+                            offset,
+                            page.offset
+                        ));
+                    }
+                    if actor_id.as_deref() != Some(bot_uuid) {
+                        if actor_id.is_some() {
+                            return Err(anyhow!(
+                                "Owned bot groups pagination changed actor identity"
+                            ));
+                        }
+                        actor_id = Some(bot_uuid.to_string());
+                    }
+                    let page_returned = page.items.len() as u64;
+                    groups.extend(page.items);
+                    let total = page.total;
+                    let next_offset = offset.saturating_add(page_returned);
+                    if !all || page_returned == 0 || next_offset >= total {
+                        break (next_offset, total);
+                    }
+                    offset = next_offset;
+                    continue;
+                }
                 debug_request!(
                     debug,
                     "GET",

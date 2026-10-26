@@ -399,3 +399,56 @@ async fn list_groups_all_rejects_actor_change_between_pages() {
     assert_failure(&output, None);
     assert_output_contains(&output, "current actor changed during pagination");
 }
+
+#[tokio::test]
+async fn list_groups_uses_cookie_session_bot_route() {
+    let ctx = TestContext::new().await.expect("Failed to create test context");
+    std::fs::write(
+        ctx.session_path(),
+        serde_json::to_vec(&serde_json::json!({
+            "bot_uuid": "cookie-owned-bot",
+            "token": "",
+            "bcs_url": ctx.session.bcs_url,
+            "api_base_url": None::<&str>
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    Mock::given(method("GET"))
+        .and(path("/bots/cookie-owned-bot/groups"))
+        .and(query_param("offset", "0"))
+        .and(query_param("limit", "20"))
+        .and(query_param("include_session_groups", "false"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "items": [{"group_id": "group-for-cookie-owned-bot"}],
+            "total": 1,
+            "offset": 0,
+            "limit": 20
+        })))
+        .expect(1)
+        .mount(&ctx.mock_server)
+        .await;
+
+    let output = ctx
+        .cmd()
+        .env("BCS_COOKIE", "session=cookie-e2e")
+        .arg("list-groups")
+        .output()
+        .expect("Failed to execute cookie list-groups");
+
+    assert_success(&output);
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["returned"], 1);
+    assert_eq!(json["items"][0]["group_id"], "group-for-cookie-owned-bot");
+
+    let requests = ctx.mock_server.received_requests().await.unwrap();
+    let request = requests
+        .iter()
+        .find(|request| request.url.path() == "/bots/cookie-owned-bot/groups")
+        .expect("owned bot groups request");
+    assert_eq!(
+        request.headers.get("cookie").and_then(|value| value.to_str().ok()),
+        Some("session=cookie-e2e")
+    );
+}

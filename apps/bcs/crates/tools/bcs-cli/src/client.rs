@@ -1791,8 +1791,7 @@ impl BcsClient {
         let url = format!("{}/groups/{}", self.base_url, group_id);
 
         let response = self
-            .http_client
-            .get(&url)
+            .add_auth(self.http_client.get(&url))
             .send()
             .await
             .context("Failed to get group")?;
@@ -1830,6 +1829,56 @@ impl BcsClient {
         let items = result["items"].as_array().cloned().unwrap_or_default();
 
         Ok(items)
+    }
+
+    /// List formal groups for the Cookie-selected owned Bot.
+    ///
+    /// Cookie-only authentication identifies the Human; the private session's
+    /// Bot UUID is the reviewed current actor for command execution.
+    pub async fn list_owned_bot_groups(
+        &self,
+        bot_uuid: &str,
+        offset: u64,
+        limit: u64,
+    ) -> Result<CurrentActorGroupListPage> {
+        let url = format!(
+            "{}/bots/{}/groups",
+            self.base_url,
+            urlencoding::encode(bot_uuid)
+        );
+
+        let response = self
+            .add_auth(self.http_client.get(&url).query(&[
+                ("offset", offset.to_string()),
+                ("limit", limit.to_string()),
+                ("include_session_groups", "false".to_string()),
+            ]))
+            .send()
+            .await
+            .context("Failed to list owned bot groups")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow!(
+                "List owned bot groups failed ({}): {}",
+                status,
+                body
+            ));
+        }
+
+        let page: BotGroupListPage = response
+            .json()
+            .await
+            .context("Invalid owned bot groups response")?;
+
+        Ok(CurrentActorGroupListPage {
+            actor_id: bot_uuid.to_string(),
+            items: page.items,
+            total: page.total,
+            offset: page.offset,
+            limit: page.limit,
+        })
     }
 
     /// List groups that include a specific bot.
@@ -2037,9 +2086,7 @@ impl BcsClient {
         };
 
         let response = self
-            .http_client
-            .post(&url)
-            .json(&payload)
+            .add_auth(self.http_client.post(&url).json(&payload))
             .send()
             .await
             .context("Failed to fuse context")?;
