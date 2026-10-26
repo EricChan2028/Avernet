@@ -10,7 +10,10 @@ import time
 import uuid
 
 from .bounded_process import ProcessCaptureError, capture
-from .collaboration_team_http import CollaborationTeamHttpError, read_formal_group_page
+from .collaboration_team_http import (
+    CollaborationTeamHttpError, read_formal_group_page,
+)
+from .collaboration_team_http import delete_group as delete_group_request
 from .collaboration_team_profile import validate_collaboration_team_profile
 from .local_cli import require_cli_binary
 from .profile import identifier, text, unique_keys
@@ -72,6 +75,16 @@ class CollaborationTeamRunner:
         self.executed: list[str] = []
         self._formal_attempted = False
         self._current_group_id = ""
+        self._group_context = {
+            "group_id": "",
+            "session_id": "",
+            "round_id": "",
+            "ctx_name": f"cli_e2e_context_{uuid.uuid4().hex[:12]}",
+            "group_content": "initial group context from cli e2e",
+            "group_updated": "updated group context from cli e2e",
+            "session_content": "session group context from cli e2e",
+            "round_content": "round group context from cli e2e",
+        }
 
 
     @property
@@ -217,8 +230,75 @@ class CollaborationTeamRunner:
             identifier(group_id, "Group ID")
             return ("driver", ("terminate-group", "--group", group_id),
                     "POST", f"/groups/{group_id}/terminate")
+        if operation == "group_context.workspace":
+            text(topic, "Group topic")
+            return ("driver",
+                    ("create-group", "--driver", self.driver_id,
+                     "--participants", f"{self.driver_id},{self.engineering_id}",
+                     "--context", "Release coordination through bcs-cli",
+                     "--topic", topic),
+                    "POST", "/groups")
+        if operation == "group_context.add.group":
+            return self._group_context_add_command("group", session_id=False)
+        if operation == "group_context.add.session":
+            return self._group_context_add_command("session", session_id=True)
+        if operation == "group_context.add.round":
+            return self._group_context_add_command("round", session_id=True, round_id=True)
+        if operation == "group_context.get.initial":
+            return ("driver", (
+                "group-context", "get", "--group-id", self._group_context["group_id"],
+                "--name", self._group_context["ctx_name"], "--scope-level", "group",
+                "--limit", "3"), "POST", "/groupcontext/get")
+        if operation == "group_context.update.group":
+            return ("driver", (
+                "group-context", "update", "--group-id", self._group_context["group_id"],
+                "--name", self._group_context["ctx_name"], "--scope-level", "group",
+                "--content", self._group_context["group_updated"],
+                "--visible-to", json.dumps({"userIds": [self.driver_id]}, separators=(",", ":")),
+                "--change-reason", "e2e update"), "POST", "/groupcontext/update")
+        if operation == "group_context.list.entries":
+            return ("driver", (
+                "group-context", "list", "--group-id", self._group_context["group_id"],
+                "--session-id", self._group_context["session_id"],
+                "--round-id", self._group_context["round_id"],
+                "--scope-levels", "group,session,round"), "POST", "/groupcontext/list")
+        if operation == "group_context.get.updated":
+            return ("driver", (
+                "group-context", "get", "--group-id", self._group_context["group_id"],
+                "--name", self._group_context["ctx_name"], "--scope-level", "group"),
+                "POST", "/groupcontext/get")
         raise CollaborationTeamRunnerError(
             "unsupported collaboration-team CLI operation")
+
+    def _group_context_add_command(self, scope_level: str, *, session_id: bool,
+                                      round_id: bool):
+        if not self._group_context["group_id"]:
+            raise CollaborationTeamRunnerError("Group Context workspace is not ready")
+        content_key = {"group": "group_content", "session": "session_content",
+                       "round": "round_content"}[scope_level]
+        visible_to = json.dumps({"userIds": [self.driver_id]}, separators=(",", ":"))
+        arguments = ["group-context", "add"]
+        if self._group_context["group_id"]:
+            arguments += ["--group-id", self._group_context["group_id"]]
+        if session_id or round_id:
+            if not self._group_context["session_id"]:
+                raise CollaborationTeamRunnerError("Group Context session is missing")
+            arguments += ["--session-id", self._group_context["session_id"]]
+        if round_id:
+            if not self._group_context["round_id"]:
+                raise CollaborationTeamRunnerError("Group Context round is missing")
+            arguments += ["--round-id", self._group_context["round_id"]]
+        arguments += ["--name", self._group_context["ctx_name"],
+                      "--scope-level", scope_level,
+                      "--content", self._group_context[content_key],
+                      "--visible-to", visible_to,
+                      "--collect-from", visible_to]
+        return ("driver", tuple(arguments), "POST", "/groupcontext/add")
+
+    def _after_group_context_workspace(self, data: dict) -> None:
+        self._group_context["group_id"] = data["group_id"]
+        self._group_context["session_id"] = data["session_id"]
+        self._group_context["round_id"] = data["session_id"] + ":round-cli-e2e-" + uuid.uuid4().hex[:12]
 
     @staticmethod
     def _line(text: str, label: str) -> str:
@@ -302,8 +382,11 @@ class CollaborationTeamRunner:
                     or credential.encode() in result.stderr):
                 raise CollaborationTeamRunnerError(
                     "collaboration-team CLI emitted its credential")
-            if operation in ("group.create", "termination.group.create"):
+            if operation in ("group.create", "termination.group.create",
+                            "group_context.workspace"):
                 data = self._parse_group_create(result.stdout)
+                if operation == "group_context.workspace":
+                    self._after_group_context_workspace(data)
             elif operation == "group.add-member":
                 data = self._parse_add_member(result.stdout)
             elif operation == "group.fuse":
@@ -353,5 +436,14 @@ class CollaborationTeamRunner:
         self._formal_attempted = True
         try:
             return read_formal_group_page(self.profile, expected_group_id)
+        except CollaborationTeamHttpError as error:
+            raise CollaborationTeamRunnerError(str(error)) from None
+
+    def delete_group(self, group_id: str) -> dict:
+        identifier(group_id, "Group Context group ID")
+        if self._group_context["group_id"] != group_id:
+            raise CollaborationTeamRunnerError("Group Context cleanup group differs")
+        try:
+            return delete_group_request(self.profile, group_id)
         except CollaborationTeamHttpError as error:
             raise CollaborationTeamRunnerError(str(error)) from None

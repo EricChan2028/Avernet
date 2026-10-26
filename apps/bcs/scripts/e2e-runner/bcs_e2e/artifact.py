@@ -74,7 +74,10 @@ def disk_digest() -> str:
     # Webhook subscription command lifecycle adds one further focused module.
     # The dual public Session JWT/WS command lifecycle adds one further focused
     # module while reusing its existing admission and owned-local executor.
-    if len(paths) > 294:
+    # The dual Group Context product-CLI story adds one focused Case contract,
+    # one remote Adapter and one command Run lifecycle, so the allowance grows
+    # by exactly those three files.
+    if len(paths) > 297:
         raise ValueError('executor artifact exceeds its source-file budget')
     digest = hashlib.sha256()
     for path in paths:

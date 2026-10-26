@@ -263,6 +263,7 @@ def migration_plan() -> dict:
         edge_read_case_plans,
     )
     from .collaboration_team_contract import CASE_ID as COLLABORATION_TEAM_CASE, SUITE as COLLABORATION_TEAM_SUITE, collaboration_team_adaptability
+    from .group_context_contract import group_context_adaptability
     from .edge_search_case import (
         CASE_ID as EDGE_SEARCH_CASE_ID,
         edge_bot_search_candidates_adaptability,
@@ -460,6 +461,7 @@ def migration_plan() -> dict:
             'cross_environment_product_cli_case_slices': [
                 friend_cli_accept_adaptability(),
                 collaboration_team_adaptability(),
+                group_context_adaptability(),
                 custom_collaboration_case_adaptability(),
                 session_service_parent_adaptability(),
                 local_session_service_lifecycle_adaptability(),

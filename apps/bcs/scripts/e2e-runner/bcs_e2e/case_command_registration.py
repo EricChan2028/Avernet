@@ -24,6 +24,7 @@ CASE_COMMANDS = frozenset({
     "dual-friend-public-accept-run",
     "dual-session-file-run",
     "dual-collaboration-team-run",
+    "dual-group-context-run",
     "dual-edge-read-run",
     "dual-network-read-run",
     "dual-network-register-run",
@@ -168,6 +169,16 @@ def register_case_commands(commands) -> None:
     collaboration_team_case.add_argument("--run-id", required=True)
     collaboration_team_case.add_argument("--confirm-run-id", required=True)
     collaboration_team_case.add_argument("--allow-write", action="store_true")
+    group_context_case = commands.add_parser(
+        "dual-group-context-run",
+        help="Run the reviewed dual Group Context product-CLI story through Singlebox or preprod")
+    group_context_case.add_argument("--profile", type=Path, required=True)
+    group_context_case.add_argument("--cli-binary", type=Path, required=True)
+    group_context_case.add_argument("--cli-binary-sha256", required=True)
+    group_context_case.add_argument("--state-dir", type=Path, required=True)
+    group_context_case.add_argument("--run-id", required=True)
+    group_context_case.add_argument("--confirm-run-id", required=True)
+    group_context_case.add_argument("--allow-write", action="store_true")
     edge_case = commands.add_parser(
         "dual-edge-read-run",
         help="Run the reviewed dual Edge read slices through Singlebox or preprod")

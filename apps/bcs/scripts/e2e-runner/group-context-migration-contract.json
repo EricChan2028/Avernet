@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "source_revision": "71860eae99c62d7bf1349a0f46562f6395acbf1e",
+  "parent": "story_cli_operator_manages_group_context",
+  "sources": {
+    "cli-stories.sh": "779672ec0d0c02405e5f3fee0f50aec9fbe1febac0808c05ec6844a1e4a39efc"
+  },
+  "requirements": [
+    {
+      "id": "CLI-GROUP-CONTEXT.workspace",
+      "command": "bcs-cli create-group + establish group and Session identifiers",
+      "expectation": "Create the exact CLI group-context workspace using the owned Human Cookie and dedicated driver Bot, and retain the returned group ID and current session ID for the remaining obligations."
+    },
+    {
+      "id": "CLI-GROUP-CONTEXT.add-group-entry",
+      "command": "bcs-cli group-context add --scope-level group",
+      "expectation": "Add one deterministic group-scope context with exact visibility and collect-from policy, and receive an ok acknowledgement from the product CLI."
+    },
+    {
+      "id": "CLI-GROUP-CONTEXT.add-session-entry",
+      "command": "bcs-cli group-context add --scope-level session",
+      "expectation": "Add one deterministic session-scope context under the same Group Context story using the current active Session and receive an ok acknowledgement."
+    },
+    {
+      "id": "CLI-GROUP-CONTEXT.add-round-entry",
+      "command": "bcs-cli group-context add --scope-level round",
+      "expectation": "Add one deterministic round-scope context under the same Group Context story using the current active Session and one exact round identifier, and receive an ok acknowledgement."
+    },
+    {
+      "id": "CLI-GROUP-CONTEXT.get-initial-entry",
+      "command": "bcs-cli group-context get --scope-level group",
+      "expectation": "Read the exact initial group-scope context entry and confirm the returned items array contains the exact context name and content unique to this run."
+    },
+    {
+      "id": "CLI-GROUP-CONTEXT.update-entry",
+      "command": "bcs-cli group-context update --scope-level group",
+      "expectation": "Update the exact group-scope context entry with the updated content and receive an ok acknowledgement from the product CLI."
+    },
+    {
+      "id": "CLI-GROUP-CONTEXT.list-entries",
+      "command": "bcs-cli group-context list --scope-levels group,session,round",
+      "expectation": "List all three scope levels and validate that the context name appears with owner permission, without mixing unrelated contexts into the story evidence."
+    },
+    {
+      "id": "CLI-GROUP-CONTEXT.get-updated-entry",
+      "command": "bcs-cli group-context get --scope-level group",
+      "expectation": "Read the exact updated group-scope context entry and confirm the returned items array now contains the updated content and the exact run-local context name."
+    },
+    {
+      "id": "CLI-GROUP-CONTEXT.cleanup-workspace",
+      "command": "product HTTP DELETE /groups/{group_id}",
+      "expectation": "Delete the exact workspace group created for this story and confirm HTTP 200, without deleting any unrelated Group or Session."
+    }
+  ]
+}
