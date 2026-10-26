@@ -268,6 +268,9 @@ class TaskContext:
     gaps: list[str]
     task_id: str | None = None
     node_id: str | None = None
+    # Current node execution attempt. S1 projects this value from the authoritative
+    # ``harness_retries`` snapshot so artifact reports can align with the server.
+    attempt: int = 0
     root_task_spec: TaskSpec | None = None
     current_task_spec: TaskSpec | None = None
     # Runtime-only S3 outputs. S1 projects them as empty on a fresh attempt

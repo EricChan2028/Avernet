@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+from dataclasses import replace
 import asyncio
 from typing import Callable
 
@@ -300,6 +301,32 @@ class TestHarnessWiring:
         _exec(facade, _task_info_request())
         assert "t1" in harness._registered
         assert harness._on_harness_fn == facade._recovery.recover
+
+    def test_relay_execute_registers_with_harness(self):
+        from agentclaw.community.core.task.task_harness.harness import TaskHarness
+        from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
+
+        svc = TaskGraphService()
+        harness = TaskHarness(svc)
+        facade = _CaseTaskService(
+            svc, planner_factory=lambda g: [], harness=harness,
+            task_id_provider=lambda: "t1",
+        )
+        facade._api_base_url = "http://example.invalid"
+
+        request = replace(
+            _task_info_request(),
+            execution_config={
+                "MAX_DEPTH": 3,
+                "BBS_MAX_DEPTH": 3,
+                "orchestration_mode": "relay",
+            },
+        )
+        result = _exec(facade, request)
+
+        assert result.extend_props["orchestration_mode"] == "relay"
+        assert "root_execution_instruction" in result.extend_props
+        assert "t1" in harness._registered
 
     def test_dashboard_registers_task_for_harness_on_this_worker(self):
         from agentclaw.community.core.task.task_harness.harness import TaskHarness

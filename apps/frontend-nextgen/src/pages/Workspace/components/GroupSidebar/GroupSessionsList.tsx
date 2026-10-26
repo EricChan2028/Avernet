@@ -54,30 +54,21 @@ export function GroupSessionsList({
   const visibleSessions =
     sessionTab === 'favorite' ? safeSessions.filter((s) => favoriteSessionIds.includes(s.sessionId)) : safeSessions;
   return (
-    // conversation-area-in（global.css 局部 keyframes）：展开区进入动效，与对话侧「…」
-    // 检索区/Bot 展开区同一动效语言；reduced-motion 由该类的媒体查询静止。
-    <div aria-label={`协作群会话列表：${group.name}`} className="conversation-area-in">
+    <div aria-label={`协作群会话列表：${group.name}`}>
       {error ? (
         <ListErrorState message={error} onRetry={() => void onRetrySessions?.()} />
       ) : !loaded ? (
         /* 加载骨架：回声 SessionItem 行槽及名称起点，对齐对话二级会话行骨架。 */
         <GroupSessionRowsSkeleton rows={3} />
       ) : visibleSessions.length === 0 ? (
-        /* 空态升级为引导卡（2026-10-22 对话侧同语言）：不再是裸文本行；
-            全部 Tab 指向行尾「＋」的下一步动作，收藏 Tab 只陈述事实不给错误引导。 */
-        <div className="mx-4 my-2 flex flex-col items-center gap-1 rounded-lg bg-muted/40 px-3 py-3 text-center">
-          <p className="text-xs font-normal text-content-soft">
+        <div className="py-5 pr-4 pl-10">
+          <span className="text-xs text-muted-foreground">
             {sessionTab === 'favorite'
               ? hasMoreSessions
                 ? '当前已加载会话中暂无收藏'
                 : '暂无已收藏会话'
               : '当前协作群暂无会话'}
-          </p>
-          {sessionTab !== 'favorite' && (
-            <p className="max-w-[180px] text-[11px] font-normal leading-4 text-content-hint">
-              点击群行尾的「＋」按钮，发起第一场协作会话
-            </p>
-          )}
+          </span>
         </div>
       ) : (
         visibleSessions.map((session) => (
