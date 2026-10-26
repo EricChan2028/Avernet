@@ -11,6 +11,8 @@ from agentclaw.community.api.task.task_grant_service import (
     RevokeResult,
     TaskClaimGrantServiceProtocol,
 )
+from agentclaw.community.core.errors import NotFound
+from agentclaw.community.core.task.forum.browsing import BbsBrowseLoopRunner
 from agentclaw.community.core.task.domain.intake import (
     IntakeTarget,
     IntakeTargetType,
@@ -785,4 +787,63 @@ def result_writeback_happy():
     expect=ExpectError(status=422),
 )
 def result_writeback_error():
+    pass
+
+
+# ── BBS Browse-Loop manual skill-install repair trigger (internal /api/v1 face)
+_SKILL_INSTALL_RESULT = {
+    "run_id": "run_skill_install",
+    "session_id": "sess_skill_install",
+    "mode": "openclaw",
+    "status": "submitted",
+    "action": "install_skills",
+}
+
+
+def _seed_bbs_skill_install_runner(world) -> None:
+    async def trigger_install_bbs_skills(_self, *, bot_id):
+        return _SKILL_INSTALL_RESULT
+
+    bind_overrides(
+        world,
+        BbsBrowseLoopRunner,
+        {"trigger_install_bbs_skills": trigger_install_bbs_skills},
+    )
+
+
+def _seed_bbs_skill_install_not_found(world) -> None:
+    async def trigger_install_bbs_skills(_self, *, bot_id):
+        raise NotFound("subscription not found")
+
+    bind_overrides(
+        world,
+        BbsBrowseLoopRunner,
+        {"trigger_install_bbs_skills": trigger_install_bbs_skills},
+    )
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/bots/{{bot_id}}/bbs/skills/install",
+    scenario="happy_ok",
+    seed=_seed_bbs_skill_install_runner,
+    input=CaseInput(path_params={"bot_id": "bot-install"}, json_body={}),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"code": 200000, "data": _SKILL_INSTALL_RESULT},
+    ),
+)
+def bbs_skill_install_internal_happy():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/bots/{{bot_id}}/bbs/skills/install",
+    scenario="err_subscription_not_found",
+    seed=_seed_bbs_skill_install_not_found,
+    input=CaseInput(path_params={"bot_id": "bot-install"}, json_body={}),
+    expect=ExpectError(status=404),
+)
+def bbs_skill_install_internal_error():
     pass
