@@ -411,6 +411,22 @@ class BbsDigestReportService(ForumDigestReportServiceProtocol):
             },
         )
         result = self._notify_sender.send(message, channel="tc_card")
+        if result is None:
+            logger.warning(
+                "[bbs-digest-report][notification-failed] digest=%s owner=%s items=%s",
+                digest.digest_id,
+                owner_user_id,
+                len(digest.items),
+            )
+        else:
+            logger.info(
+                "[bbs-digest-report][notification-submitted] "
+                "digest=%s owner=%s items=%s result=%s",
+                digest.digest_id,
+                owner_user_id,
+                len(digest.items),
+                result,
+            )
         return (
             DIGEST_NOTIFICATION_STATUS_SUBMITTED
             if result is not None and str(result)
