@@ -106,36 +106,34 @@ class DefaultModel(BaseModel):
     in the same namespace as :meth:`ModelsService.list_models` ids, so a
     picker can pre-select it by equality.
 
-    ``source`` says where the engine read the value from — a short, stable,
-    engine-specific token (``"openclaw.config.get"``, ``"openclaw.json"``,
-    ``"settings.json"``, ``"env"``, ``"fallback"`` …). ``source_detail`` is the
-    human-readable location (file path + key, env var name) for debugging.
-    ``fallbacks`` carries the engine's configured fallback chain when it has
-    one (OpenClaw ``agents.defaults.model.fallbacks``); empty otherwise.
+    ``fallbacks`` is the engine's configured fallback chain — the models it
+    tries, in order, when the default fails (OpenClaw
+    ``agents.defaults.model.fallbacks``). Engines without such a chain leave
+    it empty.
     """
 
     model: Model
-    source: str
-    source_detail: str | None = None
     fallbacks: list[str] = Field(default_factory=list)
 
 
 def find_catalogue_model(model_id: str, models: list[Model]) -> Model | None:
-    """Return the catalogue entry whose id names ``model_id``.
+    """Return the catalogue entry that names ``model_id``, or ``None``.
 
-    Exact id match first; then the bare (provider-stripped) forms, so a
-    config that says ``claude-sonnet-4-5`` matches a catalogue entry
-    ``anthropic/claude-sonnet-4-5`` and vice versa. ``None`` when nothing
-    matches — the caller then synthesises a minimal entry.
+    Exact ``id`` match first, then an entry whose upstream-native
+    ``provider_id`` is ``model_id``. A bare id (no ``provider/`` prefix) also
+    matches a prefixed catalogue entry by its bare segment, but only when
+    exactly one entry has that segment — two providers listing the same
+    model name is ambiguous and must not pre-select either. A prefixed id
+    never matches another provider's entry. ``None`` → the caller synthesises
+    a minimal entry.
     """
     for m in models:
-        if m.id == model_id:
+        if m.id == model_id or (m.provider_id or "") == model_id:
             return m
-    bare = model_id.rsplit("/", 1)[-1]
-    for m in models:
-        if m.id.rsplit("/", 1)[-1] == bare or (m.provider_id or "") == model_id:
-            return m
-    return None
+    if "/" in model_id:
+        return None
+    bare_hits = [m for m in models if m.id.rsplit("/", 1)[-1] == model_id]
+    return bare_hits[0] if len(bare_hits) == 1 else None
 
 
 __all__ = [

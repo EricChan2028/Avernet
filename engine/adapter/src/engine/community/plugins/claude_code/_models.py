@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import logging
 
+from engine.community.core.models.exceptions import DefaultModelNotConfiguredError
+
 log = logging.getLogger("claude-code-community-port")
 
 
@@ -25,15 +27,16 @@ class _ModelsPortMixin:
         entries = data.get("providers") if isinstance(data, dict) else data
         return [e for e in entries if isinstance(e, dict)] if isinstance(entries, list) else []
 
-    async def models_default(self, token: str | None = None) -> dict | None:
+    async def models_default(self, token: str | None = None) -> dict:
         resp = await (await self._relay()).send_request("models.default", {}, timeout=5.0)
         if not resp.ok or not isinstance(resp.payload, dict):
-            log.debug(
-                "[models_default] unavailable: %s",
-                resp.error.message if resp.error else "no payload",
+            detail = resp.error.message if resp.error else "no payload"
+            raise DefaultModelNotConfiguredError(
+                f"relay did not answer models.default: {detail}"
             )
-            return None
         model = resp.payload.get("model")
         if not isinstance(model, str) or not model.strip():
-            return None
+            raise DefaultModelNotConfiguredError(
+                "relay answered models.default without a model id"
+            )
         return dict(resp.payload)

@@ -652,7 +652,7 @@ class LocalClaudeCodePluginImpl(ClaudeCodePlugin):
     async def models_default(
         self,
         token: str | None = None,
-    ) -> dict | None:
+    ) -> dict:
         return {"model": "claude-sonnet-4-5", "source": "fallback"}
 
     # ----------------------------------------------------------------- file

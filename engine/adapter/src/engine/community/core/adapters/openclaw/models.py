@@ -213,17 +213,28 @@ class OpenClawModelsAdapter(ModelsService):
 
     async def get_default_model(
         self, auth: AuthContext | None = None,
-    ) -> DefaultModel | None:
-        """``agents.defaults.model`` as a catalogue-shaped entry, or ``None``.
+    ) -> DefaultModel:
+        """``agents.defaults.model`` as a catalogue-shaped entry.
 
-        The configured id is matched against the catalogue so the answer
-        carries the same ``display_name`` / capabilities the picker shows;
-        an id the catalogue does not know (a model configured but not yet
-        advertised by ``models.list``) is returned as a minimal entry.
+        The port returns the configured value as a primitive dict, e.g. for
+        an ``openclaw.json`` carrying::
+
+            {"agents": {"defaults": {"model": {
+                "primary": "openai-compatible/glm-5.2",
+                "fallbacks": ["openai/gpt-4"]}}}}
+
+        ``raw`` is ``{"model": "openai-compatible/glm-5.2",
+        "fallbacks": ["openai/gpt-4"]}`` (the plain-string form
+        ``"model": "openai-compatible/glm-5.2"`` yields the same dict with
+        ``fallbacks == []``). The configured id is matched against the
+        catalogue so the answer carries the same ``display_name`` /
+        capabilities the picker shows; an id the catalogue does not know (a
+        model configured but not yet advertised by ``models.list``) is
+        returned as a minimal entry. Raises
+        ``DefaultModelNotConfiguredError`` (from the port) when OpenClaw has
+        no default configured.
         """
         raw = await self._port.default_model()
-        if raw is None:
-            return None
         configured = str(raw["model"])
         provider = configured.split("/", 1)[0] if "/" in configured else "unknown"
         model_id = _normalize_model_id(configured, provider)
@@ -238,8 +249,6 @@ class OpenClawModelsAdapter(ModelsService):
         )
         return DefaultModel(
             model=model,
-            source=str(raw["source"]),
-            source_detail=raw.get("source_detail"),
             fallbacks=[str(f) for f in raw.get("fallbacks") or []],
         )
 

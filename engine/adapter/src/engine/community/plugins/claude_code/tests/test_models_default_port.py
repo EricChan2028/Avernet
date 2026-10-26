@@ -7,6 +7,9 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
+from engine.community.core.models.exceptions import DefaultModelNotConfiguredError
 from engine.community.kernel.frames import ErrorShape, ResponseFrame
 from engine.community.plugins.claude_code.plugin_impl import ClaudeCodePluginImpl
 from engine.community.plugins.skills_pool.center_content import MountedCenterContentAdapter
@@ -37,18 +40,21 @@ async def test_models_default_returns_payload_and_pins_rpc_shape():
     assert client.calls == [("models.default", {}, 5.0)]
 
 
-async def test_models_default_none_on_error_frame():
+async def test_models_default_raises_on_error_frame():
     impl, _ = _impl(ResponseFrame(
         id="1", ok=False, error=ErrorShape(code="UNKNOWN_METHOD", message="unsupported"),
     ))
-    assert await impl.models_default() is None
+    with pytest.raises(DefaultModelNotConfiguredError, match="unsupported"):
+        await impl.models_default()
 
 
-async def test_models_default_none_without_model_string():
+async def test_models_default_raises_without_model_string():
     impl, _ = _impl(ResponseFrame(id="1", ok=True, payload={"model": "  ", "source": "env"}))
-    assert await impl.models_default() is None
+    with pytest.raises(DefaultModelNotConfiguredError, match="without a model id"):
+        await impl.models_default()
 
 
-async def test_models_default_none_when_payload_not_dict():
+async def test_models_default_raises_when_payload_not_dict():
     impl, _ = _impl(ResponseFrame(id="1", ok=True, payload=["not", "a", "dict"]))
-    assert await impl.models_default() is None
+    with pytest.raises(DefaultModelNotConfiguredError):
+        await impl.models_default()

@@ -17,7 +17,7 @@ Selection semantics
 ``chat.send`` ``model`` per-request, so "switch" is effectively stateless.
 Declaring the capability tells the frontend the picker is functional.
 ``MODEL_DEFAULT_GET`` — :meth:`get_default_model` returns the model used when
-a session / run names none, with its provenance.
+a session / run names none.
 
 See ``src/engine/docs/heterogeneous-engine-architecture.md`` for the
 plugin-first engine architecture rationale.
@@ -57,14 +57,15 @@ class ModelsService(Protocol):
 
     async def get_default_model(
         self, auth: AuthContext | None = None,
-    ) -> DefaultModel | None:
-        """Return the engine's default model, or ``None`` when none is configured.
+    ) -> DefaultModel:
+        """Return the engine's default model.
 
         "Default" is the model the engine uses when a session / run does not
         name one — read from the engine's own config, never guessed by the
-        adapter. ``None`` means the engine has no explicit default (the HTTP
-        layer answers 404); engines that always resolve one (Claude Code's
-        hard-coded fallback) never return ``None``. Upstream failures raise.
+        adapter. Every engine is expected to resolve one; when it cannot
+        (nothing configured, relay too old to answer) raise
+        :class:`~engine.community.core.models.exceptions.DefaultModelNotConfiguredError`.
+        Other upstream failures raise as they are.
         """
         ...
 

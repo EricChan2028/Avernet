@@ -17,6 +17,7 @@ from engine.community.api.models.router import router as models_router
 from engine.community.core.engine.base import BaseEngine
 from engine.community.core.engine.capability import Capability, EngineCapabilities
 from engine.community.core.engine.registry import EngineRegistry
+from engine.community.core.models.exceptions import DefaultModelNotConfiguredError
 from engine.community.core.models.models import DefaultModel, Model, ModelCapabilities, ModelPricing
 from engine.community.manager import EngineManager
 
@@ -208,13 +209,11 @@ class TestGetModel:
 
 
 class TestGetDefaultModel:
-    def test_returns_model_entry_with_provenance(self, rich_manager, client):
+    def test_returns_model_entry_plus_fallbacks(self, rich_manager, client):
         plugin = MagicMock()
         plugin.list_models = AsyncMock(return_value=_sample_models())
         plugin.get_default_model = AsyncMock(return_value=DefaultModel(
             model=_sample_models()[0],
-            source="openclaw.config.get",
-            source_detail="/home/admin/.openclaw/openclaw.json#agents.defaults.model",
             fallbacks=["anthropic/claude-3.5-sonnet"],
         ))
         rich_manager._active_engine._models = plugin
@@ -231,22 +230,28 @@ class TestGetDefaultModel:
         assert data["provider_id"] == "gpt-5.3"
         assert data["display_name"] == "OpenAI GPT-5.3"
         assert data["capabilities"]["vision"] is True
-        # … plus the default-only provenance keys.
-        assert data["source"] == "openclaw.config.get"
-        assert data["source_detail"].endswith("#agents.defaults.model")
+        # … plus the fallback chain, and nothing about where it was read from.
         assert data["fallbacks"] == ["anthropic/claude-3.5-sonnet"]
+        assert "source" not in data
+        assert "source_detail" not in data
         plugin.get_default_model.assert_awaited_once()
         # The literal segment is routed to the default handler, not to
         # get_model("default") — the catalogue is never scanned here.
         plugin.list_models.assert_not_awaited()
 
-    def test_404_when_engine_has_no_default(self, rich_manager, client):
+    def test_not_configured_is_a_flagged_refusal(self, rich_manager, client):
         plugin = MagicMock()
-        plugin.get_default_model = AsyncMock(return_value=None)
+        plugin.get_default_model = AsyncMock(
+            side_effect=DefaultModelNotConfiguredError("agents.defaults.model is not set"),
+        )
         rich_manager._active_engine._models = plugin
 
         resp = client.get("/api/models/default")
-        assert resp.status_code == 404
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error"] == "default_model_not_configured"
+        assert "agents.defaults.model is not set" in body["message"]
 
     def test_upstream_failure_is_reported_not_raised(self, rich_manager, client):
         plugin = MagicMock()
@@ -257,6 +262,7 @@ class TestGetDefaultModel:
         assert resp.status_code == 200
         body = resp.json()
         assert body["success"] is False
+        assert body["error"] is None          # transport failure, not a refusal
         assert "gateway down" in body["message"]
 
     def test_unsupported_engine_returns_501(self, lean_manager, client):
@@ -271,7 +277,7 @@ class TestGetDefaultModel:
         m = _install_manager(_ListOnly)
         try:
             plugin = MagicMock()
-            plugin.get_default_model = AsyncMock(return_value=None)
+            plugin.get_default_model = AsyncMock()
             m._active_engine._models = plugin
             resp = client.get("/api/models/default")
             assert resp.status_code == 501

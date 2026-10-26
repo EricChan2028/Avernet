@@ -127,20 +127,20 @@ class ClaudeCodeModelsAdapter(ModelsService):
 
     async def get_default_model(
         self, auth: AuthContext | None = None,
-    ) -> DefaultModel | None:
+    ) -> DefaultModel:
         """The relay's ``models.default`` answer as a catalogue-shaped entry.
 
         The relay resolves ``RELAY_DEFAULT_MODEL`` → ``settings.json``
         ``env.ANTHROPIC_MODEL`` → its model-provider source → a hard-coded
-        fallback, and reports which one won as ``source``. The id is kept
-        exactly as the relay routes it (usually bare, e.g.
-        ``claude-sonnet-4-5``); a catalogue match supplies the provider and
-        display name when the routing file lists it.
+        fallback and answers ``{"model": "claude-sonnet-4-5", "source":
+        "settings.json", "path": "..."}``; only ``model`` is surfaced. The id
+        is kept exactly as the relay routes it (usually bare); a catalogue
+        match supplies the provider and display name when the routing file
+        lists it. Raises ``DefaultModelNotConfiguredError`` (from the port)
+        when the relay cannot answer.
         """
         token = auth.token if auth is not None else None
         raw = await self._port.models_default(token=token)
-        if raw is None:
-            return None
         configured = str(raw["model"]).strip()
         match = find_catalogue_model(configured, await self.list_models(auth))
         model = match or Model(
@@ -149,16 +149,7 @@ class ClaudeCodeModelsAdapter(ModelsService):
             name=configured.rsplit("/", 1)[-1],
             display_name=configured.rsplit("/", 1)[-1],
         )
-        path = raw.get("path")
-        source = str(raw.get("source") or "relay")
-        return DefaultModel(
-            model=model,
-            source=source,
-            source_detail=(
-                f"{path}#env.ANTHROPIC_MODEL" if isinstance(path, str) and path
-                else {"env": "RELAY_DEFAULT_MODEL", "fallback": "relay built-in fallback"}.get(source)
-            ),
-        )
+        return DefaultModel(model=model)
 
 
 __all__ = ["ClaudeCodeModelsAdapter"]

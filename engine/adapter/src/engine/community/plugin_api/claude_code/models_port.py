@@ -47,11 +47,11 @@ class ClaudeCodeModelsPort(Protocol):
     async def models_default(
         self,
         token: str | None = None,
-    ) -> dict | None:
+    ) -> dict:
         """Call ``models.default``; return the raw ``{model, source, path?}`` dict.
 
-        ``None`` when the relay predates the method or answers without a
-        usable ``model`` string.
+        Raises ``DefaultModelNotConfiguredError`` when the relay predates the
+        method or answers without a usable ``model`` string.
 
         Args:
             token: MCP token for per-token pool routing; None -> default client.

@@ -6,8 +6,11 @@ the adapter against a fake ``ClaudeCodeModelsPort`` returning the relay's raw
 """
 from __future__ import annotations
 
+import pytest
+
 from engine.community.core.adapters.claude_code.models import ClaudeCodeModelsAdapter
 from engine.community.core.engine.context import AuthContext
+from engine.community.core.models.exceptions import DefaultModelNotConfiguredError
 
 
 def _auth(token: str) -> AuthContext:
@@ -34,21 +37,20 @@ class _FakeModelsPort:
     async def models_list_providers(self, token=None) -> list[dict]:
         return []
 
-    async def models_default(self, token=None) -> dict | None:
+    async def models_default(self, token=None) -> dict:
         self.default_token = token
+        if self.default_raw is None:
+            raise DefaultModelNotConfiguredError("relay did not answer models.default")
         return self.default_raw
 
 
 async def test_default_model_matches_catalogue_entry():
     port = _FakeModelsPort()
     out = await ClaudeCodeModelsAdapter(port).get_default_model(auth=_auth("t"))
-    assert out is not None
     assert out.model.id == "m1"
     assert out.model.provider == "anthropic"
     assert out.model.display_name == "Claude 3"      # from the catalogue
     assert out.model.capabilities.vision is True
-    assert out.source == "settings.json"
-    assert out.source_detail == "/home/admin/.claude/settings.json#env.ANTHROPIC_MODEL"
     assert out.fallbacks == []
     assert port.default_token == "t"                 # token forwarded to the port
 
@@ -57,12 +59,9 @@ async def test_default_model_synthesises_entry_when_not_in_catalogue():
     port = _FakeModelsPort()
     port.default_raw = {"model": " GLM-5.1 ", "source": "env"}
     out = await ClaudeCodeModelsAdapter(port).get_default_model()
-    assert out is not None
     assert out.model.id == "GLM-5.1"
     assert out.model.provider == ""
     assert out.model.display_name == "GLM-5.1"
-    assert out.source == "env"
-    assert out.source_detail == "RELAY_DEFAULT_MODEL"
     assert port.default_token is None
 
 
@@ -72,10 +71,8 @@ async def test_default_model_bare_id_matches_prefixed_catalogue_entry():
                        "display_name": "Sonnet 4.5"}]
     port.default_raw = {"model": "claude-sonnet-4-5", "source": "fallback"}
     out = await ClaudeCodeModelsAdapter(port).get_default_model()
-    assert out is not None
     assert out.model.id == "anthropic/claude-sonnet-4-5"
     assert out.model.display_name == "Sonnet 4.5"
-    assert out.source_detail == "relay built-in fallback"
 
 
 async def test_default_model_prefixed_id_keeps_provider_when_unknown():
@@ -85,10 +82,10 @@ async def test_default_model_prefixed_id_keeps_provider_when_unknown():
     out = await ClaudeCodeModelsAdapter(port).get_default_model()
     assert out.model.id == "glink/claude-opus-4-6"
     assert out.model.provider == "glink"
-    assert out.source_detail == "/opt/claude-settings.json#env.ANTHROPIC_MODEL"
 
 
-async def test_default_model_none_when_relay_lacks_method():
+async def test_default_model_propagates_not_configured_when_relay_lacks_method():
     port = _FakeModelsPort()
     port.default_raw = None
-    assert await ClaudeCodeModelsAdapter(port).get_default_model() is None
+    with pytest.raises(DefaultModelNotConfiguredError):
+        await ClaudeCodeModelsAdapter(port).get_default_model()
