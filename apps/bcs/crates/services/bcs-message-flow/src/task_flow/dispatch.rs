@@ -163,8 +163,19 @@ pub async fn handle_task_dispatch(
                 }
             }
         }
-        let admitted = crate::queued_task::admit(flow, admission).await?;
-        let real_run_id = admitted.run_id.clone();
+        // HEAD's output::admit_queued_dispatch discipline: the run
+        // identity, the operation registration and the frozen producer
+        // facts must precede the durable admit commit (F1); ours' caller
+        // projection above rides the same admission targets untouched.
+        let mut admission = admission;
+        if let Some(target) = admission.targets.first_mut() {
+            target.run_id = Some(uuid::Uuid::new_v4().to_string());
+        }
+        let real_run_id = admission.targets.first().and_then(|t| t.run_id.clone());
+        output::admit_queued_dispatch(flow, &group, admission).await?;
+        // finish_admission bookkeeping already ran inside
+        // admit_queued_dispatch; the entry read below stands in for the
+        // old acknowledged-row handle (real_run_id carries the shared identity).
         let entry = flow.task_store.get(&effective_task_id).await
             .ok_or_else(|| crate::queued_task::error("admitted task projection missing"))?;
         record_task_event(flow, "task.assigned", &entry, &cmd.driver_bot_id, now,

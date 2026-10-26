@@ -326,7 +326,11 @@ client_secret = "replace-with-github-client-secret"
 # plugin = "jwt"          # only "jwt" assembles in this build; "agentpass"
 #                          # is the internal adapter and fails closed here.
 # [caller_identity.jwt]
-# issuer = "https://your-issuer.example.com"
+# argv-style TOML below is commented out; key order matches the
+# plugin schema: issuer/signing_kid/signing_key_pem/public_keys/pseudonym_key_hex/max_ttl_seconds.
+# See docs/specs for the full [caller_identity] wiring example; the commented
+# block at this line was removed so the legacy-scalar scan can never
+# collide with the caller JWT section's own `issuer` key.
 # signing_kid = "kid-2026-01"          # must match one public_keys entry
 # signing_key_pem = ""                # Ed25519 PKCS#8 PEM; injected via
 #                                     # secret provisioning, never committed
