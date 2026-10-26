@@ -82,7 +82,10 @@ def disk_digest() -> str:
     # The owned-local caller-execution black-box slice adds its focused source
     # binding contract, run lifecycle and offline report projection modules, so
     # the focused-module allowance grows by exactly those three files.
-    if len(paths) > 298:
+    # The owned-local Draft group black-box slice adds its focused source
+    # binding contract, run lifecycle and offline report projection modules,
+    # so the focused-module allowance grows by exactly those three files.
+    if len(paths) > 300:
         raise ValueError('executor artifact exceeds its source-file budget')
     digest = hashlib.sha256()
     for path in paths:
