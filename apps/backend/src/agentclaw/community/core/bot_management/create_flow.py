@@ -461,6 +461,22 @@ def create_bot_with_authorization(
         # it as pending hands back a dead end that is indistinguishable from a
         # genuine wait.
         if not iframe_url and not redirect_url:
+            # Re-apply corner: the passport for THIS bot may already be
+            # ISSUED (a retry hit the same bot after the first persona's
+            # engine died). tcauthmng won't re-issue the token or mint a
+            # new consent page, but the creation job's own poller reads
+            # query_auth_status every 5s and will see ISSUED. Fall
+            # through to the pending path with no URLs rather than
+            # raising a fatal error the caller cannot recover from.
+            already = passport_plugin.query_auth_status(
+                bot_id=bot_id, owner_workno=user_id,
+            )
+            if already and already.get("status") == AuthStatus.ISSUED:
+                return AuthPending(
+                    bot_id=bot_id,
+                    iframe_url=None,
+                    redirect_url=None,
+                )
             raise PassportError(
                 f"Passport returned no token and no authorization URL for bot {bot_id}"
             )
@@ -696,9 +712,16 @@ def _apply_and_hand_off(
         # Neither a token nor anywhere to send the user. No bot was created, but
         # the stored manifest is real — the caller above discards it — and the
         # caller would otherwise be left polling a creation nobody can authorize.
-        raise PassportError(
-            f"Passport returned no token and no authorization URL for bot {bot_id}"
+        # Re-apply corner: the passport may already be ISSUED (a retry
+        # on the same bot). The durable job's poller will detect ISSUED
+        # on its first query_auth_status cycle and proceed.
+        already = passport_plugin.query_auth_status(
+            bot_id=bot_id, owner_workno=user_id,
         )
+        if not already or already.get("status") != AuthStatus.ISSUED:
+            raise PassportError(
+                f"Passport returned no token and no authorization URL for bot {bot_id}"
+            )
 
     # The durable job, last: its first step reads the authorization that the
     # application above has only just made, so starting it earlier would only

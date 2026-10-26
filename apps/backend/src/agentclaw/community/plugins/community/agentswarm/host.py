@@ -737,7 +737,38 @@ class AvernetBotPlatform(BotPlatform):
                          session_key: str | None,
                          cancel_event: threading.Event | None) -> str:
         ws_url, token = self._engine_endpoint(bot_id, owner)
-        ws = await self._connect_engine(ws_url, token)
+        # A freshly-provisioned persona's engine may not be accepting
+        # WebSocket connections yet — the sandbox-proxy tunnel closes
+        # the client-side with 1011 when the upstream host isn't
+        # accepting. Retry with backoff instead of burning a
+        # persona (and its human consent) on a cold-boot race.
+        ws = None
+        last_connect_error: Exception | None = None
+        for attempt in range(4):
+            if attempt == 0:
+                # Freshly-READY persona: the engine process inside the
+                # container needs a few seconds to bind its WebSocket
+                # listener — settle before the first connect to let the
+                # common cold-boot case pass without a retry cycle.
+                await asyncio.sleep(15.0)
+            try:
+                ws = await self._connect_engine(ws_url, token)
+                last_connect_error = None
+                break
+            except ConnectionError as exc:
+                last_connect_error = exc
+                if attempt < 3:
+                    backoff = 15.0 * (2 ** attempt)
+                    logger.warning(
+                        "[agentswarm][host] engine connect attempt %d/%d "
+                        "failed for bot %s, retrying in %.0fs: %s",
+                        attempt + 1, 4, bot_id, backoff, exc,
+                    )
+                    await asyncio.sleep(backoff)
+        if ws is None:
+            raise ConnectionError(
+                f"engine connect failed after 4 attempts for bot {bot_id}"
+            ) from last_connect_error
         try:
             # Reset-before-chat: the upcoming chat.send addresses one
             # session key, and the engine's blessed fresh-conversation
