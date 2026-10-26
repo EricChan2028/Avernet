@@ -4,11 +4,12 @@ export type SessionRecoveryTask = {
   shared: boolean;
   canOperate: boolean;
   canManageShare: boolean;
+  simulation?: { batchId: string; cutoffAtMs: number; cutoffNode: { messageId?: string; traceId?: string; observationId?: string }; inputDigest: string };
   level: 'debug' | 'approval' | 'automatic';
   status: 'running' | 'waiting_owner' | 'waiting_effect' | 'completed' | 'failed' | 'canceled';
   completionReason?: 'user_continued';
   phase: 'assess' | 'observe' | 'plan' | 'apply' | 'verify';
-  request: { diagnosis: string; error_location?: string; target: { bot_id: string; entity_id: string; env: 'pre' | 'prod'; engine: 'OC' | 'CC' | 'TE' }; session_key: string; event_id: string; delivery_key: string; tc_fault_label: string | null };
+  request: { diagnosis: string; error_location?: string; target: { bot_id: string; entity_id: string; env: 'pre' | 'prod'; engine: 'OC' | 'CC' | 'TE' }; session_key: string; session_id?: string; event_id: string; delivery_key: string; tc_fault_label: string | null };
   plan: null | {
     digest: string; approvedAt: number | null;
     summary: string; basis: string; scope: string; verification: string;

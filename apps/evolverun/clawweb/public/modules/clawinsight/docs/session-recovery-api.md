@@ -1,6 +1,35 @@
 # 会话自愈接口
 
-创建接口同步确认受理；效果等待超时和任务结束时通过异步结果接口回报。消息投递成功与原故障恢复分别表达。
+## 历史离线仿真
+
+登录态 `POST /api/insight/v1/monitoring/session-recoveries/simulations` 发起历史仿真，`cases` 接受 1～10 个 case。每个 case 独立复用现有任务流程；不增加页面创建入口，沿用任务详情展示判断、拟议消息、完整方案和取证过程。
+
+```json
+{
+  "batch_id": "handbook-review-001",
+  "cases": [{
+    "request": {
+      "event_id": "original-diagnosis-event",
+      "delivery_key": "original-delivery-key",
+      "diagnosis": "原始诊断文本",
+      "tc_fault_label": "TC.MCP.PERMISSION",
+      "target": { "entity_id": "example-owner", "bot_id": "default", "env": "prod", "engine": "OC" },
+      "session_key": "agent:main:session:original",
+      "session_id": "original"
+    },
+    "cutoff_node": { "message_id": "original-failure-message" },
+    "cutoff_at_ms": 1792713600000
+  }]
+}
+```
+
+OC／CC 的 `cutoff_node` 为原会话 `message_id`；TE 使用 `trace_id`，可附 `observation_id`。截止节点包含在可见范围内，`cutoff_at_ms` 是对应的 Unix 毫秒时间，不可晚于当前时间。原目标与原会话沿用既有请求合同。调用方提供原始诊断和稳定节点，不能用当前会话代替原会话。仅 Owner 或管理员可发起；同一批次和 case 输入重试复用任务，输入不同返回 `409`；换批次创建新运行，保留旧结果。
+
+HTTP `202` 返回 `{ "batch_id": "…", "items": [{ "event_id": "…", "delivery_key": "…", "task_id": "SR-…", "status": "accepted" }] }`。创建不要求解析当前 Bot 路由；Agent 按需使用原有会话、轨迹和日志工具，工具强制执行历史边界。允许只读环境调查，回执标明当前环境和查询时点；会话历史不能通过环境工具绕过边界。来源缺失或无法定位截止节点时返回不可取得，不默认读到最新。
+
+消息建议作为 `assessment.message` 保存；环境决策进入原有 plan 阶段，完整方案提交后结束。`completed` 表示仿真产物已生成，effect 为 `not_intervened`；不发送消息、不执行方案、不投递线上业务通知或诊断结果，不允许审批或继续成为在线执行。详情、工具回执、日志归档和停止接口沿用现有实现。输入与边界责任见[离线仿真 Spec](../../../../../docs/clawweb/specs/clawinsight-session-recovery-simulation.md)。
+
+以下在线自愈接口同步确认受理，效果等待超时和任务结束时通过异步结果接口回报。消息投递成功与原故障恢复分别表达；离线仿真不触发该回报。
 
 ## 实时诊断自动触发（内测）
 
@@ -26,7 +55,7 @@ ClawWeb 在现有 `POST /api/insight/v1/internal/monitoring/diagnosis-events` �
 
 配置不存在、`enabled = 0` 或名单为空时，诊断正常落库和 ACK，不自动创建任务。每次符合触发条件的上报重新读取配置，修改后即时影响后续自动创建；已创建任务按原流程继续。配置读取失败、启用记录的格式无效或自愈服务暂不可用返回 `503`，不会默认放行。
 
-自动请求使用诊断的 `eventId / tcFaultLabel / botId / entityId / env / engine / sessionKey`。`diagnosis` 按“业务诊断＋系统诊断”保留原文本并校验总长，不静默截断。投递键固定为 `monitoring-<SHA-256(eventId)>`。不发送当前实时诊断未提供的 `error_location`，不发送 `execution_level`，沿用自愈服务默认 `approval`。无合法自愈输入时保存诊断、记录跳过原因并正常 ACK；自愈服务明确拒绝请求时返回不可重试的现有监控错误。
+自动请求使用诊断的 `eventId / tcFaultLabel / botId / entityId / env / engine / sessionKey`；存在物理 `sessionId` 时，作为可选的 `session_id` 一并保存。`diagnosis` 按“业务诊断＋系统诊断”保留原文本并校验总长，不静默截断。投递键固定为 `monitoring-<SHA-256(eventId)>`。不发送当前实时诊断未提供的 `error_location`，不发送 `execution_level`，沿用自愈服务默认 `approval`。无合法自愈输入时保存诊断、记录跳过原因并正常 ACK；自愈服务明确拒绝请求时返回不可重试的现有监控错误。
 
 需要自动创建的诊断，只有自愈任务持久化成功后才确认上报；不等待 Agent 执行或最终效果。任务保存失败返回 `503`，复用诊断发送端原有持久队列与退避重试。重复诊断也执行同一触发检查；诊断内容冲突先返回 `409`，不会创建自愈任务。固定投递键复用已有任务，响应丢失、重启或并发上报不创建第二个任务。
 
@@ -61,6 +90,7 @@ ClawWeb 在现有 `POST /api/insight/v1/internal/monitoring/diagnosis-events` �
 | `target.runtime_identity` | 否 | 原运行阶段、设备和发布版本，详见[运行身份字段补充](./session-recovery-runtime-identity.md)。 |
 | `target.engine` | 是 | 支持 `OC`、`CC`、`TE`。OC／CC 优先读 NAS，失败时经受控 Shell 读会话文件；TE 只通过 AIVision／TCLog 轨迹调查原会话、验证触达和恢复效果，不调用会话 API，不使用 Shell。各引擎的实际修复效果需真实现场验收。 |
 | `session_key` | 是 | 发生故障、需要继续的原会话键；不是会话名称或 `session_id`。 |
+| `session_id` | 否 | 上游确认的物理会话 ID，只允许字母、数字、下划线和连字符。用于固定原会话文件，不替代 `session_key`。OpenClaw Cron 键若包含 `:run:<id>`，两者必须一致。 |
 | `delivery_key` | 是 | 本次尝试的唯一投递键。同一次请求重试复用，新尝试换新键。 |
 | `diagnosis` | 是 | 脱敏诊断摘要，最多 8000 字符。 |
 | `error_location` | 否 | 错误的具体位置，例如消息 ID、文件行号或工具调用位置。供 Agent 读取原故障证据。 |
@@ -68,6 +98,8 @@ ClawWeb 在现有 `POST /api/insight/v1/internal/monitoring/diagnosis-events` �
 
 
 请求采用 `snake_case`，不接受未定义字段。同一 `event_id + delivery_key` 对应同一任务；内容不同返回 `409`。
+
+OpenClaw 读取优先校验原会话键的索引映射。索引没有该键时，可凭 `session_id`，或旧任务完整 Cron 键 `agent:<agent>:cron:<cron>:run:<id>` 中的 ID，在冻结的目标 Bot 和 Agent 目录读取同名文件，并校验文件头的会话 ID。不会使用已被下一轮覆盖的 Cron 基础键，也不会搜索其他 Bot。历史文件可读不代表消息可投递；发送消息仍要求原会话键存在且指向同一 ID，避免新建或误投会话。
 
 HTTP `202`：
 

@@ -1,6 +1,7 @@
 """Per-route authorization inventory; vocabulary lives in models_authorization."""
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+from .authorization_rules_genome import GENOME_AUTHORIZATION
 from .authorization_rules_retiring import RETIRING_AUTHORIZATION
 from .authorization_rules_task import (
     TASK_BBS_AUTHORIZATION,
@@ -410,8 +411,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/sessions"): ServiceChecked(
         PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.router"
     ),
-    ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files"): Check(
-        PermissionLevel.MEMBER
+    ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files"): ServiceChecked(
+        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.router"
     ),
     (
         "POST",
@@ -950,6 +951,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     # ``authorization_rules_retiring`` for the rows.
     **RETIRING_AUTHORIZATION,
     **TASK_BBS_AUTHORIZATION,
+    **GENOME_AUTHORIZATION,
 }
 
 
