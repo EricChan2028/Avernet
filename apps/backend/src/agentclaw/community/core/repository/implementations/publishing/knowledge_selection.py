@@ -55,7 +55,7 @@ def _locked_source(session, publish):
         .filter(
             BotModel.id == publish.source_bot_pk,
             BotModel.bot_id == publish.source_bot_id,
-            BotModel.owner_id == publish.owner_id,
+            BotModel.entity_id == publish.owner_id,
             BotModel.env == publish.env,
             BotModel.bot_type == "service",
             BotModel.is_delete == 0,
@@ -72,7 +72,7 @@ def _locked_source(session, publish):
     session.refresh(publish, with_for_update=True)
     if (
         source.id != publish.source_bot_pk
-        or source.owner_id != publish.owner_id
+        or source.entity_id != publish.owner_id
         or source.bot_id != publish.source_bot_id
         or source.env != publish.env
         or source.bot_type != "service"
@@ -127,7 +127,7 @@ def publication_scope(session, publish_id):
         and 0 < len(tenant) <= 64
         and snapshot.get("publish_id") == row.id
         and snapshot.get("source_bot_pk") == row.source_bot_pk
-        and snapshot.get("owner_id") == row.owner_id
+        and snapshot.get("source_entity_id") == row.owner_id
         and snapshot.get("env") == row.env
     ):
         with avernet_tenant_scope(tenant):
@@ -145,6 +145,7 @@ def _snapshot_scope(publish, source):
         "schema_version": 1,
         "source_bot_pk": source.id,
         "owner_id": source.owner_id,
+        "source_entity_id": source.entity_id,
         "space_id": source.space_id,
         "env": source.env,
         "avernet_tenant": source.avernet_tenant,
@@ -257,23 +258,24 @@ def merge_protected_ext(stored, incoming):
     return result
 
 
-def _newer_observed_completion(session, publish):
+def _newer_observed_completion(session, publish, workflow_id):
     """Native monotonic workflow IDs also order completions across UUID replacement.
 
     Bot locking serializes these knowledge writes. A CURRENT read sees a newer
     completion committed while we waited, without scanning/locking op history.
     Native operation/attempt/release gates themselves remain unchanged.
     """
-    workflow_id = (_ext(publish).get("publish") or {}).get("online")
     if type(workflow_id) is not int:
         return False  # legacy local completion without workflow metadata
-    result_id = type_coerce(Publish.ext, JSON)[RESULT_KEY]["deployment_id"].as_integer()
+    result = type_coerce(Publish.ext, JSON)[RESULT_KEY]
+    result_id = result["deployment_id"].as_integer()
     return (
         session.query(Publish.id)
         .filter(
             Publish.source_bot_pk == publish.source_bot_pk,
             Publish.env == publish.env,
             Publish.owner_id == publish.owner_id,
+            result["status"].as_string().in_(("applied", "unknown")),
             Publish.id != publish.id,
             result_id > workflow_id,
         )
@@ -283,7 +285,7 @@ def _newer_observed_completion(session, publish):
     )
 
 
-def prepare_online(session, publish_id, expected_json):
+def prepare_online(session, publish_id, expected_json, observed_workflow_id=None):
     """Lock Bot before publication CAS; reject a stale outcome without effects."""
     publish = session.query(Publish).filter(Publish.id == publish_id).one_or_none()
     if (
@@ -323,10 +325,23 @@ def prepare_online(session, publish_id, expected_json):
     session.refresh(publish, with_for_update=True)
     if publish.status != PublishStatus.ONLINE_PUB or publish.ext != expected_json:
         return None
-    if source is not None and _newer_observed_completion(session, publish):
+    workflow_id = (
+        observed_workflow_id
+        if observed_workflow_id is not None
+        else (_ext(publish).get("publish") or {}).get("online")
+    )
+    # Publication.owner_id is the immutable entity address, NOT current Owner.
+    # Scope the effect to the locked current Owner; snapshot validation already
+    # prevents cross-Owner grants, and newer observed results fence late work.
+    result_owner = source.owner_id if source is not None else None
+    if source is not None and _newer_observed_completion(
+        session,
+        publish,
+        workflow_id,
+    ):
         return None
-    workflow_id = (_ext(publish).get("publish") or {}).get("online")
     outcome["deployment_id"] = workflow_id if type(workflow_id) is int else 0
+    outcome["owner_id"] = result_owner
     return source, snapshot, outcome
 
 

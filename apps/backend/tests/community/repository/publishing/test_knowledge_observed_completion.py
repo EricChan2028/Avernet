@@ -66,7 +66,7 @@ def version(repo, previous, *, owner="owner", status=PublishStatus.DRAFT, **extr
             source_bot_id="service",
             publish_bot_id="service.pub",
             name="Service",
-            owner_id=owner,
+            owner_id=previous.owner_id,
             permission_owner=owner,
             status=status,
             version=previous.version + 1,
@@ -231,14 +231,105 @@ def test_late_callback_across_uuid_or_owner_replacement_cannot_touch_new_flags(
         )
     poll(repo, current.id)
     assert selected(db, owner) == ("A",)
-    if owner_changed:
-        poll(repo, old.id)  # native may complete; no effects on new Owner
-        assert (
-            repo.get_by_id(old.id).ext["knowledge_selection_result"]["status"]
-            == "unknown"
-        )
-    else:
-        with pytest.raises(PublishNotFoundError):
-            poll(repo, old.id)  # older observed workflow cannot win the local CAS
+    with pytest.raises(PublishNotFoundError):
+        poll(repo, old.id)  # observed200 fences late100 even after Owner/UUID change
     assert _online(db) == {"A"}
     assert selected(db, owner) == ("A",)
+
+
+@pytest.mark.parametrize("stale_marker", [False, True])
+def test_restart_completion_uses_workflow_actually_observed_not_release_slot(
+    publication,
+    stale_marker,
+):
+    from agentclaw.community.core.repository.implementations.publishing.publish_operation import (
+        OrmPublishOperationRepository,
+    )
+
+    db, repo, previous = publication
+    space(db)
+    previous = finish(repo, deploying(repo, previous, 200))
+    with db.orm_session() as session:
+        session.query(Binding).update({"enabled": False})
+        session.query(Binding).filter_by(kb_id="A").update({"enabled": True})
+    current = version(repo, previous)
+    current = _start_online(repo, current)  # native original release slot remains77
+    restart = {"restarting": True}
+    if stale_marker:
+        restart["online"] = 299  # best-effort dual-write can be stale/missing
+    repo.update_status_with_ext(
+        current.id,
+        PublishStatus.ONLINE_PUB,
+        {
+            **current.ext,
+            "retry": True,
+            "source_status": "online_pub",
+            "restart": restart,
+            "binding": {"online": 11},
+        },
+        PublishStatus.ONLINE_PUB,
+    )
+    ledger = OrmPublishOperationRepository(db)
+    ledger.insert(
+        dict(
+            publish_id=current.id,
+            stage="online",
+            operation_kind="restart",
+            attempt=1,
+            state="completed",
+            request_id="retry-restart-300",
+            bot_uuid="device",
+            baas_publish_id=300,
+            env="dev",
+        )
+    )
+    flow, queue = _real_flow(repo)
+    flow._publish_operation_repo = ledger
+    flow.get_baas_publish_progress = MagicMock(return_value={"status": "SUCCESS"})
+    PublishProgressPollHandler(flow=flow, task_queue_service=queue).handle(
+        {"publish_id": current.id}
+    )
+    flow.get_baas_publish_progress.assert_called_once_with(baas_publish_id=300)
+    completed = repo.get_by_id(current.id)
+    assert completed.status == PublishStatus.SUCCESS
+    assert completed.ext["publish"]["online"] == 77  # no native-history rewrite
+    assert completed.ext["knowledge_selection_result"]["deployment_id"] == 300
+    assert selected(db) == ("A",)
+
+
+def test_native_stable_entity_owner_survives_current_owner_handoff(publication):
+    db, repo, previous = publication
+    space(db)
+    old = deploying(repo, previous, 100)
+    with db.orm_session() as session:
+        session.query(BotModel).filter_by(id=1).update({"owner_id": "new-owner"})
+        source = session.get(BotModel, 1).to_dict()
+        session.query(Binding).update({"enabled": False})
+        session.query(Binding).filter_by(kb_id="A").update({"enabled": True})
+    flow, _queue = _real_flow(repo)
+    flow._publish_service._bot_repo.get_by_pk.return_value = source
+    current = flow._publish_service.create_publish(
+        source_bot_pk=1,
+        source_bot_id="service",
+        publish_bot_id="service.pub",
+        name="Service",
+        owner_id="new-owner",
+        permission_owner="owner",
+        version=2,
+        last_pub_id=old.id,
+    )
+    # This is the actual native create contract, not an invented fixture owner.
+    assert current.owner_id == source["entity_id"] == "owner"
+    current = deploying(repo, current, 200)
+    snapshot = current.ext["knowledge_selection_snapshot"]
+    assert snapshot["owner_id"] == "new-owner"
+    assert snapshot["source_entity_id"] == "owner"
+    poll(repo, current.id)
+    assert (
+        repo.get_by_id(current.id).ext["knowledge_selection_result"]["owner_id"]
+        == "new-owner"
+    )
+    with pytest.raises(PublishNotFoundError):
+        poll(repo, old.id)
+    assert _online(db) == {"A"}
+    assert selected(db, "new-owner") == ("A",)

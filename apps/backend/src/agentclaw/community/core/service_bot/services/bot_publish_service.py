@@ -374,7 +374,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         target_status: str,
         ext: Dict[str, Any],
         source_status: str,
-        expected_ext: Optional[Dict[str, Any]],
+        expected_ext: Optional[Dict[str, Any]], observed_workflow_id: int | None = None,
     ) -> BotPublishRecord:
         """更新发布记录状态和扩展字段（乐观锁）。
 
@@ -395,7 +395,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             source_status=source_status,
             target_status=target_status,
             expected_ext=expected_ext,
-            ext=ext,
+            ext=ext, **({"observed_workflow_id": observed_workflow_id} if observed_workflow_id is not None else {}),
         )
         if not record:
             raise PublishNotFoundError(

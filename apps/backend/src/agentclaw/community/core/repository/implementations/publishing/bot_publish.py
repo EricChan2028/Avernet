@@ -645,6 +645,7 @@ class BotPublishRepository(
         target_status: str,
         expected_ext: Optional[Dict[str, Any]],
         ext: Dict[str, Any],
+        observed_workflow_id: int | None = None,
     ) -> Optional[BotPublishRecord]:
         """CAS status and the exact serialized ext snapshot in one UPDATE."""
         env = get_current_env()
@@ -661,7 +662,7 @@ class BotPublishRepository(
         with self._publication_session(publish_id if online_success else None) as db:
             online = None
             if online_success:
-                online = knowledge_selection.prepare_online(db, publish_id, expected_json)
+                online = knowledge_selection.prepare_online(db, publish_id, expected_json, observed_workflow_id)
                 if online is None:
                     return None
             ext = self._protect_knowledge_ext(db, publish_id, ext)

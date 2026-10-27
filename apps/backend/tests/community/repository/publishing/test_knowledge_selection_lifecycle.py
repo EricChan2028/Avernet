@@ -271,7 +271,7 @@ def test_missing_snapshot_completes_native_success_but_clears_old_online(
     )
     assert completed.status == PublishStatus.SUCCESS
     assert completed.ext["knowledge_selection_result"] == {
-        "status": "unknown", "reason": "KNOWLEDGE_SNAPSHOT_MISSING", "deployment_id": 77,
+        "status": "unknown", "reason": "KNOWLEDGE_SNAPSHOT_MISSING", "deployment_id": 77, "owner_id": "owner",
     }
     assert _online(db) == set()
 

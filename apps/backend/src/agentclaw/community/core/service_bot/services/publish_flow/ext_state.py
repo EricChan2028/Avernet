@@ -127,6 +127,7 @@ class PublishExtState:
         source_status: PublishStatus,
         ext: dict,
         expected_ext: dict | None,
+        observed_workflow_id: int | None = None,
     ) -> None:
         """Atomically update the publish record's status and ext fields.
 
@@ -140,6 +141,8 @@ class PublishExtState:
             ext=ext,
             source_status=source_status,
             expected_ext=expected_ext,
+            **({"observed_workflow_id": observed_workflow_id}
+               if observed_workflow_id is not None else {}),
         )
 
     def commit_built_artifact(

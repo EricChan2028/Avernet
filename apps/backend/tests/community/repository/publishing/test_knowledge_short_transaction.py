@@ -61,7 +61,7 @@ def test_knowledge_business_states_are_unknown_not_native_failures(publication, 
     completed = finish(repo, online)
     assert completed.status == PublishStatus.SUCCESS
     assert completed.ext["knowledge_selection_result"]["status"] == "unknown"
-    assert _online(db) == ({"A"} if change == "owner" else set())
+    assert _online(db) == set()
 
 
 def test_background_completion_restores_snapshot_tenant_without_guard_bypass(

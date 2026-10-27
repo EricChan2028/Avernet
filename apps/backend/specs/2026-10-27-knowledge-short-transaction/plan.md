@@ -36,3 +36,12 @@
 - This no-schema approach has per-Bot publication-history query cost. Default-off
   is retained; actual deployed plans/history/latency/lock evidence is an explicit
   enablement prerequisite, not inferred from SQLite or deferred ORM indexes.
+
+- Native publication owner_id is the stable entity address, not current Owner.
+  Fence that immutable identity separately from snapshot/current-Owner checks;
+  order the stable Bot timeline before checking result Owner to avoid handback
+  resurrection. Do not change native owner persistence or execution identity.
+- Pass the actually queried workflow ID explicitly through the existing CAS
+  plumbing. A retry/restart can observe a ledger ID different from the original
+  release slot or a stale/missing dual-write marker; never guess the observed
+  completion from those handles.

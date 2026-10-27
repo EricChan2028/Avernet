@@ -216,3 +216,21 @@ inspect its actual existing indexes, history distribution and exact query plans,
 and measure representative completion/read latency and lock waits. Fresh SQLite
 indexes and passing unit tests are not this evidence. This refactor does not
 apply the separately deferred publication index DDL or authorize enablement.
+
+#### Native identity and completion proof compatibility
+
+Native `ac_bot_publish.owner_id` is the immutable resource `entity_id`; it is not
+rewritten on current-Owner handoff. Knowledge snapshots independently capture
+`source_entity_id` and current `owner_id`. Completion results record the locked
+current Owner. Reads first choose the Bot's latest observed workflow result,
+then check Owner compatibility; filtering history by current Owner first would
+resurrect an older result after A → B → A handoff. Native resource identity,
+status, queue and deployment behavior are unchanged.
+
+The real success observer forwards its `baas_publish_id` through a backward-
+compatible optional `observed_workflow_id` CAS argument. This is required for
+retry/restart completion: the ledger-preferred workflow actually observed may
+be different from the old `ext.publish.online` or a missing/stale best-effort
+restart marker. The argument is not a new DB field and does not rewrite native
+release/restart handles. Only legacy direct repository callers may omit it when
+the release slot already identifies the observed workflow.

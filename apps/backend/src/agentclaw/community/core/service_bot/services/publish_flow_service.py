@@ -771,6 +771,7 @@ class PublishFlowService(
         source_status: PublishStatus,
         ext: dict,
         expected_ext: dict | None,
+        observed_workflow_id: int | None = None,
     ) -> None:
         self._ext_state.update_status(
             publish_id=publish_id,
@@ -778,6 +779,8 @@ class PublishFlowService(
             source_status=source_status,
             ext=ext,
             expected_ext=expected_ext,
+            **({"observed_workflow_id": observed_workflow_id}
+               if observed_workflow_id is not None else {}),
         )
 
     # ── public accessors for the durable task handlers ───────────────────────

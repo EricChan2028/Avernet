@@ -403,8 +403,13 @@ class BotPublishRepositoryProtocol(Protocol):
         target_status: str,
         expected_ext: Optional[Dict[str, Any]],
         ext: Dict[str, Any],
+        observed_workflow_id: int | None = None,
     ) -> Optional[BotPublishRecord]:
-        """Atomically replace status and ext when both snapshots still match."""
+        """CAS both snapshots; online observers pass the workflow actually queried.
+
+        The optional ID is completion evidence, not another stored native field.
+        Legacy callers may omit it when ext.publish.online is the observed ID.
+        """
         ...
 
     @abstractmethod

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 from injector import inject
-from sqlalchemy import JSON, func, literal, select, type_coerce, update
+from sqlalchemy import JSON, and_, func, literal, select, type_coerce, update
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
@@ -169,15 +169,19 @@ def _online_selection_known(session, bot):
     result = type_coerce(BotPublishModel.ext, JSON)["knowledge_selection_result"]
     state = result["status"].as_string()
     deployment_id = result["deployment_id"].as_integer()
-    current = session.query(state).filter(
+    result_owner = result["owner_id"].as_string()
+    owner_matches = func.coalesce(result_owner, bot.entity_id) == bot.owner_id
+    # Order the Bot's timeline FIRST. Filtering historical results by Owner
+    # before ordering could resurrect an older result after A -> B -> A handoff.
+    current = session.query(and_(state == "applied", owner_matches)).filter(
         BotPublishModel.source_bot_pk == bot.id,
         BotPublishModel.env == bot.env,
-        BotPublishModel.owner_id == bot.owner_id,
+        BotPublishModel.owner_id == bot.entity_id,
         state.in_(("applied", "unknown")),
     ).order_by(
         func.coalesce(deployment_id, 0).desc(), BotPublishModel.id.desc(),
     ).limit(1).scalar_subquery()
-    return func.coalesce(current != "unknown", True)
+    return func.coalesce(current, True)
 
 
 class BotKnowledgeRepository:

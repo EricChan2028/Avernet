@@ -280,3 +280,27 @@ def test_only_structured_top_level_unknown_denies_online_selection(knowledge, pa
     result = service.list_bindings(scope=scope, actor_id="owner", selection_stage="online")
     flags = {item["kb_id"]: item["enabled"] for item in result["items"]}
     assert flags == {"a": not denied, "b": False}
+
+
+@pytest.mark.parametrize("latest_state", ["applied", "unknown"])
+def test_owner_handoff_back_does_not_resurrect_older_completion(knowledge, latest_state):
+    import json
+
+    db, repo, _service, scope = knowledge
+    seed_service(db)
+    with db.orm_session() as session:
+        session.query(BotPublishModel).update({
+            "status": "upgraded", "ext": json.dumps({"knowledge_selection_result": {
+                "status": "applied", "deployment_id": 100, "owner_id": "owner",
+            }}),
+        })
+        session.add(BotPublishModel(
+            source_bot_pk=1, source_bot_id="bot", publish_bot_id="bot-pub-1",
+            owner_id="owner", name="Bot", status="draft", version=2,
+            env="dev", permission_owner="owner",
+            ext=json.dumps({"knowledge_selection_result": {
+                "status": latest_state, "deployment_id": 200, "owner_id": "other",
+            }}),
+        ))
+    # Current Owner A must not select A's old100 over actual latest B200.
+    assert repo.list_enabled(scope, selection_stage="online") == ()
