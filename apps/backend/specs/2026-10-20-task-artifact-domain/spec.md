@@ -541,7 +541,9 @@ dashboard 作为中间产物发现入口,在返回清单前协调 BCS session fi
 - **单向失败安全**:put 成功后行写失败 → 至多遗留无引用对象(可被清理回收),**决不出现"行在、字节无"的引用悬空行**;行写失败如实上抛(不吞)。
 - 单字节面(无分块)本期封顶 `max_upload_mb`(缺省 64,corp 建议 200);更大文件留后续 optional capability(如 presign/分块),不改基础缝。
 
-## 14. 增补(2026-10-27,DRAFT 待批):relay 尝试直传分支 —— 产物写口双凭证
+## 14. 增补(2026-10-27,用户定稿):relay 尝试直传分支 —— 产物写口双凭证 
+
+**实施验证(2026-10-27)**:fence 下沉 core(`relay_attempt.py`)+ 两写口双凭证 + creator=assignee 全量落地;产物域回归 1821 passed(含 1661 端点用例、6 个 relay 新场景);`ci_test.sh` 主体绿(26,058 passed;两轮全量各撞一个无关域并发 flake——agentswarm drain_breaker 与 space_knowledge 跨进程用例,均单独复跑全绿,与产物域零交集,见分支提交记录)。
 
 **动机**:sandbox 执行 bot 持 relay_token(claim 时由 Backend 签发、随派发载荷递送)却无用户登录态,被 §13"用户操作面"限定挡在字节通道之外,只能回传引用、由人搬运字节。本增补把两个产物**写口**扩为双凭证,生产者补齐"跨 session 存活 + 原件可下载"的最后一环;**推翻** §13.2 上传口的"`get_current_user`,creator=登录 user.id"单凭证裁决与 §13 路由注"relay 场景不经本口",其余裁决(§4 报文引用、§13.3 key/失败语义)逐字节不动。
 
