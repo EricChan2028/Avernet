@@ -116,7 +116,7 @@ def dual_session_file_core_case_run(
         "remote_validation": "NOT_RUN",
         "grants_release_credit": False,
         "credential_kind": (
-            "owned_local_bot_token" if profile["environment"]["tier"] == "local" else "human_cookie"
+            "owned_local_bot_token" if profile["environment"]["tier"] == "local" else "human_cookie_with_owned_driver_bot_token"
         ),
     }
     write(state_dir / REPORT_FILE, report)

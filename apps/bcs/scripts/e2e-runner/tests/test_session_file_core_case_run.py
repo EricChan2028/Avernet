@@ -45,7 +45,8 @@ def fake_execution(*, gateway=False) -> CaseExecution:
         method="setup_session_file_workspace",
         status="PASS",
         data={"group_id": "bcs_grp_session-file-core-01"},
-        evidence={"credential_kind": "human_cookie" if gateway else "owned_local_bot_token"},
+        evidence={"credential_kind": (
+            "human_cookie_with_owned_driver_bot_token" if gateway else "owned_local_bot_token")},
         error_type=None,
     )
     execution = CaseExecution(
@@ -127,7 +128,8 @@ class SessionFileCoreCaseRunTests(unittest.TestCase):
     def test_preprod_report_records_cookie_kind_without_secret(self):
         report, _, _ = self.invoke(gateway=True)
         self.assertEqual(report["status"], "PASS")
-        self.assertEqual(report["credential_kind"], "human_cookie")
+        self.assertEqual(report["credential_kind"],
+                         "human_cookie_with_owned_driver_bot_token")
         self.assertEqual(report["environment"]["entrypoint_kind"], "gateway")
         raw = json.dumps(report, sort_keys=True)
         self.assertNotIn("cookie-secret", raw)

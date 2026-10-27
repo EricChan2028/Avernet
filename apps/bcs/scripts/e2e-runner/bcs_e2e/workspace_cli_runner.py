@@ -139,6 +139,13 @@ class WorkspaceCliRunner:
             if not value:
                 raise WorkspaceCliRunnerError("workspace CLI owned Bot credential is absent")
             return "owned_local_bot_token", value
+        if (self.profile["contract"] == SESSION_FILE_CORE_PROFILE_CONTRACT
+                and self.profile["auth"]["kind"] == "human-cookie-with-owned-driver-bot-token"):
+            value = os.environ.get(self.profile["auth"]["driver_token_env"], "")
+            cookie = os.environ.get(self.profile["auth"]["cookie_env"], "")
+            if not value or not cookie:
+                raise WorkspaceCliRunnerError("workspace CLI Session-file credential bundle is absent")
+            return "human_cookie_with_owned_driver_bot_token", value
         value = os.environ.get(self.profile["auth"]["cookie_env"], "")
         if not value:
             raise WorkspaceCliRunnerError("workspace CLI Human Cookie is absent")
@@ -151,7 +158,9 @@ class WorkspaceCliRunner:
             (root / name).mkdir(mode=0o700)
         context = root / "bot" / ".bcs" / "session.json"
         data = {
-            "token": credential if credential_kind == "owned_local_bot_token" else "",
+            "token": credential if credential_kind in {
+                "owned_local_bot_token", "human_cookie_with_owned_driver_bot_token"
+            } else "",
             "bot_uuid": self.driver_id,
             "api_base_url": self.origin,
         }
@@ -160,7 +169,13 @@ class WorkspaceCliRunner:
         environment = {"PATH": "/usr/bin:/bin", "HOME": base + "/home",
                        "BOT_DATA_DIR": base + "/bot", "TMPDIR": base + "/tmp",
                        "LANG": "C"}
-        if credential_kind == "human_cookie":
+        if credential_kind == "human_cookie_with_owned_driver_bot_token":
+            cookie = os.environ.get(self.profile["auth"]["cookie_env"], "")
+            if not cookie:
+                raise WorkspaceCliRunnerError("workspace CLI Human Cookie is absent")
+            environment["BCS_COOKIE"] = cookie
+            environment["tc_sdb_nenv"] = "production"
+        elif credential_kind == "human_cookie":
             environment["BCS_COOKIE"] = credential
         return root, context, environment
 

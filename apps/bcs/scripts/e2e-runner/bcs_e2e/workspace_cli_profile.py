@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from .profile import ConfigError, identifier, object_keys, parsed_origin, unique_keys
+from .profile import ConfigError, identifier, object_keys, origin, parsed_origin, unique_keys
 
 
 WORKSPACE_CLI_CREATE_GET_PROFILE_CONTRACT = "dual-workspace-cli-profile-v1"
@@ -186,10 +186,13 @@ def _validate_workspace_cli_profile(raw: object, contract_name: str) -> dict:
     """Validate a retained two-Bot Workspace CLI Profile."""
     if not isinstance(raw, dict) and not hasattr(raw, "get"):
         raise ConfigError("workspace CLI profile must be an object")
-    profile = object_keys(raw, {
+    expected_keys = {
         "schema_version", "contract", "environment", "entrypoint", "human",
         "actors", "auth", "relationships", "policy", "cli",
-    }, "workspace CLI profile")
+    }
+    if contract_name == SESSION_FILE_CORE_PROFILE_CONTRACT and "file_transfer" in raw:
+        expected_keys.add("file_transfer")
+    profile = object_keys(raw, expected_keys, "workspace CLI profile")
     if (type(profile["schema_version"]) is not int
             or profile["schema_version"] != 1
             or profile["contract"] != contract_name):
@@ -302,6 +305,15 @@ def _validate_workspace_cli_profile(raw: object, contract_name: str) -> dict:
         if auth["kind"] != "owned-local-bot-tokens":
             raise ConfigError("auth.kind: local workspace CLI requires an owned Bot token")
         _env_ref(auth["driver_token_env"], "auth.driver_token_env")
+    elif contract_name == SESSION_FILE_CORE_PROFILE_CONTRACT:
+        auth = object_keys(
+            profile["auth"], {"kind", "cookie_env", "driver_token_env"}, "auth")
+        if auth["kind"] != "human-cookie-with-owned-driver-bot-token":
+            raise ConfigError(
+                "auth.kind: preprod Session-file requires the Human Cookie "
+                "plus the owned driver Bot token")
+        _env_ref(auth["cookie_env"], "auth.cookie_env")
+        _env_ref(auth["driver_token_env"], "auth.driver_token_env")
     else:
         auth = object_keys(profile["auth"], {"kind", "cookie_env"}, "auth")
         if auth["kind"] != "human-cookie":
@@ -367,7 +379,27 @@ def _validate_workspace_cli_profile(raw: object, contract_name: str) -> dict:
                      "api_face": "legacy"})
     if cli != expected_cli:
         raise ConfigError("cli: product CLI binding differs from the case contract")
+    if "file_transfer" in profile:
+        _validate_session_file_transfer(profile["file_transfer"], environment["tier"])
     return json.loads(json.dumps(profile, allow_nan=False), object_pairs_hook=unique_keys)
+
+
+def _validate_session_file_transfer(value: object, tier: str) -> None:
+    transfer = object_keys(
+        value, {"allowed_share_origins", "allowed_storage_origins"}, "file_transfer")
+    for key, allow_empty in (("allowed_share_origins", False),
+                             ("allowed_storage_origins", True)):
+        origins = transfer[key]
+        if not isinstance(origins, list) or len(origins) > 16 or (not origins and not allow_empty):
+            raise ConfigError(f"file_transfer.{key}: expected at most 16 exact origins")
+    normalized = []
+    for remote_origin in transfer["allowed_share_origins"] + transfer["allowed_storage_origins"]:
+        parsed = parsed_origin(remote_origin, tier)
+        if "*" in parsed.netloc or not remote_origin.isascii():
+            raise ConfigError("file_transfer: share origins must be exact ASCII hosts")
+        normalized.append(origin(remote_origin, tier))
+    if len(set(normalized)) != len(normalized):
+        raise ConfigError("file_transfer: duplicate share origins")
 
 
 def validate_workspace_cli_profile(raw: object) -> dict:

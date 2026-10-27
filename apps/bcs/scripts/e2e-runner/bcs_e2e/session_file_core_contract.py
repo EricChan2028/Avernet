@@ -126,10 +126,10 @@ def _session_file_metadata_profile(profile: dict) -> dict:
         }}
     return {
         "environment": copy.deepcopy(profile["environment"]),
-        "entrypoint": {
-            "origin": profile["entrypoint"]["origin"],
-        },
+        "entrypoint": {"kind": profile["entrypoint"]["kind"],
+                      "origin": profile["entrypoint"]["origin"]},
         "auth": auth,
+        "file_transfer": copy.deepcopy(profile.get("file_transfer", {})),
         "policy": copy.deepcopy(profile["policy"]),
     }
 
@@ -215,7 +215,7 @@ class RemoteSessionFileCoreAdapter:
                 or not isinstance(value.get("session_id"), str)
                 or not value["session_id"].startswith(self.group_id + ":")
                 or value.get("session_kind") != "chat"
-                or value.get("status") != "active"):
+                or value.get("status") not in ("active", "running")):
             raise RunStateError("Session-file explicit Session create is not exact")
         self.session_id = value["session_id"]
         evidence = {
@@ -239,7 +239,7 @@ class RemoteSessionFileCoreAdapter:
                 or not isinstance(data.get("file_id"), str) or not data["file_id"]
                 or data.get("file_name") != FILE_NAME
                 or data.get("size") != FILE_SIZE
-                or data.get("status") != "ready"):
+                or data.get("status") not in ("ready", "Ready")):
             raise RunStateError("Session-file upload result is not exact")
         self.file_id = data["file_id"]
         return result
@@ -257,7 +257,7 @@ class RemoteSessionFileCoreAdapter:
                 or item.get("file_id") != self.file_id
                 or item.get("file_name") != FILE_NAME
                 or item.get("size") != FILE_SIZE
-                or item.get("status") != "ready"):
+                or item.get("status") not in ("ready", "Ready")):
             raise RunStateError("Session-file list result is not exact")
         return result
 
@@ -270,10 +270,10 @@ class RemoteSessionFileCoreAdapter:
         expected_storage = "local" if self.profile["environment"]["tier"] == "local" else "baas"
         if (not isinstance(data, dict)
                 or data.get("storage") != expected_storage
-                or not isinstance(data.get("max_file_size_bytes"), int)
-                or data["max_file_size_bytes"] <= 0
-                or not isinstance(data.get("file_uploads"), bool)
-                or data["file_uploads"] is not True):
+                or not isinstance((max_size := data.get("max_file_size_bytes",
+                                                        data.get("max_size", 0))), int)
+                or max_size <= 0
+                or data.get("file_uploads", data.get("presign_upload")) is not True):
             raise RunStateError("Session-file capabilities are not environment-exact")
         return result
 
@@ -289,7 +289,7 @@ class RemoteSessionFileCoreAdapter:
             raise RunStateError("Session-file metadata result is not exact")
         credential_kind = ("owned_local_bot_token"
                            if self.profile["environment"]["tier"] == "local"
-                           else "human_cookie")
+                           else "human_cookie_with_owned_driver_bot_token")
         evidence = dict(record)
         evidence.update({
             "transport": "PRODUCT_HTTP",
@@ -386,6 +386,7 @@ class RemoteSessionFileCoreAdapter:
         self.share_token = token
         self.share_url = url
         self.share_expires_at = expires
+        self.file_client.register_share_target(token, url)
         return AdapterCall(data={
             "share_granted": True, "share_token_present": True,
             "expires_at": expires,
@@ -406,7 +407,7 @@ class RemoteSessionFileCoreAdapter:
             "transport": "PRODUCT_HTTP", "caller_role": "driver",
             "credential_kind": ("owned_local_bot_token"
                                 if self.profile["environment"]["tier"] == "local"
-                                else "human_cookie"),
+                                else "human_cookie_with_owned_driver_bot_token"),
             "fixture_effect": DELETE_FILE_EFFECT, **file_absence,
         })
         _, shared_metadata_absence = self.file_client.shared_metadata_verify_deleted(self.share_token)
@@ -434,7 +435,7 @@ def _validate_step(requirement_id: str, adapter: object,
         raise RunStateError("Session-file core adapter is invalid")
     credential_kind = ("owned_local_bot_token"
                        if adapter.profile["environment"]["tier"] == "local"
-                       else "human_cookie")
+                       else "human_cookie_with_owned_driver_bot_token")
     if requirement_id == "CLI-FILE.setup":
         evidence = result.evidence
         requests = evidence.get("requests") if isinstance(evidence, dict) else None

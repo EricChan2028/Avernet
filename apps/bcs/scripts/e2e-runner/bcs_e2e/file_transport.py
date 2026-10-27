@@ -49,6 +49,11 @@ class RemoteFileClient:
         self.base = origin(profile["entrypoint"]["origin"], profile["environment"]["tier"])
         self.base_parts = urlsplit(self.base)
         self.local_auth = local_auth
+        # Station gateways expose the internal V1 file router at /sessions;
+        # owned-local product services expose it under the public V1 prefix.
+        self.station_gateway = (profile["environment"]["tier"] == "preprod"
+                                and profile["entrypoint"]["kind"] == "gateway")
+        self.file_path_prefix = "" if self.station_gateway else "/api/v1/collaboration"
         owned_local = profile["auth"] == {"kind": "owned-local"}
         if owned_local or local_auth is not None:
             from .local_auth import require_local_auth
@@ -67,11 +72,15 @@ class RemoteFileClient:
             self._origin_key(origin(value, profile["environment"]["tier"]))
             for value in profile.get("file_transfer", {}).get("allowed_storage_origins", [])
         }
+        self.share_origins = {
+            self._origin_key(origin(value, profile["environment"]["tier"]))
+            for value in profile.get("file_transfer", {}).get("allowed_share_origins", [])
+        }
         self.prepared: dict[tuple[str, str], dict] = {}
         self.share_targets: dict[str, str] = {}
 
     def _path(self, session_id: str, suffix: str = "") -> str:
-        return f"/api/v1/collaboration/sessions/{_segment(session_id)}/files{suffix}"
+        return f"{self.file_path_prefix}/sessions/{_segment(session_id)}/files{suffix}"
 
     @staticmethod
     def _origin_key(target: str) -> tuple:
@@ -81,7 +90,7 @@ class RemoteFileClient:
     def _same_origin(self, target: str) -> bool:
         return self._origin_key(target) == self._origin_key(self.base)
 
-    def _url(self, path_or_url: str, *, storage: bool = False) -> str:
+    def _url(self, path_or_url: str, *, storage: bool = False, share: bool = False) -> str:
         if (not isinstance(path_or_url, str) or not path_or_url.isascii()
                 or any(ord(c) <= 32 or ord(c) == 127 for c in path_or_url)):
             raise FileTransportError("invalid file target URL")
@@ -97,6 +106,10 @@ class RemoteFileClient:
             if storage:
                 if self._origin_key(target) not in self.storage_origins:
                     raise FileTransportError("storage target requires an explicit egress allowlist")
+            elif share:
+                if (self._origin_key(target) not in self.share_origins
+                        and not self._same_origin(target)):
+                    raise FileTransportError("share target requires an explicit egress allowlist")
             elif not self._same_origin(target):
                 raise FileTransportError("product target must match the configured origin")
         except ValueError:
@@ -106,13 +119,13 @@ class RemoteFileClient:
     def _send(self, method: str, path_or_url: str, *, operation: str,
                  body: bytes | None = None, content_type: str | None = None,
                  expected: tuple[int, ...] = (200,), include_auth: bool = True,
-                 storage: bool = False) -> _FileResponse:
+                 storage: bool = False, share: bool = False) -> _FileResponse:
         # Enforced at the transport boundary, not just at individual callers.
         if body is not None and (not isinstance(body, bytes) or len(body) > self.max_bytes):
             raise FileTransportError("request body exceeds the small-file runner budget")
         if storage and include_auth:
             raise FileTransportError("storage requests cannot carry product credentials")
-        url = self._url(path_or_url, storage=storage)
+        url = self._url(path_or_url, storage=storage, share=share)
         parts = urlsplit(url)
         request_id = "e2e-file-" + uuid.uuid4().hex
         request_headers = {"Accept": "*/*" if storage else "application/json"}
@@ -170,17 +183,20 @@ class RemoteFileClient:
         response = self._send(method, path_or_url, **kwargs)
         return response.body, response.record
 
-    def _download(self, path: str, *, operation: str, include_auth: bool) -> tuple[bytes, dict]:
+    def _download(self, path: str, *, operation: str, include_auth: bool,
+                  share: bool = False) -> tuple[bytes, dict]:
         records = []
         target = path
         try:
             for hop in range(4):
                 response = self._send("GET", target, operation=operation,
-                                      expected=(200, 302), include_auth=include_auth if hop == 0 else False,
-                                      storage=hop > 0)
+                                      expected=(200, 302, 303), include_auth=include_auth if hop == 0 else False,
+                                      storage=hop > 0, share=share and hop == 0)
                 records.append(response.record)
                 if response.record["http_status"] == 200:
-                    record = {**records[0], "hops": records,
+                    record = {**records[0],
+                              "http_status": response.record["http_status"],
+                              "hops": records,
                               "elapsed_ms": round(sum(item["elapsed_ms"] for item in records), 2)}
                     return response.body, record
                 if not response.location or hop == 3:
@@ -223,6 +239,14 @@ class RemoteFileClient:
             body=None if body is None else json.dumps(body, separators=(",", ":")).encode(),
             content_type="application/json" if body is not None else None, expected=expected,
         )
+        if self.station_gateway:
+            try:
+                data = json.loads(response.body, object_pairs_hook=unique_keys)
+            except (UnicodeError, json.JSONDecodeError):
+                raise FileTransportError("station file response is not valid JSON")                     .with_record(response.record) from None
+            if not isinstance(data, dict):
+                raise FileTransportError("station file response is not an object")                     .with_record(response.record) from None
+            return data, response.record
         return self._decode_json_data(response.body, response.record, sensitive_values=response.sensitive_values)
 
     def probe_anonymous_route(self) -> tuple[dict, dict]:
@@ -273,7 +297,7 @@ class RemoteFileClient:
         response = self._send(
             "GET", self._share_url(token),
             operation="file.share_login_required",
-            expected=(200, 401, 403), include_auth=False,
+            expected=(200, 401, 403), include_auth=False, share=True,
         )
         status = response.record["http_status"]
         if status == 200 and self._login_required_projection(response.body) != {
@@ -294,7 +318,8 @@ class RemoteFileClient:
         if token not in self.share_targets:
             raise FileTransportError("SSO shared download requires this client's issued share token")
         _, denial = self.probe_share_login_required(token)
-        data, record = self._download(self._share_url(token), operation="file.shared_download", include_auth=True)
+        data, record = self._download(self._share_url(token), operation="file.shared_download",
+                                      include_auth=True, share=True)
         record["access_checks"] = [denial]
         record["response_projection"] = {
             "share_access_contract": PREPROD_SHARE_SSO,
@@ -373,28 +398,38 @@ class RemoteFileClient:
                                   operation="file.share", body={}, expected=(201,))
         token, target = data.get("share_token"), data.get("share_url")
         if isinstance(token, str) and token and isinstance(target, str) and target:
-            self.share_targets[token] = target
+            self.register_share_target(token, target)
         return data, record
+
+    def register_share_target(self, token: str, target: str) -> None:
+        if not isinstance(token, str) or not token:
+            raise FileTransportError("share binding requires the issued token")
+        url = self._url(target, share=True)
+        parts = urlsplit(url)
+        if (parts.path != "/sessions/shared-file/content"
+                or parse_qsl(parts.query, keep_blank_values=True) != [("token", token)]):
+            raise FileTransportError("returned share URL does not match the issued token route")
+        self.share_targets[token] = target
 
     def _share_url(self, token: str) -> str:
         path = self._shared_path(token)
         target = self.share_targets.get(token, self.base + path)
-        url = self._url(target)
+        url = self._url(target, share=True)
         parts = urlsplit(url)
         if (parts.path != urlsplit(path).path or parse_qsl(parts.query, keep_blank_values=True) != [("token", token)]):
             raise FileTransportError("returned share URL does not match the issued token route")
         return target
 
-    @staticmethod
-    def _shared_path(token: str) -> str:
+    def _shared_path(self, token: str) -> str:
         if not isinstance(token, str) or not token:
             raise FileTransportError("shared download requires the issued share token")
-        return "/api/v1/collaboration/sessions/shared-file/content?token=" + quote(token, safe="")
+        return self.file_path_prefix + "/sessions/shared-file/content?token=" + quote(token, safe="")
 
     def shared_download(self, token: str):
         if self._share_sso_required():
             return self.shared_download_sso(token)
-        return self._download(self._share_url(token), operation="file.shared_download", include_auth=False)
+        return self._download(self._share_url(token), operation="file.shared_download",
+                               include_auth=False, share=True)
 
     @staticmethod
     def _shared_metadata_path(token: str) -> str:
@@ -402,10 +437,38 @@ class RemoteFileClient:
             raise FileTransportError("shared metadata requires the issued share token")
         return "/sessions/shared-file?token=" + quote(token, safe="")
 
+    def _shared_metadata_url(self, token: str) -> str:
+        target = self.share_targets.get(token)
+        if target is None:
+            return self._shared_metadata_path(token)
+        parts = urlsplit(self._url(target, share=True))
+        metadata = parts._replace(path="/sessions/shared-file",
+                                  query="token=" + quote(token, safe=""))
+        return self._url(metadata.geturl(), share=True)
+
     def shared_metadata(self, token: str):
+        if self._share_sso_required():
+            _, denial = self.probe_share_login_required(token)
+            response = self._send(
+                "GET", self._shared_metadata_url(token),
+                operation="file.shared_metadata", include_auth=True, share=True,
+            )
+            try:
+                data = json.loads(response.body, object_pairs_hook=unique_keys)
+            except (UnicodeError, json.JSONDecodeError):
+                raise FileTransportError("shared metadata response is not valid JSON").with_record(response.record) from None
+            if not isinstance(data, dict) or "session_id" in data:
+                raise FileTransportError("shared metadata must be a dictionary without session_id").with_record(response.record)
+            response.record["access_checks"] = [denial]
+            response.record["response_projection"] = {
+                "share_access_contract": PREPROD_SHARE_SSO,
+                "unauthenticated_access": "DENIED",
+                "auth_mode": "SSO_AND_SHARE_TOKEN",
+            }
+            return data, response.record
         response = self._send(
-            "GET", self._shared_metadata_path(token),
-            operation="file.shared_metadata", include_auth=False,
+            "GET", self._shared_metadata_url(token),
+            operation="file.shared_metadata", include_auth=False, share=True,
         )
         try:
             data = json.loads(response.body, object_pairs_hook=unique_keys)
@@ -416,10 +479,13 @@ class RemoteFileClient:
         return data, response.record
 
     def shared_metadata_verify_deleted(self, token: str):
+        denial = None
+        if self._share_sso_required():
+            _, denial = self.probe_share_login_required(token)
         response = self._send(
-            "GET", self._shared_metadata_path(token),
+            "GET", self._shared_metadata_url(token),
             operation="file.shared_metadata_verify_deleted",
-            expected=(404,), include_auth=False,
+            expected=(404,), include_auth=self._share_sso_required(), share=True,
         )
         try:
             data = json.loads(response.body, object_pairs_hook=unique_keys)
@@ -427,6 +493,13 @@ class RemoteFileClient:
             raise FileTransportError("deleted shared metadata response is not valid JSON").with_record(response.record) from None
         if data != {"error": "NOT_FOUND", "message": "shared file not found"}:
             raise FileTransportError("deleted shared metadata did not reach the exact not-found response").with_record(response.record)
+        if denial is not None:
+            response.record["access_checks"] = [denial]
+            response.record["response_projection"] = {
+                "share_access_contract": PREPROD_SHARE_SSO,
+                "unauthenticated_access": "DENIED",
+                "auth_mode": "SSO_AND_SHARE_TOKEN",
+            }
         return None, response.record
 
     def delete(self, session_id: str, file_id: str):
@@ -435,8 +508,10 @@ class RemoteFileClient:
             raise FileTransportError("file deletion was not explicitly confirmed").with_record(record)
         return data, record
 
-    def _verify_absent(self, path: str, error_code: str, *, operation: str, include_auth: bool):
-        response = self._send("GET", path, operation=operation, expected=(404,), include_auth=include_auth)
+    def _verify_absent(self, path: str, error_code: str, *, operation: str,
+                       include_auth: bool, share: bool = False):
+        response = self._send("GET", path, operation=operation, expected=(404,),
+                              include_auth=include_auth, share=share)
         record = response.record
         try:
             payload = self._envelope(response.body)
@@ -450,15 +525,36 @@ class RemoteFileClient:
             raise error.with_record(record)
 
     def verify_deleted(self, session_id: str, file_id: str):
-        return self._verify_absent(self._path(session_id, f"/{_segment(file_id)}"), "session_file_not_found",
+        path = self._path(session_id, f"/{_segment(file_id)}")
+        if self.station_gateway:
+            response = self._send("GET", path, operation="file.verify_deleted",
+                                  expected=(404,), include_auth=True)
+            try:
+                data = json.loads(response.body, object_pairs_hook=unique_keys)
+            except (UnicodeError, json.JSONDecodeError):
+                raise FileTransportError("deleted station file did not return exact JSON").with_record(response.record) from None
+            if data != {"error": "FILE_NOT_FOUND",
+                        "message": f"not found: file {file_id}"}:
+                raise FileTransportError("not-found response does not prove the exact file outcome").with_record(response.record)
+            return None, response.record
+        return self._verify_absent(path, "session_file_not_found",
                                    operation="file.verify_deleted", include_auth=True)
 
     def verify_shared_deleted(self, token: str):
         if self._share_sso_required():
-            return self._verify_absent(self._share_url(token), "shared_file_not_found",
-                                       operation="file.shared_verify_deleted", include_auth=True)
+            path = self._share_url(token)
+            response = self._send("GET", path, operation="file.shared_verify_deleted",
+                                  expected=(404,), include_auth=True, share=True)
+            try:
+                data = json.loads(response.body, object_pairs_hook=unique_keys)
+            except (UnicodeError, json.JSONDecodeError):
+                raise FileTransportError("deleted shared content did not return exact JSON").with_record(response.record) from None
+            if data != {"error": "NOT_FOUND", "message": "shared file not found"}:
+                raise FileTransportError("not-found response does not prove the exact shared outcome").with_record(response.record)
+            return None, response.record
         return self._verify_absent(self._share_url(token), "shared_file_not_found",
-                                   operation="file.shared_verify_deleted", include_auth=False)
+                                   operation="file.shared_verify_deleted", include_auth=False,
+                                   share=True)
 
     def upload_to_signed_url(self, upload_url: str, content: bytes):
         return self._request("PUT", upload_url, operation="file.signed_upload", body=content,

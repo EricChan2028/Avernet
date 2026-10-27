@@ -8,6 +8,7 @@ import os
 import sys
 import unittest
 from unittest.mock import Mock, patch
+from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bcs_e2e.file_transport import FileTransportError, RemoteFileClient
@@ -35,6 +36,7 @@ class FileTransportTests(unittest.TestCase):
     def profile(self):
         root = Path(__file__).resolve().parents[1]
         profile = json.loads((root / "profiles/local.singlebox.example.json").read_text())
+        profile["file_transfer"] = {"allowed_storage_origins": ["https://storage.example.test"]}
         profile["human"]["user_id"] = "human-local"
         profile["actors"]["driver"]["bot_id"] = "driver-local"
         profile["actors"]["driver"]["owner_id"] = "human-local"
@@ -92,7 +94,8 @@ class FileTransportTests(unittest.TestCase):
                             "/api/v1/collaboration/sessions/s-1/files/f-1/content"}, 201), 201),
             Reply(envelope({"file_id": "f-1", "status": "pending"}), 202),
             Reply(b"payload", 200),
-            Reply(envelope({"share_url": "http://127.0.0.1/share", "share_token": "secret", "expires_at": 1}, 201), 201),
+            Reply(envelope({"share_url": "http://127.0.0.1:21000/sessions/shared-file/content?token=secret",
+                            "share_token": "secret", "expires_at": 1}, 201), 201),
         ]
         opener = type("FakeOpener", (), {})()
         calls = []
@@ -215,12 +218,7 @@ class FileTransportTests(unittest.TestCase):
         profile["environment"]["tier"] = "preprod"
         profile["entrypoint"]["kind"] = "gateway"
         profile["entrypoint"]["origin"] = "https://gateway.example.test"
-        missing = {
-            "code": 40400,
-            "message": "not found",
-            "request_id": "req-1",
-            "data": {"error_code": "shared_file_not_found"},
-        }
+        missing = {"error": "NOT_FOUND", "message": "shared file not found"}
         opener = Mock()
         opener.open.return_value = Reply(missing, 404)
         with patch.dict(os.environ, {"BCS_E2E_LOCAL_COOKIE": "private-cookie"}), \
@@ -232,6 +230,65 @@ class FileTransportTests(unittest.TestCase):
         request = opener.open.call_args.args[0]
         self.assertEqual(request.headers["Cookie"], "private-cookie")
         self.assertNotIn("issued-secret", json.dumps(record))
+
+    def test_preprod_file_deletion_verification_uses_station_json(self):
+        profile = self.profile()
+        profile["environment"]["tier"] = "preprod"
+        profile["entrypoint"]["kind"] = "gateway"
+        profile["entrypoint"]["origin"] = "https://gateway.example.test"
+        profile["auth"] = {"header_env": {"Cookie": "BCS_E2E_TEST_COOKIE"}}
+        missing = {"error": "FILE_NOT_FOUND", "message": "not found: file f-1"}
+        opener = Mock(); opener.open.return_value = Reply(missing, 404)
+        with patch.dict(os.environ, {"BCS_E2E_TEST_COOKIE": "private-cookie"}), \
+                patch("bcs_e2e.file_transport.build_opener", return_value=opener):
+            client = RemoteFileClient(profile)
+            absent, record = client.verify_deleted("s-1", "f-1")
+        self.assertIsNone(absent)
+        self.assertEqual(record["http_status"], 404)
+        request = opener.open.call_args.args[0]
+        self.assertIn("/sessions/s-1/files/f-1", request.full_url)
+        self.assertEqual(request.headers["Cookie"], "private-cookie")
+
+    def test_preprod_share_binding_uses_reviewed_cross_origin_for_metadata(self):
+        profile = self.profile()
+        profile["environment"]["tier"] = "preprod"
+        profile["entrypoint"]["kind"] = "gateway"
+        profile["entrypoint"]["origin"] = "https://gateway.example.test"
+        profile["auth"] = {"header_env": {"Cookie": "BCS_E2E_TEST_COOKIE"}}
+        profile["file_transfer"] = {
+            "allowed_share_origins": ["https://share.example.test"],
+            "allowed_storage_origins": ["https://storage.example.test"],
+        }
+        opener = Mock()
+        login = {"actionType": "LOGIN", "buserviceErrorCode": "USER_NOT_LOGIN",
+                 "decisionBy": "ACE"}
+        opener.open.side_effect = [Reply(login, 200), Reply(b'{"file_id":"f-1"}')]
+        with patch.dict(os.environ, {"BCS_E2E_TEST_COOKIE": "private-cookie"}), \
+                patch("bcs_e2e.file_transport.build_opener", return_value=opener):
+            client = RemoteFileClient(profile)
+            client.register_share_target(
+                "issued-secret",
+                "https://share.example.test/sessions/shared-file/content?token=issued-secret")
+            data, record = client.shared_metadata("issued-secret")
+        self.assertEqual(data, {"file_id": "f-1"})
+        request = opener.open.call_args.args[0]
+        self.assertEqual(urlsplit(request.full_url).netloc, "share.example.test")
+        self.assertEqual(urlsplit(request.full_url).path, "/sessions/shared-file")
+        self.assertEqual(len(opener.open.call_args_list), 2)
+        self.assertNotIn("Cookie", opener.open.call_args_list[0].args[0].headers)
+        self.assertEqual(opener.open.call_args_list[1].args[0].headers["Cookie"], "private-cookie")
+        self.assertNotIn("issued-secret", json.dumps(record))
+
+    def test_redirect_download_reports_final_content_status(self):
+        redirect = Reply(b"", 303)
+        redirect.headers["Location"] = (
+            "https://storage.example.test/object?signature=private")
+        with self.client(redirect, Reply(b"payload", 200)) as (client, _):
+            body, record = client.shared_download("issued-secret")
+        self.assertEqual(body, b"payload")
+        self.assertEqual(record["http_status"], 200)
+        self.assertEqual([hop["http_status"] for hop in record["hops"]], [303, 200])
+        self.assertNotIn("private", json.dumps(record))
 
     def test_shared_metadata_absence_uses_exact_legacy_not_found(self):
         missing = b'{"error":"NOT_FOUND","message":"shared file not found"}'

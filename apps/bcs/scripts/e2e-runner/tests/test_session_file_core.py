@@ -40,7 +40,9 @@ FILE = "file-01020304"
 TOKEN = "driver-token-secret"
 COOKIE = "cookie-secret"
 SHARE_TOKEN = "fake-share-token"
-SHARE_URL = "https://share.example.com/s/fake"
+SHARED_ROUTE = "/sessions/shared-file/content?token=" + SHARE_TOKEN
+SHARE_URL = "http://127.0.0.1:21000" + SHARED_ROUTE
+GATEWAY_SHARE_URL = "https://share.example.com" + SHARED_ROUTE
 EXPIRES_AT = 1_772_000_000
 SOURCE = "bcs-e2e-session-file-source.txt"
 
@@ -61,7 +63,9 @@ def profile_value(*, gateway=False, mutate=None):
                    "member": {"bot_id": MEMBER, "owner_id": "owner-1",
                               "dedicated": True, "visibility": "public"}},
         "auth": ({"kind": "owned-local-bot-tokens", "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN"}
-                 if not gateway else {"kind": "human-cookie", "cookie_env": "BCS_E2E_HUMAN_COOKIE"}),
+                 if not gateway else {"kind": "human-cookie-with-owned-driver-bot-token",
+                                      "cookie_env": "BCS_E2E_HUMAN_COOKIE",
+                                      "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN"}),
         "relationships": {"group": "bounded-owned-bots-retained-session-file",
                           "initial_session": "retained", "explicit_session": "retained",
                           "file": "retained", "share_link": "retained",
@@ -71,16 +75,25 @@ def profile_value(*, gateway=False, mutate=None):
                     "failure_retention_hours": 24},
         "cli": {"transport": "product-cli", "command_family": "group", "api_face": "legacy"},
     }
+    if gateway:
+        value["file_transfer"] = {
+            "allowed_share_origins": ["https://share.example.com"],
+            "allowed_storage_origins": ["https://storage.example.com"],
+        }
     if mutate is not None:
         mutate(value)
     return value
 
 
-def metadata_result():
+def file_path_prefix(*, gateway=False):
+    return "" if gateway else "/api/v1/collaboration"
+
+
+def metadata_result(*, gateway=False):
     return ({"file_id": FILE}, {
         "operation": "file.metadata",
         "method": "GET",
-        "path": "/api/v1/collaboration/sessions/" + EXPLICIT_SESSION
+        "path": file_path_prefix(gateway=gateway) + "/sessions/" + EXPLICIT_SESSION
                 + "/files/" + FILE,
         "target_kind": "product",
         "submitted_request_id": "e2e-file-metadata-1",
@@ -112,11 +125,11 @@ def shared_metadata_result():
     })
 
 
-def shared_content_result():
+def shared_content_result(*, gateway=False):
     return (b"bcs-e2e-session-file-payload\n", {
         "operation": "file.shared_download",
         "method": "GET",
-        "path": "/api/v1/collaboration/sessions/shared-file/content?token=[REDACTED]",
+        "path": file_path_prefix(gateway=gateway) + "/sessions/shared-file/content?token=[REDACTED]",
         "target_kind": "product",
         "submitted_request_id": "e2e-shared-content-1",
         "http_status": 200,
@@ -124,10 +137,10 @@ def shared_content_result():
     })
 
 
-def file_absence_result():
+def file_absence_result(*, gateway=False):
     return {
         "operation": "file.verify_deleted", "method": "GET",
-        "path": "/api/v1/collaboration/sessions/" + EXPLICIT_SESSION + "/files/" + FILE,
+        "path": file_path_prefix(gateway=gateway) + "/sessions/" + EXPLICIT_SESSION + "/files/" + FILE,
         "target_kind": "product", "submitted_request_id": "e2e-file-absence-1",
         "http_status": 404, "request_id_echoed": True,
     }
@@ -142,7 +155,7 @@ def shared_metadata_absence_result():
     }
 
 
-def shared_content_absence_result():
+def shared_content_absence_result(*, gateway=False):
     return {
         "operation": "file.shared_verify_deleted", "method": "GET",
         "path": "/api/v1/collaboration/sessions/shared-file/content?token=[REDACTED]",
@@ -160,30 +173,40 @@ def json_output(value):
     return json.dumps(value).encode()
 
 
-def outputs(*, session=True, upload=True, files=True, capabilities=None,
-            download=True, share=True, delete=True, gateway=False):
+def outputs(*, session=True, session_status="active", upload=True, files=True,
+            file_status="ready", capabilities=None, download=True, share=True,
+            delete=True, gateway=False):
     upload_value = {
-        "file_id": FILE, "file_name": SOURCE, "size": 29, "status": "ready",
+        "file_id": FILE, "file_name": SOURCE, "size": 29,
+        "status": file_status,
     }
     list_value = {
         "total": 1,
         "items": [{"file_id": FILE, "file_name": SOURCE, "size": 29,
-                   "status": "ready"}],
+                   "status": file_status}],
     }
     storage = capabilities if capabilities is not None else ("local" if not gateway else "baas")
-    capability_value = {
-        "storage": storage, "max_file_size_bytes": 10_000_000,
-        "file_uploads": True,
-    }
+    if gateway:
+        capability_value = {
+            "storage": storage, "max_size": 209_715_200,
+            "inline_view": True, "presign_upload": True, "presign_download": True,
+        }
+    else:
+        capability_value = {
+            "storage": storage, "max_file_size_bytes": 10_000_000,
+            "file_uploads": True,
+        }
     download_value = {"out": str(Path("/unused-download-target"))}
     share_value = {
-        "share_token": SHARE_TOKEN, "share_url": SHARE_URL,
+        "share_token": SHARE_TOKEN,
+        "share_url": GATEWAY_SHARE_URL if gateway else SHARE_URL,
         "expires_at": EXPIRES_AT,
     }
     delete_value = b"null\n" if delete else b"{}\n"
     return (
         json_output({
-            "session_id": EXPLICIT_SESSION, "session_kind": "chat", "status": "active",
+            "session_id": EXPLICIT_SESSION, "session_kind": "chat",
+            "status": session_status,
         }) if session else b"{}",
         json_output(upload_value) if upload else b"{}",
         json_output(list_value) if files else b"{}",
@@ -206,8 +229,9 @@ class SessionFileCoreTests(unittest.TestCase):
         self.state.mkdir()
         self.env = {"BCS_E2E_DRIVER_BOT_TOKEN": TOKEN, "BCS_E2E_HUMAN_COOKIE": COOKIE}
 
-    def run_case(self, *, gateway=False, session=None, upload=None, files=None,
-                 capabilities=None, metadata=None, download=None, share=None,
+    def run_case(self, *, gateway=False, session=None, session_status="active",
+                 upload=None, files=None, file_status="ready", capabilities=None,
+                 metadata=None, download=None, share=None,
                  shared_metadata=None, shared=None, delete=None,
                  file_absent=None, shared_metadata_absent=None,
                  shared_content_absent=None, returncode=0):
@@ -220,8 +244,10 @@ class SessionFileCoreTests(unittest.TestCase):
         (session_raw, upload_raw, files_raw, capability_raw, download_raw,
          share_raw, delete_raw) = outputs(
             session=session if session is not None else True,
+            session_status=session_status,
             upload=upload if upload is not None else True,
             files=files if files is not None else True,
+            file_status=file_status,
             capabilities=capabilities,
             download=download if download is not None else True,
             share=share if share is not None else True,
@@ -231,7 +257,7 @@ class SessionFileCoreTests(unittest.TestCase):
         contexts = []
 
         def fake_metadata(_client, session_id, file_id):
-            data, record = metadata_result()
+            data, record = metadata_result(gateway=gateway)
             if metadata is False:
                 data = {}
             if session_id != EXPLICIT_SESSION or file_id != FILE:
@@ -242,12 +268,15 @@ class SessionFileCoreTests(unittest.TestCase):
             data, record = shared_metadata_result()
             if shared_metadata is False:
                 data["session_id"] = EXPLICIT_SESSION
+            binding = _client.share_targets.get(token)
+            if binding != (GATEWAY_SHARE_URL if gateway else SHARE_URL):
+                raise AssertionError("session-file share binding is not exact")
             if token != SHARE_TOKEN:
                 raise AssertionError("session-file shared metadata exact token")
             return data, record
 
         def fake_shared_download(_client, token):
-            body, record = shared_content_result()
+            body, record = shared_content_result(gateway=gateway)
             if shared is False:
                 body = b"wrong payload"
             if token != SHARE_TOKEN:
@@ -255,7 +284,7 @@ class SessionFileCoreTests(unittest.TestCase):
             return body, record
 
         def fake_verify_deleted(_client, session_id, file_id):
-            record = file_absence_result()
+            record = file_absence_result(gateway=gateway)
             if file_absent is False:
                 record["http_status"] = 200
             if session_id != EXPLICIT_SESSION or file_id != FILE:
@@ -271,7 +300,7 @@ class SessionFileCoreTests(unittest.TestCase):
             return None, record
 
         def fake_shared_content_verify_deleted(_client, token):
-            record = shared_content_absence_result()
+            record = shared_content_absence_result(gateway=gateway)
             if shared_content_absent is False:
                 record["http_status"] = 200
             if token != SHARE_TOKEN:
@@ -408,15 +437,40 @@ class SessionFileCoreTests(unittest.TestCase):
         execution, _, _, contexts = self.run_case(gateway=True)
         self.assertEqual(execution.status, "PASS")
         for context, cookie in contexts:
-            self.assertEqual(context["token"], "")
+            self.assertEqual(context["token"], TOKEN)
             self.assertEqual(cookie, COOKIE)
         snapshot = execution.snapshot()
-        self.assertEqual(snapshot["steps"][3]["data"]["storage"], "baas")
+        self.assertIn(snapshot["steps"][0]["data"]["explicit_session"]["status"],
+                      ("active", "running"))
+
+        self.assertEqual(snapshot["steps"][3]["data"], {
+            "storage": "baas", "max_size": 209_715_200,
+            "inline_view": True, "presign_upload": True, "presign_download": True,
+        })
         self.assertEqual(snapshot["steps"][4]["evidence"]["transport"], "PRODUCT_HTTP")
         self.assertEqual(snapshot["steps"][4]["evidence"]["operation"], "file.metadata")
-        self.assertEqual(snapshot["steps"][4]["evidence"]["credential_kind"], "human_cookie")
+        self.assertEqual(
+            snapshot["steps"][4]["evidence"]["credential_kind"],
+            "human_cookie_with_owned_driver_bot_token")
         self.assertEqual(snapshot["steps"][8]["evidence"]["caller_role"], "public_share")
+        self.assertNotIn(GATEWAY_SHARE_URL, json.dumps(snapshot, sort_keys=True))
+        self.assertNotIn("share_url", json.dumps(snapshot, sort_keys=True))
         self.assertNotIn(COOKIE, json.dumps(snapshot, sort_keys=True))
+
+    def test_gateway_accepts_running_explicit_session(self):
+        execution = self.run_case(gateway=True, session_status="running")[0]
+        self.assertEqual(execution.status, "PASS")
+        self.assertEqual(execution.completed_count, 10)
+
+    def test_gateway_rejects_unknown_explicit_session_status(self):
+        execution = self.run_case(gateway=True, session_status="pending")[0]
+        self.assertEqual(execution.status, "BLOCKED")
+        self.assertEqual(execution.completed_count, 0)
+
+    def test_gateway_accepts_preprod_ready_file_status(self):
+        execution = self.run_case(gateway=True, file_status="Ready")[0]
+        self.assertEqual(execution.status, "PASS")
+        self.assertEqual(execution.completed_count, 10)
 
     def test_inexact_after_setup_blocks_remaining_steps(self):
         cases = {
