@@ -634,3 +634,18 @@ def test_add_artifact_relay_token_mismatch_rejected_without_row():
     with pytest.raises(TaskStateError, match="attempt has expired"):
         service.add_artifact(item, relay_token="gen-2")
     assert repo.appended == []
+
+
+def test_add_artifact_relay_token_unclaimed_node_not_rejected():
+    # §14.5 勘定:补录口不增设 assignee 空拒绝——合法性 token 打在无人认领的节点上,
+    # 仍登记成功,creator 走既有 system 兜底(与上传口的 409 拒绝不对称是定稿行为)。
+    graph = _relay_token_graph()
+    graph.tasks[1].run_info.assignee = None
+    repo = _StubArtifactRepo()
+    service = _service({"t-1": graph}, repo)
+    item = parse_artifact_report_item(
+        _raw_item(), report_task_id="t-1", report_node_id="n-1"
+    )
+    record = service.add_artifact(item, relay_token="gen-1")
+    assert record.creator == "system"
+    assert record is repo.appended[0]
