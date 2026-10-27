@@ -11,9 +11,17 @@ construct these providers at bootstrap and supply trusted authorized item IDs.
 | Reranker | query, candidate IDs and text, top-k → scored IDs | Preserve candidate identity; finite model scores. No business profile lookup or LLM answer synthesis. |
 
 The default orchestration starts lexical recall independently of Embedding, fuses
-ranked IDs with RRF, and optionally reranks the bounded candidate set. Index/model
-failures raise `SearchUnavailable`; they are distinguishable from a successful
-query with no matches. Model-specific scores are not interchangeable with RRF.
+ranked IDs with RRF, and optionally reranks the bounded candidate set. A failed
+semantic branch is degraded to `SearchResult(status="degraded",
+reasons=("semantic_unavailable",))` only when lexical retrieval still produces the
+result. A failed reranker discards model scores, preserves the previous ranking and
+returns `reasons=("reranker_unavailable",)`. When a host supplies a static literal/regex
+fallback, a semantic and lexical outage may return that bounded, filtered result with
+`reasons=("semantic_unavailable", "keyword_unavailable", "regex_fallback")`. If no
+fallback is supplied, the failure raises `SearchUnavailable`; it is distinguishable from
+a successful query with no matches. Model-specific scores are not interchangeable with
+RRF, and providers must not enforce quotas with an inter-request sleep inside the
+provider implementation.
 
 TC retains its own fragment aggregation and Worker/Profile policy. Its thin
 adapters reexport shared value classes, load existing env configuration, preserve

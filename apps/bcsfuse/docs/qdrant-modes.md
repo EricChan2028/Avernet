@@ -85,3 +85,25 @@ Tests create and delete uniquely named collections. They verify Local/REST/gRPC
 filtering, updates and deletion; TC priority and durable recovery; query concurrency;
 and error/readiness behavior. They do not measure production throughput or model
 quotas. Without `QDRANT_TEST_URL`, remote integration cases are explicitly skipped.
+
+## HA refactor TDD acceptance
+
+The shared HA refactor follows these transport-agnostic contracts before a
+multi-replica deployment is enabled:
+
+- A collection pair has one owner. A coordinator rejects a second live owner and allows
+  another replica to acquire ownership only after the prior lease is released.
+- Shared `IndexHealth` metadata records the collection, owner, index version, update
+  timestamp, stale threshold and read-only state; any replica computes the same version,
+  lag and stale decision from that mapping.
+- A read-only retrieval index rejects mutations before reaching Qdrant or durable
+  storage, with a stable `INDEX_READ_ONLY` delivery error.
+- Readiness and metrics expose owner, version, lag and staleness so routing can remove
+  stale readers without treating an empty or stale result as healthy.
+- Static literal/regex fallback is the last bounded path. It applies filters and trusted
+  allowed IDs before limiting and never treats the caller query as an untrusted regex.
+
+These cases currently start red in
+`packages/search-core/tests/test_ha_refactor_tdd.py` and
+`tests/contract/test_ha_refactor_tdd.py`; production composition is not enabled until
+the corresponding contracts pass.

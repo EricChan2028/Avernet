@@ -11,7 +11,7 @@ currently uses the default query-based ranking; no personalization is implied.
 | --- | --- |
 | `query` | Required nonblank string, at most 4096 characters; outer whitespace is removed |
 | `limit` | Integer 1–20; default 5 |
-| `filters` | Field to string-array map; AND between fields, OR within each array; an empty array matches nothing |
+| `filters` | Field to string-array map; AND between fields, OR within each array; an empty array matches nothing. Requests reject more than 16 fields or more than 32 values in one field before application execution |
 | `scene` | Default `default`; each application must reject unsupported scenes |
 | `extensions` | Business options validated by the application, never authority or provider configuration |
 
@@ -28,6 +28,8 @@ never from the body. The callback accepts `fastapi.Request`, returns
 policy. There is no unauthenticated default. Empty allowed IDs prohibit searching;
 `None` is valid only when trusted authentication explicitly grants full scope.
 
+The router rejects request bodies above 64 KiB with HTTP 413 before parsing application JSON.
+
 Successful responses contain `items`, `status` (`ok` or `degraded`) and `reasons`.
 Each item has `id`, `name`, `summary`, finite `score`, `score_source` and
 string-valued `extensions`. IDs are opaque. Scores are not probabilities or
@@ -38,7 +40,8 @@ Search failures must not be converted to an empty success by new providers.
 
 | Failure | HTTP status |
 | --- | --- |
-| Invalid schema | 422 |
+| Request body above 64 KiB | 413 |
+| Oversized filter cardinality | 422 |
 | Unsupported business option | 400 |
 | Execution capacity occupied (`SearchOverloaded`) | 429 |
 | Declared provider failure (`SearchUnavailable`) | 503 |
