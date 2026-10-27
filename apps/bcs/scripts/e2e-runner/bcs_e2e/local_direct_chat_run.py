@@ -3,7 +3,7 @@ from pathlib import Path
 import signal
 
 from .errors import has_cancellation
-from .inventory import current_manifest, executor_digest
+from .inventory import executor_digest, reviewed_release_inventory
 from .local_fixtures import OwnedLocalFixtures
 from .local_direct_chat_contract import CASE_ID, PARENT, SUITE, REQUIREMENTS, direct_chat_source_binding
 from .local_role_identity import OwnedLocalRoleIdentity
@@ -23,8 +23,8 @@ def local_direct_chat_run(*, binary: Path, binary_sha256: str, state_dir: Path, 
         raise RunStateError('Direct chat requires a fresh state directory; existing evidence is retained')
     source = executor_digest()
     original = direct_chat_source_binding()
-    legacy = current_manifest()['legacy_inventory']
-    if len(legacy) != 29 or PARENT not in {row['id'] for row in legacy}:
+    legacy = reviewed_release_inventory()
+    if PARENT not in {row['id'] for row in legacy}:
         raise RunStateError('Direct chat parent is missing from the original release denominator')
     binding = {'schema_version': 1, 'contract': SUITE, 'suite': SUITE,
                'case_id': CASE_ID, 'run_id': run_id, 'executor_digest': source,

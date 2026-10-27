@@ -90,11 +90,15 @@ class CustomCollaborationLifecycleTests(unittest.TestCase):
         self.cli.write_bytes(b'bcs-cli')
         self.binary_sha = 'a' * 64
         self.cli_sha = 'b' * 64
+        reviewed_legacy = [
+            {'id': 'story_cli_operator_creates_custom_collaboration'}
+        ] + [{'id': f'other-{index}'} for index in range(28)]
         self.inventory_patcher = patch(
-            'bcs_e2e.local_custom_collaboration_run.current_manifest',
-            return_value={'legacy_inventory': [
-                {'id': 'story_cli_operator_creates_custom_collaboration'}
-            ] + [{'id': f'other-{index}'} for index in range(28)]})
+            'bcs_e2e.local_custom_collaboration_run.reviewed_release_inventory',
+            return_value=reviewed_legacy)
+        self.reporting_inventory_patcher = patch(
+            'bcs_e2e.local_custom_collaboration_reporting.reviewed_release_inventory',
+            return_value=reviewed_legacy)
         self.digest_patcher = patch(
             'bcs_e2e.local_custom_collaboration_run.executor_digest',
             return_value='e' * 64)
@@ -102,9 +106,11 @@ class CustomCollaborationLifecycleTests(unittest.TestCase):
             'bcs_e2e.local_custom_collaboration_reporting.executor_digest',
             return_value='e' * 64)
         self.inventory_patcher.start()
+        self.reporting_inventory_patcher.start()
         self.digest_patcher.start()
         self.reporting_digest_patcher.start()
         self.addCleanup(self.inventory_patcher.stop)
+        self.addCleanup(self.reporting_inventory_patcher.stop)
         self.addCleanup(self.digest_patcher.stop)
         self.addCleanup(self.reporting_digest_patcher.stop)
 

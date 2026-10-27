@@ -125,8 +125,8 @@ class LocalCliExchange:
                         raise LocalCliExchangeError('CLI request body exceeds the finite contract')
                     raw = exchange._read_bounded(self.rfile, int(lengths[0]) if lengths else 0)
                     parsed = json.loads(raw.decode('utf-8'), object_pairs_hook=unique_keys) if raw else None
-                    if (exchange.body is None and raw or
-                            json.dumps(parsed,sort_keys=True,allow_nan=False) != json.dumps(exchange.body,sort_keys=True,allow_nan=False)):
+                    if (exchange.body is None and raw
+                            or not exchange._body_matches(parsed)):
                         raise LocalCliExchangeError('CLI request body differs from the admitted pair or decision')
                     case._active()
                     event['dispatch_status'] = 'INTENDED'
@@ -194,6 +194,26 @@ class LocalCliExchange:
         self.server.timeout = 0.1
         self.origin = 'http://127.0.0.1:' + str(self.server.server_port)
         self.thread = threading.Thread(target=self._serve, name='e2e-local-cli-exchange', daemon=True)
+
+    @staticmethod
+    def _admitted_wire_body(path: str, method: str, value: object) -> object:
+        """Materialize the product CLI's explicit Group-creation default.
+
+        `bcs-cli create-group` now serializes `human_mention_notify_mode: "all"`.
+        The finite pair/decision contract still owns every other field and will
+        not accept an unrelated addition.
+        """
+        if (path == '/groups' and method == 'POST' and isinstance(value, dict)
+                and value.get('human_mention_notify_mode') is None):
+            return {**value, 'human_mention_notify_mode': 'all'}
+        return value
+
+    def _body_matches(self, parsed: object) -> bool:
+        expected = self._admitted_wire_body(self.event['path'], self.event['method'], self.body)
+        if expected is None or parsed is None:
+            return expected is None and parsed is None
+        return (json.dumps(parsed, sort_keys=True, allow_nan=False)
+                == json.dumps(expected, sort_keys=True, allow_nan=False))
 
     def _serve(self):
         try:

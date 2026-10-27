@@ -31,7 +31,7 @@ def local_slow_judge_run(*, binary: Path, binary_sha256: str, state_dir: Path, r
     original = judge_source_binding()
     plan = slow_judge_case_rewrite()
     legacy = reviewed_release_inventory()
-    if len(legacy) != 29 or PARENT not in {row['id'] for row in legacy}:
+    if PARENT not in {row['id'] for row in legacy}:
         raise RunStateError('Slow Judge parent is missing from the original release denominator')
     binding = {
         'schema_version': 1, 'contract': SUITE, 'suite': SUITE, 'case_id': CASE_ID,

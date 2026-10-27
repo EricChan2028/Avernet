@@ -14,7 +14,6 @@ from .inventory import reviewed_release_inventory
 from .migration_inventory import migration_plan
 
 _CONTRACT = "bcs-local-entry-switch-review-v1"
-_EXPECTED_PARENT_COUNT = 29
 
 
 def _global_blocker(kind: str, value: Any) -> str:
@@ -126,6 +125,7 @@ def review_local_entry_switch() -> dict[str, Any]:
         blockers.append(_global_blocker("partial.executors.present", partial_case_ids))
 
     expected_inventory = reviewed_release_inventory()
+    expected_parent_count = len(expected_inventory)
     expected_parents = {
         row.get("id") for row in expected_inventory
         if isinstance(row, dict) and isinstance(row.get("id"), str)
@@ -135,8 +135,8 @@ def review_local_entry_switch() -> dict[str, Any]:
         if isinstance(row, dict) and isinstance(row.get("legacy_id"), str)
     }
 
-    if len(rows) != _EXPECTED_PARENT_COUNT:
-        blockers.append(_global_blocker("executor.count", f"{len(rows)} expected 29"))
+    if len(rows) != expected_parent_count:
+        blockers.append(_global_blocker("executor.count", f"{len(rows)} expected {expected_parent_count}"))
 
     if missing := sorted(expected_parents - actual_parents):
         blockers.append(_global_blocker("parents.missing", missing))
@@ -162,7 +162,7 @@ def review_local_entry_switch() -> dict[str, Any]:
         "entry_switch": ("PERFORMED_LOCAL_SHELL_DEFAULT" if status == "READY" else "NOT_PERFORMED"),
         "remote_validation": "NOT_RUN",
         "grants_release_credit": False,
-        "expected_executor_count": _EXPECTED_PARENT_COUNT,
+        "expected_executor_count": expected_parent_count,
         "executor_count": len(rows),
         "partial_executor_count": len(partials),
         "executors": executor_rows,

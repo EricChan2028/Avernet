@@ -20,7 +20,7 @@ from .collaboration_team_contract import (
 from .collaboration_team_profile import validate_collaboration_team_profile
 from .collaboration_team_runner import CollaborationTeamRunner
 from .errors import has_cancellation
-from .inventory import current_manifest, executor_digest
+from .inventory import executor_digest, reviewed_release_inventory
 from .local_fixtures import OwnedLocalFixtures
 from .local_operator_cli_contract import collaboration_team_source_binding
 from .local_role_identity import OwnedLocalRoleIdentity
@@ -138,8 +138,8 @@ def local_collaboration_team_run(*, binary: Path, binary_sha256: str,
     source = executor_digest()
     contract = collaboration_team_source_binding()
     plan = collaboration_team_case_plan()
-    legacy = current_manifest()['legacy_inventory']
-    _require(len(legacy) == 29 and contract['parent'] in {row['id'] for row in legacy},
+    legacy = reviewed_release_inventory()
+    _require(contract['parent'] in {row['id'] for row in legacy},
              'Collaboration-team parent is missing from the original release denominator')
     binding = {'schema_version': 1, 'contract': BINDING, 'suite': SUITE,
                'case_id': CASE_ID, 'case_version': 1, 'run_id': run_id,

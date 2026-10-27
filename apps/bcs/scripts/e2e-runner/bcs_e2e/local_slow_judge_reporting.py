@@ -8,7 +8,7 @@ from pathlib import Path
 import stat
 
 from .case_rewrite import slow_judge_case_rewrite
-from .inventory import executor_digest
+from .inventory import executor_digest, reviewed_release_inventory
 from .local_judge_contract import CASE_ID, PARENT, SUITE
 from .profile import fingerprint
 from .run_state import RunStateError, read
@@ -68,8 +68,7 @@ def _bound(root: Path) -> dict:
              and binding.get('adapter_family') == 'OwnedLocalCaseAdapter'
              and binding.get('source_binding', {}).get('parent') == PARENT
              and [row.get('id') for row in binding['source_binding']['requirements']] == list(plan.requirement_ids)
-             and len(binding.get('legacy_inventory', [])) == 29
-             and len({row.get('id') for row in binding['legacy_inventory']}) == 29,
+             and binding.get('legacy_inventory') == reviewed_release_inventory(),
              'Slow Judge frozen complete binding is invalid')
     return binding
 

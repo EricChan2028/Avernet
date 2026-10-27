@@ -5,7 +5,7 @@ from pathlib import Path
 import signal
 
 from .errors import has_cancellation
-from .inventory import current_manifest, executor_digest
+from .inventory import executor_digest, reviewed_release_inventory
 from .edge_read_case import (
     ADMISSION_CASE_ID,
     ADMISSION_PARENT,
@@ -74,8 +74,8 @@ def local_edge_read_run(*, binary: Path, binary_sha256: str, state_dir: Path, ru
     friend_requests = friend_requests_list_source_binding()
     friend_connections = friend_connections_list_source_binding()
     bot_search = bot_search_source_binding()
-    legacy = current_manifest()['legacy_inventory']
-    if (len(legacy) != 29 or set(PARENTS) - {row['id'] for row in legacy}):
+    legacy = reviewed_release_inventory()
+    if set(PARENTS) - {row['id'] for row in legacy}:
         raise RunStateError('Edge read parents are missing from the original release denominator')
     selected_requirement_ids = {
         ADMISSION_PARENT: [row['id'] for row in admission['requirements']],

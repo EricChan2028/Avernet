@@ -8,7 +8,7 @@ import signal
 from urllib.parse import quote, urlsplit
 
 from .errors import has_cancellation
-from .inventory import current_manifest, executor_digest
+from .inventory import executor_digest, reviewed_release_inventory
 from .local_custom_collaboration_case import (
     CASE_ID,
     REQUIREMENTS,
@@ -195,9 +195,8 @@ def local_custom_collaboration_run(*, binary: Path, binary_sha256: str,
             'existing evidence is retained')
     executor = executor_digest()
     source = custom_collaboration_source_binding()
-    legacy = current_manifest()['legacy_inventory']
-    if (len(legacy) != 29
-            or source['parent'] not in {row.get('id') for row in legacy}):
+    legacy = reviewed_release_inventory()
+    if (source['parent'] not in {row.get('id') for row in legacy}):
         raise RunStateError(
             'custom-collaboration parent is missing from the release denominator')
     binding = _binding(binary_sha256=binary_sha256,

@@ -204,6 +204,21 @@ class ExchangeTests(unittest.TestCase):
         self.assertEqual(exchange.forwarded,1)
         self.assertIsNotNone(exchange.failure)
 
+    def test_group_creation_admits_product_cli_mention_default(self):
+        event=dict(self.event,method='POST',path='/groups',operation='create-group',submitted_request_id='test-group-default')
+        declared={'name':'owned-local-group'}
+        wire={'name':'owned-local-group','human_mention_notify_mode':'all'}
+        with LocalCliExchange(self.case,event,token='local-test',body=declared) as exchange:
+            status,_=self.request(exchange,path='/groups',body=json.dumps(wire).encode())
+        self.assertEqual(status,201, repr(exchange.failure))
+        self.assertEqual(exchange.attempts,1);self.assertEqual(exchange.forwarded,1)
+        self.assertIsNone(exchange.failure)
+        self.assertEqual(self.received,[('/groups','test-group-default',json.dumps(wire).encode())])
+        with LocalCliExchange(self.case,dict(event),token='local-test',body=declared) as rejected:
+            bad={**wire,'unexpected':True}
+            self.assertEqual(self.request(rejected,path='/groups',body=json.dumps(bad).encode())[0],502)
+        self.assertEqual(rejected.attempts,1);self.assertEqual(rejected.forwarded,0);self.assertIsNotNone(rejected.failure)
+
     def test_null_body_does_not_equal_absent_body(self):
         with LocalCliExchange(self.case,self.event,token='local-test',body=None) as exchange:
             self.assertEqual(self.request(exchange,body=b'null')[0],502)

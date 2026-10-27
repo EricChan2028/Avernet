@@ -13,6 +13,7 @@ import signal
 import time
 
 from .errors import has_cancellation
+from .inventory import reviewed_release_inventory
 from .migration_inventory import migration_plan
 from .profile import identifier
 from .run_state import RunStateError, write
@@ -795,7 +796,8 @@ def list_cases() -> dict:
             'status': 'READY' if matches else 'BLOCKED',
         })
     ids = [row['case_id'] for row in rows]
-    aligned = (len(ids) == len(set(ids)) == len(CASES) == 29
+    reviewed_parent_count = len(reviewed_release_inventory())
+    aligned = (len(ids) == len(set(ids)) == len(CASES) == reviewed_parent_count
                and set(ids) == set(bindings) and all(row['status'] == 'READY' for row in rows))
     return {'schema_version': 1, 'status': 'READY' if aligned else 'BLOCKED',
             'case_count': len(rows), 'cases': rows, 'remote_validation': 'NOT_RUN',
@@ -944,9 +946,9 @@ def _publish(root: Path, summary: dict, *, finished: bool) -> None:
     if finished:
         cancelled = counts['CANCELLED'] or summary.get('cancellation_requested', False)
         summary['status'] = ('CANCELLED' if cancelled else
-                             'LOCAL_COVERAGE_SUITE_PASS' if counts['PASS'] == 29 else
+                             'LOCAL_COVERAGE_SUITE_PASS' if counts['PASS'] == len(reviewed_release_inventory()) else
                              'BLOCKED' if counts['BLOCKED'] else 'LOCAL_COVERAGE_SUITE_FAIL')
-        summary['exit_code'] = 130 if cancelled else 0 if counts['PASS'] == 29 else 2
+        summary['exit_code'] = 130 if cancelled else 0 if counts['PASS'] == len(reviewed_release_inventory()) else 2
     write(root / SUMMARY_NAME, summary)
     lines = ['# Owned-local coverage suite', '', f"Run: `{summary['run_id']}`",
              f"Status: **{summary['status']}**", '',
@@ -989,7 +991,7 @@ def local_coverage_suite(*, binary: Path, binary_sha256: str, state_dir: Path,
     panel_path = (panel_asset or DEFAULT_PANEL).absolute()
     summary = {
         'schema_version': 1, 'suite': 'owned-local-coverage-suite-v1', 'status': 'RUNNING',
-        'run_id': run_id, 'state_dir': str(root), 'case_count': 29,
+        'run_id': run_id, 'state_dir': str(root), 'case_count': len(reviewed_release_inventory()),
         'binaries': {'bcs': _binary_evidence(binary, binary_sha256),
                      'cli': _binary_evidence(cli_binary, cli_binary_sha256)},
         'panel_asset': {'path': str(panel_path), 'sha256': None, 'status': 'PENDING'},
@@ -1097,7 +1099,7 @@ def local_coverage_suite(*, binary: Path, binary_sha256: str, state_dir: Path,
             signal.signal(sig, handler)
 
 def register_coverage_command(commands) -> None:
-    parser = commands.add_parser('local-coverage-suite', help='Run all 29 owned-local parents, sequentially and in isolated state directories')
+    parser = commands.add_parser('local-coverage-suite', help='Run all reviewed-release owned-local parents, sequentially and in isolated state directories')
     parser.add_argument('--template-dir', type=Path, default=DEFAULT_TEMPLATES)
     parser.add_argument('--list-cases', action='store_true', help='List explicit bindings without starting processes or creating state')
     for name in ('binary', 'cli-binary', 'state-dir', 'panel-asset', 'template-manifest'):

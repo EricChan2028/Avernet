@@ -401,8 +401,7 @@ def local_session_service_parent_run(*, binary: Path, binary_sha256: str,
     executor = executor_digest()
     source = sessions_services_source_binding()
     legacy = reviewed_release_inventory()
-    if (len(legacy) != 29
-            or source['parent'] not in {row.get('id') for row in legacy}):
+    if (source['parent'] not in {row.get('id') for row in legacy}):
         raise RunStateError(
             'Session Service parent is missing from the release denominator')
 
