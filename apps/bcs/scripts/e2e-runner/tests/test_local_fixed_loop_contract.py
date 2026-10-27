@@ -50,8 +50,11 @@ class FixedLoopContractTests(unittest.TestCase):
 
     def test_python_method_boundary_keeps_all_iterations_and_one_shot_details(self):
         text = (Path(__file__).resolve().parents[2] / 'e2e-test/fixed_loop_story.py').read_text()
+        setup = fixed_loop_method(text, 'setup')
         exercise = fixed_loop_method(text, 'exercise')
         verify = fixed_loop_method(text, 'verify')
+        self.assertIn('X-BCS-Bot-Token', setup)
+        self.assertIn('self.bot["bot_runtime_token"]', setup)
         self.assertIn('iteration"] == 1', exercise)
         self.assertIn('iteration"] == 2', exercise)
         self.assertIn('stale input', exercise)

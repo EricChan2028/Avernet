@@ -113,6 +113,13 @@ class ObligationTests(unittest.TestCase):
             for literal in anchors:
                 self.assertIn(literal, self.text, row['id'])
 
+    def test_v1_reference_is_no_longer_an_authority_grant(self):
+        self.assertNotIn('X-BCS-Draft-Read-Token', self.text)
+        self.assertIn('reference["readToken"] == "A" * 43', self.text)
+        self.assertIn('set(reference) == {"schemaVersion", "draftId", "revision", "readToken"}', self.text)
+        self.assertEqual(self.text.count('"missing revision"'), 1)
+        self.assertIn('revision.replace("/revisions/1", "/revisions/2")', self.text)
+
     def test_independent_slice_never_claims_release_credit(self):
         value = draft_group_source_binding()
         self.assertFalse(value['grants_release_credit'])

@@ -74,7 +74,9 @@ def fixed_loop_source_binding() -> dict:
                    for name in ('setup', 'start', 'exercise', 'verify', 'cleanup', 'main')}
         required_literals = {
             'setup': ('post("/control/reset", mock=True)', '"/me/ensure-human"', '"/providers"',
-                      '/visibility', '"/friends/request"'),
+                      'f"/bots/{segment(self.bot[\'bot_uuid\'])}/visibility"',
+                      '{"X-BCS-Bot-Token": self.bot["bot_runtime_token"]}',
+                      '"/friends/request"'),
             'start': ('"/control/provider/clear"', '"/control/judge/outcomes"', '"validate"',
                       '"/groups"', '/state-machine-runs', '/sessions'),
             'exercise': ('assert first["loop_context"]["iteration"] == 1',

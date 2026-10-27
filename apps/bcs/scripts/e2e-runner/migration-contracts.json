@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "source_revision": "74dd751b623b7701608374fc4c7c4a6cf58278da",
+  "source_revision": "48b23001e2edf63fbedc80acdf1474e5c105ad23",
   "sources": {
-    "stories.sh": "5c4d77f99e8574b5b1132ac4550aeffb7eedf7cb59f82b2d8ee52eb4a704fea4",
+    "stories.sh": "68fff1b3a5190245f9ee87f8357ac5b1d107543a685dc9d4426d7930f718c37e",
     "group.sh": "2bbb82c417261900265ce39f69aebb01633bb0700c4d7c71c1a2c9d7d9131c1d",
     "friends.sh": "80c76bb471dbe42a2e891e10558d920723d133510e6661b8cb3457381050b946",
     "session_files.sh": "836d05d1798da0592c7eb027bed4f1fc762510bcbae083c5e129ac7deebfc724",

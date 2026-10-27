@@ -54,7 +54,7 @@ def judge_source_binding():
         for index,row in enumerate(value['requirements']):
             if (set(row)!={'id','kind','method','path','actor','expectation'} or not isinstance(row['expectation'],str)
                     or not 1<=len(row['expectation'])<=2048):raise ValueError
-            expected_actor=('PROVIDER_ADMIN' if index in (2,21) else 'PROVIDER_RUNTIME' if index in (12,18)
+            expected_actor=('PROVIDER_ADMIN' if index in (2,21) else 'PROVIDER_RUNTIME' if index in (3,12,18)
                             else 'BCS_PROVIDER' if row['kind']=='delivery' else 'HUMAN_LOCAL' if row['kind'] in ('http','poll') else 'LOCAL_CONTROL')
             if row['actor']!=expected_actor:raise ValueError
         for literal in ('provider_callback_with_timeout "$provider_id" "$runtime_token"',
@@ -62,6 +62,7 @@ def judge_source_binding():
             'wait_for_graph_node_sub_status "$run_id" "review" "judging"',
             'wait_for_state_machine_status "$run_id" "completed"',
             'candidate awaiting slow judge','published after slow judge','judge_outputs.0.decision.outcome',
+            'api_request_headers PUT "/bots/${provider_bot_uuid}/visibility"', '"X-BCS-Bot-Token: ${runtime_token}',
             '"running"','"Bearer ${bcs_token}"','/control/judge/release'):
             if literal not in flat:raise ValueError
         for index,method,path in ((10,'GET','/state-machine-runs/${run_id}/graph'),

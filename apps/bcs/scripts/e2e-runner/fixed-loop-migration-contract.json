@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "source_revision": "71860eae99c62d7bf1349a0f46562f6395acbf1e",
+  "source_revision": "48b23001e2edf63fbedc80acdf1474e5c105ad23",
   "parent": "story_fixed_loop_human_editor_workflow",
   "sources": {
     "fixed_loop_story.sh": "14939d995cd1134b6be626a44f823a53dcf134f5b702187e0d8639fb6b15b92d",
-    "fixed_loop_story.py": "7e42cff9820a68e9099309d5a313f0f9a9d4814dda66bb7fc89e8aee5dd7aefb",
+    "fixed_loop_story.py": "8fc6daeace717e1e030478c398ed1a770df192c69fcd7622cd34cbdca11d17d5",
     "common.sh": "ca4d2571f58f8de3b13c0516b6db3c07c76e0028592b890aff19dc7bea678815"
   },
   "requirements": [
@@ -22,7 +22,7 @@
       "method": "POST",
       "path": "/me/ensure-human",
       "actor": "HUMAN_LOCAL",
-      "expectation": "Local Human, Provider, Provider Bot, public visibility and original driver-to-worker trust fixture are created and bound before the first Run."
+      "expectation": "Local Human, Provider, Provider Bot, original driver-to-worker trust and public visibility using the Bot runtime credential are created and bound before the first Run."
     },
     {
       "id": "FIXED_LOOP.approved-loop",

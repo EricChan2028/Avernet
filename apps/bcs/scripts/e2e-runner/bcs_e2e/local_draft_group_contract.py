@@ -47,7 +47,7 @@ STORY_MARKERS = (
 MARKER_PREFIX = 'Draft group launch story: '
 MARKER_SUFFIX = ' live HTTP assertions passed (including cleanup)'
 # Behavior literals frozen from the upstream story at
-# 9c36f767fda10f04c14bf10049a3bee1549f4a90. Every obligation keeps its
+# 48b23001e2edf63fbedc80acdf1474e5c105ad23. Every obligation keeps its
 # literals; story drift fails the binding instead of silently re-scoping an
 # obligation.
 ANCHORS = {
@@ -65,7 +65,10 @@ ANCHORS = {
     ),
     'LOCAL-DRAFT-GROUP.share-reference-issuance': (
         '"assistant obtains share card"', '"/revisions/1/reference"',
-        'reference["readToken"]', '"X-BCS-Draft-Read-Token"',
+        'set(reference) == {"schemaVersion", "draftId", "revision", "readToken"}',
+        '"reference remains compatible with the deployed CLI"',
+        'reference["readToken"] == "A" * 43',
+        '"legacy field is a fixed non-secret placeholder"',
     ),
     'LOCAL-DRAFT-GROUP.v1-preview-byte-fidelity': (
         '"/api/v1" + self.draft + "/revisions/1"', '"V1 host opens shared card"',
@@ -77,8 +80,8 @@ ANCHORS = {
         'validated["validation"]["valid"] is True', '"validation binds the same revision"',
     ),
     'LOCAL-DRAFT-GROUP.grant-negative-matrix': (
-        '("GET", ""), ("POST", "/validate")', '"missing grant"', '"wrong grant"',
-        '"duplicate grant"', '"non-ASCII grant"', 'status=404',
+        '("GET", ""), ("POST", "/validate")', '"missing revision"',
+        'revision.replace("/revisions/1", "/revisions/2")', 'status=404',
         'DRAFT_REFERENCE_UNAVAILABLE',
     ),
     'LOCAL-DRAFT-GROUP.revision-input-guards': (
@@ -107,8 +110,8 @@ ANCHORS = {
         'browser_context_required', 'user_context_changed', 'status=403',
     ),
     'LOCAL-DRAFT-GROUP.impersonation-rejection': (
-        '"Bot/share credentials cannot impersonate a Human"',
-        'self.credentials(author)[0], grant[0]', '"Actor"',
+        '"Bot credentials cannot impersonate a Human"',
+        'self.credentials(author)[0], ("Actor", driver["bot_uuid"])',
         '"X-Avernet-Principal", "invalid"', 'status=401', '"unauthenticated"',
     ),
     'LOCAL-DRAFT-GROUP.group-launch-binding': (

@@ -17,14 +17,16 @@ class JudgeContractTests(unittest.TestCase):
         self.assertIn('one-second',rows[12]['expectation']);self.assertEqual(rows[12]['path'],'/bot/events')
         self.assertEqual(rows[10]['path'],rows[14]['path'])
         self.assertEqual(rows[-2]['method'],'DELETE');self.assertEqual(rows[-1]['actor'],'PROVIDER_ADMIN')
+        self.assertEqual(rows[3]['actor'],'PROVIDER_RUNTIME');self.assertIn('runtime credential',rows[3]['expectation'])
 
     def test_omitted_poll_wrong_actor_or_modified_source_never_pass(self):
         original=judge_source_binding()
-        for change in ('missing','reorder','actor','method','path','kind','source','callback-path','poll-path'):
+        for change in ('missing','reorder','actor','visibility-actor','method','path','kind','source','callback-path','poll-path'):
             value=copy.deepcopy(original)
             if change=='missing':value['requirements'].pop(10)
             elif change=='reorder':value['requirements'].reverse()
             elif change=='actor':value['requirements'][12]['actor']='HUMAN_LOCAL'
+            elif change=='visibility-actor':value['requirements'][3]['actor']='HUMAN_LOCAL'
             elif change=='method':value['requirements'][20]['method']='GET'
             elif change=='path':value['requirements'][15]['path']='/state-machine-runs'
             elif change=='kind':value['requirements'][14]['kind']='http'

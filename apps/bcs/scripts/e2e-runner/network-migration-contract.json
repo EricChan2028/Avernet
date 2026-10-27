@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "source_revision": "74dd751b623b7701608374fc4c7c4a6cf58278da",
+  "source_revision": "48b23001e2edf63fbedc80acdf1474e5c105ad23",
   "parent": "story_user_prepares_agent_network",
   "sources": {
-    "stories.sh": "5c4d77f99e8574b5b1132ac4550aeffb7eedf7cb59f82b2d8ee52eb4a704fea4",
+    "stories.sh": "68fff1b3a5190245f9ee87f8357ac5b1d107543a685dc9d4426d7930f718c37e",
     "actor.sh": "9b7679964e0afdac13ad34960ddb475cf09e710c751efbbdd5005555f1056497"
   },
   "requirements": [
