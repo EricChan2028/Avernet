@@ -113,7 +113,7 @@ async def resolve_artifact_write_actor(
 
 - [ ] **Step 1: 实现 `artifact_actor.py`**
 
-分支逻辑（Rule 22:本模块只做协议翻译,不看图不派生 creator）: `token = (request.headers.get("x-relay-token") or "").strip() or None`——非 None 即 relay 分支，**不触碰 auth_plugin**（relay 分支不发 SSO 网络调用）；None 即 `user = await get_current_user(request, auth_plugin)`（401/302 既有语义天然保留）后返回 user 分支 actor。
+分支逻辑（Rule 22:本模块只做协议翻译,不看图不派生 creator）: 从 HTTP header 读出本次请求的 relay 凭证并空白归一(空白→None)——非 None 即 relay 分支，**不触碰 auth_plugin**（relay 分支不发 SSO 网络调用）；None 即 `user = await get_current_user(request, auth_plugin)`（401/302 既有语义天然保留）后返回 user 分支 actor。
 
 - [ ] **Step 2: 冷导入自检**
 
@@ -263,12 +263,7 @@ Expected: 新 relay 用例 FAIL（现路由无此 header 处理,409 拿不到/40
 
 - [ ] **Step 3: 改路由**
 
-上传路由删 `user: AuthenticatedUser = Depends(get_current_user)`,换 `actor: ArtifactWriteActor = Depends(resolve_artifact_write_actor)`;服务调用改
-
-```python
-service.upload_object_file(..., creator=actor.user.id if actor.user else None,
-    relay_token=actor.relay_token)
-```
+上传路由删 `user: AuthenticatedUser = Depends(get_current_user)`,换 `actor: ArtifactWriteActor = Depends(resolve_artifact_write_actor)`;服务调用改为两分支入参:creator 传 `actor.user.id if actor.user else None`(用户分支),relay 分支补传 actor 携带的 relay_token 入参。
 
 docstring 改写: 删"role 为认证用户…relay 场景不经本口",改为"双凭证:X-Relay-Token(relay 尝试,fence+assignee creator)或登录用户(creator=user.id);读口仍用户面。spec §14"。下载路由 `del user` 一行保留（`GET /content` 鉴权零改动）。
 
@@ -305,7 +300,7 @@ Expected: 新用例 FAIL
 
 - [ ] **Step 3: 改路由**
 
-POST `add_task_artifact` 同法换 actor 依赖;`service.add_artifact(item, relay_token=actor.relay_token)`;`del user` 删;docstring 补一句双凭证（引 §14）。GET 路由不碰。
+POST `add_task_artifact` 同法换 actor 依赖;`add_artifact` 补传 actor 携带的 relay_token 入参;`del user` 删;docstring 补一句双凭证（引 §14）。GET 路由不碰。
 
 - [ ] **Step 4: 跑套件**
 

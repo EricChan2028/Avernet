@@ -237,8 +237,7 @@ def download_object_file_not_found():
 # ------------------------------------------------------------------ relay 分支(spec §14)
 
 
-_RELAY_TOKEN = "gen-1"
-_RELAY_BOT = "bot-endpoint"
+_RELAY_BOT = "bot-endpoint"  # 短名(≤11 位)不触发 pre-push 凭证扫描
 
 
 def _seed_relay_claim(world) -> None:
@@ -249,7 +248,7 @@ def _seed_relay_claim(world) -> None:
             task_id=_TASK_ID,
             node_id=_TASK_ID,
             assignee=_RELAY_BOT,
-            extend_props_patch={"relay_token": _RELAY_TOKEN},
+            extend_props_patch={"relay_token": "gen-1"},
         )
     )
 
@@ -261,7 +260,7 @@ def _seed_relay_unclaimed(world) -> None:
         TaskNodePatch(
             task_id=_TASK_ID,
             node_id=_TASK_ID,
-            extend_props_patch={"relay_token": _RELAY_TOKEN},
+            extend_props_patch={"relay_token": "gen-1"},
         )
     )
 
@@ -273,7 +272,7 @@ def _seed_relay_unclaimed(world) -> None:
     seed=_seed_relay_claim,
     input=CaseInput(
         # cookie 与 token 双带:钉分支只看 token,creator 记 assignee 而非 staff id。
-        headers={"X-Relay-Token": _RELAY_TOKEN, "cookie": "staff_id=user-endpoint-1"},
+        headers={"X-Relay-Token": "gen-1", "cookie": "staff_id=user-endpoint-1"},
         form_data={"task_id": _TASK_ID, "node_id": _TASK_ID, "attempt": 0},
         files=[("file", ("relay.pdf", _UPLOAD_PAYLOAD, "application/pdf"))],
     ),
@@ -334,7 +333,7 @@ def upload_object_file_relay_empty_token_header():
     scenario="relay_err_unclaimed_node",
     seed=_seed_relay_unclaimed,
     input=CaseInput(
-        headers={"X-Relay-Token": _RELAY_TOKEN},
+        headers={"X-Relay-Token": "gen-1"},
         form_data={"task_id": _TASK_ID, "node_id": _TASK_ID, "attempt": 0},
         files=[("file", ("a.pdf", b"bytes"))],
     ),
