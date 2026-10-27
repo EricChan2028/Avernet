@@ -257,6 +257,25 @@ fn load_optional_session_info() -> Result<Option<SessionInfo>> {
     load_session_info_from_path(&session_file)
 }
 
+/// Resolve the Cookie-selected owned Bot for Cookie-only authentication.
+///
+/// A non-empty Bearer token identifies a concrete Bot actor directly; only a
+/// cookie-only CLI invocation uses the BCN session's bound Bot UUID.
+fn cookie_owned_bot_uuid(
+    bcs_cookie: Option<&str>,
+    token: &str,
+    session: Option<&SessionInfo>,
+) -> Option<String> {
+    if bcs_cookie.is_none() || !token.is_empty() {
+        return None;
+    }
+    session
+        .and_then(|session| session.bot_uuid.as_deref())
+        .map(|uuid| uuid.trim())
+        .filter(|uuid| !uuid.is_empty())
+        .map(str::to_string)
+}
+
 fn normalize_bcs_api_url(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
