@@ -234,3 +234,8 @@ be different from the old `ext.publish.online` or a missing/stale best-effort
 restart marker. The argument is not a new DB field and does not rewrite native
 release/restart handles. Only legacy direct repository callers may omit it when
 the release slot already identifies the observed workflow.
+
+The publication opt-in alone does not disable the history predicate for online
+API reads. Measure online-consumer read cadence and cost separately before its
+rollout; the local query-plan evidence records the remaining history-linear
+work explicitly rather than claiming constant-time production access.

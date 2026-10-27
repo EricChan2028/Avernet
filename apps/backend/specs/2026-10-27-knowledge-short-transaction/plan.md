@@ -27,8 +27,9 @@
 
 - Preserve the compact result of actual successful completion across native
   status changes and new capture; stamp its observed native workflow ID in ext.
-  Read the greatest observed result under source/Owner/environment scope in the
-  same flags query. Native rollback admission is not a new observed result.
+  Read the greatest observed result under stable Bot/source/environment scope
+  before checking current Owner in the same flags query. Native rollback
+  admission is not a new observed result.
 - An unresolved current source never revokes bindings by historical PK alone.
   A newer observed result is checked with a current locking read under the Bot
   lock, including replacement UUIDs; native ledger gates remain untouched.
