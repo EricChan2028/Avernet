@@ -258,4 +258,25 @@ def test_unknown_completion_is_denied_in_the_same_statement_as_online_flags(know
     # gate SELECT that could race with reading stale production flags.
     flag_reads = [sql for sql in statements if "FROM ac_bot_knowledge_binding" in sql]
     assert len(flag_reads) == 2
-    assert all("EXISTS (SELECT" in sql and "ac_bot_publish" in sql for sql in flag_reads)
+    assert all("ac_bot_publish" in sql and "JSON_EXTRACT" in sql for sql in flag_reads)
+
+
+@pytest.mark.parametrize("payload,denied", [
+    ({"knowledge_selection_result": {"status": "applied"},
+      "config_artifact": {"metadata": {"knowledge_selection_result": {"status": "unknown"}}}}, False),
+    ({"knowledge-selection-result": {"status": "unknown"}}, False),
+    ({"knowledge_selection_result": {"reason": "legacy", "status": "unknown"}}, True),
+])
+def test_only_structured_top_level_unknown_denies_online_selection(knowledge, payload, denied):
+    import json
+
+    db, repo, service, scope = knowledge
+    seed_service(db)
+    with db.orm_session() as session:
+        session.query(BotPublishModel).update({
+            "status": "success", "ext": json.dumps(payload, separators=(",", ":")),
+        })
+    assert repo.list_enabled(scope, selection_stage="online") == (() if denied else ("a",))
+    result = service.list_bindings(scope=scope, actor_id="owner", selection_stage="online")
+    flags = {item["kb_id"]: item["enabled"] for item in result["items"]}
+    assert flags == {"a": not denied, "b": False}

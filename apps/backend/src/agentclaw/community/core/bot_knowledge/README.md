@@ -170,10 +170,15 @@ tenant, space, publication ID and a fresh generation token. A durable callback
 may restore the snapshot tenant context, but all Bot/Binding tenant guards and
 source identity checks still apply. Missing or invalid historical snapshots and
 removed bindings produce UNKNOWN, never a later draft selection or an implicit
-inheritance of previous production flags. Scoped flags are cleared; the online
-reader additionally denies explicit UNKNOWN completions in the same SQL
-statement that reads flags, including when no source can be safely resolved.
-A normal service read adds one scoped EXISTS subquery, not per-binding queries.
+inheritance of previous production flags. Flags are changed only under a
+trustworthy current source/Owner scope; unresolved scopes never revoke a new
+Owner's selection. The online reader denies the latest observed UNKNOWN result
+in the same SQL statement that reads flags, even if source resolution failed.
+Results carry the actual native workflow ID observed at successful completion,
+are retained across capture/redraft, and are selected by workflow ID rather than
+mutable publication status/version. Thus rollback admission cannot activate old
+UNKNOWN state. A normal service read adds one scoped scalar subquery, not
+per-binding queries.
 Personal and draft reads do not query publication state.
 
 The ONLINE_PUB → SUCCESS status/ext CAS and binding flag replacement use ONE
@@ -181,7 +186,9 @@ real transaction/Session. SQL/connection/commit errors propagate and roll back
 both, unlike knowledge business states. The existing progress-poll task retries
 local completion after observing the same external workflow; it does not invoke
 another deploy. No knowledge-specific queue job or table is needed. Native
-ledger deployment ordering rejects late outcomes superseded by a newer deploy.
+ledger/attempt/release gates remain unchanged. Current locking reads of observed
+completion IDs fence late outcomes even when the target device UUID changed;
+there is no new scan or lock over native operation history.
 
 Rollback admission only performs the native two-record flip, with no knowledge
 history validation. Selection changes on observed target deployment success.
@@ -198,3 +205,14 @@ in a knowledge transaction. Disabled integration retains native session and
 upload behavior and accesses no knowledge table. See
 `specs/2026-10-27-knowledge-short-transaction/` for current acceptance evidence;
 earlier stage verification counts are historical, not this refactor's result.
+
+#### Production enablement gate
+
+The feature remains disabled by default. The owner/source/env-scoped completion
+subqueries inspect that Bot's publication history and may sort observed workflow
+IDs; their CPU/scan cost can grow with that history even though statement count
+and selected bindings are bounded. Before opting in on a deployed database,
+inspect its actual existing indexes, history distribution and exact query plans,
+and measure representative completion/read latency and lock waits. Fresh SQLite
+indexes and passing unit tests are not this evidence. This refactor does not
+apply the separately deferred publication index DDL or authorize enablement.

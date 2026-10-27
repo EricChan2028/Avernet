@@ -61,7 +61,7 @@ def test_knowledge_business_states_are_unknown_not_native_failures(publication, 
     completed = finish(repo, online)
     assert completed.status == PublishStatus.SUCCESS
     assert completed.ext["knowledge_selection_result"]["status"] == "unknown"
-    assert _online(db) == set()
+    assert _online(db) == ({"A"} if change == "owner" else set())
 
 
 def test_background_completion_restores_snapshot_tenant_without_guard_bypass(
@@ -86,7 +86,9 @@ def test_background_completion_restores_snapshot_tenant_without_guard_bypass(
         assert _online(db) == {"B"}
 
 
-@pytest.mark.parametrize("method", ["status_ext", "ext_cas", "status_cas", "built"])
+@pytest.mark.parametrize(
+    "method", ["status_ext", "ext_cas", "status_cas", "built", "online_cas"]
+)
 def test_changed_artifact_put_happens_before_any_explicit_transaction(
     publication, method
 ):
@@ -114,6 +116,8 @@ def test_changed_artifact_put_happens_before_any_explicit_transaction(
 
     storage.put_object.side_effect = put
     storage.get_object.side_effect = lambda key: objects.get(key)
+    if method == "online_cas":
+        record = _start_online(repo, record)
     ext = {**record.ext, "config_artifact": {"data": "x" * 62000}}
     if method == "status_ext":
         result = repo.update_status_with_ext(
@@ -126,8 +130,12 @@ def test_changed_artifact_put_happens_before_any_explicit_transaction(
     else:
         args = dict(
             publish_id=record.id,
-            source_status=PublishStatus.DRAFT,
-            target_status=PublishStatus.FAILED,
+            source_status=PublishStatus.ONLINE_PUB
+            if method == "online_cas"
+            else PublishStatus.DRAFT,
+            target_status=PublishStatus.SUCCESS
+            if method == "online_cas"
+            else PublishStatus.FAILED,
             expected_ext=record.ext,
             ext=ext,
         )
@@ -253,3 +261,79 @@ def test_normal_ext_over_60kb_is_not_rejected_by_a_knowledge_only_limit(publicat
     built = repo.update_status(record.id, PublishStatus.BUILDING, PublishStatus.DRAFT)
     assert built.status == PublishStatus.BUILDING
     assert built.ext["knowledge_selection_snapshot"]["enabled_kb_ids"] == ["B"]
+
+
+def test_mutable_snapshot_and_completion_reads_are_current_locking_reads(publication):
+    from sqlalchemy.dialects import mysql
+    from sqlalchemy.orm import Session
+
+    _db, repo, record = publication
+    reads = []
+
+    def inspect(orm):
+        if orm.is_select:
+            reads.append(str(orm.statement.compile(dialect=mysql.dialect())))
+
+    event.listen(Session, "do_orm_execute", inspect)
+    try:
+        online = _start_online(repo, record)
+        finish(repo, online)
+    finally:
+        event.remove(Session, "do_orm_execute", inspect)
+    # A plain consistent read after waiting on a Bot row would retain the
+    # pre-lock MySQL REPEATABLE READ snapshot. Locking reads see the editor or
+    # deployment that committed while we waited; SQLite concurrency alone
+    # cannot establish that property.
+    mutable_reads = [
+        sql
+        for sql in reads
+        if "FROM ac_bot_knowledge_binding" in sql
+        or ("FROM ac_bot_publish" in sql and "JSON_EXTRACT" in sql)
+    ]
+    assert mutable_reads
+    assert all("FOR UPDATE" in sql for sql in mutable_reads)
+
+
+def test_stale_rollback_pair_does_not_put_either_artifact(publication):
+    _db, repo, record = publication
+    assert repo.rollback_flip(
+        demoted_publish_id=record.id,
+        demoted_ext={**record.ext, "config_artifact": {"data": "x" * 62000}},
+        demoted_from_status=PublishStatus.DRAFT,
+        demoted_to_status=PublishStatus.UPGRADED,
+        restored_publish_id=999,
+        restored_ext={},
+        restored_from_status=PublishStatus.UPGRADED,
+        restored_to_status=PublishStatus.SUCCESS,
+    ) == (False, False)
+    repo._offload._oss.put_object.assert_not_called()
+
+
+def test_delete_racing_pre_staged_put_does_not_leave_unowned_objects(publication):
+    _db, repo, record = publication
+    storage = repo._offload._oss
+    objects = {}
+    storage.list_objects.side_effect = lambda prefix: [
+        key for key in objects if key.startswith(prefix)
+    ]
+    storage.delete_object.side_effect = lambda key: objects.pop(key, None)
+
+    def put(key, body):
+        # Native delete cleans before the upload becomes visible.
+        assert repo.delete(record.id)
+        objects[key] = body
+        return True
+
+    storage.put_object.side_effect = put
+    assert (
+        repo.compare_and_set_status_with_ext(
+            publish_id=record.id,
+            source_status=PublishStatus.DRAFT,
+            target_status=PublishStatus.FAILED,
+            expected_ext=record.ext,
+            ext={"config_artifact": {"data": "x" * 62000}},
+        )
+        is None
+    )
+    assert not objects
+    assert repo.get_by_id(record.id) is None

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 from injector import inject
-from sqlalchemy import literal, select, update
+from sqlalchemy import JSON, func, literal, select, type_coerce, update
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
@@ -159,22 +159,25 @@ def require_editable(session, bot: BotModel, *, lock: bool = False) -> None:
 
 
 def _online_selection_known(session, bot):
-    """SQL predicate, evaluated in the SAME statement as the production flags.
+    """Read the last OBSERVED completion, not mutable native status/version.
 
-    The result is internally encoded/protected with status first. A temporary
-    pair of native SUCCESS rows is conservatively denied until supersession.
-    Neither tenant inference nor an extra publication table is needed.
+    Rollback admission and redraft must not activate or erase an old result.
+    The scalar is in the same statement as flags, with no separate read race.
     """
-    from agentclaw.community.core.service_bot.repository.models import (
-        BotPublishModel, PublishStatus,
-    )
+    from agentclaw.community.core.service_bot.repository.models import BotPublishModel
 
-    return ~session.query(BotPublishModel.id).filter(
+    result = type_coerce(BotPublishModel.ext, JSON)["knowledge_selection_result"]
+    state = result["status"].as_string()
+    deployment_id = result["deployment_id"].as_integer()
+    current = session.query(state).filter(
         BotPublishModel.source_bot_pk == bot.id,
         BotPublishModel.env == bot.env,
-        BotPublishModel.status == PublishStatus.SUCCESS,
-        BotPublishModel.ext.contains('"knowledge_selection_result": {"status": "unknown"'),
-    ).exists()
+        BotPublishModel.owner_id == bot.owner_id,
+        state.in_(("applied", "unknown")),
+    ).order_by(
+        func.coalesce(deployment_id, 0).desc(), BotPublishModel.id.desc(),
+    ).limit(1).scalar_subquery()
+    return func.coalesce(current != "unknown", True)
 
 
 class BotKnowledgeRepository:

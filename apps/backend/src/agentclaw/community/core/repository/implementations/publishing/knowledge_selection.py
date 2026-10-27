@@ -39,7 +39,7 @@ from agentclaw.community.kernel.knowledge import (
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.env_utils import get_current_env
-from sqlalchemy import func, or_
+from sqlalchemy import JSON, func, or_, type_coerce
 
 SNAPSHOT_KEY = "knowledge_selection_snapshot"
 RESULT_KEY = "knowledge_selection_result"
@@ -189,7 +189,6 @@ def freeze_build(session, publish_id):
         return False
     ext = _ext(publish)
     ext.pop(_ROLLBACK_BASE_KEY, None)
-    ext.pop(RESULT_KEY, None)
     generation = uuid4().hex
     source = None
     try:
@@ -198,7 +197,6 @@ def freeze_build(session, publish_id):
             return False
         ext = _ext(publish)
         ext.pop(_ROLLBACK_BASE_KEY, None)
-        ext.pop(RESULT_KEY, None)
         ids = [
             r[0]
             for r in _bindings(session, source)
@@ -206,6 +204,7 @@ def freeze_build(session, publish_id):
             .filter(Binding.enabled.is_(True))
             .order_by(Binding.kb_id)
             .limit(_MAX_SELECTION + 1)
+            .with_for_update()
             .all()
         ]
         if len(ids) > _MAX_SELECTION:
@@ -224,7 +223,6 @@ def freeze_build(session, publish_id):
             return False
         ext = _ext(publish)
         ext.pop(_ROLLBACK_BASE_KEY, None)
-        ext.pop(RESULT_KEY, None)
         ext[SNAPSHOT_KEY] = {
             **(_snapshot_scope(publish, source) if source is not None else {}),
             "generation": generation,
@@ -259,36 +257,27 @@ def merge_protected_ext(stored, incoming):
     return result
 
 
-def _deployment_superseded(session, publish):
-    """Reuse the native ledger's monotonic deployment ordering, not KB history."""
-    online_id = (_ext(publish).get("publish") or {}).get("online")
-    if type(online_id) is not int:
-        return False  # legacy paths without workflow metadata keep native behavior
-    own = (
-        session.query(Operation)
-        .filter(
-            Operation.publish_id == publish.id,
-            Operation.env == publish.env,
-            Operation.stage == "online",
-            Operation.baas_publish_id == online_id,
-        )
-        .first()
-    )
-    if own is None or not own.bot_uuid:
-        return False
+def _newer_observed_completion(session, publish):
+    """Native monotonic workflow IDs also order completions across UUID replacement.
+
+    Bot locking serializes these knowledge writes. A CURRENT read sees a newer
+    completion committed while we waited, without scanning/locking op history.
+    Native operation/attempt/release gates themselves remain unchanged.
+    """
+    workflow_id = (_ext(publish).get("publish") or {}).get("online")
+    if type(workflow_id) is not int:
+        return False  # legacy local completion without workflow metadata
+    result_id = type_coerce(Publish.ext, JSON)[RESULT_KEY]["deployment_id"].as_integer()
     return (
-        session.query(Operation.id)
+        session.query(Publish.id)
         .filter(
-            Operation.bot_uuid == own.bot_uuid,
-            Operation.env == publish.env,
-            Operation.baas_publish_id > online_id,
-            Operation.operation_kind.in_(
-                tuple(PublishOperationKind.version_setting_kinds())
-            ),
-            Operation.state.in_(
-                (PublishOperationState.ID_RECORDED, PublishOperationState.COMPLETED)
-            ),
+            Publish.source_bot_pk == publish.source_bot_pk,
+            Publish.env == publish.env,
+            Publish.owner_id == publish.owner_id,
+            Publish.id != publish.id,
+            result_id > workflow_id,
         )
+        .with_for_update()
         .first()
         is not None
     )
@@ -318,6 +307,7 @@ def prepare_online(session, publish_id, expected_json):
                 for r in _bindings(session, source)
                 .with_entities(Binding.kb_id)
                 .filter(Binding.kb_id.in_(ids))
+                .with_for_update()
                 .all()
             }
             if ids
@@ -333,22 +323,18 @@ def prepare_online(session, publish_id, expected_json):
     session.refresh(publish, with_for_update=True)
     if publish.status != PublishStatus.ONLINE_PUB or publish.ext != expected_json:
         return None
-    if _deployment_superseded(session, publish):
+    if source is not None and _newer_observed_completion(session, publish):
         return None
+    workflow_id = (_ext(publish).get("publish") or {}).get("online")
+    outcome["deployment_id"] = workflow_id if type(workflow_id) is int else 0
     return source, snapshot, outcome
 
 
-def replace_online(session, publish_id, source, snapshot, outcome):
+def replace_online(session, source, snapshot):
     """Same Session as the winning native CAS; unknown never inherits old flags."""
     if source is None:
-        # Revocation only: native immutable PK + env and the normal Binding
-        # tenant guard. Never substitute another same-named Bot or grant access.
-        publish = session.get(Publish, publish_id)
-        session.query(Binding).filter(
-            Binding.bot_pk == publish.source_bot_pk,
-            Binding.env == publish.env,
-            Binding.online_enabled.is_(True),
-        ).update({Binding.online_enabled: False}, synchronize_session=False)
+        # Never revoke a new Owner/tenant's flags using only a historical PK.
+        # The observed UNKNOWN result denies the original scope on reads.
         return
     query = _bindings(session, source)
     ids = snapshot["enabled_kb_ids"] if snapshot is not None else []

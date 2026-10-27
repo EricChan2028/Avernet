@@ -128,6 +128,14 @@ class BotPublishRepository(
         self._validate_knowledge_ext(encoded)
         if pending and stored.get("config_artifact_oss", {}).get("oss_key") != pending[0]:
             self._offload.upload(pending)
+            # Delete can race the PUT and sweep its prefix before bytes land.
+            # Reap here only if the immutable owner is already gone; a later
+            # delete will see the completed PUT and use the native cleanup.
+            with self._db.orm_session() as db:
+                exists = db.query(self.Model.id).filter(self.Model.id == publish_id).first()
+            if exists is None:
+                self._offload.cleanup(self._offload.prefix(env, publish_id))
+                return False
         return True
 
     def _upload_native(self, pending):
@@ -680,7 +688,7 @@ class BotPublishRepository(
             if affected > 0:
                 self._upload_native(pending)
                 if online is not None:
-                    knowledge_selection.replace_online(db, publish_id, *online)
+                    knowledge_selection.replace_online(db, *online[:2])
         if affected == 0:
             return None
         return self.get_by_id(publish_id)
