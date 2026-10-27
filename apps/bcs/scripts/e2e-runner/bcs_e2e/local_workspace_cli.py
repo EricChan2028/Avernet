@@ -339,8 +339,12 @@ class OwnedLocalWorkspaceCli:
         try:
             with LocalCliExchange(self, event, token=exchange_token, body=body,
                                   **exchange_options) as exchange:
+                # The legacy no-auth Group reads/fuse contract requires an empty
+                # wire credential: the product CLI auto-discovers a non-empty
+                # session token and would send Bearer, which the exchange
+                # admission correctly rejects for an unauthenticated operation.
                 root, context, environment, credential, require_context = self._context(
-                    len(self.state['operations']), token, exchange.origin)
+                    len(self.state['operations']), exchange_token, exchange.origin)
                 write(context, credential)
                 require_context(credential)
                 result = capture([str(self.binary), '--json', '--log-level', 'error', *args],

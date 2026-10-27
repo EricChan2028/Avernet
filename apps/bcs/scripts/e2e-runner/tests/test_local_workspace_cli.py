@@ -7,6 +7,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import threading
 import unittest
 from unittest.mock import Mock, patch
@@ -94,6 +95,69 @@ class LocalWorkspaceCliGuardTests(unittest.TestCase):
             'focus': None, 'session_id': 'group_owned', 'fusion_mode': None})
         self.assertEqual(args, ['fuse', '--group', 'group_owned', '--question', QUESTION,
                                 '--participants', 'pm-id,eng-id'])
+
+    def test_group_get_wire_credential_stays_empty_and_clears_after(self):
+        case = self.case()
+        case._admit_pm = Mock(return_value=('pm-id', 'owned-pm-token'))
+        case._save = Mock()
+        case.identities = SimpleNamespace(origin='http://127.0.0.1:1')
+        case.runtime = SimpleNamespace(root=Path(tempfile.mkdtemp()))
+        self.addCleanup(shutil.rmtree, case.runtime.root, ignore_errors=True)
+        case.state['operations'] = [{'operation': 'create-primary'}]
+        case.state['resources']['primary'] = {
+            'id': 'group_owned', 'handle': 'h',
+            'initial_session': {'id': 'group_owned:1', 'handle': 's'}}
+        case.binary = Path('/loopback/fake/bcs-cli')
+        case.ledger._get.return_value = {
+            'kind': 'group', 'origin': 'created', 'state': 'live',
+            'case_id': CASE_ID, 'attempt': 1, 'resource_id': 'group_owned'}
+        reply = {'id': 'group_owned', 'driver_bot': 'pm-id', 'status': 'active',
+                 'participants': [{'bot_uuid': 'pm-id'}, {'bot_uuid': 'eng-id'}]}
+        pegged = []
+
+        class FakeExchange:
+            def __init__(self, cli_case, event, *, token, body, auth_contract):
+                self.case, self.event = cli_case, event
+                self.origin = 'http://127.0.0.1:1'
+                self.failure = None
+                self.attempts = 1
+                self.forwarded = 1
+                self.response = reply
+
+            def __enter__(self):
+                self.event['http_status'] = 200
+                return self
+
+            def __exit__(self, *_exc_info):
+                return False
+
+        def fake_capture(argv, *, timeout_seconds, max_output_bytes,
+                         environment=None, cwd=None, collect_stderr=False):
+            pegged.append(json.loads(
+                (Path(cwd) / 'bot' / '.bcs' / 'session.json').read_text()))
+            return subprocess.CompletedProcess(
+                [], 0, json.dumps(reply).encode(), b'')
+
+        with patch('bcs_e2e.local_workspace_cli.LocalCliExchange', FakeExchange), \
+             patch('bcs_e2e.local_workspace_cli.capture', side_effect=fake_capture):
+            observed = case._invoke('get-primary', *case._expected('get-primary'))
+
+        self.assertEqual(observed, reply)
+        # The legacy no-auth Group read must go out with an empty wire token:
+        # the product CLI auto-discovers session.json and would otherwise send
+        # a Bearer the exchange admission correctly rejects.
+        self.assertEqual(pegged, [{'schema_version': 1, 'token': '',
+                                   'bot_uuid': 'pm-id',
+                                   'api_base_url': 'http://127.0.0.1:1'}])
+        sessions = list(case.runtime.root.glob('workspace-cli-command-*/bot/.bcs/session.json'))
+        self.assertEqual(len(sessions), 1)
+        self.assertEqual(json.loads(sessions[0].read_text()),
+                         {'schema_version': 1, 'token': '',
+                          'api_base_url': 'http://127.0.0.1:1'})
+        operation = case.state['operations'][-1]
+        self.assertEqual(operation['status'], 'ACKNOWLEDGED')
+        self.assertEqual(operation['credential_cleanup'], 'CLEARED')
+        self.assertEqual(operation['wire_authentication'], 'NONE_LEGACY_LOCAL_GROUP_GET')
 
     def test_adapter_has_no_remote_cookie_delete_or_broad_stop_surface(self):
         source = (ROOT/'bcs_e2e'/'local_workspace_cli.py').read_text()
