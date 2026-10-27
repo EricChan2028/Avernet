@@ -169,7 +169,8 @@ def _validate_result(plan: ChannelPublicCasePlan, result: AdapterCall) -> None:
     expected_paths = {
         REQUIREMENT_IDS[0]: plan.requirements[0].path,
         REQUIREMENT_IDS[1]: plan.requirements[1].path,
-        REQUIREMENT_IDS[2]: (PUBLIC_BY_TARGET_PREFIX + projection['target_actor_id']
+        REQUIREMENT_IDS[2]: (PUBLIC_BY_TARGET_PREFIX
+                             + projection['target_actor_id'].replace(':', '%3A')
                              + '&channel_type=' + UNINSTALLED_CHANNEL_TYPE),
         REQUIREMENT_IDS[3]: plan.requirements[3].path,
     }

@@ -219,6 +219,31 @@ class ChannelBindingTests(unittest.TestCase):
         self.assertTrue(all(request.full_url.startswith('https://teamclawgw.example.com')
                            for request in requests))
 
+    def test_gateway_profile_accepts_the_station_percent_encoded_bot_id(self):
+        profile = base_profile(gateway=True)
+        driver = 'driver:bot'
+        encoded_path = (
+            '/openapi/v1/collaboration/channels/bindings/by-target'
+            '?target_type=bot&target_id=driver%3Abot'
+            '&channel_type=e2e-uninstalled-channel'
+        )
+        profile['actors']['driver']['bot_id'] = driver
+        profile['edge_case_bindings']['channel_bindings.create_denied'][
+            'target_actor_id'] = driver
+        profile['edge_case_bindings']['channel_bindings.by_target'][
+            'target_actor_id'] = driver
+        profile['edge_case_bindings']['channel_bindings.by_target'][
+            'path'] = encoded_path
+        profile = validate(profile)
+
+        execution, requests = self.run_case(profile_value=profile)
+        self.assertEqual(execution.status, 'PASS')
+        self.assertEqual([request.full_url.split('https://teamclawgw.example.com', 1)[1]
+                          for request in requests],
+                         [CREATE_PATH, LIST_PATH, encoded_path, LIST_PATH])
+        for step in execution.steps:
+            self.assertEqual(step.status, 'PASS')
+
     def test_wrong_rejection_target_or_ghost_visible_blocks_without_partial_credit(self):
         cases = {
             'invalid-request-code': (
