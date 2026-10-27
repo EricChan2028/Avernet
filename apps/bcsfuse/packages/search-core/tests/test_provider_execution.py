@@ -132,7 +132,7 @@ def test_scope_is_applied_before_top_k(tmp_path):
 
 
 @pytest.mark.parametrize("invalid", ["dependency", "unauthorized", "duplicate", "nan"])
-def test_pipeline_errors_are_not_empty_success(invalid):
+def test_pipeline_failures_are_explicit_not_silent(invalid):
     hit = VectorSearchHit(id="a", score=0.5, payload={"content": "支付"})
     index = Mock()
     index.vector_search.return_value = [hit]
@@ -152,6 +152,14 @@ def test_pipeline_errors_are_not_empty_success(invalid):
     service = HybridRetrievalService(
         index=index, embedding=embedding, reranker=reranker
     )
+    if invalid == "dependency":
+        result = asyncio.run(
+            service.retrieve(RetrievalRequest("支付", 1, {}, frozenset({"a"})))
+        )
+        assert result.status == "degraded"
+        assert result.reasons == ("semantic_unavailable",)
+        return
+
     with pytest.raises(SearchUnavailable):
         asyncio.run(service.retrieve(RetrievalRequest("支付", 1, {}, frozenset({"a"}))))
 

@@ -23,9 +23,17 @@ a successful query with no matches. Model-specific scores are not interchangeabl
 RRF, and providers must not enforce quotas with an inter-request sleep inside the
 provider implementation.
 
+The HA primitives remain transport-agnostic: `core.ha.OwnershipCoordinator`
+enforces one owner per collection pair through an injected process-independent
+`IndexOwnershipStore`; `IndexHealth` round-trips owner/version/timestamp/staleness
+metadata. `providers.read_only.ReadOnlyRetrievalIndex` rejects upsert/delete before
+the backing index, and `providers.fallback.RegexFallbackIndex` supplies the final
+bounded literal path with no model, network or storage dependency.
+
 TC retains its own fragment aggregation and Worker/Profile policy. Its thin
 adapters reexport shared value classes, load existing env configuration, preserve
 TC diagnostics, and explicitly enable Worker-ID keyword priority. Generic sparse
 retrieval does no such ID lookup. Provider conformance coverage lives in
-`tests/test_provider_execution.py` and `tests/test_retrieval_pipeline.py`; TC and
-OCB additionally run their existing compatibility/composition suites.
+`tests/test_provider_execution.py`, `tests/test_retrieval_pipeline.py`, and
+`tests/test_ha_refactor_tdd.py`; TC and OCB additionally run their existing
+compatibility/composition suites.
