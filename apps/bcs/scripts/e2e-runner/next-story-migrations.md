@@ -4076,3 +4076,28 @@ and its reviewed prebuilt `bcs-cli` (SHA256
 `72fef9d390eacc0e5455daa3d5838c91368c0ec59508342a2f48c7708b4937fe`) remains
 available; after the Cookie refresh, rerun that case on the rebased runner
 with a fresh Run rather than rebuilding the Rust product locally.
+
+## 2026-10-27 clean-rebase collaboration-team live preprod run
+
+The collaboration-team Story was rerun on the clean rebased branch after the
+human Cookie was refreshed. The run used the same r12 collaboration-team
+Profile, but with the post-rebase runner and the prebuilt `bcs-cli` binary whose
+SHA256 still matches the reviewed binding. The preprod manifest was first
+confirmed independently with the refreshed Cookie and returned HTTP 200 with
+`env=pre`; this proved both service reachability and authentication before the
+write path was opened.
+
+The actual collaboration-team Run then completed all 8 obligations on
+`https://bcs-pre.alipay.com`:
+`CLI-COLLAB-TEAM.protect-visibility`,
+`friend-request-reject`, `group-create-read`, `group-add-member`,
+`group-list`, `group-fuse`, `group-complete`, and `group-terminate`.
+Driver status and termination steps were executed with the reviewed
+`human_cookie_with_owned_driver_bot_token` identity; all child group reads
+returned completed/terminated states consistent with the business contract.
+The resulting resource disposition remains
+`REQUEST_AND_GROUP_HISTORY_RETAINED`.
+
+This live result is bound to the fresh post-rebase Run
+`collab-team-preprod-post-rebase-r13`, and it supersedes only the previous
+credential-blocked check. It is not a release qualification claim.
