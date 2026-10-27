@@ -34,7 +34,7 @@ import logging
 import os
 from time import perf_counter
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Request, status
 
 from app.domain.models.bot_recommendation import (
     BotRecommendationRequest,
@@ -121,7 +121,10 @@ def _enrich_trust_level(response: BotRecommendationResponse) -> None:
 ```
 """,
 )
-async def recommend_bots(request: BotRecommendationRequest) -> BotRecommendationResponse:
+async def recommend_bots(
+    http_request: Request,
+    request: BotRecommendationRequest,
+) -> BotRecommendationResponse:
     """
     推荐 Bot
 
@@ -133,6 +136,9 @@ async def recommend_bots(request: BotRecommendationRequest) -> BotRecommendation
     Returns:
         BotRecommendationResponse: 包含推荐的 Bot 列表
     """
+    from app.bootstrap.oss_business_routes import require_oss_auth
+
+    require_oss_auth(http_request)
     trace_id = get_trace_id()  # 从中间件设置的 contextvars 读取，用于传递给响应
     started = perf_counter()
 

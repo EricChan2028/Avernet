@@ -18,7 +18,7 @@ class RealEmbeddingProvider(SharedEmbeddingProvider):
         max_retries=4,
         base_delay_ms=5000,
         max_delay_ms=60000,
-        request_interval_ms=1200,
+        request_interval_ms=0,
         **kwargs,
     ):
         super().__init__(

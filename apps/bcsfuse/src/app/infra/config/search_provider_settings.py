@@ -7,7 +7,7 @@ def qdrant_path(path):
     return path or os.getenv("QDRANT_LOCAL_PATH", "./qdrant_storage")
 
 
-def embedding_options(max_retries, base_delay_ms, request_interval_ms):
+def embedding_options(max_retries, base_delay_ms, request_interval_ms=0):
     return dict(
         max_retries=int(os.environ.get("EMBEDDING_MAX_RETRIES", max_retries)),
         base_delay_ms=int(os.environ.get("EMBEDDING_RETRY_BACKOFF_SECONDS", "5"))

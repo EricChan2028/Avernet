@@ -106,6 +106,20 @@ def _get_runtime_service(request: Request):
     )
 
 
+def _ensure_writable_index(request: Request) -> None:
+    """Reject writes before durable providers when this process is a reader."""
+    registry = request.app.state.context.registry
+    vector_store = registry.get("vector_store")
+    if vector_store is not None and getattr(vector_store, "read_only", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "INDEX_READ_ONLY",
+                "message": "This replica is read-only; send updates to the index owner",
+            },
+        )
+
+
 def _runtime_response(worker) -> dict:
     return {
         "success": True,
@@ -151,6 +165,7 @@ async def batch_query_worker_configs(
 async def create_worker(payload: WorkerCreateRequest, request: Request) -> dict:
     """Register a worker through the provider-backed application service."""
     require_oss_auth(request)
+    _ensure_writable_index(request)
     service = _get_import_service(request)
     try:
         worker = service.import_from_api(
@@ -209,6 +224,7 @@ async def _set_runtime_state(
 ) -> dict:
     started_at = perf_counter() if online else None
     require_oss_auth(request)
+    _ensure_writable_index(request)
     if online:
         logger.info(
             "[ONLINE-TIMING] phase=auth worker_id=%s elapsed_ms=%.1f",
@@ -291,6 +307,7 @@ async def activate_worker_profile(
 ) -> dict:
     """Activate a profile only after its visibility binding is durable."""
     require_oss_auth(request)
+    _ensure_writable_index(request)
     registry = request.app.state.context.registry
     profile_store = registry.get("worker_profile_content_store")
     binding_store = registry.get("worker_profile_binding_store")
@@ -446,6 +463,7 @@ def _get_profile_service():
 async def delete_worker(worker_id: str, request: Request) -> dict:
     """Delete an existing worker through the always-mounted product API."""
     require_oss_auth(request)
+    _ensure_writable_index(request)
     store = request.app.state.context.registry.get("worker_registry_store")
     if store is None:
         raise HTTPException(

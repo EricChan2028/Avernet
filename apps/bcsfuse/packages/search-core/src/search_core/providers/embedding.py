@@ -65,7 +65,7 @@ class RealEmbeddingProvider(EmbeddingProvider):
         max_retries: int = 4,
         base_delay_ms: int = 5000,
         max_delay_ms: int = 60000,
-        request_interval_ms: int = 1200,
+        request_interval_ms: int = 0,
     ):
         """
         初始化 Real Provider
@@ -75,13 +75,14 @@ class RealEmbeddingProvider(EmbeddingProvider):
             max_retries: 最大重试次数（默认 4 次，可从环境变量 EMBEDDING_MAX_RETRIES 配置）
             base_delay_ms: 基础延迟时间，毫秒（默认 5000ms = 5s，可从环境变量 EMBEDDING_RETRY_BACKOFF_SECONDS 配置）
             max_delay_ms: 最大延迟时间，毫秒（默认 60000ms = 60s）
-            request_interval_ms: 请求间隔时间，毫秒（默认 1200ms，可从环境变量 EMBEDDING_REQUEST_INTERVAL_MS 配置）
+            request_interval_ms: 兼容参数；内部请求间隔已移除，模型配额由外部限流器管理
         """
         self._settings = settings
         self._max_retries = max_retries
         self._base_delay_ms = base_delay_ms
         self._max_delay_ms = max_delay_ms
-        self._request_interval_ms = request_interval_ms
+        # Keep zero permanently: providers must not serialize callers with sleep.
+        self._request_interval_ms = 0
         self._client: Optional[httpx.Client] = None
         self._last_request_time: Optional[float] = None
 
@@ -212,16 +213,7 @@ class RealEmbeddingProvider(EmbeddingProvider):
         raise last_error or EmbeddingAPIError("未知错误")
 
     def _enforce_request_interval(self):
-        """强制请求间隔，避免触发 rate limit"""
-        if self._last_request_time is not None and self._request_interval_ms > 0:
-            elapsed_ms = (time.time() - self._last_request_time) * 1000
-            if elapsed_ms < self._request_interval_ms:
-                sleep_ms = self._request_interval_ms - elapsed_ms
-                logger.debug(
-                    f"Rate limiting: sleeping {sleep_ms:.0f}ms to enforce request interval"
-                )
-                time.sleep(sleep_ms / 1000.0)
-
+        """Compatibility no-op; model quotas are managed outside providers."""
         self._last_request_time = time.time()
 
     def _extract_retry_after(self, response: httpx.Response) -> Optional[int]:

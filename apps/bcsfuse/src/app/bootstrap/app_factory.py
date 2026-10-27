@@ -37,6 +37,82 @@ def _configure_fusion_dependencies(context: ApplicationContext) -> None:
     fusion_dependencies.set_fused_profile_storage_service(storage_service)
 
 
+_INDEX_METRICS = None
+
+
+def _get_index_metrics():
+    """Create index gauges once; labels follow the active collection owner."""
+    global _INDEX_METRICS
+    if _INDEX_METRICS is None:
+        from prometheus_client import Gauge
+
+        labels = ["collection", "owner"]
+        _INDEX_METRICS = {
+            "ready": Gauge(
+                "bcsfuse_index_ready",
+                "Whether the local index replica is ready to serve reads",
+                labels,
+            ),
+            "stale": Gauge(
+                "bcsfuse_index_stale",
+                "Whether the local index replica is stale",
+                labels,
+            ),
+            "lag_seconds": Gauge(
+                "bcsfuse_index_lag_seconds",
+                "Index revision lag in seconds",
+                labels,
+            ),
+        }
+    return _INDEX_METRICS
+
+
+async def _index_readiness(context: ApplicationContext) -> tuple[bool, dict]:
+    provider_count = len(context.registry.keys())
+    is_ready = provider_count > 0
+    vector_store_info: dict = {}
+
+    try:
+        vector_store = context.registry.get("vector_store")
+    except Exception as error:
+        # Do not leak endpoint details from a provider-registry implementation.
+        return is_ready, {"vector_store_error": type(error).__name__}
+
+    if vector_store is None:
+        return is_ready, {"vector_store_available": False}
+
+    try:
+        check_ready = getattr(vector_store, "check_ready", None)
+        if check_ready is not None:
+            from starlette.concurrency import run_in_threadpool
+
+            store_ready = await run_in_threadpool(check_ready)
+            if store_ready is False:
+                is_ready = False
+    except Exception as error:
+        is_ready = False
+        return is_ready, {"vector_store_error": type(error).__name__}
+
+    connection = getattr(vector_store, "connection", None)
+    index_stale = bool(getattr(vector_store, "index_stale", False))
+    if index_stale:
+        is_ready = False
+    vector_store_info = {
+        "vector_store_available": True,
+        "qdrant_mode": getattr(connection, "mode", None),
+        "vector_store_type": type(vector_store).__name__,
+        "vector_store_instance_id": id(vector_store),
+        "qdrant_collection_name": getattr(vector_store, "collection_name", None),
+        "qdrant_storage_path": getattr(vector_store, "path", None),
+        "index_owner": getattr(vector_store, "index_owner", None),
+        "index_version": getattr(vector_store, "index_version", None),
+        "index_lag_seconds": getattr(vector_store, "index_lag_seconds", None),
+        "index_stale": index_stale,
+        "read_only": bool(getattr(vector_store, "read_only", False)),
+    }
+    return is_ready, vector_store_info
+
+
 def _register_health_routes(app: FastAPI, context: ApplicationContext) -> None:
     @app.get("/health", tags=["Health"])
     async def health():
@@ -55,36 +131,8 @@ def _register_health_routes(app: FastAPI, context: ApplicationContext) -> None:
     async def ready():
         """Return provider readiness without leaking provider failure details."""
         try:
+            is_ready, vector_store_info = await _index_readiness(context)
             provider_count = len(context.registry.keys())
-            is_ready = provider_count > 0
-
-            vector_store_info = {}
-            try:
-                vector_store = context.registry.get("vector_store")
-                if vector_store is not None:
-                    check_ready = getattr(vector_store, "check_ready", None)
-                    if check_ready is not None:
-                        from starlette.concurrency import run_in_threadpool
-                        await run_in_threadpool(check_ready)
-                    connection = getattr(vector_store, "connection", None)
-                    vector_store_info = {
-                        "vector_store_available": True,
-                        "qdrant_mode": getattr(connection, "mode", None),
-                        "vector_store_type": type(vector_store).__name__,
-                        "vector_store_instance_id": id(vector_store),
-                        "qdrant_collection_name": getattr(
-                            vector_store, "collection_name", None
-                        ),
-                        "qdrant_storage_path": getattr(vector_store, "path", None),
-                    }
-                else:
-                    vector_store_info = {"vector_store_available": False}
-            except Exception as error:
-                is_ready = False
-                vector_store_info = {
-                    "vector_store_error": type(error).__name__,
-                }
-
             return JSONResponse(
                 status_code=200 if is_ready else 503,
                 content={
@@ -112,6 +160,28 @@ def _register_health_routes(app: FastAPI, context: ApplicationContext) -> None:
                     "providers": 0,
                 },
             )
+
+    @app.get("/metrics", include_in_schema=False)
+    async def metrics():
+        """Expose current index ownership and staleness in Prometheus text format."""
+        from fastapi import Response
+        from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+        is_ready, info = await _index_readiness(context)
+        collection = str(info.get("qdrant_collection_name") or "unknown")
+        owner = str(info.get("index_owner") or "unknown")
+        gauges = _get_index_metrics()
+        labels = {"collection": collection, "owner": owner}
+        gauges["ready"].labels(**labels).set(1 if is_ready else 0)
+        gauges["stale"].labels(**labels).set(
+            1 if bool(info.get("index_stale", False)) else 0
+        )
+        try:
+            lag = float(info.get("index_lag_seconds") or 0)
+        except (TypeError, ValueError):
+            lag = 0
+        gauges["lag_seconds"].labels(**labels).set(max(lag, 0))
+        return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 def create_bcsfuse_app(
