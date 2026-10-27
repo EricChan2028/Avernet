@@ -23,6 +23,10 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
 )
+from agentclaw.community.adapters.http.task.artifact_actor import (
+    ArtifactWriteActor,
+    resolve_artifact_write_actor,
+)
 from agentclaw.community.adapters.http.task.schemas_artifact import (
     TaskArtifactDescriptorDTO,
     artifact_record_to_descriptor,
@@ -52,14 +56,15 @@ async def upload_task_artifact_object_file(
         None, description="业务展示名(可选;缺省回落上传文件名)", max_length=255
     ),
     file: UploadFile = File(..., description="产物文件字节"),
-    user: AuthenticatedUser = Depends(get_current_user),
+    actor: ArtifactWriteActor = Depends(resolve_artifact_write_actor),
     service: TaskArtifactObjectFileServiceProtocol = Injected(TaskArtifactObjectFileServiceProtocol),  # noqa: B008
 ) -> Envelope[TaskArtifactDescriptorDTO]:
     """上传一个 OBJECT_FILE 产物(字节先落对象存储,成功后登记产品行;幂等)。
 
     内容寻址 key 由服务端派生(``{prefix}/{task_id}/{sha256}{ext}``),同一字节
-    重复上传收敛为同一行。角色为认证用户(``user.id`` 记 creator);relay 场景
-    不经本口(relay 仍只上报引用)。"""
+    重复上传收敛为同一行。双凭证(spec §14):``X-Relay-Token``(relay 尝试,token
+    fence + creator=节点 assignee)或登录用户(creator=user.id)二选一;下载读口
+    仍为用户面。"""
     payload = await file.read()
     record = service.upload_object_file(
         task_id=task_id,
@@ -69,7 +74,8 @@ async def upload_task_artifact_object_file(
         file_name=file.filename or _DEFAULT_FILE_NAME,
         content_type=file.content_type,
         payload=payload,
-        creator=user.id,
+        creator=actor.user.id if actor.user else None,
+        relay_token=actor.relay_token,
     )
     return envelope(artifact_record_to_descriptor(record), request)
 

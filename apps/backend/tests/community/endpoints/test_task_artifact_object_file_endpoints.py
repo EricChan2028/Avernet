@@ -22,6 +22,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskSpec,
 )
 from agentclaw.community.core.task.repository.types import TaskInfoRecord
+from agentclaw.community.core.task.domain.models import TaskNodePatch
 from agentclaw.community.core.task.task_context.task_graph_service import (
     TaskGraphService,
 )
@@ -231,4 +232,113 @@ def download_object_file_unauthenticated():
     expect=ExpectError(status=404),
 )
 def download_object_file_not_found():
+    pass
+
+# ------------------------------------------------------------------ relay 分支(spec §14)
+
+
+_RELAY_TOKEN = "gen-1"
+_RELAY_BOT = "bot-endpoint"
+
+
+def _seed_relay_claim(world) -> None:
+    """在既有图上打认领上下文:节点 relay_token + assignee(claim 时绑定)。"""
+    _seed_artifact_graph(world)
+    world.get(TaskGraphService).update_task_node_info(
+        TaskNodePatch(
+            task_id=_TASK_ID,
+            node_id=_TASK_ID,
+            assignee=_RELAY_BOT,
+            extend_props_patch={"relay_token": _RELAY_TOKEN},
+        )
+    )
+
+
+def _seed_relay_unclaimed(world) -> None:
+    """已派发 token 但无人认领(纯代次 fence,无 assignee)。"""
+    _seed_artifact_graph(world)
+    world.get(TaskGraphService).update_task_node_info(
+        TaskNodePatch(
+            task_id=_TASK_ID,
+            node_id=_TASK_ID,
+            extend_props_patch={"relay_token": _RELAY_TOKEN},
+        )
+    )
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/object-file",
+    scenario="relay_happy",
+    seed=_seed_relay_claim,
+    input=CaseInput(
+        # cookie 与 token 双带:钉分支只看 token,creator 记 assignee 而非 staff id。
+        headers={"X-Relay-Token": _RELAY_TOKEN, "cookie": "staff_id=user-endpoint-1"},
+        form_data={"task_id": _TASK_ID, "node_id": _TASK_ID, "attempt": 0},
+        files=[("file", ("relay.pdf", _UPLOAD_PAYLOAD, "application/pdf"))],
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "creator": _RELAY_BOT,
+                "kind": "file",
+                "attempt": 0,
+                "content": {"kind": "file", "storage_type": "object_file"},
+            },
+        },
+    ),
+)
+def upload_object_file_relay_happy():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/object-file",
+    scenario="relay_err_stale_token",
+    seed=_seed_relay_claim,
+    input=CaseInput(
+        headers={"X-Relay-Token": "gen-wrong"},
+        # attempt 同时失配:钉 fence(409)先于快照(422)的业务序。
+        form_data={"task_id": _TASK_ID, "node_id": _TASK_ID, "attempt": 99},
+        files=[("file", ("a.pdf", b"bytes"))],
+    ),
+    expect=ExpectError(status=409),
+)
+def upload_object_file_relay_stale_token():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/object-file",
+    scenario="relay_err_empty_header_falls_back_to_user_branch",
+    seed=_seed_relay_claim,
+    input=CaseInput(
+        # 空白 token 视为未带(§14.5):走用户分支,无登录态即 401,而非 409。
+        headers={"X-Relay-Token": "  "},
+        form_data={"task_id": _TASK_ID, "node_id": _TASK_ID, "attempt": 0},
+        files=[("file", ("a.pdf", b"bytes"))],
+    ),
+    expect=ExpectError(status=401),
+)
+def upload_object_file_relay_empty_token_header():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/object-file",
+    scenario="relay_err_unclaimed_node",
+    seed=_seed_relay_unclaimed,
+    input=CaseInput(
+        headers={"X-Relay-Token": _RELAY_TOKEN},
+        form_data={"task_id": _TASK_ID, "node_id": _TASK_ID, "attempt": 0},
+        files=[("file", ("a.pdf", b"bytes"))],
+    ),
+    expect=ExpectError(status=409),
+)
+def upload_object_file_relay_unclaimed():
     pass
