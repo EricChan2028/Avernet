@@ -362,6 +362,8 @@ consumes:
 internal_dependencies:
   - agentclaw.community.core.engine_runtime.stage  # stage vocabulary; SQL/runtime selection parity is covered by conformance tests
   - agentclaw.community.core.engine_runtime.errors
+  - agentclaw.community.core.bot_knowledge  # shared Bot lock and binding-model effects at publication CAS
+  - agentclaw.community.kernel.knowledge
   - agentclaw.community.core.space_knowledge.capture_guard
   - agentclaw.community.core.space_knowledge.repository
   - agentclaw.community.plugin_api.space_knowledge
