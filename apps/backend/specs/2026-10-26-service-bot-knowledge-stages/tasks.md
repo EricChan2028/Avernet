@@ -1,3 +1,8 @@
+> Historical baseline: publication/restore coupling and blocking knowledge
+> error handling in this document are superseded by
+> `../2026-10-27-knowledge-nonblocking/`. Draft/verification sharing, production
+> isolation, native ACL and live platform-grant semantics remain unchanged.
+
 # Tasks
 
 ## Group 1 — Selection persistence and contract

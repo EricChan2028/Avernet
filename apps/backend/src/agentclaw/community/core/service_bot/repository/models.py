@@ -178,11 +178,28 @@ class BotPublishModel(Base):
     ext = Column(Text, nullable=True, comment="扩展信息 JSON")
     permission_owner = Column(String(64), nullable=False, comment="权限归属")
 
+    # Optional knowledge projection journal. Excluded from the native mapper:
+    # disabled deployments keep their original SELECT/INSERT shape, including
+    # before this additive migration has been applied.
+    knowledge_tenant = Column(String(128), nullable=True)
+    knowledge_snapshot = Column(Text, nullable=True)
+    knowledge_projection = Column(Text, nullable=True)
+    knowledge_due = Column(DateTime, nullable=True)
+    knowledge_deployment_id = Column(BigInteger, nullable=True)
+    knowledge_restore = Column(Text, nullable=True)
+    knowledge_revision = Column(BigInteger, nullable=True)
+    __mapper_args__ = {"exclude_properties": [
+        "knowledge_tenant", "knowledge_snapshot", "knowledge_projection", "knowledge_due", "knowledge_deployment_id",
+        "knowledge_restore", "knowledge_revision",
+    ]}
+
     # 时间戳
     gmt_create = Column(DateTime, default=func.now(), nullable=False, comment="创建时间")
     gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False, comment="修改时间")
 
     __table_args__ = (
+        Index("idx_publish_knowledge_due", "env", "knowledge_due", "id"),
+        Index("idx_publish_knowledge_deploy", "env", "source_bot_pk", "knowledge_deployment_id", "id"),
         Index(
             "idx_pb_owner_status",
             "publish_bot_id",

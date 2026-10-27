@@ -145,6 +145,7 @@ from agentclaw.community.core.service_bot.services.deploy.producer import (
     DeployArtifactProducerRouter,
 )
 from agentclaw.community.core.service_bot.services.publish_flow_service import PublishFlowService
+from agentclaw.community.core.service_bot.services.knowledge_projection_lifecycle import KnowledgeProjectionLifecycle
 from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
     PublishTaskLifecycle,
 )
@@ -277,6 +278,7 @@ class ServiceBotModule(Module):
         return KnowledgePublicationPolicy(enabled=enabled)
 
     def configure(self, binder: Binder) -> None:
+        binder.bind(KnowledgeProjectionLifecycle, to=KnowledgeProjectionLifecycle, scope=singleton)
         binder.bind(WorkspacePathFactory, to=WorkspacePathFactory, scope=singleton)
         # Offloads an oversized config_artifact out of the ac_bot_publish.ext
         # TEXT column into object storage; injected into the repo below.

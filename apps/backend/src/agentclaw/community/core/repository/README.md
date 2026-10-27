@@ -362,7 +362,7 @@ consumes:
 internal_dependencies:
   - agentclaw.community.core.engine_runtime.stage  # stage vocabulary; SQL/runtime selection parity is covered by conformance tests
   - agentclaw.community.core.engine_runtime.errors
-  - agentclaw.community.core.bot_knowledge  # shared Bot lock and binding-model effects at publication CAS
+  - agentclaw.community.core.bot_knowledge  # shared Bot lock, capture and independent projection effects
   - agentclaw.community.kernel.knowledge
   - agentclaw.community.core.space_knowledge.capture_guard
   - agentclaw.community.core.space_knowledge.repository
@@ -434,3 +434,13 @@ See `core/space_knowledge/README.md` for capture/delivery rollout and rollback.
 `ManagerSyncReadRepositoryProtocol` is read-only: the bot collaborator manager
 sync projector sources its facts and key pages from it, and the sync path
 persists nothing — no queue table, no retry log, and no task record.
+
+## Publication knowledge journal
+
+`BotPublishRepositoryProtocol` exposes bounded reconciliation and scoped manual
+retry, with a default-off no-op. Native completion CAS and its immutable intent
+share one publication-row write. Binding projection and acknowledgement share
+another DB-only transaction; they never undo native completion. Capture errors
+are recorded as UNKNOWN, not repaired from a later draft. The optional columns
+are excluded from native ORM reads/inserts until integration opts in. See
+`core/bot_knowledge/README.md` for schema prerequisites, retry limits and fences.

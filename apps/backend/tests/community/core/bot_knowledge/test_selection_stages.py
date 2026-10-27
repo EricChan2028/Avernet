@@ -205,3 +205,23 @@ def test_online_selection_preserves_owner_tenant_env_and_space_boundaries(knowle
     )
     with avernet_tenant_scope("other-tenant"):
         assert service.list_enabled(scope, selection_stage="online") == ()
+
+
+@pytest.mark.parametrize(
+    "status", ["building", "built", "validate_pub", "validating", "online_pub"]
+)
+def test_service_cannot_edit_shared_working_selection_during_release(knowledge, status):
+    from agentclaw.community.kernel.knowledge import KnowledgeError
+
+    db, _, service, scope = knowledge
+    seed_service(db)
+    with db.orm_session() as session:
+        session.query(BotPublishModel).filter_by(source_bot_pk=1).update(
+            {"status": status}
+        )
+    with pytest.raises(KnowledgeError, match="BOT_DRAFT_REQUIRED"):
+        service.set_enabled(
+            scope=scope, actor_id="owner", kb_id="b", enabled=False, expected_revision=2
+        )
+    assert service.list_enabled(scope, selection_stage="draft") == ("b",)
+    assert service.list_enabled(scope, selection_stage="online") == ("a",)

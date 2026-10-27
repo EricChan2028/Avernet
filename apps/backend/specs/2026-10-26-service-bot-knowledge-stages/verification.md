@@ -1,3 +1,8 @@
+> Historical baseline: publication/restore coupling and blocking knowledge
+> error handling in this document are superseded by
+> `../2026-10-27-knowledge-nonblocking/`. Draft/verification sharing, production
+> isolation, native ACL and live platform-grant semantics remain unchanged.
+
 # Verification of service Bot knowledge selection isolation
 
 The earlier implementation is reused as a source, not as current acceptance

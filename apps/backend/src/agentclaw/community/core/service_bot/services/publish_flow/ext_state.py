@@ -26,7 +26,6 @@ from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
-from agentclaw.community.kernel.knowledge import KnowledgeError
 
 if TYPE_CHECKING:
     from agentclaw.community.core.channel.services.engine_overrides_reader import (
@@ -82,8 +81,14 @@ class PublishExtState:
     @staticmethod
     def require_knowledge_snapshot(expected: dict | None, latest_ext: dict) -> None:
         """An old build/deploy result cannot adopt a new publish generation."""
-        if latest_ext.get("knowledge_selection_snapshot") != expected:
-            raise KnowledgeError("KNOWLEDGE_PUBLISH_SUPERSEDED")
+        latest = latest_ext.get("knowledge_selection_snapshot")
+        generation = latest.get("generation") if isinstance(latest, dict) else None
+        expected_generation = expected.get("generation") if isinstance(expected, dict) else None
+        # Missing/corrupt optional knowledge metadata is not a native gate.
+        # A known NEW admission is still a stale-work fence, independently of
+        # whether optional knowledge capture succeeded for the old attempt.
+        if isinstance(generation, str) and generation != expected_generation:
+            raise PublishFlowServiceError("Publication attempt superseded")
 
     def mutate_and_update_ext(
         self,

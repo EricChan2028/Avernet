@@ -18,6 +18,7 @@ from agentclaw.community.kernel.knowledge import (
     BotKnowledgeScope,
     KnowledgeError,
     KnowledgeSelectionStage,
+    KnowledgePublicationPolicy,
     require_selection_stage,
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
@@ -36,6 +37,29 @@ def binding_view(
         "revision": row.revision,
         "runtime_selection": "online" if online else "current",
     }
+
+
+def online_projection_state(session, bot):
+    from agentclaw.community.core.service_bot.repository.models import BotPublishModel as Publish
+    import json
+
+    column = Publish.__table__.c
+    if session.query(Publish.id).filter(
+        Publish.source_bot_pk == bot.id, Publish.env == bot.env,
+        Publish.status == "success", column.knowledge_deployment_id == 0,
+    ).first() is not None:
+        return "unknown"
+    raw = session.query(column.knowledge_projection).filter(
+        Publish.source_bot_pk == bot.id, Publish.env == bot.env,
+        column.knowledge_deployment_id.is_not(None),
+    ).order_by(column.knowledge_deployment_id.desc(), Publish.id.desc()).first()
+    if raw is None:
+        return "legacy"
+    try:
+        journal = json.loads(raw[0])
+    except (ValueError, TypeError):
+        return "unknown"
+    return journal.get("state", "unknown") if isinstance(journal, dict) else "unknown"
 
 
 def resolve_bot(session, scope: BotKnowledgeScope, *, lock: bool = False) -> BotModel:
@@ -159,8 +183,9 @@ def require_editable(session, bot: BotModel, *, lock: bool = False) -> None:
 
 class BotKnowledgeRepository:
     @inject
-    def __init__(self, db: DatabasePlugin) -> None:
+    def __init__(self, db: DatabasePlugin, knowledge_policy: KnowledgePublicationPolicy = KnowledgePublicationPolicy()) -> None:
         self.db = db
+        self._knowledge_policy = knowledge_policy
 
     def get_bot(
         self,
@@ -253,6 +278,15 @@ class BotKnowledgeRepository:
                     row.revision += 1
                     row.updated_by = actor_id
                 session.flush()
+                if self._knowledge_policy.enabled and bot.bot_type == "service" and changed:
+                    from agentclaw.community.core.service_bot.repository.models import BotPublishModel as Publish
+                    from sqlalchemy import func
+                    current = session.query(Publish.id).filter(
+                        Publish.source_bot_pk == bot.id, Publish.env == bot.env,
+                    ).order_by(Publish.version.desc(), Publish.id.desc()).first()
+                    session.query(Publish).filter(Publish.id == current[0]).update({
+                        Publish.__table__.c.knowledge_revision: func.coalesce(Publish.__table__.c.knowledge_revision, 0) + 1,
+                    }, synchronize_session=False)
                 result = binding_view(row, bot)
                 return result
         except IntegrityError:
@@ -274,6 +308,9 @@ class BotKnowledgeRepository:
                 if exc.status in (403, 404):
                     return ()
                 raise
+            if selection_stage == "online" and bot.bot_type == "service" and self._knowledge_policy.enabled:
+                if online_projection_state(session, bot) not in ("applied", "legacy"):
+                    return ()
             enabled_column = (
                 Binding.online_enabled
                 if selection_stage == "online" and bot.bot_type == "service"
@@ -308,6 +345,9 @@ class BotKnowledgeRepository:
         with self.db.orm_session() as session:
             bot = resolve_bot(session, scope)
             require_editor(session, bot, actor_id)
+            projection_state = "legacy"
+            if selection_stage == "online" and bot.bot_type == "service" and self._knowledge_policy.enabled:
+                projection_state = online_projection_state(session, bot)
             rows = (
                 session.query(Binding)
                 .filter(
@@ -321,8 +361,13 @@ class BotKnowledgeRepository:
                 .all()
             )
             page = rows[:limit]
+            items = [binding_view(r, bot, selection_stage) for r in page]
+            if projection_state not in ("applied", "legacy"):
+                for item in items:
+                    item["enabled"] = False
             result = {
-                "items": [binding_view(r, bot, selection_stage) for r in page],
+                "items": items,
+                "projection_state": projection_state,
                 "next_cursor": page[-1].id if len(rows) > limit else None,
                 "runtime_selection": (
                     "online"

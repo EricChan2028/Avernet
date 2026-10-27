@@ -1,6 +1,8 @@
 """Publication repository behavior against the real binding/publish transaction."""
 
 from contextlib import contextmanager
+
+from agentclaw.community.core.repository.implementations.publishing import knowledge_projection as projection
 from unittest.mock import MagicMock
 
 import pytest
@@ -120,14 +122,14 @@ def _online(db):
         }
 
 
-def _start_online(repo, record):
+def _start_online(repo, record, deployment=77):
     building = repo.update_status(
         record.id, PublishStatus.BUILDING, PublishStatus.DRAFT
     )
     return repo.update_status_with_ext(
         record.id,
         PublishStatus.ONLINE_PUB,
-        {**building.ext, "publish": {"online": 77}},
+        {**building.ext, "publish": {"online": deployment}},
         source_status=PublishStatus.BUILDING,
     )
 
@@ -153,6 +155,8 @@ def test_only_successful_online_cas_replaces_production_from_frozen_selection(
         ext={**online.ext, "done": True},
     )
     assert result.status == PublishStatus.SUCCESS
+    assert _online(db) == {"A"}
+    assert repo.reconcile_knowledge_projection() == 1
     assert _online(db) == {"B"}
     assert (
         repo.compare_and_set_status_with_ext(
@@ -177,6 +181,7 @@ def test_explicit_draft_restore_restores_only_draft_and_is_replay_safe(publicati
         expected_ext=previous.ext,
         ext=previous.ext,
     )
+    repo.reconcile_knowledge_projection()
     draft = repo.insert(
         dict(
             source_bot_pk=1,
@@ -225,6 +230,7 @@ def test_explicit_draft_restore_restores_only_draft_and_is_replay_safe(publicati
         expected_attempt=operation.attempt,
         final_result={"status": "success"},
     )
+    assert repo.reconcile_knowledge_projection() == 1
     with db.orm_session() as session:
         assert {
             r.kb_id
@@ -248,32 +254,22 @@ def test_explicit_draft_restore_restores_only_draft_and_is_replay_safe(publicati
         } == {"A", "B"}
 
 
-def test_missing_snapshot_rejects_success_without_changing_online_or_status(
-    publication,
-):
-    from agentclaw.community.kernel.knowledge import KnowledgeError
-
+def test_missing_snapshot_does_not_block_native_success_and_projects_unknown(publication):
     db, repo, record = publication
-    online = repo.update_status_with_ext(
-        record.id,
-        PublishStatus.ONLINE_PUB,
-        {"publish": {"online": 77}},
-        source_status=PublishStatus.DRAFT,
-    )
+    online = repo.update_status_with_ext(record.id, PublishStatus.ONLINE_PUB,
+        {"publish": {"online": 77}}, source_status=PublishStatus.DRAFT)
     with db.orm_session() as session:
-        session.query(Binding).filter(Binding.kb_id == "A").update(
-            {Binding.online_enabled: True}
-        )
-    with pytest.raises(KnowledgeError, match="KNOWLEDGE_SNAPSHOT_MISSING"):
-        repo.compare_and_set_status_with_ext(
-            publish_id=record.id,
-            source_status=PublishStatus.ONLINE_PUB,
-            target_status=PublishStatus.SUCCESS,
-            expected_ext=online.ext,
-            ext=online.ext,
-        )
-    assert repo.get_by_id(record.id).status == PublishStatus.ONLINE_PUB
+        session.query(Binding).filter_by(kb_id="A").update({"online_enabled": True})
+    result = repo.compare_and_set_status_with_ext(publish_id=record.id,
+        source_status=PublishStatus.ONLINE_PUB, target_status=PublishStatus.SUCCESS,
+        expected_ext=online.ext, ext=online.ext)
+    assert result.status == PublishStatus.SUCCESS
     assert _online(db) == {"A"}
+    assert repo.reconcile_knowledge_projection() == 1
+    assert _online(db) == set()
+    with db.orm_session() as session:
+        raw = session.query(repo.Model.__table__.c.knowledge_projection).filter_by(id=record.id).scalar()
+    assert projection.decode(raw)["state"] == "unknown"
 
 
 def test_empty_snapshot_is_valid_and_clears_production(publication):
@@ -291,12 +287,12 @@ def test_empty_snapshot_is_valid_and_clears_production(publication):
         expected_ext=online.ext,
         ext=online.ext,
     )
+    assert repo.reconcile_knowledge_projection() == 1
     assert _online(db) == set()
 
 
 @pytest.mark.parametrize("change", ["space", "orphan", "environment", "tenant"])
 def test_source_scope_change_never_promotes_same_named_bot(publication, change):
-    from agentclaw.community.kernel.knowledge import KnowledgeError
 
     db, repo, record = publication
     online = _start_online(repo, record)
@@ -326,15 +322,15 @@ def test_source_scope_change_never_promotes_same_named_bot(publication, change):
             source.env = "pre"
         else:
             source.avernet_tenant = "other"
-    with pytest.raises(KnowledgeError):
-        repo.compare_and_set_status_with_ext(
+    repo.compare_and_set_status_with_ext(
             publish_id=record.id,
             source_status=PublishStatus.ONLINE_PUB,
             target_status=PublishStatus.SUCCESS,
             expected_ext=online.ext,
             ext=online.ext,
         )
-    assert repo.get_by_id(record.id).status == PublishStatus.ONLINE_PUB
+    assert repo.get_by_id(record.id).status == PublishStatus.SUCCESS
+    repo.reconcile_knowledge_projection()
     assert _online(db) == set()
 
 
@@ -349,10 +345,11 @@ def test_legacy_ext_updates_cannot_drop_snapshot_and_stale_outcome_does_not_prom
         {"publish": {"online": 78}, "background": True},
         source_status=PublishStatus.ONLINE_PUB,
     )
-    assert (
-        updated.ext["knowledge_selection_snapshot"]
-        == online.ext["knowledge_selection_snapshot"]
-    )
+    assert updated.status == PublishStatus.ONLINE_PUB
+    # A legacy writer may replace ext, but never the authoritative capture.
+    with db.orm_session() as session:
+        raw = session.query(repo.Model.__table__.c.knowledge_snapshot).filter_by(id=record.id).scalar()
+    assert projection.decode(raw) == online.ext["knowledge_selection_snapshot"]
     assert (
         repo.compare_and_set_status_with_ext(
             publish_id=record.id,
@@ -411,6 +408,7 @@ def test_rollback_flip_does_not_promote_until_target_deployment_succeeds(publica
         expected_ext=target.ext,
         ext=target.ext,
     )
+    repo.reconcile_knowledge_projection()
     second = repo.insert(
         dict(
             source_bot_pk=1,
@@ -432,7 +430,7 @@ def test_rollback_flip_does_not_promote_until_target_deployment_succeeds(publica
         session.query(Binding).filter(Binding.kb_id == "B").update(
             {Binding.enabled: False}
         )
-    current = _start_online(repo, second)
+    current = _start_online(repo, second, deployment=88)
     current = repo.compare_and_set_status_with_ext(
         publish_id=second.id,
         source_status=PublishStatus.ONLINE_PUB,
@@ -440,6 +438,7 @@ def test_rollback_flip_does_not_promote_until_target_deployment_succeeds(publica
         expected_ext=current.ext,
         ext=current.ext,
     )
+    repo.reconcile_knowledge_projection()
     target = repo.update_status(first.id, PublishStatus.UPGRADED, PublishStatus.SUCCESS)
     assert _online(db) == {"A"}
     assert repo.rollback_flip(
@@ -467,6 +466,7 @@ def test_rollback_flip_does_not_promote_until_target_deployment_succeeds(publica
         expected_ext=target.ext,
         ext=target.ext,
     )
+    repo.reconcile_knowledge_projection()
     assert _online(db) == {"B"}
 
 
@@ -557,20 +557,16 @@ def test_failed_online_outcome_keeps_previous_production_selection(publication):
     assert _online(db) == {"A"}
 
 
-def test_snapshot_capacity_is_checked_before_accepting_build(publication):
-    from agentclaw.community.kernel.knowledge import KnowledgeError
-
+def test_snapshot_capacity_failure_does_not_block_native_build(publication):
     db, repo, record = publication
-    repo.update_status_with_ext(
-        record.id,
-        PublishStatus.DRAFT,
-        {"large": "中" * 19980},
-        source_status=PublishStatus.DRAFT,
-    )
-    with pytest.raises(KnowledgeError, match="KNOWLEDGE_PUBLISH_EXT_TOO_LARGE"):
-        repo.update_status(record.id, PublishStatus.BUILDING, PublishStatus.DRAFT)
-    assert repo.get_by_id(record.id).status == PublishStatus.DRAFT
-    assert "knowledge_selection_snapshot" not in repo.get_by_id(record.id).ext
+    repo.update_status_with_ext(record.id, PublishStatus.DRAFT,
+        {"large": "中" * 19980}, source_status=PublishStatus.DRAFT)
+    assert repo.update_status(record.id, PublishStatus.BUILDING, PublishStatus.DRAFT).status == PublishStatus.BUILDING
+    token = repo.get_by_id(record.id).ext["knowledge_selection_snapshot"]
+    assert set(token) == {"generation"}
+    with db.orm_session() as session:
+        raw = session.query(repo.Model.__table__.c.knowledge_snapshot).filter_by(id=record.id).scalar()
+    assert projection.decode(raw)["capture_error"]
 
 
 @pytest.mark.parametrize("first", ["publish", "edit"])
@@ -684,7 +680,6 @@ def test_sqlite_freeze_and_draft_edit_share_a_real_write_reservation(
 
 
 def test_late_rollback_success_cannot_overwrite_republished_newer_version(publication):
-    from agentclaw.community.kernel.knowledge import KnowledgeError
 
     db, repo, first = publication
 
@@ -698,6 +693,7 @@ def test_late_rollback_success_cannot_overwrite_republished_newer_version(public
         )
 
     first = finish(_start_online(repo, first))
+    repo.reconcile_knowledge_projection()
     second = repo.insert(
         dict(
             source_bot_pk=1,
@@ -719,7 +715,8 @@ def test_late_rollback_success_cannot_overwrite_republished_newer_version(public
         session.query(Binding).filter(Binding.kb_id == "B").update(
             {Binding.enabled: False}
         )
-    second = finish(_start_online(repo, second))
+    second = finish(_start_online(repo, second, deployment=88))
+    repo.reconcile_knowledge_projection()
     first = repo.update_status(first.id, PublishStatus.UPGRADED, PublishStatus.SUCCESS)
     repo.rollback_flip(
         demoted_publish_id=second.id,
@@ -740,11 +737,12 @@ def test_late_rollback_success_cannot_overwrite_republished_newer_version(public
     )
     # Native rollback left the demoted version in DRAFT. Republish that same id
     # before the older rollback's deployment callback returns.
-    second = finish(_start_online(repo, repo.get_by_id(second.id)))
+    second = finish(_start_online(repo, repo.get_by_id(second.id), deployment=100))
+    repo.reconcile_knowledge_projection()
     assert _online(db) == {"A"}
-    with pytest.raises(KnowledgeError, match="KNOWLEDGE_ONLINE_PREDECESSOR_CHANGED"):
-        finish(rollback)
-    assert repo.get_by_id(first.id).status == PublishStatus.ONLINE_PUB
+    assert finish(rollback).status == PublishStatus.SUCCESS
+    repo.reconcile_knowledge_projection()
+    assert repo.get_by_id(first.id).status == PublishStatus.SUCCESS
     assert _online(db) == {"A"}
 
 

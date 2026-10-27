@@ -1,12 +1,12 @@
-"""Knowledge selection effects inside the caller's publication transaction.
+"""Bounded capture and selection primitives for the independent projector.
 
-No remote I/O, independent commit, Bot.ext writes or knowledge-content snapshots. Bot
-locking is shared with the binding writer (including SQLite's write reservation).
+Only admission capture runs synchronously, with explicit UNKNOWN fallback owned
+by the publication repository. All binding promotion/restoration runs in the
+projector's transaction; none runs in native deployment completion.
 """
 
 from __future__ import annotations
 
-import copy
 import json
 from datetime import datetime
 from uuid import uuid4
@@ -37,10 +37,9 @@ from agentclaw.community.kernel.knowledge import (
 )
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.utils.env_utils import get_current_env
-from sqlalchemy import func, or_
+from sqlalchemy import func
 
 SNAPSHOT_KEY = "knowledge_selection_snapshot"
-_RESTORE_KEY = "knowledge_selection_restore"
 _ROLLBACK_BASE_KEY = "knowledge_selection_rollback_base"
 _MAX_SELECTION = 100
 _MAX_EXT_BYTES = 60000
@@ -99,7 +98,6 @@ def encode_ext(ext):
         if key in ext:
             canonical[key] = ext[key]
     encoded = json.dumps(canonical, ensure_ascii=False)
-    validate_encoded_ext(encoded)
     return encoded
 
 
@@ -107,29 +105,8 @@ def validate_encoded_ext(encoded):
     if encoded is None or len(encoded.encode("utf-8")) <= _MAX_EXT_BYTES:
         return
     ext = json.loads(encoded)
-    if SNAPSHOT_KEY in ext or _RESTORE_KEY in ext:
+    if SNAPSHOT_KEY in ext:
         raise KnowledgeError("KNOWLEDGE_PUBLISH_EXT_TOO_LARGE")
-
-
-def _unconfigured(session, source):
-    # No old-space rows either: a move must not turn missing history into an
-    # invented empty snapshot. This exemption only preserves non-knowledge Bots.
-    return (
-        session.query(Binding.id)
-        .filter(
-            Binding.bot_pk == source.id,
-            Binding.env == source.env,
-            Binding.avernet_tenant == source.avernet_tenant,
-        )
-        .first()
-        is None
-    )
-
-
-def _snapshot_or_unconfigured(session, publish, source):
-    if SNAPSHOT_KEY not in _ext(publish) and _unconfigured(session, source):
-        return None
-    return validate_snapshot(publish, source)
 
 
 def validate_snapshot(publish, source):
@@ -139,6 +116,7 @@ def validate_snapshot(publish, source):
     expected = {
         "schema_version": 1,
         "source_bot_pk": source.id,
+        "owner_id": source.owner_id,
         "space_id": source.space_id,
         "env": source.env,
         "avernet_tenant": source.avernet_tenant,
@@ -188,80 +166,90 @@ def freeze_build(session, publish_id):
     ]
     if len(ids) > _MAX_SELECTION:
         raise KnowledgeError("KNOWLEDGE_LIMIT_EXCEEDED")
-    predecessor_generation = None
-    if publish.last_pub_id:
-        predecessor = (
-            session.query(Publish)
-            .filter(
-                Publish.id == publish.last_pub_id,
-                Publish.source_bot_pk == source.id,
-                Publish.env == source.env,
-            )
-            .one_or_none()
-        )
-        if predecessor is None:
-            raise KnowledgeError("KNOWLEDGE_PUBLISH_SOURCE_MISMATCH")
-        predecessor_generation = (_ext(predecessor).get(SNAPSHOT_KEY) or {}).get(
-            "generation"
-        )
     ext = _ext(publish)
     ext.pop(_ROLLBACK_BASE_KEY, None)
     ext[SNAPSHOT_KEY] = {
         "schema_version": 1,
         "source_bot_pk": source.id,
+        "owner_id": source.owner_id,
         "space_id": source.space_id,
         "env": source.env,
         "avernet_tenant": source.avernet_tenant,
         "publish_id": publish.id,
         "generation": uuid4().hex,
         "enabled_kb_ids": ids,
-        "predecessor_generation": predecessor_generation,
     }
     publish.ext = encode_ext(ext)
+    validate_encoded_ext(publish.ext)
     publish.status = PublishStatus.BUILDING
     publish.gmt_modified = func.now()
     session.flush()
+    session.query(Publish).filter(Publish.id == publish.id).update(
+        {
+            Publish.__table__.c.knowledge_snapshot: json.dumps(ext[SNAPSHOT_KEY]),
+            Publish.__table__.c.knowledge_tenant: source.avernet_tenant,
+        },
+        synchronize_session=False,
+    )
     return True
 
 
-def protected_ext(session, publish_id, incoming):
-    """A legacy/background ext writer cannot erase or replace a frozen selection."""
-    row = (
+def freeze_unknown(session, publish_id, error):
+    """Admit a fresh native attempt after capture rollback, without binding I/O.
+
+    Rotate the small ext token even when capture failed, so a previous build
+    cannot adopt the new BUILDING state. The full failed capture lives only in
+    the journal; it never borrows enabled IDs or tenant from the later request.
+    """
+    publish = (
         session.query(Publish)
         .filter(Publish.id == publish_id)
         .with_for_update()
         .one_or_none()
     )
-    result = copy.deepcopy(incoming)
-    stored = _ext(row) if row is not None else {}
-    for key in (SNAPSHOT_KEY, _RESTORE_KEY, _ROLLBACK_BASE_KEY):
-        if key in result and result[key] != stored.get(key):
-            raise KnowledgeError("KNOWLEDGE_SNAPSHOT_READ_ONLY")
-        if key in stored:
-            result[key] = copy.deepcopy(stored[key])
-    return result
-
-
-def prepare_online(session, publish_id, expected_json):
-    """Lock Bot before publication CAS; reject a stale outcome without effects."""
-    publish = session.query(Publish).filter(Publish.id == publish_id).one_or_none()
-    if (
-        publish is None
-        or publish.status != PublishStatus.ONLINE_PUB
-        or publish.ext != expected_json
-    ):
-        return None
-    source = _locked_source(session, publish)
-    if publish.status != PublishStatus.ONLINE_PUB or publish.ext != expected_json:
-        return None
-    snapshot = _snapshot_or_unconfigured(session, publish, source)
-    if snapshot is not None:
-        _require_success_predecessor(session, publish, source, snapshot)
-    return source, snapshot
+    if publish is None or publish.status != PublishStatus.DRAFT:
+        return False
+    tenant = (
+        session.query(Publish.__table__.c.knowledge_tenant)
+        .filter(Publish.id == publish_id)
+        .with_for_update()
+        .scalar()
+    )
+    generation = uuid4().hex
+    ext = _ext(publish)
+    had_token = SNAPSHOT_KEY in ext
+    ext[SNAPSHOT_KEY] = {"generation": generation}
+    encoded = encode_ext(ext)
+    if not had_token and len(encoded.encode("utf-8")) > 65535:
+        # Optional metadata cannot overflow a previously valid native TEXT.
+        # There is no preceding admitted token to rotate; the immutable failed
+        # capture still fences all knowledge effects as UNKNOWN.
+        encoded = publish.ext
+    query = session.query(Publish).filter(
+        Publish.id == publish_id, Publish.status == PublishStatus.DRAFT
+    )
+    affected = query.update(
+        {
+            Publish.status: PublishStatus.BUILDING,
+            Publish.ext: encoded,
+            Publish.gmt_modified: func.now(),
+            Publish.__table__.c.knowledge_snapshot: json.dumps(
+                {
+                    "generation": generation,
+                    "capture_error": error.code
+                    if isinstance(error, KnowledgeError)
+                    else type(error).__name__,
+                    "avernet_tenant": tenant,
+                }
+            ),
+        },
+        synchronize_session=False,
+    )
+    return bool(affected)
 
 
 def replace_online(session, source, snapshot):
-    """Called only after the status/ext CAS won, in that exact transaction."""
+    """Replace flags inside the independent projector/ack transaction."""
     if snapshot is None:
         return
     query = _bindings(session, source)
@@ -272,6 +260,7 @@ def replace_online(session, source, snapshot):
             r[0]
             for r in query.with_entities(Binding.kb_id)
             .filter(Binding.kb_id.in_(ids))
+            .with_for_update()
             .all()
         }
         if ids
@@ -360,158 +349,3 @@ def _require_restore_deadline(params):
         raise KnowledgeError("KNOWLEDGE_RESTORE_DEADLINE_INVALID") from exc
     if datetime.now(tz=deadline.tzinfo) >= deadline:
         raise KnowledgeError("KNOWLEDGE_RESTORE_OPERATION_EXPIRED")
-
-
-def restore_draft(
-    session,
-    *,
-    draft_publish_id,
-    source_publish_id,
-    operation_id,
-    expected_attempt: int,
-    final_result: dict,
-):
-    """Commit the selection and native operation completion in one transaction."""
-    draft = session.query(Publish).filter(Publish.id == draft_publish_id).one_or_none()
-    if draft is None:
-        return False
-    source = _locked_source(session, draft)
-    operation, params = _locked_restore_operation(
-        session,
-        draft,
-        source_publish_id=source_publish_id,
-        operation_id=operation_id,
-        expected_attempt=expected_attempt,
-    )
-    if operation.state == PublishOperationState.COMPLETED:
-        return True
-    latest = (
-        session.query(Publish)
-        .filter(
-            Publish.source_bot_pk == source.id,
-            Publish.env == source.env,
-        )
-        .order_by(Publish.version.desc(), Publish.id.desc())
-        .with_for_update()
-        .first()
-    )
-    if draft.status != PublishStatus.DRAFT or latest.id != draft.id:
-        raise KnowledgeError("BOT_DRAFT_REQUIRED", 403)
-    previous = (
-        session.query(Publish)
-        .filter(
-            Publish.id == source_publish_id,
-            Publish.source_bot_pk == source.id,
-            Publish.env == source.env,
-        )
-        .with_for_update()
-        .one_or_none()
-    )
-    if (
-        previous is None
-        or draft.last_pub_id != previous.id
-        or previous.version != params["source_version"]
-    ):
-        raise KnowledgeError("KNOWLEDGE_PUBLISH_SOURCE_MISMATCH")
-    snapshot = _snapshot_or_unconfigured(session, previous, source)
-    bindings = []
-    ids = set(snapshot["enabled_kb_ids"]) if snapshot is not None else set()
-    if snapshot is not None:
-        bindings = (
-            _bindings(session, source)
-            .filter(or_(Binding.enabled.is_(True), Binding.kb_id.in_(ids)))
-            .with_for_update()
-            .limit(_MAX_SELECTION * 2 + 1)
-            .all()
-        )
-        if len(bindings) > _MAX_SELECTION * 2:
-            raise KnowledgeError("KNOWLEDGE_LIMIT_EXCEEDED")
-        if not ids.issubset({row.kb_id for row in bindings}):
-            raise KnowledgeError("KNOWLEDGE_SNAPSHOT_BINDING_MISSING")
-    # Check after every potentially blocking lock read, just before any writes.
-    _require_restore_deadline(params)
-    result_json = json.dumps(final_result, ensure_ascii=False)
-    for row in bindings:
-        value = row.kb_id in ids
-        if row.enabled != value:
-            row.enabled = value
-            row.revision += 1
-            row.updated_by = "publish_restore"
-    if snapshot is not None:
-        ext = _ext(draft)
-        ext[_RESTORE_KEY] = {
-            "operation_id": operation_id,
-            "source_publish_id": source_publish_id,
-        }
-        draft.ext = encode_ext(ext)
-        draft.gmt_modified = func.now()
-    operation.result = result_json
-    operation.state = PublishOperationState.COMPLETED.value
-    operation.gmt_modified = func.now()
-    session.flush()
-    return True
-
-
-def prepare_rollback_base(session, demoted_publish_id, restored_publish_id):
-    """Capture the exact demoted generation, before native rollback changes status.
-
-    Lock order remains Bot -> publish. No knowledge state is advanced here.
-    """
-    demoted = (
-        session.query(Publish).filter(Publish.id == demoted_publish_id).one_or_none()
-    )
-    restored = (
-        session.query(Publish).filter(Publish.id == restored_publish_id).one_or_none()
-    )
-    if demoted is None or restored is None:
-        return None
-    if SNAPSHOT_KEY not in _ext(demoted) and SNAPSHOT_KEY not in _ext(restored):
-        return None  # untouched legacy publication, with no knowledge metadata
-    if restored.source_bot_pk != demoted.source_bot_pk or restored.env != demoted.env:
-        raise KnowledgeError("KNOWLEDGE_PUBLISH_SOURCE_MISMATCH")
-    source = _locked_source(session, demoted)
-    session.refresh(restored, with_for_update=True)
-    if (
-        restored.source_bot_pk != source.id
-        or restored.env != source.env
-        or demoted.last_pub_id != restored.id
-    ):
-        raise KnowledgeError("KNOWLEDGE_PUBLISH_SOURCE_MISMATCH")
-    validate_snapshot(restored, source)
-    snapshot = validate_snapshot(demoted, source)
-    return {"publish_id": demoted.id, "generation": snapshot["generation"]}
-
-
-def with_rollback_base(ext, baseline):
-    result = copy.deepcopy(ext)
-    if baseline is not None:
-        result[_ROLLBACK_BASE_KEY] = baseline
-    return result
-
-
-def _require_success_predecessor(session, publish, source, snapshot):
-    rollback_base = _ext(publish).get(_ROLLBACK_BASE_KEY) or {}
-    successes = (
-        session.query(Publish)
-        .filter(
-            Publish.source_bot_pk == source.id,
-            Publish.env == source.env,
-            Publish.status == PublishStatus.SUCCESS,
-            Publish.id != publish.id,
-        )
-        .limit(3)
-        .all()
-    )  # only last_pub_id and rollback base can legitimately precede us
-    for previous in successes:
-        generation = (_ext(previous).get(SNAPSHOT_KEY) or {}).get("generation")
-        if previous.id == publish.last_pub_id and generation == snapshot.get(
-            "predecessor_generation"
-        ):
-            continue
-        if (
-            previous.id == rollback_base.get("publish_id")
-            and previous.id == _ext(publish).get("rollback_restored_from")
-            and generation == rollback_base.get("generation")
-        ):
-            continue
-        raise KnowledgeError("KNOWLEDGE_ONLINE_PREDECESSOR_CHANGED")
