@@ -150,6 +150,13 @@ async fn blocking_send_returns_the_completed_task_with_the_conclusion() {
     let retry = call(&bridge, "SendMessage", json!({"message": user_message("m-1", "hello")})).await;
     assert_eq!(retry["result"]["task"]["id"], task["id"]);
     assert_eq!(retry["result"]["task"]["contextId"], context);
+    // Immediate sequential follow-ups in the same context never see it busy.
+    for turn in 2..5 {
+        let next = call(&bridge, "SendMessage", json!({"message": {"messageId": format!("m-{turn}"), "role": "ROLE_USER",
+            "contextId": context, "parts": [{"text": "again"}]}})).await;
+        assert_eq!(next["result"]["task"]["status"]["state"], "TASK_STATE_COMPLETED", "{next}");
+        assert_eq!(next["result"]["task"]["contextId"], context);
+    }
 }
 
 #[tokio::test]

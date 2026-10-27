@@ -66,10 +66,14 @@ fn interactions_toggle_input_required_until_all_are_resolved() {
     assert!(prompt.contains("rm -rf build") && prompt.contains("allow-once, deny"), "{prompt}");
     assert_eq!(update.metadata.as_ref().unwrap()[meta::INTERACTION_ID], "int-1");
     assert_eq!(p.pending_interactions(), ["int-1", "int-2"]);
+    let pending = &p.task().metadata.as_ref().unwrap()[PENDING_INTERACTIONS];
+    assert_eq!(pending[0][meta::INTERACTION_ID], "int-1");
+    assert_eq!(pending[1][meta::INTERACTION_KIND], "ask_user");
     let resolved = p.apply(&sse::interaction_event("r", InteractionPhase::Resolved, InteractionKind::Exec, "int-1", serde_json::json!({"decision":"deny"})));
     assert_eq!(kinds(&resolved), ["status:InputRequired:interaction.resolved"]);
     let resolved = p.apply(&sse::interaction_event("r", InteractionPhase::Resolved, InteractionKind::AskUser, "int-2", serde_json::json!({"action":"submit"})));
     assert_eq!(kinds(&resolved), ["status:Working:interaction.resolved"]);
+    assert!(p.task().metadata.is_none(), "resolved interactions leave no pending metadata");
 }
 
 #[test]

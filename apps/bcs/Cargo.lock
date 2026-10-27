@@ -1875,6 +1875,8 @@ version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
+ "bcs-a2a-protocol",
+ "bcs-bridge-core",
  "bcs-domain",
  "bcs-observability",
  "bcs-protocol",
@@ -1887,6 +1889,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tower",
  "tracing",

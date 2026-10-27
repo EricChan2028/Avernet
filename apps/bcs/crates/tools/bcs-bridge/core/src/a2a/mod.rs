@@ -38,6 +38,8 @@ const HEARTBEAT: Duration = Duration::from_secs(20);
 const CANCEL_WAIT: Duration = Duration::from_secs(10);
 /// Upper bound for an interaction answer to be acknowledged by the engine.
 const RESOLVE_WAIT: Duration = Duration::from_secs(10);
+/// Grace for the previous run of a context to release its slot.
+const BUSY_WAIT: Duration = Duration::from_secs(3);
 
 pub fn routes() -> Router<Providers> {
     Router::new()
@@ -322,7 +324,7 @@ async fn send_message(ctx: Ctx, req: SendMessageRequest, streaming: bool) -> Res
         message: Some(bcn_message(&message)), from: Some(json!({"kind": "a2a", "name": ctx.owner})),
         timeout_ms: Some(timeout_ms), params: None,
     };
-    let (handle, stream) = match runtime::dispatch(ctx.state.clone(), downstream).await.map_err(map_bridge_error)? {
+    let (handle, stream) = match start_run(&ctx, downstream).await? {
         RuntimeReply::Run { handle, delivery: RunDelivery::Gateway { stream } } => (handle, stream),
         _ => return Err(JsonRpcError::new(A2aErrorCode::InternalError, "engine run did not start")),
     };
@@ -339,6 +341,24 @@ async fn send_message(ctx: Ctx, req: SendMessageRequest, streaming: bool) -> Res
         start_push(&ctx, &task, config, Cursor::Start)?;
     }
     respond(&task, &configuration, streaming, Cursor::Start).await
+}
+
+/// Start the turn. A client may see the previous task's terminal event just
+/// before that run releases its context slot; wait briefly instead of
+/// reporting a busy context for a sequential follow-up.
+async fn start_run(ctx: &Ctx, downstream: DownstreamRequest) -> Result<RuntimeReply, JsonRpcError> {
+    let deadline = tokio::time::Instant::now() + BUSY_WAIT;
+    loop {
+        let attempt = DownstreamRequest { id: downstream.id.clone(), method: downstream.method.clone(),
+            to_bot: to_bot(ctx), session_id: downstream.session_id.clone(), message: downstream.message.clone(),
+            from: downstream.from.clone(), timeout_ms: downstream.timeout_ms, params: downstream.params.clone() };
+        match runtime::dispatch(ctx.state.clone(), attempt).await {
+            Err(error) if error.status == 429 && tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            result => return result.map_err(map_bridge_error),
+        }
+    }
 }
 
 fn start_push(ctx: &Ctx, task: &Arc<A2aTask>, config: TaskPushNotificationConfig, cursor: Cursor) -> Result<(), JsonRpcError> {

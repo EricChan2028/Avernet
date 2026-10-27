@@ -11,6 +11,7 @@ use bcs_protocol::stream::{AgentData, ChatEvent, ChatState, InteractionKind, Int
 use serde_json::{json, Value};
 
 pub const RESPONSE_ARTIFACT_ID: &str = "response";
+pub const PENDING_INTERACTIONS: &str = meta::PENDING_INTERACTIONS;
 /// Bound on `Task.history`; the oldest narration is dropped first.
 const MAX_HISTORY: usize = 256;
 
@@ -81,6 +82,7 @@ impl Projection {
                         if !self.pending.iter().any(|(id, _, _)| id == &interaction.interaction_id) {
                             self.pending.push((interaction.interaction_id.clone(), interaction.kind, interaction.raw.clone()));
                         }
+                        self.sync_pending_metadata();
                         let prompt = self.agent_message(interaction_prompt(interaction.kind, &interaction.raw));
                         self.push_history(prompt.clone());
                         out.push(self.set_status(TaskState::InputRequired, Some(prompt), Some(metadata([
@@ -92,6 +94,7 @@ impl Projection {
                     }
                     InteractionPhase::Resolved => {
                         self.pending.retain(|(id, _, _)| id != &interaction.interaction_id);
+                        self.sync_pending_metadata();
                         let state = if self.pending.is_empty() { TaskState::Working } else { TaskState::InputRequired };
                         out.push(self.set_status(state, None, Some(metadata([
                             (meta::KIND, json!("interaction.resolved")),
@@ -225,6 +228,20 @@ impl Projection {
         message.context_id = Some(self.context_id.clone());
         message.task_id = Some(self.task.id.clone());
         message
+    }
+
+    /// Mirror pending interactions into `Task.metadata.pendingInteractions` so
+    /// polling clients and snapshot-based resumes see structured HITL requests.
+    fn sync_pending_metadata(&mut self) {
+        let metadata = self.task.metadata.get_or_insert_with(Default::default);
+        if self.pending.is_empty() {
+            metadata.remove(PENDING_INTERACTIONS);
+        } else {
+            metadata.insert(PENDING_INTERACTIONS.into(), Value::Array(self.pending.iter().map(|(id, kind, raw)| json!({
+                meta::INTERACTION_ID: id, meta::INTERACTION_KIND: interaction_kind(*kind), meta::ENGINE_FRAME: raw,
+            })).collect()));
+        }
+        if metadata.is_empty() { self.task.metadata = None; }
     }
 
     /// Record a client message (e.g. an interaction answer) in history.

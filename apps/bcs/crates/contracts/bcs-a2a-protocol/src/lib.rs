@@ -72,4 +72,7 @@ pub mod meta {
     pub const DELTA: &str = "delta";
     pub const ERROR_CODE: &str = "errorCode";
     pub const ERROR_MESSAGE: &str = "errorMessage";
+    /// `Task.metadata` list of `{interactionId, interactionKind, engine_frame}`
+    /// awaiting an answer, for snapshot (poll / resume) consumers.
+    pub const PENDING_INTERACTIONS: &str = "pendingInteractions";
 }
