@@ -459,6 +459,83 @@ describe("AutoHealDeployService", () => {
     expect(reservedTagName).toBe("deploy/wf-test/#1");
     expect(reservedIsActive).toBe(0);
   });
+
+  it("reuses the reserved deploy number per deploy instead of skipping ahead", async () => {
+    const service = new AutoHealDeployService(
+      ctx.db as never,
+      specRepo,
+      deployHistoryRepo,
+      botPermRepo,
+      gitConfig,
+      gitAuthor,
+      triggerRun,
+    );
+
+    // Echo the number the service computed, as the real commitAndPushDeploy does
+    // (it tags with the passed number and returns it). The old fixed-return mocks
+    // never saw the computed value, which is how the double increment slipped by.
+    const echoPush = vi.fn(async (_repoDir: string, _workflowId: string, deployNumber: number) => ({
+      branch: "wf/wf-test",
+      tagName: `deploy/wf-test/#${deployNumber}`,
+      commit: "def456",
+      deployNumber,
+    }));
+    vi.spyOn(gitClient, "commitAndPushDeploy").mockImplementation(echoPush);
+
+    const first = await service.deploy({ workflowId: "wf-test", actorId: "user-1" });
+    expect(first.deployNumber).toBe(1);
+    const second = await service.deploy({ workflowId: "wf-test", actorId: "user-1" });
+    expect(second.deployNumber).toBe(2);
+    expect(second.tagName).toBe("deploy/wf-test/#2");
+
+    // Reserved number = dbMax + 1; a git max that is not ahead must NOT bump the
+    // tag past it: one history row per deploy, no inactive placeholders, no gaps.
+    expect(echoPush.mock.calls.map((call) => call[2])).toEqual([1, 2]);
+    const history = await deployHistoryRepo.listHistory("wf-test", 10);
+    expect(history.map((h) => h.deploy_number).sort((a, b) => a - b)).toEqual([1, 2]);
+    const firstRow = history.find((h) => h.deploy_number === 1);
+    const secondRow = history.find((h) => h.deploy_number === 2);
+    expect(firstRow?.is_active).toBe(0);
+    expect(secondRow?.is_active).toBe(1);
+    expect(secondRow?.tag_name).toBe("deploy/wf-test/#2");
+  });
+
+  it("numbers the git tag gitMax+1 when external tags are ahead of the DB", async () => {
+    const service = new AutoHealDeployService(
+      ctx.db as never,
+      specRepo,
+      deployHistoryRepo,
+      botPermRepo,
+      gitConfig,
+      gitAuthor,
+      triggerRun,
+    );
+
+    vi.spyOn(gitClient, "getMaxDeployNumberFromGitTags").mockResolvedValueOnce(5);
+    let pushedDeployNumber = 0;
+    vi.spyOn(gitClient, "commitAndPushDeploy").mockImplementationOnce(
+      async (_repoDir: string, _workflowId: string, deployNumber: number) => {
+        pushedDeployNumber = deployNumber;
+        return { branch: "wf/wf-test", tagName: `deploy/wf-test/#${deployNumber}`, commit: "def456", deployNumber };
+      },
+    );
+
+    const result = await service.deploy({ workflowId: "wf-test", actorId: "user-1" });
+
+    // dbMax=0 → reserved=1; external tags already reach #5 → the tag must be
+    // gitMax + 1 (#6), keeping the reserved #1 as an inactive placeholder.
+    expect(pushedDeployNumber).toBe(6);
+    expect(result.deployNumber).toBe(6);
+    expect(result.tagName).toBe("deploy/wf-test/#6");
+
+    const history = await deployHistoryRepo.listHistory("wf-test", 10);
+    expect(history.map((h) => h.deploy_number).sort((a, b) => a - b)).toEqual([1, 6]);
+    const placeholder = history.find((h) => h.deploy_number === 1);
+    const real = history.find((h) => h.deploy_number === 6);
+    expect(placeholder?.is_active).toBe(0);
+    expect(real?.is_active).toBe(1);
+    expect(real?.tag_name).toBe("deploy/wf-test/#6");
+  });
 });
 
 describe("createTempRepo", () => {
