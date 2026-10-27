@@ -602,3 +602,35 @@ def test_manual_artifact_write_is_rejected_for_cross_executor_app_owner(monkeypa
             )
         )
     assert repo.appended == []
+
+
+# ------------------------------------------------------------------ relay 分支(spec §14.2:补录口 fence-only,creator 派生零改动)
+
+
+def _relay_token_graph():
+    graph = _graph()
+    graph.tasks[1].run_info.extend_props["relay_token"] = "gen-1"
+    return graph
+
+
+def test_add_artifact_relay_token_happy_path_keeps_creator_semantics():
+    repo = _StubArtifactRepo()
+    service = _service({"t-1": _relay_token_graph()}, repo)
+    item = parse_artifact_report_item(
+        _raw_item(), report_task_id="t-1", report_node_id="n-1"
+    )
+    record = service.add_artifact(item, relay_token="gen-1")
+    # creator 派生零改动:维持既有 assignee 兜底语义(§14.2)。
+    assert record.creator == "bot-9"
+    assert record is repo.appended[0]
+
+
+def test_add_artifact_relay_token_mismatch_rejected_without_row():
+    repo = _StubArtifactRepo()
+    service = _service({"t-1": _relay_token_graph()}, repo)
+    item = parse_artifact_report_item(
+        _raw_item(), report_task_id="t-1", report_node_id="n-1"
+    )
+    with pytest.raises(TaskStateError, match="attempt has expired"):
+        service.add_artifact(item, relay_token="gen-2")
+    assert repo.appended == []
