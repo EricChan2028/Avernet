@@ -540,3 +540,38 @@ dashboard 作为中间产物发现入口,在返回清单前协调 BCS session fi
 - **内容寻址 key**:`{key_prefix}/{task_id}/{sha256(字节).hex}{ext}`——同字节重传同 key → 同 `FileContent` → 既有 select-first dedupe(§5.3)收敛为一行;key 前缀天然按任务分域,支撑下载侧前缀域校验与未来的按任务清理。
 - **单向失败安全**:put 成功后行写失败 → 至多遗留无引用对象(可被清理回收),**决不出现"行在、字节无"的引用悬空行**;行写失败如实上抛(不吞)。
 - 单字节面(无分块)本期封顶 `max_upload_mb`(缺省 64,corp 建议 200);更大文件留后续 optional capability(如 presign/分块),不改基础缝。
+
+## 14. 增补(2026-10-27,DRAFT 待批):relay 尝试直传分支 —— 产物写口双凭证
+
+**动机**:sandbox 执行 bot 持 relay_token(claim 时由 Backend 签发、随派发载荷递送)却无用户登录态,被 §13"用户操作面"限定挡在字节通道之外,只能回传引用、由人搬运字节。本增补把两个产物**写口**扩为双凭证,生产者补齐"跨 session 存活 + 原件可下载"的最后一环;**推翻** §13.2 上传口的"`get_current_user`,creator=登录 user.id"单凭证裁决与 §13 路由注"relay 场景不经本口",其余裁决(§4 报文引用、§13.3 key/失败语义)逐字节不动。
+
+### 14.1 双凭证解析(HTTP 层只转协议,Rule 22)
+
+- `POST /api/v1/collaboration/tasks/artifacts/object-file` 与 `POST /api/v1/collaboration/tasks/artifacts` 增加统一依赖:请求**带** `X-Relay-Token` header → relay 执行者分支(不要求、也不看用户登录态);**不带** → 维持现状 `get_current_user` 用户分支。两分支互斥,token 分支下 cookie 缺失不再是错误。
+- HTTP 层职责止于"header 有无 → 分支选择 + 参数透传";token 与节点代次比对、creator 派生均为领域语义,收口在核心服务(见 14.2),不在路由里复刻 relay_guard 的图查询。
+
+### 14.2 relay 分支的领域语义(核心服务收口)
+
+- **token 校验**:与 `require_relay_attempt` 同款恒时比对——路由透传 `relay_token` 进 `upload_object_file` / `add_artifact`,服务在既有图/节点/attempt 交叉校验的同一位置对 `node.run_info.extend_props.relay_token` 做 `hmac.compare_digest`;失配/缺失 → `TaskStateError("relay execution attempt has expired")` → 既有 409 映射,不新增错误类型。代次轮转(重试/重派发时重新 mint)即自然吊销。
+- **creator 派生**:取图上该节点的 `run_info.assignee`(claim 时绑定的 bot_id)为 creator;`assignee` 为空(节点已被派发 token 但无人认领)→ `TaskStateError`,拒绝无认领上下文的写入。**两写口的用户分支现状行为逐字节不动**——object-file 用户分支照旧 creator=登录 `user.id`(`TaskArtifactObjectFileService` 入参);`add_artifact` 用户分支照旧现状(creator=`assignee or "system"`,从不看登录用户,`artifact_api_service.py:169` 既有契约),故 `POST /artifacts` 的 relay 分支只新增 token fence,creator 派生零改动。
+- **归属交叉校验不动**:表单/JSON 的 `task_id/node_id/attempt` 与图交叉校验(§12.1 口径)在两分支下一致;relay_token 是代次 fence,不替代也不放宽 attempt 快照对齐。`POST /artifacts` 补录口的 `session_id` 归属校验两分支共用。
+- **上传即交付**(用户定稿):relay 分支上传/登记成功 = 产物行落库、面板可见;不要求该产物再进 `EXECUTION_RESULT` 报文 `artifacts` 列表(与 §4 引用上报互不排斥,报了也不重复落行——幂等键不变)。
+
+### 14.3 读口不动(用户定稿)
+
+- `GET /artifacts/{artifact_id}/content`(下载)与 `GET /artifacts`、三处 dashboard Descriptor **维持用户面**——bot 上传、人下载,与 task 侧 `_require_read_scope`(读不绑 executor_app)同构;relay token 不进入任何读口。后透:若未来出现"bot 需要拉取上游产物字节"的场景,再按需增设 relay 读分支,本期预不铺(anti-goal)。
+
+### 14.4 覆盖与验收门禁
+
+- endpoints 声明式用例新增:relay happy 上传(creator 断言=seed 的 assignee)、串改/过期 token 409、token 分支无 cookie 可过、用户分支 401 照旧、无认领 assignee 空拒绝;`test_task_artifact_object_file_endpoints.py` 与 artifacts 登记口用例各补一组。
+- 核心服务用例:`upload_object_file`/`add_artifact` 的 relay_token 参数化(合法/失配/代次过期)、creator=assignee 断言、put 成功前 token 失败不留行。
+- 路由 docstring 同步改写"relay 场景不经本口"表述;OpenAPI/PR 描述引用本节。
+
+### 14.5 实现勘定(builder-check 后定稿的代决项)
+
+- **fence 实现归属**:恒时比对与空值拒绝逻辑提到 core(`core/task/...` 自有位置,如 `task_context/relay_attempt.py` 单函数);adapter 侧 `require_relay_attempt` 改为委托该 core 帮手,既有 relay 路由行为/diff 零变化——既满足 14.1"不在路由复刻",又避免双拷贝漂移(架构方向:领域语义归属 core,R13 架构检查不新增逆行边)。
+- **校验序**(endpoints 用例按此钉):路由先读字节/解析表单(FastAPI 天然前置)→ 身份分支(缺两种凭证之用户分支,401 照旧)→ size 413(超限整字节面拒绝,**维持现状先于图校验**,零既有用例改动)→ 图/节点存在(404)→ token fence(409)→ assignee 非空(409,仅上传口;补录口 creator 走既有 `assignee or "system"` 兜底不增设)→ attempt 快照(422)→ put(502 不留行)→ 落行。**空串 `X-Relay-Token` 视为未带**(协议翻译,falsy → 用户分支)。
+- **executor_app 归属对称项明确出范围**(2026-10-27 用户定稿"这次不考虑"):现状 `upload_object_file` 与 `add_artifact` 的跨部署写归属校验不对称(前者无 `_require_owned_task` 比对),**维持原样不在本增补处理**;后透:跨部署写若需要封堵,走独立整改,不与双凭证混卷。
+- **信任模型与配额**:relay 字节口信任级与 relay attach/result 口一致——生产网络白名单准入 + 代次 fence 即凭证强度,**不引入 per-node 上传配额/频控**(anti-goal,本期留 max_upload_mb 单笔上限;滥用面与 relay 报文同数量级,超出再按运维证据增设)。
+- **relay 读分支预不铺**(14.3 已列 anti-goal,此处重申为勘定项):bot 拉取上游产物字节的需求一旦出现,走新 spec,不在本缝上悄悄扩。
+
