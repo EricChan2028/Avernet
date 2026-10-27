@@ -39,7 +39,7 @@ task 模块中节点"产物"的现状是 `RuntimeInfo.output: dict[str, Any]`(`c
 
 ### 1.3 非目标(本期不做)
 
-- **不搬字节**:文件字节不进 Artifact、不进图表、不进 Prompt;后端不新建 preview/下载/presign 接口——二进制下载链接由前端基于既有读口自行拼接;
+- **不搬字节**~~:文件字节不进 Artifact、不进图表、不进 Prompt;后端不新建 preview/下载/presign 接口——二进制下载链接由前端基于既有读口自行拼接~~;**(2026-10-26 修订,用户定稿)OBJECT_FILE 介质例外**:新增第三种 FILE 来源(见 §3.4 与 §13),其字节经**后端流式代理**上传/下载(任务模块自有对象存储服务,非 presign 直连);BOT_WORKSPACE / SESSION_FILE 两个既有介质**维持本条原裁决与既有读口不变**,字节仍不进 Artifact、不进图表、不进 Prompt;
 - **不切读侧消费路径**:下游节点拼 Prompt、验收/Judge、OpenAPI 任务导出等消费方**继续读 output dict**,不改;
 - 不引入 `Structured` / `Collection` 分支、`supersedes` 内容修订链、Schema Registry(语雀文档后续演进项,待真实需求驱动);
 - 不改造 SessionFile / 附件 / 存储分层(BCS 已管好字节生命周期);
@@ -47,7 +47,7 @@ task 模块中节点"产物"的现状是 `RuntimeInfo.output: dict[str, Any]`(`c
 
 ### 1.4 反目标(做了即算失败)
 
-- Artifact 里出现临时下载 URL、token、对象存储 handle 或后端实现细节;
+- Artifact 里出现临时下载 URL、token、对象存储 handle 或后端实现细节;**(2026-10-26 修订)OBJECT_FILE 不破例**:产物行只存**稳定对象 key**(`{prefix}/{task_id}/{sha256}{ext}`,内容寻址引用),下载能力由后端逐次校验签发,任何临时 token/签名 URL 依旧不落产物内容行;
 - 为记录产物而破坏现有回调/图变更的幂等与版本重放语义;
 - output dict 与产物对象出现"双首领"(产物写失败但图写成功且不报错,或反之);
 
@@ -140,11 +140,11 @@ class TextContent(ArtifactContent):
 
 @dataclass(frozen=True)
 class FileContent(ArtifactContent):
-    storage_type: StorageType    # BOT_WORKSPACE | SESSION_FILE
-    storage_id: str              # 统一存储寻址:BOT_WORKSPACE=工作区路径;SESSION_FILE=文件所在会话 id
+    storage_type: StorageType    # BOT_WORKSPACE | SESSION_FILE | OBJECT_FILE(2026-10-26 新增)
+    storage_id: str              # 统一存储寻址:BOT_WORKSPACE=工作区路径;SESSION_FILE=文件所在会话 id;OBJECT_FILE=稳定对象 key
     file_type: str               # 缺省按 file_name 扩展名推断,推不出为 application/octet-stream
     file_name: str
-    file_id: str | None          # SESSION_FILE 必填;BOT_WORKSPACE 为 None
+    file_id: str | None          # SESSION_FILE 必填;BOT_WORKSPACE 与 OBJECT_FILE 为 None
 
 @dataclass(frozen=True)
 class UrlLinkContent(ArtifactContent):
@@ -162,8 +162,8 @@ class CodeContent(ArtifactContent):
 内容分支类**不带 `kind` 字段**——形态的单一事实源是 `TaskArtifact.kind`(3.1)与分支类本身;tagged union 只存在于**序列化形**:content 落库为 `{"kind": "text"|"file"|"url_link"|"code", ...}` 的 tag 前缀 JSON,tag 由序列化器负责——写入时按分支类派发(isinstance),读取时按 tag 选构造类。这样领域模型无重复字段,type 也不靠 `Literal["text"]` 兜护。
 
 - 未知 `kind` tag → `TaskArtifactContentError`(domain errors),不猜、不降级;
-- **`storage_id` 是唯一的存储寻址字段**:BOT_WORKSPACE → 工作区相对路径值;SESSION_FILE → 文件所在会话 id 值。上报方在 `file_content` JSON 里**直接提供** `storage_id`(按此语义填值),后端不再做 path/session_id → storage_id 的映射归一。读侧/前端拿 `(storage_type, storage_id[, file_id])` 即得完整寻址:BOT_WORKSPACE 走 `GET /api/resources/files/preview?path={storage_id}`、SESSION_FILE 走 `GET /sessions/{storage_id}/files/{file_id}/content`;
-- `FileContent` 互斥性在领域构造器校验:`BOT_WORKSPACE` → `file_id` 必须为 None、`storage_id` 做相对路径校验(拒绝绝对路径与 `..` 逃逸,长度上限 512);`SESSION_FILE` → `file_id` 必填,`file_id`/`file_name`/`storage_id` 长度与字符校验;
+- **`storage_id` 是唯一的存储寻址字段**:BOT_WORKSPACE → 工作区相对路径值;SESSION_FILE → 文件所在会话 id 值;OBJECT_FILE → 稳定对象 key(服务端派生,见 §13)。上报方在 `file_content` JSON 里**直接提供** `storage_id`(按此语义填值),后端不再做 path/session_id → storage_id 的映射归一。读侧/前端拿 `(storage_type, storage_id[, file_id])` 即得完整寻址:BOT_WORKSPACE 走 `GET /api/resources/files/preview?path={storage_id}`、SESSION_FILE 走 `GET /sessions/{storage_id}/files/{file_id}/content`、OBJECT_FILE 走 `GET /api/v1/collaboration/tasks/artifacts/{artifact_id}/content`(后端代理,§13.2);
+- `FileContent` 互斥性在领域构造器校验:`BOT_WORKSPACE` → `file_id` 必须为 None、`storage_id` 做相对路径校验(拒绝绝对路径与 `..` 逃逸,长度上限 512);`SESSION_FILE` → `file_id` 必填,`file_id`/`file_name`/`storage_id` 长度与字符校验;`OBJECT_FILE` → `file_id` 必须为 None,`storage_id` 做对象 key 结构校验(拒绝对 `\`、绝对/`~` 开头、空段/`.`/`..` 段、控制字符;长度沿用 512 上限)——**前缀域归属校验在服务层**(配置依赖,模型层只见结构);
 - `UrlLinkContent`/`CodeContent` 校验:`url`/`code_base_address`/`pr_link` 必须是 http(s) 前缀且长度上限 2048;`type` 为开放字符串(不建受治枚举,业务类型词汇由调用方生态演进;非空,长度上限 64);`code_base_name` 非空;`pr_desc` 允许空串、长度上限 8KB;
 - **信任边界(方案取舍,已显式声明)**:回调上报的引用**只做结构校验,不做归属交叉核验**——上报人(已鉴权的回调发送方)可信,`storage_id`/`file_id` 原样进产物与读侧 Descriptor。风险敞口 = 看板读者可见到上报者提供的会话标识与文件元数据;**字节不因此泄露**(两处读口均为参与者级 ACL)。有限归属核验(如"上报 session 须与节点 assignee/relay 会话相关")列为后续加固项,本期不建;
 - 字段里**不出现**:**文件字节的临时访问凭证**——presign、带 token 的下载 URL、object handle、宿主机绝对路径;`file_type` 是引用元数据(供前端挑下载/预览行为),不是字节承诺;文本分支连格式元数据也不带,text 即全部内容。**边界澄清(方案取舍)**:`UrlLinkContent.url` 与 `CodeContent.pr_link`/`code_base_address` 是**产物内容本身**——bot 交付的稳定业务链接(需求条目、语雀文档、PR),不是"文件字节怎么取"的临时能力,不受上述禁令约束,原样入库入 Descriptor。
@@ -231,15 +231,15 @@ class CodeContent(ArtifactContent):
 }
 ```
 
-`file_content` 两种形态对照(BOT_WORKSPACE:`storage_id`=工作区相对路径、`file_id` 恒 null;SESSION_FILE:`storage_id`=群聊会话 id、`file_id` 必填):
+`file_content` 形态对照(BOT_WORKSPACE:`storage_id`=工作区相对路径、`file_id` 恒 null;SESSION_FILE:`storage_id`=群聊会话 id、`file_id` 必填;OBJECT_FILE:`storage_id`=稳定对象 key、字节经 §13 上传/下载):
 
-| | BOT_WORKSPACE(单 bot 工作区) | SESSION_FILE(协作群会话文件) |
-|---|---|---|
-| `storage_type` | `"bot_workspace"` | `"session_file"` |
-| `storage_id` | `"reports/analysis-report.md"`(工作区相对路径,读口 `GET /api/resources/files/preview?path={storage_id}`) | `"sess-xxx"`(文件所在会话 id,读口 `GET /sessions/{storage_id}/files/{file_id}/content`) |
-| `file_id` | `null`(工作区按路径寻址,无文件 id) | `"f-987"`(BCS session file 的 file_id,必填) |
-| `file_type` | 按扩展名推断(`.md`→`text/markdown`) | 缺省按 `file_name` 扩展名推断(`.pdf`→`application/pdf`,推不出为 `application/octet-stream`) |
-| `file_name` | `"analysis-report.md"`(物理文件名,同时是 artifact_name 的回落值) | `"analysis-report.pdf"` |
+| | BOT_WORKSPACE(单 bot 工作区) | SESSION_FILE(协作群会话文件) | OBJECT_FILE(对象存储产物,2026-10-26 新增) |
+|---|---|---|---|
+| `storage_type` | `"bot_workspace"` | `"session_file"` | `"object_file"` |
+| `storage_id` | `"reports/analysis-report.md"`(工作区相对路径,读口 `GET /api/resources/files/preview?path={storage_id}`) | `"sess-xxx"`(文件所在会话 id,读口 `GET /sessions/{storage_id}/files/{file_id}/content`) | `"task-artifacts/{task_id}/{sha256}{ext}"`(服务端上传时派生的稳定 key,读口 `GET /api/v1/collaboration/tasks/artifacts/{artifact_id}/content`,§13.2) |
+| `file_id` | `null`(工作区按路径寻址,无文件 id) | `"f-987"`(BCS session file 的 file_id,必填) | `null`(对象按 key 寻址) |
+| `file_type` | 按扩展名推断(`.md`→`text/markdown`) | 缺省按 `file_name` 扩展名推断(`.pdf`→`application/pdf`,推不出为 `application/octet-stream`) | 上传 multipart 报送,缺省同左推断规则 |
+| `file_name` | `"analysis-report.md"`(物理文件名,同时是 artifact_name 的回落值) | `"analysis-report.pdf"` | 同左(展示名 + 下载 Content-Disposition 文件名) |
 
 | 通道 | 行为 |
 |---|---|
@@ -412,7 +412,7 @@ dashboard 作为中间产物发现入口,在返回清单前协调 BCS session fi
 - **阶段一(本方案)**:引入 Artifact + 回调契约 + 双轨记录(写侧 + dashboard 可见),
   并在 dashboard 访问时把尚未识别的 Ready session files 补录进 manifest;
 - **阶段二(后续)**:读侧切换——下游节点按 artifact 解析上游输入、Judge 消费 Descriptor、RuntimeInfo.output 退化为投影、OpenAPI 导出产物列表;
-- **阶段三(后续)**:停止产出文本约定键、`Structured`/`Collection` 内容分支、`supersedes` 修订链、按需的字节物化/提取(文本提取产物,`derived_from` 血缘)。
+3. **阶段三(后续)**:停止产出文本约定键、`Structured`/`Collection` 内容分支、`supersedes` 修订链、按需的字节物化/提取(文本提取产物,`derived_from` 血缘)。**(2026-10-26 修订)"字节物化"的第一块已提前落地**:OBJECT_FILE 介质(§13)按用户定稿新增,产物字节经任务模块自有对象存储服务上传/下载;`Structured`/`Collection` 与 `supersedes` 仍在后续。
 
 ---
 
@@ -433,7 +433,8 @@ dashboard 作为中间产物发现入口,在返回清单前协调 BCS session fi
 - [ ] 缺席态:graph 仓储未接线(内存-only)时不发布、不报错;
 - [ ] 架构守卫:`test_repository_contracts` / `test_task_module_responsibility_guards` / README provides 测试全绿;
 - [ ] 回归:`uv run pytest tests/community/core/task tests/community/repository/task tests/community/adapters/http/task`(apps/backend 下,uv 环境)全绿;ruff changed files 清洁;
-- [ ] 兼容:无 `artifacts` 字段的旧回调行为逐字节不变;output dict 内容与现状一致(剥离仅发生在产物块范围内)。
+- [ ] 兼容:无 `artifacts` 字段的旧回调行为逐字节不变;output dict 内容与现状一致(剥离仅发生在产物块范围内);
+- [x] **OBJECT_FILE(2026-10-26 修订,§13)**:模型三枚举分支 + key 结构校验矩阵(含 file_id 恒 None);**上传单向失败安全**(put 失败/超上限/未接线 → 无行)与内容寻址 key 幂等(同字节同 key → 既有 dedupe 收敛);**下载三态映射**(FOUND/NOT_FOUND/FAILED → 200/404/502)与 413/503 配置位;key 前缀域校验(跨任务伪造拒绝);协议契约套件(Rule 25)+ 两新路由 endpoint happy/error 声明 + `test_service_api_conformance` 登记;两既有介质行为零变化。
 
 ---
 
@@ -513,3 +514,29 @@ dashboard 作为中间产物发现入口,在返回清单前协调 BCS session fi
 2. **relay 线上 content 字段改收 JSON 对象**(不收字符串):`ArtifactReportItemDTO` 四个 `*_content` 为 `dict | None`;核心 `parse_artifact_report_item` 同时容忍对象与字符串两种形态,字符串路径保留给手动 API 的向后兼容与既有单测。
 3. 手动 `POST /artifacts` 四个 content 字段(text/file/url_link/code)自 12.5 起即已全部支持对象与字符串,此点为澄清、非变更。
 4. 契约测试同步:`test_router.py` wire 用例改顶层+对象形态并增补 DECLINED→409;`test_artifact_report_item.py` 增报文顶层 DTO 契约类(ACCEPTED 落 patch/DECLINED 拒/无字段 None/[]明空/PLAN_RESULT 拒/event 内携带 forbidden/旧报文字节不变)与对象形态解析一致性/对象禁 kind tag/非对象非字符串拒绝单测。全量门禁 1915 passed, 27 skipped。
+
+---
+
+## 13. 增补(2026-10-26,用户定稿):OBJECT_FILE 介质 —— 产物对象存储与上传/下载
+
+第三种 FILE 来源介质 `object_file`。**字节经任务模块自有的对象存储服务承载,上传/下载为后端流式代理**;这是对 §1.3"不搬字节"原裁决的显式例外(见 §1.3 修订注),两既有介质语义、读口、校验逐字节不动。
+
+### 13.1 对象存储服务协议(task 模块自有缝)
+
+- 协议:**task 模块自有位置** `core/task/task_context/task_artifact/artifact_object_storage.py` 的 `TaskArtifactObjectStoragePlugin`(方案下沉,不占公共 `plugin_api/` 面,与 task_discovery 的 SessionInitiator 同款先例)——窄面三方法:``put_object(key, content) -> bool``(失败=显式 False,**上传服务据此拒绝留行**)、``get_object(key) -> TaskArtifactObjectReadResult``(**三态** FOUND/NOT_FOUND/FAILED,下载映射 200/404/502 的判别基础;三态在这个缝上是**基础契约**而非可选 capability,因为下载路由必须区分"字节缺失"与"存储不可用")、``delete_object(key) -> bool``(本期不路由,留存清理备用)。实现吞传输错误成 False/枚举,形态参照 `plugin_api/object_storage.py`(仅形态参照,不继承不复用)。
+- 与既有 `ObjectStoragePlugin` **互不复用**:那是平台级单例(绑定一个 bucket、SDK 环境链凭证),服务配置在 `bot_oss_config` 块;本缝的配置是 **task 模块自有的 `user_config.task_artifact_storage` 块**(backend/fs_root/key_prefix/max_upload_mb/endpoint/bucket_name/secret_name),凭证名经 SecretResolver 解析(社区仓只见结构不见厂商)。
+- 实现与 DI:community 列 fs 实现(`plugins/community/task_artifact_object_storage.py`,Mode.PROD,``backend: fs`` fail-fast 拒其它值);test/singlebox 列内存实现(`plugins/local/...`, Flavor.FAKE,endpoints/契约测试真回环);**corp(ocb)**:oss2 实现于 `corp/plugins/prod/task_artifact_object_storage.py`,corp DI 模块 expect `backend: oss`` 并懒取 Mist 凭证(母版:`corp/plugins/prod/oss_storage.py` 的 OSSStorageManager 习惯)。实现契约套件随协议下沉,落在 `tests/community/core/task/task_artifact/test_artifact_object_storage.py`(world 驱动,local 真回环 + community 列钉型)。
+- **giraffeai 不可作参考实现**(2026-10-27 勘察定稿):该仓无 OSS 读写代码,仅禁用的 ddsoss 中间件配置与 SLS 日志客户端;corp 实现以 ocb 既有 oss2 插件为母版。
+
+### 13.2 上传/下载/列(list 复用)
+
+- `POST /api/v1/collaboration/tasks/artifacts/object-file`(multipart:task_id/node_id/attempt/artifact_name?/file;`get_current_user`,creator=登录 user.id):**一步原子**——图/节点/attempt 交叉校验(与 `add_artifact` 同口径)→ 派生 key → put(失败 502,**无行**)→ `compose_artifact_record`+`append` 登记(幂等)。
+- `GET /api/v1/collaboration/tasks/artifacts/{artifact_id}/content`(同鉴权口径):按 artifact_id 查行 → 非 object_file 行 422 → key 前缀域校验(`{key_prefix}/{row.task_id}/`,跨任务伪造拒绝 422)→ 读对象(FOUND 200 回发字节 + Content-Disposition 文件名;NOT_FOUND 404;FAILED 502)。插件未绑定整个口 503。
+- **list 不新增路由**:OBJECT_FILE 产物天然出现在既有 `GET /artifacts` 与三处 dashboard Descriptor 中;协议层不留 bucket 级浏览(按需再加)。
+- 错误映射(ENVELOPE_ERRORS,列于 TaskError 基类前):413 超上限 / 404 行未知或对象缺失 / 502 存储失败 / 503 未接线;结构/内容失配沿用 `TaskArtifactContentError` 422。
+
+### 13.3 key 与失败语义(方案取舍)
+
+- **内容寻址 key**:`{key_prefix}/{task_id}/{sha256(字节).hex}{ext}`——同字节重传同 key → 同 `FileContent` → 既有 select-first dedupe(§5.3)收敛为一行;key 前缀天然按任务分域,支撑下载侧前缀域校验与未来的按任务清理。
+- **单向失败安全**:put 成功后行写失败 → 至多遗留无引用对象(可被清理回收),**决不出现"行在、字节无"的引用悬空行**;行写失败如实上抛(不吞)。
+- 单字节面(无分块)本期封顶 `max_upload_mb`(缺省 64,corp 建议 200);更大文件留后续 optional capability(如 presign/分块),不改基础缝。
