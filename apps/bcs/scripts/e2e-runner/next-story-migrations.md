@@ -4048,3 +4048,31 @@ during this command-lifecycle increment.
   `Ran 168 tests ... OK`; full e2e-runner discovery passed
   `Ran 2909 tests in 292.971s ... OK (skipped=225)`. No live Singlebox or preprod request was
   executed, and the slice starts no OpenClaw or engine-adapter process of its own.
+
+## 2026-10-27 clean-rebase preprod admission recheck
+
+On the rebased branch `codex/e2e-case-rewrite-rebased` (`origin/dev` base
+`48b23001e2edf63fbedc80acdf1474e5c105ad23`), the offline migration suite and
+runner regression had already passed. The first live preprod attempt after that
+rebase used the existing r4 remote Profile. The gateway manifest endpoint was
+reachable and returned HTTP 200, but the business payload was the ACE
+`USER_NOT_LOGIN` envelope rather than the collaboration manifest. The existing
+human Cookie file was last refreshed more than twelve hours earlier and the
+Profile references only that private `BCS_E2E_HUMAN_COOKIE` environment value.
+
+This is a credential-boundary blocker, not a network or runner-auth failure. No
+business resource was created, no observer metadata call was made, and the
+expired observer receipts were not renewed or reused. The next live admission
+requires a fresh human Cookie in the existing private local file; after that,
+rerun HTTP discovery with the same Profile before issuing a new observer
+receipt or executing any preprod write validation.
+
+The collaboration-team Story's preprod route was checked separately as well:
+`https://bcs-pre.alipay.com/manifest` returned the same business-level
+`USER_NOT_LOGIN` envelope, so the expired human credential blocks both the
+generic pilot gateway and the legacy collaboration-team product face. The
+current r12 collaboration-team artifacts already show 8/8 obligations passing,
+and its reviewed prebuilt `bcs-cli` (SHA256
+`72fef9d390eacc0e5455daa3d5838c91368c0ec59508342a2f48c7708b4937fe`) remains
+available; after the Cookie refresh, rerun that case on the rebased runner
+with a fresh Run rather than rebuilding the Rust product locally.
