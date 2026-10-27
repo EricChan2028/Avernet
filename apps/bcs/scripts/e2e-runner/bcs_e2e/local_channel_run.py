@@ -3,7 +3,7 @@ from pathlib import Path
 import signal
 
 from .errors import has_cancellation
-from .inventory import executor_digest, reviewed_release_inventory
+from .inventory import current_manifest, executor_digest, reviewed_release_inventory
 from .local_fixtures import OwnedLocalFixtures
 from .local_channel_contract import CASE_ID, PARENT, SUITE, REQUIREMENTS, channel_source_binding
 from .local_role_identity import OwnedLocalRoleIdentity
@@ -23,8 +23,9 @@ def local_channel_http_run(*, binary: Path, binary_sha256: str, state_dir: Path,
         raise RunStateError('Channel HTTP requires a fresh state directory; existing evidence is retained')
     source = executor_digest()
     original = channel_source_binding()
-    legacy = reviewed_release_inventory()
-    if PARENT not in {row['id'] for row in legacy}:
+    legacy = current_manifest()['legacy_inventory']
+    reviewed = reviewed_release_inventory()
+    if PARENT not in {row['id'] for row in reviewed}:
         raise RunStateError('Channel HTTP parent is missing from the original release denominator')
     binding = {'schema_version': 1, 'contract': SUITE, 'suite': SUITE,
                'case_id': CASE_ID, 'run_id': run_id, 'executor_digest': source,

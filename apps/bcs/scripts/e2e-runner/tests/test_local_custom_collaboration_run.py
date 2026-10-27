@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from bcs_e2e.inventory import KNOWN_UNMAPPED_LEGACY_IDS
 from bcs_e2e.local_custom_collaboration_case import CASE_ID
 from bcs_e2e.local_custom_collaboration_reporting import (
     build_custom_collaboration_report,
@@ -17,7 +18,7 @@ from bcs_e2e.local_custom_collaboration_run import (
     SUCCESS_STATUS,
     local_custom_collaboration_run,
 )
-from bcs_e2e.run_state import write
+from bcs_e2e.run_state import RunStateError, write
 
 
 class FakeOwnedBcsProcess:
@@ -93,26 +94,31 @@ class CustomCollaborationLifecycleTests(unittest.TestCase):
         reviewed_legacy = [
             {'id': 'story_cli_operator_creates_custom_collaboration'}
         ] + [{'id': f'other-{index}'} for index in range(28)]
+        # The frozen binding keeps the raw 34-row manifest; only the release
+        # denominator guards read the reviewed 29-row inventory.
+        raw_legacy = list(reviewed_legacy) + [
+            {'id': legacy_id} for legacy_id in KNOWN_UNMAPPED_LEGACY_IDS]
+        self.raw_legacy = raw_legacy
         self.inventory_patcher = patch(
             'bcs_e2e.local_custom_collaboration_run.reviewed_release_inventory',
             return_value=reviewed_legacy)
-        self.reporting_inventory_patcher = patch(
-            'bcs_e2e.local_custom_collaboration_reporting.reviewed_release_inventory',
-            return_value=reviewed_legacy)
+        self.run_manifest_patcher = patch(
+            'bcs_e2e.local_custom_collaboration_run.current_manifest',
+            return_value={'legacy_inventory': raw_legacy})
+        self.reporting_manifest_patcher = patch(
+            'bcs_e2e.local_custom_collaboration_reporting.current_manifest',
+            return_value={'legacy_inventory': raw_legacy})
         self.digest_patcher = patch(
             'bcs_e2e.local_custom_collaboration_run.executor_digest',
             return_value='e' * 64)
         self.reporting_digest_patcher = patch(
             'bcs_e2e.local_custom_collaboration_reporting.executor_digest',
             return_value='e' * 64)
-        self.inventory_patcher.start()
-        self.reporting_inventory_patcher.start()
-        self.digest_patcher.start()
-        self.reporting_digest_patcher.start()
-        self.addCleanup(self.inventory_patcher.stop)
-        self.addCleanup(self.reporting_inventory_patcher.stop)
-        self.addCleanup(self.digest_patcher.stop)
-        self.addCleanup(self.reporting_digest_patcher.stop)
+        for patcher in (self.inventory_patcher, self.run_manifest_patcher,
+                        self.reporting_manifest_patcher, self.digest_patcher,
+                        self.reporting_digest_patcher):
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def assert_success_case_file(self, root, yaml_path, status=SUCCESS_STATUS):
         result = {
@@ -256,11 +262,25 @@ class CustomCollaborationLifecycleTests(unittest.TestCase):
                      self.state_dir / 'local-custom-collaboration.json',
                      self.state_dir / 'reports/summary.json']:
             self.assertNotIn(b'owned-driver-token', path.read_bytes())
+        binding = json.loads(
+            (self.state_dir / 'custom-collaboration-lifecycle-binding.json').read_text())
+        self.assertEqual(binding['legacy_inventory'], self.raw_legacy)
+        self.assertEqual(len(binding['legacy_inventory']), 34)
+        self.assertTrue(
+            KNOWN_UNMAPPED_LEGACY_IDS
+            <= {row['id'] for row in binding['legacy_inventory']})
         canonical = build_custom_collaboration_report(self.state_dir)
         self.assertEqual(canonical['status'], 'LOCAL_SUITE_PASS')
         self.assertEqual(canonical['scope']['full_release_status'], 'NOT_QUALIFIED')
         self.assertEqual(canonical['scope']['full_story_status'], 'LOCAL_INTEGRATED')
         self.assertEqual(len(canonical['requirements']), 3)
+
+    def test_release_parent_guard_reads_reviewed_denominator_not_the_raw_freeze(self):
+        without_parent = [{'id': f'other-{index}'} for index in range(29)]
+        with patch('bcs_e2e.local_custom_collaboration_run.reviewed_release_inventory',
+                   return_value=without_parent):
+            with self.assertRaisesRegex(RunStateError, 'parent is missing'):
+                self.call_run()
 
     def test_non_pass_case_is_blocked_and_never_gets_release_credit(self):
         result, observed, _, websocket = self.call_run(case_status='NOT_PASS')

@@ -7,7 +7,7 @@ import signal
 from .case_executor import execute_fixed_loop_case
 from .case_rewrite import fixed_loop_case_rewrite
 from .errors import has_cancellation
-from .inventory import executor_digest, reviewed_release_inventory
+from .inventory import current_manifest, executor_digest, reviewed_release_inventory
 from .local_fixtures import OwnedLocalFixtures
 from .local_fixed_loop_case import OwnedFixedLoopCaseAdapter
 from .local_fixed_loop_contract import CASE_ID, PARENT, SUITE, fixed_loop_source_binding
@@ -36,8 +36,9 @@ def local_fixed_loop_run(*, binary: Path, binary_sha256: str, state_dir: Path, r
     source = executor_digest()
     original = fixed_loop_source_binding()
     plan = fixed_loop_case_rewrite()
-    legacy = reviewed_release_inventory()
-    if PARENT not in {row['id'] for row in legacy}:
+    legacy = current_manifest()['legacy_inventory']
+    reviewed = reviewed_release_inventory()
+    if PARENT not in {row['id'] for row in reviewed}:
         raise RunStateError('Fixed Loop parent is missing from the original release denominator')
     binding = {
         'schema_version': 1, 'contract': SUITE, 'suite': SUITE, 'case_id': CASE_ID,

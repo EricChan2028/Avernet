@@ -4,7 +4,7 @@ from pathlib import Path
 import signal
 
 from .errors import has_cancellation
-from .inventory import executor_digest, reviewed_release_inventory
+from .inventory import current_manifest, executor_digest, reviewed_release_inventory
 from .local_fixtures import OwnedLocalFixtures
 from .local_provider_contract import CASE_ID, PARENT, SUITE, REQUIREMENTS, provider_source_binding
 from .local_provider_sink import OwnedLocalProviderSink
@@ -25,8 +25,9 @@ def local_provider_run(*, binary: Path, binary_sha256: str, state_dir: Path,
         raise RunStateError('Provider Story requires a fresh directory; preserve existing evidence')
     source = executor_digest()
     original = provider_source_binding()
-    legacy = reviewed_release_inventory()
-    if PARENT not in {row['id'] for row in legacy}:
+    legacy = current_manifest()['legacy_inventory']
+    reviewed = reviewed_release_inventory()
+    if PARENT not in {row['id'] for row in reviewed}:
         raise RunStateError('Provider parent is missing from original release inventory')
     runtime = identities = None
     case, binding = {}, {}

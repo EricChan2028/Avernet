@@ -15,7 +15,7 @@ import signal
 from urllib.parse import quote, urlsplit
 
 from .errors import has_cancellation
-from .inventory import executor_digest, reviewed_release_inventory
+from .inventory import current_manifest, executor_digest, reviewed_release_inventory
 from .local_fixtures import OwnedLocalFixtures
 from .local_operator_cli_contract import (
     sessions_services_source_binding,
@@ -400,8 +400,9 @@ def local_session_service_parent_run(*, binary: Path, binary_sha256: str,
             'existing evidence is retained')
     executor = executor_digest()
     source = sessions_services_source_binding()
-    legacy = reviewed_release_inventory()
-    if (source['parent'] not in {row.get('id') for row in legacy}):
+    legacy = current_manifest()['legacy_inventory']
+    reviewed = reviewed_release_inventory()
+    if (source['parent'] not in {row.get('id') for row in reviewed}):
         raise RunStateError(
             'Session Service parent is missing from the release denominator')
 

@@ -3,7 +3,7 @@ from pathlib import Path
 import signal
 
 from .errors import has_cancellation
-from .inventory import executor_digest, reviewed_release_inventory
+from .inventory import current_manifest, executor_digest, reviewed_release_inventory
 from .local_delivery_policy_contract import (
     CASE_ID,
     PARENT,
@@ -33,8 +33,9 @@ def local_delivery_policy_run(*, binary: Path, binary_sha256: str, state_dir: Pa
         raise RunStateError('Delivery policy requires a fresh state directory; existing evidence is retained')
     source = executor_digest()
     original = delivery_policy_source_binding()
-    legacy = reviewed_release_inventory()
-    if PARENT not in {row['id'] for row in legacy}:
+    legacy = current_manifest()['legacy_inventory']
+    reviewed = reviewed_release_inventory()
+    if PARENT not in {row['id'] for row in reviewed}:
         raise RunStateError('Delivery policy parent is missing from the original release denominator')
     binding = {'schema_version': 1, 'contract': SUITE, 'suite': SUITE,
                'case_id': CASE_ID, 'run_id': run_id, 'executor_digest': source,

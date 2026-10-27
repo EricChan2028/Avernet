@@ -3,7 +3,7 @@ from pathlib import Path
 import signal
 
 from .errors import has_cancellation
-from .inventory import executor_digest, reviewed_release_inventory
+from .inventory import current_manifest, executor_digest, reviewed_release_inventory
 from .local_fixtures import OwnedLocalFixtures
 from .local_session_contract import PUBLIC_CASE as CASE_ID, PARENT, PUBLIC_SUITE as SUITE, REQUIREMENTS, session_source_binding
 from .local_role_identity import OwnedLocalRoleIdentity
@@ -33,8 +33,9 @@ def local_session_public_run(*, binary: Path, binary_sha256: str,
         raise RunStateError('Session public API/JWT/WS requires a fresh state directory; existing evidence is retained')
     source = executor_digest()
     original = session_source_binding()
-    legacy = reviewed_release_inventory()
-    if PARENT not in {row['id'] for row in legacy}:
+    legacy = current_manifest()['legacy_inventory']
+    reviewed = reviewed_release_inventory()
+    if PARENT not in {row['id'] for row in reviewed}:
         raise RunStateError('Session public API/JWT/WS parent is missing from the original release denominator')
     binding = {'schema_version': 1, 'contract': 'owned-local-session-public-v1', 'suite': SUITE,
                'case_id': CASE_ID, 'run_id': run_id, 'executor_digest': source,
