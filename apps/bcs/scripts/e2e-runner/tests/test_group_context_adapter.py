@@ -179,6 +179,26 @@ class GroupContextAdapterTests(unittest.TestCase):
         with self.assertRaises(RunStateError):
             self.adapter.create_workspace()
 
+    def test_runner_builds_group_and_session_add_commands(self):
+        role, arguments, method, path = self.runner._command(
+            "group_context.add.group")
+        self.assertEqual(role, "driver")
+        self.assertEqual(method, "POST")
+        self.assertEqual(path, "/groupcontext/add")
+        self.assertIn("--group-id", arguments)
+        self.assertIn(GROUP_ID, arguments)
+        self.assertNotIn("--session-id", arguments)
+        self.assertNotIn("--round-id", arguments)
+
+        role, arguments, method, path = self.runner._command(
+            "group_context.add.session")
+        self.assertEqual(role, "driver")
+        self.assertEqual(method, "POST")
+        self.assertEqual(path, "/groupcontext/add")
+        self.assertIn("--session-id", arguments)
+        self.assertIn(SESSION_ID, arguments)
+        self.assertNotIn("--round-id", arguments)
+
     def test_add_entries_carry_run_local_scope_content(self):
         group = self.adapter.add_group_context_entry()
         self.assertEqual(group.data["scope_level"], "group")

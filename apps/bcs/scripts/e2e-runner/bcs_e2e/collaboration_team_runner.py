@@ -271,7 +271,7 @@ class CollaborationTeamRunner:
             "unsupported collaboration-team CLI operation")
 
     def _group_context_add_command(self, scope_level: str, *, session_id: bool,
-                                      round_id: bool):
+                                      round_id: bool = False):
         if not self._group_context["group_id"]:
             raise CollaborationTeamRunnerError("Group Context workspace is not ready")
         content_key = {"group": "group_content", "session": "session_content",
