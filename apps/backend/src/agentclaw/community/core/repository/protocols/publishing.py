@@ -36,20 +36,6 @@ class BotPublishRepositoryProtocol(Protocol):
     # ========================================================================
 
     @abstractmethod
-    def reconcile_knowledge_projection(self) -> int:
-        """Process one bounded batch of due optional knowledge effects.
-
-        Native publication completes independently. Failures remain pending;
-        no enqueue callback is needed for restart recovery. Disabled returns 0.
-        """
-        ...
-
-    @abstractmethod
-    def retry_knowledge_projection(self, publish_id: int) -> bool:
-        """Explicitly retry FAILED effects after repair, without recapturing."""
-        ...
-
-    @abstractmethod
     def insert(self, data: Dict[str, Any]) -> BotPublishRecord:
         """Create a publish record.
 
@@ -470,15 +456,16 @@ class BotPublishRepositoryProtocol(Protocol):
         self, *, draft_publish_id: int, source_publish_id: int, operation_id: int,
         expected_attempt: int, final_result: dict,
     ) -> bool | None:
-        """Complete native restore and persist its optional selection intent.
+        """Atomically restore draft selection and complete its native operation.
 
-        Ledger identity, attempt/state, source lineage and deadline retain their
-        native guards. Result, COMPLETED and immutable projection intent commit
-        together, without binding I/O. Selection is applied independently under
-        an edit-epoch fence; unknown history never reads a later draft. Binding
-        failures retry without reversing native completion. Completed replays
-        are no-ops. Return None only when disabled (legacy completion), False
-        when draft is absent. Native ledger/journal persistence failures raise.
+        Validate the locked ledger identity, current attempt/state and persisted
+        deadline. Selection, restore marker, result and COMPLETED share one real
+        transaction. Completed replays are no-ops; terminal, expired or replaced
+        attempts never write. Source lineage/tenant/environment/space must match;
+        an unknown snapshot fails closed unless no binding was ever configured.
+        Return None only when publication integration is disabled (the caller
+        completes the legacy operation). Return False when the draft no longer
+        exists; enabled failures raise and must never select legacy completion.
         """
         ...
 

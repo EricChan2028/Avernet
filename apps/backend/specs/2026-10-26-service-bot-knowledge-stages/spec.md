@@ -1,7 +1,7 @@
-> Historical baseline: publication/restore coupling and blocking knowledge
-> error handling in this document are superseded by
-> `../2026-10-27-knowledge-nonblocking/`. Draft/verification sharing, production
-> isolation, native ACL and live platform-grant semantics remain unchanged.
+> Historical stage-isolation design/verification. Publication coupling and
+> UNKNOWN-history behavior are superseded by the approved
+> `../2026-10-27-knowledge-short-transaction/` contract. Counts below are not
+> validation of the short-transaction refactor.
 
 # Service Bot knowledge selection isolation
 

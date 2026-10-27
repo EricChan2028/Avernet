@@ -1,9 +1,6 @@
 """Draft restore completion fences against the real publication/operation ledger."""
 
 from datetime import datetime, timedelta
-
-from agentclaw.community.core.repository.implementations.publishing import knowledge_projection as projection
-from agentclaw.community.core.service_bot.repository.models import BotPublishModel as Publish
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -38,7 +35,6 @@ def restore_case(request):
         expected_ext=online.ext,
         ext=online.ext,
     )
-    repo.reconcile_knowledge_projection()
     draft = repo.insert(
         dict(
             source_bot_pk=1,
@@ -107,11 +103,6 @@ def _edit_to_a(case):
             row.enabled = row.kb_id == "A"
             row.revision += 1
             row.updated_by = "owner"
-
-    with case.db.orm_session() as session:
-        from sqlalchemy import func
-        column = Publish.__table__.c.knowledge_revision
-        session.query(Publish).filter(Publish.id == case.draft.id).update({column: func.coalesce(column, 0) + 1}, synchronize_session=False)
 
 
 def _selection(case):
@@ -184,21 +175,16 @@ def test_completion_commits_selection_marker_result_and_native_state(
     if with_workflow:
         case.ledger.record_workflow(case.operation.id, baas_publish_id=77)
     assert _complete(case)
-    assert case.ledger.get_by_id(case.operation.id).state == "completed"
-    assert _selection(case)["A"][0] is True
-    assert projection.apply(case.db, case.draft.id)
     selected = _selection(case)
     assert selected["A"][:2] == (False, False)
     assert selected["B"][:2] == (True, True)
     operation = case.ledger.get_by_id(case.operation.id)
     assert operation.state == "completed"
     assert operation.result == case.final_result
-    with case.db.orm_session() as session:
-        raw = session.query(Publish.__table__.c.knowledge_restore).filter(Publish.id == case.draft.id).scalar()
-    journal = projection.decode(raw)
-    assert journal["state"] == "applied"
-    assert journal["operation_id"] == case.operation.id
-    assert journal["source_publish_id"] == case.source.id
+    assert case.repo.get_by_id(case.draft.id).ext["knowledge_selection_restore"] == {
+        "operation_id": case.operation.id,
+        "source_publish_id": case.source.id,
+    }
 
 
 @pytest.mark.parametrize("state", ["failed", "abandoned"])
@@ -339,7 +325,6 @@ async def test_native_delivery_success_and_completed_redelivery_keep_durable_res
     )
     assert result == case.final_result
     assert case.ledger.get_by_id(case.operation.id).state == "completed"
-    assert projection.apply(case.db, case.draft.id)
     assert _selection(case)["B"][0] is True
     _edit_to_a(case)
     before = _selection(case)
@@ -371,20 +356,15 @@ def test_write_failure_rolls_back_every_restore_component(restore_case, table):
 
     event.listen(engine, "before_cursor_execute", fail_write)
     try:
-        if table == "ac_bot_knowledge_binding":
-            assert _complete(case)
-            with pytest.raises(RuntimeError, match="injected restore persistence failure"):
-                projection.apply(case.db, case.draft.id)
-        else:
-            with pytest.raises(RuntimeError, match="injected restore persistence failure"):
-                _complete(case)
+        with pytest.raises(RuntimeError, match="injected restore persistence failure"):
+            _complete(case)
     finally:
         event.remove(engine, "before_cursor_execute", fail_write)
     assert _selection(case) == before
     assert not case.repo.get_by_id(case.draft.id).ext
     operation = case.ledger.get_by_id(case.operation.id)
-    assert operation.state == ("completed" if table == "ac_bot_knowledge_binding" else "pending")
-    assert operation.result == (case.final_result if table == "ac_bot_knowledge_binding" else None)
+    assert operation.state == "pending"
+    assert operation.result is None
 
 
 @pytest.mark.parametrize("offset_seconds", [0, -1, 1])
@@ -476,31 +456,67 @@ def test_missing_ledger_never_uses_legacy_restore_bypass(restore_case):
     assert not case.repo.get_by_id(case.draft.id).ext
 
 
-def test_optional_projection_after_deadline_does_not_undo_native_completion(restore_case, monkeypatch):
-    from agentclaw.community.core.repository.implementations.publishing import knowledge_selection
+def test_deadline_is_rechecked_after_binding_lock_wait(restore_case, monkeypatch):
+    from agentclaw.community.core.repository.implementations.publishing import (
+        knowledge_selection,
+    )
+    from agentclaw.community.kernel.knowledge import KnowledgeError
     from sqlalchemy import event
+
     case = restore_case
     _edit_to_a(case)
+    before = _selection(case)
     deadline = datetime.fromisoformat(case.operation.params["deadline_at"])
     clock = {"now": deadline - timedelta(seconds=1), "waited": False}
+
     class Clock(datetime):
         @classmethod
         def now(cls, tz=None):
             return clock["now"]
+
     monkeypatch.setattr(knowledge_selection, "datetime", Clock)
     engine = case.db.factory.kw["bind"]
-    def expire_on_optional_binding_read(_c, _cu, statement, *_):
-        if statement.startswith("SELECT") and "FROM ac_bot_knowledge_binding" in statement:
+
+    def expire_while_loading_bindings(
+        _connection, _cursor, statement, _parameters, _context, _many
+    ):
+        if (
+            statement.startswith("SELECT ")
+            and "FROM ac_bot_knowledge_binding" in statement
+        ):
             clock["now"] = deadline
             clock["waited"] = True
-    event.listen(engine, "before_cursor_execute", expire_on_optional_binding_read)
+
+    event.listen(engine, "before_cursor_execute", expire_while_loading_bindings)
     try:
-        assert _complete(case)
-        assert not clock["waited"], "native completion must not read bindings"
-        assert case.ledger.get_by_id(case.operation.id).state == "completed"
-        assert projection.apply(case.db, case.draft.id)
+        with pytest.raises(KnowledgeError, match="KNOWLEDGE_RESTORE_OPERATION_EXPIRED"):
+            _complete(case)
     finally:
-        event.remove(engine, "before_cursor_execute", expire_on_optional_binding_read)
+        event.remove(engine, "before_cursor_execute", expire_while_loading_bindings)
     assert clock["waited"]
+    assert _selection(case) == before
+    assert case.ledger.get_by_id(case.operation.id).state == "pending"
+    assert case.ledger.get_by_id(case.operation.id).result is None
+    assert not case.repo.get_by_id(case.draft.id).ext
+
+
+@pytest.mark.parametrize("missing", ["snapshot", "binding"])
+def test_unknown_history_does_not_reject_native_restore_completion(restore_case, missing):
+    import json
+    from agentclaw.community.core.service_bot.repository.models import BotPublishModel
+
+    case = restore_case
+    _edit_to_a(case)
+    with case.db.orm_session() as session:
+        if missing == "binding":
+            session.query(Binding).filter_by(kb_id="B").delete()
+        else:
+            ext = dict(case.source.ext)
+            ext.pop("knowledge_selection_snapshot")
+            session.query(BotPublishModel).filter_by(id=case.source.id).update({"ext": json.dumps(ext)})
+    before = _selection(case)
+    assert _complete(case)
     assert case.ledger.get_by_id(case.operation.id).state == "completed"
-    assert _selection(case)["B"][0] is True
+    assert _selection(case) == before
+    marker = case.repo.get_by_id(case.draft.id).ext["knowledge_selection_restore"]
+    assert marker["knowledge"]["status"] == "unknown"

@@ -38,7 +38,6 @@ provides:
   - "ServiceArtifactLineageReader"
   - "ServiceEditLockService"
   - "ServiceBot SQLAlchemy models"
-  - "KnowledgeProjectionLifecycle"
 consumes:
   - "BotManagement"
   - "DeviceService + repo"
@@ -48,7 +47,6 @@ consumes:
   - "PassportPlugin"
   - "UserListRepositoryProtocol"
 internal_dependencies:
-  - agentclaw.community.kernel.knowledge  # fence asynchronous publication results by frozen selection
   - agentclaw.community.kernel.file_count
   - agentclaw.community.plugin_api.file_count_runtime
   - agentclaw.community.core.base
@@ -308,18 +306,12 @@ Optional command-timeout forwarding remains infrastructure-only: omitted timeout
 arguments retain the existing provider call/default behavior.
 
 
-## Optional non-blocking knowledge projection
+### Knowledge selection completion
 
-Draft and verification are mutually exclusive and share working selection;
-production selection is separate. Knowledge capture/projection must not gate
-native build, advancement, rollback admission or draft-device restoration.
-Successful completion records an immutable intent in the native publication
-row. Knowledge effects run independently through `BotPublishRepositoryProtocol`
-and `KnowledgeProjectionLifecycle`, not through the deployment stage runners.
-
-The lifecycle is default-off under `KnowledgePublicationPolicy`, discovers due
-work on restart, waits five seconds after each bounded 50-row batch and drains
-in-flight DB work on shutdown. It has no remote I/O and never restarts or
-reverses a successful Bot deployment. Retry/UNKNOWN/fencing and schema rollout
-are specified in `../bot_knowledge/README.md` and
-`apps/backend/specs/2026-10-27-knowledge-nonblocking/`.
+Optional knowledge effects are repository-owned DB bookkeeping, not a new
+service-Bot stage. Existing progress polling, deployment ledger and retries are
+reused unchanged. Publication schema, BaaS deployment and queue behavior are not
+extended. Only the short local success CAS/binding write unit is atomic; actual
+DB failure leaves ONLINE_PUB so its existing progress poll can retry completion
+without issuing a new deployment. Missing historical knowledge does not reject
+native rollback/restore. See `core/bot_knowledge/README.md` for UNKNOWN semantics.

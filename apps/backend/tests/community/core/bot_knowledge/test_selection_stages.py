@@ -225,3 +225,37 @@ def test_service_cannot_edit_shared_working_selection_during_release(knowledge, 
         )
     assert service.list_enabled(scope, selection_stage="draft") == ("b",)
     assert service.list_enabled(scope, selection_stage="online") == ("a",)
+
+
+def test_unknown_completion_is_denied_in_the_same_statement_as_online_flags(knowledge):
+    import json
+    from sqlalchemy import event
+
+    db, repo, service, scope = knowledge
+    seed_service(db)
+    with db.orm_session() as session:
+        session.query(BotPublishModel).update({
+            "status": "success",
+            "ext": json.dumps({"knowledge_selection_result": {
+                "status": "unknown", "reason": "KNOWLEDGE_SNAPSHOT_MISSING",
+            }}),
+        })
+    statements = []
+    engine = db.factory.kw["bind"]
+
+    def record(_conn, _cursor, sql, *_args):
+        statements.append(sql)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        assert repo.list_enabled(scope, selection_stage="online") == ()
+        result = service.list_bindings(scope=scope, actor_id="owner", selection_stage="online")
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    assert not any(item["enabled"] for item in result["items"])
+    assert repo.list_enabled_current(scope) == ("b",)
+    # The extra safety predicate is a scalar subquery, not N+1 or a separate
+    # gate SELECT that could race with reading stale production flags.
+    flag_reads = [sql for sql in statements if "FROM ac_bot_knowledge_binding" in sql]
+    assert len(flag_reads) == 2
+    assert all("EXISTS (SELECT" in sql and "ac_bot_publish" in sql for sql in flag_reads)

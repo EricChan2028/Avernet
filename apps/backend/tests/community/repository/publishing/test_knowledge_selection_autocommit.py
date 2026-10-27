@@ -1,8 +1,6 @@
 """Knowledge publication honors the production database transaction contract."""
 
 from contextlib import contextmanager
-
-from agentclaw.community.core.repository.implementations.publishing import knowledge_projection as projection
 from datetime import datetime, timedelta
 
 import pytest
@@ -94,64 +92,105 @@ def online_selection(db):
         }
 
 
-def test_projection_failure_rolls_back_only_effect_while_native_success_survives(autocommit_publication):
+def test_online_binding_failure_rolls_back_status_and_selection_and_can_retry(
+    autocommit_publication,
+):
     db, repo, record = autocommit_publication
-    online = lifecycle._start_online(repo, record)
+    building = repo.update_status(
+        record.id, PublishStatus.BUILDING, PublishStatus.DRAFT
+    )
+    online = repo.update_status_with_ext(
+        record.id,
+        PublishStatus.ONLINE_PUB,
+        building.ext,
+        source_status=PublishStatus.BUILDING,
+    )
     with db.orm_session() as session:
-        session.query(Binding).filter_by(kb_id="A").update({"online_enabled": True})
-    succeeded = repo.compare_and_set_status_with_ext(publish_id=record.id,
-        source_status=PublishStatus.ONLINE_PUB, target_status=PublishStatus.SUCCESS,
-        expected_ext=online.ext, ext=online.ext)
-    assert succeeded.status == PublishStatus.SUCCESS
+        session.query(Binding).filter(Binding.kb_id == "A").update(
+            {Binding.online_enabled: True}
+        )
     assert online_selection(db) == {"A"}
     writes = []
-    def fail_second_binding_update(_c, _cu, statement, *_):
+
+    def fail_second_binding_update(
+        _connection, _cursor, statement, _parameters, _context, _many
+    ):
         if statement.startswith("UPDATE ac_bot_knowledge_binding"):
             writes.append(statement)
             if len(writes) == 2:
-                raise RuntimeError("injected second binding UPDATE failure")
+                raise RuntimeError("injected second online binding UPDATE failure")
+
     event.listen(db.engine, "before_cursor_execute", fail_second_binding_update)
     try:
-        with pytest.raises(RuntimeError, match="second binding UPDATE"):
-            projection.apply(db, record.id)
+        with pytest.raises(RuntimeError, match="second online binding UPDATE"):
+            repo.compare_and_set_status_with_ext(
+                publish_id=record.id,
+                source_status=PublishStatus.ONLINE_PUB,
+                target_status=PublishStatus.SUCCESS,
+                expected_ext=online.ext,
+                ext=online.ext,
+            )
     finally:
         event.remove(db.engine, "before_cursor_execute", fail_second_binding_update)
     assert len(writes) == 2
-    assert repo.get_by_id(record.id).status == PublishStatus.SUCCESS
+    persisted = repo.get_by_id(record.id)
+    assert persisted.status == PublishStatus.ONLINE_PUB
+    assert persisted.ext == online.ext
     assert online_selection(db) == {"A"}
-    with db.orm_session() as session:
-        raw = session.query(repo.Model.__table__.c.knowledge_projection).filter_by(id=record.id).scalar()
-    assert projection.decode(raw)["state"] == "pending"
-    assert projection.apply(db, record.id)
+
+    succeeded = repo.compare_and_set_status_with_ext(
+        publish_id=record.id,
+        source_status=PublishStatus.ONLINE_PUB,
+        target_status=PublishStatus.SUCCESS,
+        expected_ext=online.ext,
+        ext=online.ext,
+    )
+    assert succeeded.status == PublishStatus.SUCCESS
     assert online_selection(db) == {"B"}
-    assert repo.compare_and_set_status_with_ext(publish_id=record.id,
-        source_status=PublishStatus.ONLINE_PUB, target_status=PublishStatus.SUCCESS,
-        expected_ext=online.ext, ext=online.ext) is None
+    db.writes.clear()
+    assert (
+        repo.compare_and_set_status_with_ext(
+            publish_id=record.id,
+            source_status=PublishStatus.ONLINE_PUB,
+            target_status=PublishStatus.SUCCESS,
+            expected_ext=online.ext,
+            ext=online.ext,
+        )
+        is None
+    )
+    assert db.writes == []
     assert online_selection(db) == {"B"}
 
 
-def test_capture_write_failure_rolls_back_capture_but_native_admission_can_continue(autocommit_publication):
+def test_freeze_write_failure_rolls_back_status_and_snapshot_and_can_retry(
+    autocommit_publication,
+):
     db, repo, record = autocommit_publication
     writes = []
-    def fail_once_after_publish_update(_c, _cu, statement, *_):
+
+    def fail_after_publish_update(
+        _connection, _cursor, statement, _parameters, _context, _many
+    ):
         if statement.startswith("UPDATE ac_bot_publish SET"):
             writes.append(statement)
-            if len(writes) == 1:
-                raise RuntimeError("injected after capture UPDATE")
-    event.listen(db.engine, "after_cursor_execute", fail_once_after_publish_update)
+            # The DB has executed the combined status/snapshot UPDATE. Only a
+            # real transaction can still undo it when the write unit fails.
+            raise RuntimeError("injected failure after freeze UPDATE")
+
+    event.listen(db.engine, "after_cursor_execute", fail_after_publish_update)
     try:
-        admitted = repo.update_status(record.id, PublishStatus.BUILDING, PublishStatus.DRAFT)
+        with pytest.raises(RuntimeError, match="after freeze UPDATE"):
+            repo.update_status(record.id, PublishStatus.BUILDING, PublishStatus.DRAFT)
     finally:
-        event.remove(db.engine, "after_cursor_execute", fail_once_after_publish_update)
-    assert admitted.status == PublishStatus.BUILDING
-    assert admitted.ext["other"] == record.ext["other"]
-    assert "enabled_kb_ids" not in admitted.ext["knowledge_selection_snapshot"]
-    with db.orm_session() as session:
-        raw = session.query(repo.Model.__table__.c.knowledge_snapshot).filter_by(id=record.id).scalar()
-    assert projection.decode(raw)["capture_error"] == "RuntimeError"
-    assert repo.update_status(record.id, PublishStatus.BUILDING, PublishStatus.DRAFT) is None
-    repo.update_status(record.id, PublishStatus.DRAFT, PublishStatus.BUILDING)
+        event.remove(db.engine, "after_cursor_execute", fail_after_publish_update)
+    assert len(writes) == 1
+    persisted = repo.get_by_id(record.id)
+    assert persisted.status == PublishStatus.DRAFT
+    assert persisted.ext == record.ext
+    assert "knowledge_selection_snapshot" not in persisted.ext
+
     frozen = repo.update_status(record.id, PublishStatus.BUILDING, PublishStatus.DRAFT)
+    assert frozen.status == PublishStatus.BUILDING
     assert frozen.ext["knowledge_selection_snapshot"]["enabled_kb_ids"] == ["B"]
     assert online_selection(db) == set()
 
@@ -190,7 +229,7 @@ def test_database_contract_is_real_autocommit_or_rollback(
         "restore",
     ],
 )
-def test_native_and_effect_transactions_follow_their_own_boundaries(
+def test_knowledge_write_boundaries_use_non_autocommit_transaction(
     autocommit_publication, boundary
 ):
     db, repo, record = autocommit_publication
@@ -306,7 +345,6 @@ def test_native_and_effect_transactions_follow_their_own_boundaries(
         )
         assert result is True
     assert result is not None
+    assert ("transactional_orm_session", False) in db.calls
     assert db.writes, "the boundary must execute real writes, not just open a session"
-    expected = ("transactional_orm_session", False) if boundary in ("freeze", "rollback", "restore") else ("orm_session", True)
-    assert expected in db.calls
-    assert set(db.writes) == {expected}
+    assert set(db.writes) == {("transactional_orm_session", False)}

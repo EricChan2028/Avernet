@@ -61,8 +61,7 @@ valid even if it differs from the current Bot PK; it is never silently rebound.
 A matching publication whose source was hard-deleted cannot be attributed to a
 tenant and fails closed (`BOT_DRAFT_REQUIRED`), including when ignoring it would
 otherwise reveal an older draft. No new publication ownership is inferred from
-business Bot/owner IDs alone. The optional projection journal described below
-does not introduce a new publication ownership identity.
+business Bot/owner IDs alone, and no publication schema or DDL is changed.
 
 ## AGENTS.md projection
 
@@ -136,10 +135,8 @@ Production state is never writable through the settings API.
 
 `ac_bot_knowledge_binding` retains its identity and draft revision CAS. Production
 advancement does not increment that editor revision. Publication owns freezing
-the bounded enabled KB-ID set into its existing ext and authoritative journal.
-Actual online success atomically records an intent, not binding effects. The
-independent projector atomically replaces production selection and acknowledges
-that intent. Failed deployment
+the bounded enabled KB-ID set into its existing ext, and atomically replacing
+production selection when actual online deployment succeeds. Failed deployment
 or rollback admission is not production success. Snapshots cannot cross source
 Bot, tenant, environment or space. Reclaiming a binding after a space move clears
 its old production flag. Platform grants and native user ACL remain live gates,
@@ -148,7 +145,9 @@ not snapshot fields. Actual MCP consumption wiring is outside this change.
 Fresh schemas use the updated create script. Existing databases must apply the
 review-only `apps/backend/sql/2026_10_26_bot_knowledge_online_selection.sql` before
 deploying the new code. It initializes production to false, not from draft:
-historical service publications without a trustworthy snapshot must republish.
+historical service publications without a trustworthy snapshot produce UNKNOWN
+knowledge state (no draft fallback); native publication/rollback may still finish.
+Republishing with a trustworthy snapshot restores an explicit selection.
 No migration is executed at startup or against any running environment here.
 
 ### Publication integration opt-in
@@ -156,92 +155,46 @@ No migration is executed at startup or against any running environment here.
 `user_config.bot_knowledge_publication.enabled` is false by default. It controls
 only publication snapshot/promotion/restore effects, not knowledge management
 APIs. Disabled publication never queries the binding table; enabled integration
-requires `online_enabled` and the reviewed, additive publication journal schema
-`apps/backend/sql/2026_10_27_bot_knowledge_projection.sql` **before opt-in**.
-The journal columns are excluded from the native ORM mapper so disabled native
-SELECT/INSERT/UPDATE does not require this migration. No startup migration runs.
-Do not toggle off until publication/restore operations and pending projections
-are drained. Retain additive columns when rolling back the feature.
+requires the additive `online_enabled` column and fails closed on DB errors.
+Do not toggle off in the middle of active publication or restore operations.
 
-### Non-blocking projection contract (2026-10-27)
+### Short local completion transaction (approved 2026-10-27)
 
-Knowledge capture failure is explicit UNKNOWN; native build admission continues
-using its original status CAS. Missing/invalid historical snapshots never borrow
-the current draft. Successful online deployment and native draft-device restore
-persist immutable intents alongside their native completion; neither accesses
-binding rows. Native ledger/CAS/DB failures still propagate normally.
+The implementation adds no fields/indexes to `ac_bot_publish`, no publication
+side-table, no worker, and no queue integration. `knowledge_selection_snapshot`
+and the small `knowledge_selection_result` use the existing publication `ext`.
+The result distinguishes a valid empty selection from UNKNOWN history.
 
-A lifecycle worker discovers only indexed due rows (50 per batch, 5 seconds
-between batches). It runs DB-only effects and acknowledgement in one transaction
-under Bot → publication locks. Failures retry after 30 DB-clock seconds, up to
-10 attempts, then retain FAILED with no further automatic work. After repairing
-the cause, the tenant/environment-scoped repository method
-`retry_knowledge_projection(publish_id)` requeues the same intent; it never
-recaptures. UNKNOWN requires a new trustworthy publication, not retry from draft.
-Malformed journals are durably UNKNOWN rather than silently acknowledged.
+Capture is bounded to 100 enabled IDs and contains Bot PK, Owner, environment,
+tenant, space, publication ID and a fresh generation token. A durable callback
+may restore the snapshot tenant context, but all Bot/Binding tenant guards and
+source identity checks still apply. Missing or invalid historical snapshots and
+removed bindings produce UNKNOWN, never a later draft selection or an implicit
+inheritance of previous production flags. Scoped flags are cleared; the online
+reader additionally denies explicit UNKNOWN completions in the same SQL
+statement that reads flags, including when no source can be safely resolved.
+A normal service read adds one scoped EXISTS subquery, not per-binding queries.
+Personal and draft reads do not query publication state.
 
-Ordering uses the existing globally monotonic BaaS deployment ID, not version or
-publication ID, so rollback to an older version is still a newer deployment.
-Missing deployment IDs fail closed. Delayed restore effects compare the draft
-edit epoch and latest native restore attempt; subsequent edits win.
+The ONLINE_PUB → SUCCESS status/ext CAS and binding flag replacement use ONE
+real transaction/Session. SQL/connection/commit errors propagate and roll back
+both, unlike knowledge business states. The existing progress-poll task retries
+local completion after observing the same external workflow; it does not invoke
+another deploy. No knowledge-specific queue job or table is needed. Native
+ledger deployment ordering rejects late outcomes superseded by a newer deploy.
 
-Online `list_enabled` is empty while the latest projection is pending, failed or
-unknown. `list_bindings` adds `projection_state` and reports disabled flags in
-those states; absence of a journal is `legacy`, not evidence of new capture.
-Readers must not interpret prior flags as the current production selection.
-Platform grants remain live gates. Personal Bot behavior is unchanged.
+Rollback admission only performs the native two-record flip, with no knowledge
+history validation. Selection changes on observed target deployment success.
+Draft restore retains native operation identity, latest-attempt, source, draft
+and deadline checks. Unknown history preserves working selection and records
+UNKNOWN in the restore marker while completing the native ledger. Completed
+restore replay cannot overwrite subsequent edits.
 
-Local SQLite/autocommit/fault-injection tests are not MySQL/OceanBase, multi-pod,
-remote CI, Singlebox or production acceptance. Review target schema/index plans
-and obtain separate migration/deployment approval before enabling.
-
-
-### Claim and operator recovery
-
-Before taking a Bot lock, each worker atomically claims a due row by comparing
-the journals and moving `knowledge_due` to DB-now + 30 seconds. Only the winner
-runs the projection. The apply/failed-result write checks the same lease; a
-process crash is recovered by ordinary due discovery after expiry. No new lease
-column/table or in-memory ownership is required. MySQL latest-deployment and
-restore fences use locking/current reads, not a pre-lock RR snapshot.
-
-The narrowly scoped recovery entrypoint is
-`apps/backend/scripts/retry_knowledge_projection.py`. From an **authorized
-deployment shell**, with its normal profile/config/DB privileges, run from
-`apps/backend` (only after separate operations approval):
-
-```sh
-PYTHONPATH=src python scripts/retry_knowledge_projection.py \
-  --env <matching-deployment-env> --tenant <explicit-tenant> \
-  --publish-id <failed-publication-id> --confirm-retry
-```
-
-No credentials are accepted/printed; this does not grant DB permissions, run
-DDL, start lifecycles or call deployment APIs. The policy must be enabled and
-`--env` must match the configured deployment. Repository guards enforce tenant
-and environment. Exit 0 means requeued, 2 means no matching FAILED intent was
-requeued, and validation/persistence errors fail the command. It reuses the
-immutable snapshot; UNKNOWN cannot be reconstructed this way. Production use of
-this command has not been executed or verified by this local repair.
-
-
-### Native tenant lineage and failed admission token
-
-`knowledge_tenant` persists native routing independently of optional snapshots.
-Opted-in inserts record the authenticated tenant and successful capture rechecks
-it from the guarded source Bot. The review-only migration backfills historical
-routing by the existing source Bot PK and environment; it does **not** backfill
-any selection or snapshot. Apply this reviewed metadata backfill before opt-in;
-orphan sources cannot be attributed and remain untrusted. Background completion
-uses this native routing column, never the default task tenant or missing legacy
-snapshot. No runtime tenant-guard bypass is introduced.
-
-Capture failure still rotates a small generation-only ext token in the native
-admission transaction, alongside the UNKNOWN journal capture. Thus a previous
-build worker cannot adopt a later BUILDING state even when recapture failed.
-The marker contains no enabled IDs and cannot grant access.
-
-If there was no preceding ext token and even the minimal token would overflow a
-valid native TEXT, admission leaves that native payload unchanged and records
-UNKNOWN in the journal only. No optional token may introduce a native capacity
-failure. Existing admitted generation tokens are rotated, not retained.
+Changed content-addressed artifacts are staged before added row locks, unchanged
+objects are reused, and PUT failure precedes any local transition. An exact CAS
+that races after staging may leave an unreferenced immutable object under the
+existing per-record cleanup prefix. Build/deploy/grant/OSS work is never wrapped
+in a knowledge transaction. Disabled integration retains native session and
+upload behavior and accesses no knowledge table. See
+`specs/2026-10-27-knowledge-short-transaction/` for current acceptance evidence;
+earlier stage verification counts are historical, not this refactor's result.

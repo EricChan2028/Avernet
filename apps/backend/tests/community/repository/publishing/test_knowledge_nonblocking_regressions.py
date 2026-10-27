@@ -70,9 +70,12 @@ def test_first_new_release_can_roll_back_to_pre_feature_version(
         ext=deploying.ext,
     )
     assert completed.status == PublishStatus.SUCCESS
+    assert completed.ext["knowledge_selection_result"]["status"] == "unknown"
+    with db.orm_session() as session:
+        assert not session.query(Binding).filter(Binding.online_enabled.is_(True)).count()
 
 
-def test_build_admission_continues_when_knowledge_table_read_fails(publication):
+def test_build_admission_rolls_back_when_knowledge_table_read_fails(publication):
     from sqlalchemy import event
 
     db, repo, current = publication
@@ -87,10 +90,9 @@ def test_build_admission_continues_when_knowledge_table_read_fails(publication):
 
     event.listen(engine, "before_cursor_execute", fail_knowledge_read)
     try:
-        built = repo.update_status(
-            current.id, PublishStatus.BUILDING, PublishStatus.DRAFT
-        )
-        assert built.status == PublishStatus.BUILDING
+        with pytest.raises(RuntimeError, match="injected knowledge read failure"):
+            repo.update_status(current.id, PublishStatus.BUILDING, PublishStatus.DRAFT)
+        assert repo.get_by_id(current.id).status == PublishStatus.DRAFT
     finally:
         event.remove(engine, "before_cursor_execute", fail_knowledge_read)
 

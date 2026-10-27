@@ -20,8 +20,8 @@ internal_dependencies:
 No grant writes or client-controlled publication/version inputs. GET accepts
 `selection_stage=draft|online` (default draft); verification shares draft. PUT
 only modifies working selection and rejects production fields. Production
-advancement is projected from the successful Bot publication intent, independently
-of native advancement. GET includes `projection_state` (`legacy`, `pending`,
-`applied`, `unknown`, `failed`, `superseded`). An opted-in service online view
-reports disabled items while projection is not applied; personal/current views
-retain their existing selection. No HTTP retry/write-publication API is added.
+advancement is owned by the successful Bot publication transaction.
+
+Unknown historical production selection is denied, never exposed as the current
+draft or inherited from previous production flags. No projection/retry API or
+extra background-job state is introduced. See `core/bot_knowledge/README.md`.

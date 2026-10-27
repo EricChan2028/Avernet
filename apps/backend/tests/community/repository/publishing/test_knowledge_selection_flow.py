@@ -9,7 +9,6 @@ from agentclaw.community.core.service_bot.repository.config_artifact_offload imp
 )
 from agentclaw.community.kernel.knowledge import KnowledgePublicationPolicy
 
-
 from tests.community.repository.publishing.test_knowledge_selection_lifecycle import (
     Binding,
     PublishStatus,
@@ -59,12 +58,10 @@ async def test_real_service_process_freezes_and_observed_online_success_promotes
     )
     assert result.status == PublishStatus.SUCCESS
     assert repo.get_by_id(record.id).status == PublishStatus.SUCCESS
-    assert _online(db) == {"A"}
-    assert repo.reconcile_knowledge_projection() == 1
     assert _online(db) == {"B"}
 
 
-def test_real_service_success_is_independent_of_production_projection_failure(
+def test_real_service_success_rolls_back_status_when_production_write_fails(
     publication,
 ):
     import copy
@@ -75,8 +72,6 @@ def test_real_service_success_is_independent_of_production_projection_failure(
     db, repo, record = publication
     flow, _ = _real_flow(repo)
     online = _start_online(repo, record)
-    online = repo.update_status_with_ext(record.id, PublishStatus.ONLINE_PUB,
-        {**online.ext, "binding": {"online": 11}}, source_status=PublishStatus.ONLINE_PUB)
     with db.orm_session() as session:
         session.query(Binding).filter(Binding.kb_id == "A").update(
             {Binding.online_enabled: True}
@@ -91,7 +86,8 @@ def test_real_service_success_is_independent_of_production_projection_failure(
 
     event.listen(engine, "before_cursor_execute", fail_binding_write)
     try:
-        flow._handle_sync_success(
+        with pytest.raises(RuntimeError, match="injected binding persistence failure"):
+            flow._handle_sync_success(
                 publish_id=record.id,
                 publish_record=online,
                 stage=PublishStage.ONLINE,
@@ -99,10 +95,9 @@ def test_real_service_success_is_independent_of_production_projection_failure(
                 baas_publish_id=77,
                 progress={"status": "SUCCESS"},
             )
-        assert repo.reconcile_knowledge_projection() == 0
     finally:
         event.remove(engine, "before_cursor_execute", fail_binding_write)
-    assert repo.get_by_id(record.id).status == PublishStatus.SUCCESS
+    assert repo.get_by_id(record.id).status == PublishStatus.ONLINE_PUB
     assert _online(db) == {"A"}
 
 
@@ -113,7 +108,9 @@ async def test_old_build_result_cannot_join_a_new_frozen_generation(publication)
     from agentclaw.community.core.service_bot.services.publish_flow.build_stage import (
         BuildArtifactOnlyResult,
     )
-    from agentclaw.community.core.service_bot.services.publish_flow.errors import PublishFlowServiceError
+    from agentclaw.community.core.service_bot.services.publish_flow.errors import (
+        PublishFlowServiceError,
+    )
 
     _db, repo, record = publication
     old = repo.update_status(record.id, PublishStatus.BUILDING, PublishStatus.DRAFT)
@@ -130,7 +127,7 @@ async def test_old_build_result_cannot_join_a_new_frozen_generation(publication)
             employee_snapshot=None,
         )
     )
-    with pytest.raises(PublishFlowServiceError, match="superseded"):
+    with pytest.raises(PublishFlowServiceError, match="Publication attempt superseded"):
         await flow.execute_build_phase(old, "owner")
     assert repo.get_by_id(record.id).status == PublishStatus.BUILDING
     assert repo.get_by_id(record.id).ext == current.ext
@@ -199,21 +196,20 @@ def test_frozen_snapshot_preserves_offloaded_artifact_and_exact_ext_cas(publicat
     )
 
 
-def test_generic_ext_writer_cannot_replace_authoritative_capture(publication):
-    import json
-    db, repo, record = publication
+def test_snapshot_cannot_be_replaced_by_generic_ext_writer(publication):
+    from agentclaw.community.kernel.knowledge import KnowledgeError
+
+    _db, repo, record = publication
     frozen = repo.update_status(record.id, PublishStatus.BUILDING, PublishStatus.DRAFT)
-    tampered = {**frozen.ext, "knowledge_selection_snapshot": {
-        **frozen.ext["knowledge_selection_snapshot"], "enabled_kb_ids": ["A"]}}
-    changed = repo.compare_and_set_ext(publish_id=record.id, expected_ext=frozen.ext, ext=tampered)
-    assert changed is not None
-    with db.orm_session() as session:
-        raw = session.query(repo.Model.__table__.c.knowledge_snapshot).filter_by(id=record.id).scalar()
-    assert json.loads(raw)["enabled_kb_ids"] == ["B"]
-    online = repo.update_status_with_ext(record.id, PublishStatus.ONLINE_PUB,
-        {**changed.ext, "publish": {"online": 77}}, source_status=PublishStatus.BUILDING)
-    assert repo.compare_and_set_status_with_ext(publish_id=record.id,
-        source_status=PublishStatus.ONLINE_PUB, target_status=PublishStatus.SUCCESS,
-        expected_ext=online.ext, ext=online.ext).status == PublishStatus.SUCCESS
-    assert repo.reconcile_knowledge_projection() == 1
-    assert _online(db) == {"B"}
+    tampered = {
+        **frozen.ext,
+        "knowledge_selection_snapshot": {
+            **frozen.ext["knowledge_selection_snapshot"],
+            "enabled_kb_ids": ["A"],
+        },
+    }
+    with pytest.raises(KnowledgeError, match="KNOWLEDGE_SNAPSHOT_READ_ONLY"):
+        repo.compare_and_set_ext(
+            publish_id=record.id, expected_ext=frozen.ext, ext=tampered
+        )
+    assert repo.get_by_id(record.id).ext == frozen.ext

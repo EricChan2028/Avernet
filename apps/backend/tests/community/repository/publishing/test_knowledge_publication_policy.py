@@ -14,6 +14,7 @@ from agentclaw.community.di.modules.service_bot_module import ServiceBotModule
 from agentclaw.community.kernel.knowledge import KnowledgePublicationPolicy
 from injector import Injector
 from sqlalchemy import event
+from sqlalchemy.exc import OperationalError
 
 from tests.community.repository.publishing.test_knowledge_selection_lifecycle import (
     publication as publication_fixture,
@@ -56,7 +57,7 @@ def test_publication_default_is_disabled():
 
 
 @pytest.mark.parametrize("enabled", [False, True])
-def test_missing_knowledge_schema_never_blocks_native_publication(
+def test_missing_knowledge_schema_only_blocks_opted_in_publication(
     publication, enabled, monkeypatch
 ):
     db, _repo, record = publication
@@ -82,11 +83,9 @@ def test_missing_knowledge_schema_never_blocks_native_publication(
         engine, "before_cursor_execute", lambda _c, _cur, sql, *_: queries.append(sql)
     )
     if enabled:
-        assert repo.update_status(record.id, PublishStatus.BUILDING, PublishStatus.DRAFT).status == PublishStatus.BUILDING
-        with db.orm_session() as session:
-            raw = session.query(repo.Model.__table__.c.knowledge_snapshot).filter_by(id=record.id).scalar()
-        import json
-        assert json.loads(raw)["capture_error"] == "OperationalError"
+        with pytest.raises(OperationalError):
+            repo.update_status(record.id, PublishStatus.BUILDING, PublishStatus.DRAFT)
+        assert repo.get_by_id(record.id).status == PublishStatus.DRAFT
     else:
         built = repo.update_status(
             record.id, PublishStatus.BUILDING, PublishStatus.DRAFT

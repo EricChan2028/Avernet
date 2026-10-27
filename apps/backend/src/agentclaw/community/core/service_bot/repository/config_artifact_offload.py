@@ -26,8 +26,9 @@ Design invariants:
   still-valid record points at. Superseded versions are reaped together by
   :meth:`cleanup` when the record is deleted.
 * **No I/O in :meth:`prepare`.** It returns a pending upload the caller performs
-  only AFTER the DB write is confirmed to persist, so a rejected write leaves no
-  orphan object.
+  after validating its native write, or stages a changed immutable object
+  before a knowledge-aware short transaction. A raced pre-staged object stays
+  under the same record prefix and is reaped by existing record cleanup.
 """
 from __future__ import annotations
 
@@ -82,7 +83,8 @@ class ConfigArtifactOffloader:
 
         Returns ``(ext_json, pending)``; ``pending`` is a :data:`PendingUpload`
         to write via :meth:`upload`, or ``None``. Performs NO I/O — the caller
-        uploads ``pending`` only after confirming the DB write will persist.
+        uploads ``pending`` after write validation, or before its short DB-only
+        transaction (with the native status/ext CAS still enforced).
         """
         if ext is None:
             return None, None
