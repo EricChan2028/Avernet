@@ -665,36 +665,33 @@ class WorkerCandidateRecommendationImpl:
             f"exclude_count={len(exclude_profile_keys)}, vector_min_score={vector_min_score}, rerank_min_score={rerank_min_score}"
         )
 
+        query_embedding: list[float] = []
         if self._embedding_generator is None:
-            logger.error(
-                "[VectorMatch-Try] NO_EMBEDDING_GEN | "
-                "embedding_generator is None! Cannot perform vector match."
+            logger.warning(
+                "[VectorMatch-Try] EMBEDDING_UNAVAILABLE | continuing with lexical retrieval"
             )
-            return None
-
-        # 检查 real embedding 是否启用
-        real_embedding_enabled = FeatureFlags.is_real_embedding_enabled()
-        if not real_embedding_enabled:
-            logger.error(
-                "[VectorMatch-Try] EMBEDDING_DISABLED | "
-                "ENABLE_REAL_EMBEDDING=false, cannot use vector match."
+        elif not FeatureFlags.is_real_embedding_enabled():
+            logger.warning(
+                "[VectorMatch-Try] EMBEDDING_DISABLED | continuing with lexical retrieval"
             )
-            return None
+        else:
+            try:
+                embedding_started = perf_counter()
+                query_embedding = self._embedding_generator.embed(question)
+                log_stage(logger, "embedding", dimension=len(query_embedding),
+                          duration_ms=round((perf_counter() - embedding_started) * 1000, 2))
+            except Exception as error:
+                logger.warning(
+                    "[VectorMatch-Try] EMBEDDING_FAILED | "
+                    f"error_type={type(error).__name__}; continuing with lexical retrieval"
+                )
 
         logger.debug(
-            "[VectorMatch-Try] SERVICES_OK | "
-            f"has_embedding_gen=True, has_vector_match=True, "
-            f"real_embedding_flag={real_embedding_enabled}"
+            "[VectorMatch-Try] RETRIEVAL_INPUT_READY | "
+            f"has_embedding={bool(query_embedding)}, has_vector_match=True"
         )
 
         try:
-            # 生成查询向量
-            logger.debug("[VectorMatch-Try] GENERATING_EMBEDDING | question_length=%d", len(question))
-            embedding_started = perf_counter()
-            query_embedding = self._embedding_generator.embed(question)
-            log_stage(logger, "embedding", dimension=len(query_embedding),
-                      duration_ms=round((perf_counter() - embedding_started) * 1000, 2))
-
             # 执行向量匹配（传入运行时配置和阈值）
             # Phase B: 传递两个独立的阈值
             logger.debug(

@@ -270,3 +270,127 @@ def test_composition_root_injects_literal_fallback_snapshot(monkeypatch, tmp_pat
     finally:
         fusion_dependencies.reset_fusion_services()
         fusion_dependencies.set_app_context(None)
+
+
+def test_missing_query_embedding_still_uses_keyword_branch(tmp_path):
+    from app.application.services.worker_vector_match_service import (
+        FragmentRetrievalConfig,
+        WorkerVectorMatchService,
+    )
+    from app.infra.metadatastores.file_metadata_store_adapter import (
+        FileMetadataStoreAdapter,
+    )
+    from app.domain.models.vector_search_hit import VectorSearchHit
+
+    class KeywordStore:
+        def __init__(self):
+            self.searches = []
+            self.dense_called = False
+
+        def size(self):
+            return 1
+
+        def search(self, vector, top_k, filters=None):
+            self.dense_called = True
+            raise AssertionError("dense search must be skipped without an embedding")
+
+        def text_search(self, query, top_k, filters=None):
+            self.searches.append((query, top_k, filters))
+            return [
+                VectorSearchHit(
+                    id="worker:default:full",
+                    score=1.0,
+                    payload={
+                        "profile_key": "worker:default",
+                        "worker_id": "worker",
+                        "profile_id": "default",
+                        "fragment_type": "full",
+                        "content": "星河 数据分析",
+                        "runtime_state": "online",
+                        "availability": "public",
+                    },
+                )
+            ]
+
+    store = KeywordStore()
+    service = WorkerVectorMatchService(
+        vector_store=store,
+        metadata_store=FileMetadataStoreAdapter(storage_dir=str(tmp_path / "metadata")),
+        fragment_config=FragmentRetrievalConfig(enable_fragment_embedding=True),
+    )
+    runtime_config = {}
+    results = service.match(
+        query_embedding=[],
+        query="星河 数据分析",
+        mode="fragment",
+        top_k=3,
+        vector_min_score=0.9,
+        runtime_config=runtime_config,
+    )
+
+    assert [result.profile_key for result in results] == ["worker:default"]
+    assert store.dense_called is False
+    assert runtime_config["_retrieval"]["semantic_unavailable"] is True
+    assert runtime_config["_retrieval"]["keyword_unavailable"] is False
+    assert runtime_config["_retrieval"]["score_source"] == "hybrid_rrf"
+
+
+def test_candidate_recommendation_continues_with_empty_embedding(monkeypatch):
+    from app.application.services.worker_candidate_recommendation_impl import (
+        WorkerCandidateRecommendationImpl,
+    )
+    from app.application.services.worker_vector_match_types import MatchResult
+    from app.domain.models.candidate_recommendation import CandidateRecommendation
+    from app.domain.models.metadata_record import MetadataRecord
+
+    class VectorMatch:
+        def __init__(self):
+            self.calls = []
+
+        def match(self, **kwargs):
+            self.calls.append(kwargs)
+            return [
+                MatchResult(
+                    profile_key="worker:default",
+                    metadata=MetadataRecord(
+                        profile_key="worker:default",
+                        staff_id="worker",
+                        profile_id="default",
+                        profile_type="default",
+                        source_root="test",
+                        payload={"content": "星河 数据分析"},
+                    ),
+                    score=1.0,
+                    reasons=["literal_fallback"],
+                )
+            ]
+
+    vector_match = VectorMatch()
+    service = WorkerCandidateRecommendationImpl(
+        retrieval_service=object(),
+        vector_match_service=vector_match,
+        embedding_generator=None,
+    )
+    monkeypatch.setattr(
+        service,
+        "_build_recommendation_from_metadata",
+        lambda **kwargs: CandidateRecommendation(
+            profile_key="worker:default",
+            worker_id="worker",
+            score=kwargs["score"],
+        ),
+    )
+    monkeypatch.setenv("ENABLE_REAL_EMBEDDING", "true")
+
+    result = service._try_vector_match(
+        question="星河 数据分析",
+        top_k=3,
+        exclude_profile_keys=[],
+        filters={},
+        vector_min_score=0.01,
+    )
+
+    assert result is not None
+    assert vector_match.calls[0]["query_embedding"] == []
+    assert vector_match.calls[0]["query"] == "星河 数据分析"
+    assert [rec.profile_key for rec in result[0]] == ["worker:default"]

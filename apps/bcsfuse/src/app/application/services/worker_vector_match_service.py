@@ -426,6 +426,9 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
         elif mode == "fragment":
             use_fragment = True
         # mode="auto" 或其他值时，保持 use_fragment 的默认值（从环境变量读取）
+        # 没有语义向量时强制使用 fragment 路径，让 keyword 或 literal fallback 接管。
+        if not query_embedding:
+            use_fragment = True
 
         # 提取运行时配置（并发安全，不修改全局配置）
         effective_config = runtime_config if runtime_config is not None else {}

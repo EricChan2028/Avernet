@@ -111,37 +111,46 @@ class FragmentMatchingMixin:
         # Stage 2: Fragment 级检索（扩大召回）
         fragment_hits = []
         dense_available = True
+        search_k = self._calculate_search_k(
+            top_k=top_k,
+            has_filters=filters is not None,
+            has_excluded=len(excluded_set) > 0,
+            expand_factor=effective_expand_factor,
+        )
+        vector_size = 0
         try:
-            vector_size = self._vector_store.size()
-            if vector_size == 0:
-                log_stage(logger, "vector_search", index_size=0, hit_count=0, reason="empty_index")
-                logger.error("[FRAGMENT-MATCH] vector store is empty")
-                return []
+            if not query_embedding:
+                dense_available = False
+                log_stage(
+                    logger,
+                    "vector_search",
+                    reason="embedding_unavailable",
+                    hit_count=0,
+                )
+            else:
+                vector_size = self._vector_store.size()
+                if vector_size == 0:
+                    log_stage(logger, "vector_search", index_size=0, hit_count=0, reason="empty_index")
+                    logger.error("[FRAGMENT-MATCH] vector store is empty")
+                    return []
 
-            # 计算需要召回的数量（使用运行时配置）
-            search_k = self._calculate_search_k(
-                top_k=top_k,
-                has_filters=filters is not None,
-                has_excluded=len(excluded_set) > 0,
-                expand_factor=effective_expand_factor,
-            )
+            if dense_available:
+                # 传递 filters 启用 Qdrant 前置过滤
+                search_started = perf_counter()
+                fragment_hits = self._vector_store.search(query_embedding, top_k=search_k, filters=filters)
+                raw_hit_count = len(fragment_hits)
+                log_candidates(logger, "vector_hits", ((hit.id, hit.score) for hit in fragment_hits))
 
-            # 传递 filters 启用 Qdrant 前置过滤
-            search_started = perf_counter()
-            fragment_hits = self._vector_store.search(query_embedding, top_k=search_k, filters=filters)
-            raw_hit_count = len(fragment_hits)
-            log_candidates(logger, "vector_hits", ((hit.id, hit.score) for hit in fragment_hits))
-
-            # 过滤掉未启用的 fragment 类型（使用运行时权重决定）
-            unfiltered_hits = fragment_hits
-            fragment_hits = self._filter_fragment_hits(fragment_hits, enabled_fragment_types)
-            retained_ids = {hit.id for hit in fragment_hits}
-            log_candidates(logger, "fragment_type_removed", (
-                (hit.id, hit.score) for hit in unfiltered_hits if hit.id not in retained_ids
-            ), level=logging.INFO)
-            log_stage(logger, "vector_search", index_size=vector_size, search_k=search_k,
-                      hit_count=raw_hit_count, after_type_filter=len(fragment_hits),
-                      duration_ms=round((perf_counter() - search_started) * 1000, 2))
+                # 过滤掉未启用的 fragment 类型（使用运行时权重决定）
+                unfiltered_hits = fragment_hits
+                fragment_hits = self._filter_fragment_hits(fragment_hits, enabled_fragment_types)
+                retained_ids = {hit.id for hit in fragment_hits}
+                log_candidates(logger, "fragment_type_removed", (
+                    (hit.id, hit.score) for hit in unfiltered_hits if hit.id not in retained_ids
+                ), level=logging.INFO)
+                log_stage(logger, "vector_search", index_size=vector_size, search_k=search_k,
+                          hit_count=raw_hit_count, after_type_filter=len(fragment_hits),
+                          duration_ms=round((perf_counter() - search_started) * 1000, 2))
 
         except Exception as e:
             log_stage(logger, "vector_search", reason="provider_error", error_type=type(e).__name__)
