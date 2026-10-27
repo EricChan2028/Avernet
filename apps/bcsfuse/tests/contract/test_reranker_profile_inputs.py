@@ -236,7 +236,10 @@ async def test_recommend_metadata_preserves_actual_model(monkeypatch):
             )
 
     monkeypatch.setattr(recommend_routes, "get_candidate_recommendation_service", CandidateService)
-    response = await recommend_routes.recommend_bots(BotRecommendationRequest(
+    from app.bootstrap import oss_business_routes
+    from types import SimpleNamespace
+    monkeypatch.setattr(oss_business_routes, "require_oss_auth", lambda request: None)
+    response = await recommend_routes.recommend_bots(SimpleNamespace(headers={}), BotRecommendationRequest(
         question=QUERY, enable_rerank=True, reranker_model="qwen3-reranker-4b",
     ))
     assert response.metadata["reranker_model"] == "Qwen3-Reranker-4B"
@@ -299,7 +302,9 @@ async def test_api_model_default_preserves_overrides_and_disable(
 
     if endpoint == "recommend":
         monkeypatch.setattr(recommend_routes, "get_candidate_recommendation_service", Service)
-        response = await recommend_routes.recommend_bots(BotRecommendationRequest(
+        from app.bootstrap import oss_business_routes
+        monkeypatch.setattr(oss_business_routes, "require_oss_auth", lambda request: None)
+        response = await recommend_routes.recommend_bots(SimpleNamespace(headers={}), BotRecommendationRequest(
             question=QUERY, enable_rerank=enabled, reranker_model=requested,
         ))
         assert response.metadata["reranker_model"] == expected

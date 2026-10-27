@@ -33,6 +33,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
+from app.application.services.literal_fallback_builder import build_literal_fallback_index
 from app.application.services.registry_aware_worker_filter import RegistryAwareWorkerFilter
 from app.application.services.worker_candidate_recommendation_impl import WorkerCandidateRecommendationImpl
 from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
@@ -953,10 +954,12 @@ def _get_vector_match_service():
                 profile_filter = None
                 logger.info("[VectorMatch] Registry-aware filter disabled, using vector store payload filtering only")
 
+            fallback_index = build_literal_fallback_index(vector_store)
             _vector_match_service = WorkerVectorMatchService(
                 vector_store=vector_store,
                 metadata_store=metadata_store,
                 profile_filter=profile_filter,
+                fallback_index=fallback_index,
             )
 
             # Phase B: Inject profile content store for fragment content reload

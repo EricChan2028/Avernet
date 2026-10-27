@@ -14,7 +14,10 @@ from app.domain.services.profile_fragment_decomposer import ProfileFragmentDecom
 from app.domain.services.retrieval_logging import log_stage, log_candidates, log_rows
 from app.application.services.worker_vector_match_types import MatchResult, FragmentProfileCandidate
 from app.application.services.fragment_candidate_selection import select_rerank_candidates
-from app.application.services.keyword_candidate_selection import keyword_candidates, fuse_candidates
+from app.application.services.keyword_candidate_selection import (
+    fuse_candidates,
+    keyword_candidates_with_status,
+)
 
 logger = logging.getLogger("app.application.services.worker_vector_match_service")
 
@@ -106,6 +109,8 @@ class FragmentMatchingMixin:
             logger.debug("[FRAGMENT-MATCH] no filters")
 
         # Stage 2: Fragment 级检索（扩大召回）
+        fragment_hits = []
+        dense_available = True
         try:
             vector_size = self._vector_store.size()
             if vector_size == 0:
@@ -141,7 +146,7 @@ class FragmentMatchingMixin:
         except Exception as e:
             log_stage(logger, "vector_search", reason="provider_error", error_type=type(e).__name__)
             logger.warning("Fragment search failed: %s", e)
-            return []
+            dense_available = False
 
         # Stage 3: 按 profile_key 聚合（使用运行时权重）
         aggregated = self._aggregate_fragments(
@@ -180,14 +185,39 @@ class FragmentMatchingMixin:
             logger.warning("[FRAGMENT-MATCH] all candidates filtered out! excluded=%d, meta_filtered=%d",
                            excluded_by_set, excluded_by_meta)
 
-        lexical = keyword_candidates(
+        keyword_outcome = keyword_candidates_with_status(
             self._vector_store, query, search_k, filters, excluded_set,
             candidate_keys, enabled_fragment_types,
         )
-        diagnostics = {"keyword_search_used": bool(lexical), "rerank_degraded": False,
-                       "score_source": "hybrid_rrf" if lexical else "vector_weighted"}
+        lexical = keyword_outcome.candidates
+        diagnostics = {
+            "keyword_search_used": bool(lexical),
+            "rerank_degraded": False,
+            "score_source": "hybrid_rrf" if lexical else "vector_weighted",
+            "semantic_unavailable": not dense_available,
+            "keyword_unavailable": not keyword_outcome.available,
+            "literal_fallback_used": False,
+        }
         if runtime_config is not None:
             runtime_config["_retrieval"] = diagnostics
+
+        if not dense_available and not keyword_outcome.available:
+            if self._fallback_index is None:
+                logger.warning("[FRAGMENT-MATCH] both retrieval branches down and no literal fallback")
+                return []
+            logger.warning("[FRAGMENT-MATCH] both retrieval branches down; using literal fallback")
+            diagnostics["score_source"] = "regex_fallback"
+            diagnostics["literal_fallback_used"] = True
+            results = self._literal_fallback_matches(
+                query=query,
+                top_k=top_k,
+                filters=filters or {},
+                excluded=excluded_set,
+                allowed=candidate_keys,
+            )
+            results = self._apply_registry_filter(self._rerank(results))
+            return results[:top_k]
+
         hybrid = fuse_candidates(candidates, lexical, effective_expand_factor * top_k, vector_min_score) if lexical else None
 
         # Stage 4: Reranker 精排（如果启用）
@@ -247,6 +277,77 @@ class FragmentMatchingMixin:
 
         return results[:top_k]
 
+
+    def _literal_fallback_matches(
+        self,
+        query: str,
+        top_k: int,
+        filters: dict[str, Any],
+        excluded: set[str],
+        allowed: set[str] | None,
+    ) -> list[MatchResult]:
+        """Build the final local result without invoking embedding or rerank."""
+        try:
+            hits = self._fallback_index.keyword_search(
+                query=query,
+                limit=top_k,
+                filters=filters,
+                allowed_ids=None,
+            )
+        except Exception as error:
+            log_stage(
+                logger,
+                "literal_fallback",
+                available=False,
+                error_type=type(error).__name__,
+            )
+            logger.error("[FRAGMENT-MATCH] literal fallback failed: %s", error)
+            raise
+
+        results: list[MatchResult] = []
+        for hit in hits:
+            payload = dict(hit.payload or {})
+            profile_key = payload.get("profile_key") or hit.id
+            if profile_key in excluded or (
+                allowed is not None and profile_key not in allowed
+            ):
+                continue
+            metadata = self._metadata_store.get(profile_key)
+            if metadata is None:
+                metadata = self._build_metadata_from_payload(profile_key, payload)
+            if metadata is None:
+                continue
+            content = str(
+                payload.get("content")
+                or payload.get("searchable_text")
+                or payload.get("content_preview")
+                or ""
+            )
+            fragment = FragmentMatch(
+                fragment_type="full",
+                fragment_id=hit.id,
+                score=hit.score,
+                content_preview=content[:200],
+                content=content,
+            )
+            results.append(MatchResult(
+                profile_key=profile_key,
+                metadata=metadata,
+                score=hit.score,
+                aggregated_score=hit.score,
+                reasons=["literal_fallback"],
+                fragment_matches=[fragment],
+            ))
+            if len(results) >= top_k:
+                break
+        log_stage(
+            logger,
+            "literal_fallback",
+            hit_count=len(hits),
+            result_count=len(results),
+            available=True,
+        )
+        return results
 
     def _calculate_search_k(
         self,

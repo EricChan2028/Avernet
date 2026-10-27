@@ -222,8 +222,11 @@ async def test_recommend_route_logs_summary_without_query_or_response_content(mo
             )
 
     monkeypatch.setattr(recommend_routes, "get_candidate_recommendation_service", CandidateService)
+    from app.bootstrap import oss_business_routes
+    from types import SimpleNamespace
+    monkeypatch.setattr(oss_business_routes, "require_oss_auth", lambda request: None)
     caplog.set_level(logging.DEBUG, logger="src")
-    response = await recommend_routes.recommend_bots(BotRecommendationRequest(
+    response = await recommend_routes.recommend_bots(SimpleNamespace(headers={}), BotRecommendationRequest(
         question="private-query-sentinel", topK=10, min_score=0.005, enable_rerank=True,
     ))
     assert response.recommendations[0].score == 0.8

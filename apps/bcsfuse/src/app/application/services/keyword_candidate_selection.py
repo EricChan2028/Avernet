@@ -1,7 +1,7 @@
 """Merge lexical and dense profile rankings without mixing raw score scales."""
 
 import logging
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from search_core.core.ranking import reciprocal_rank_fusion
 
@@ -17,7 +17,15 @@ from app.domain.services.vector_store_adapter import VectorStoreAdapter
 logger = logging.getLogger("app.application.services.worker_vector_match_service")
 
 
-def keyword_candidates(
+@dataclass(frozen=True)
+class KeywordRetrievalOutcome:
+    """Keyword candidates plus an explicit availability flag."""
+
+    candidates: list[FragmentProfileCandidate]
+    available: bool
+
+
+def keyword_candidates_with_status(
     store: VectorStoreAdapter,
     query: str,
     limit: int,
@@ -25,9 +33,9 @@ def keyword_candidates(
     excluded: set[str],
     allowed: set[str] | None,
     enabled_types: set[str],
-) -> list[FragmentProfileCandidate]:
+) -> KeywordRetrievalOutcome:
     if not query.strip() or limit <= 0 or allowed == set() or not enabled_types:
-        return []
+        return KeywordRetrievalOutcome([], available=True)
     try:
         fetch_limit, lookups = limit, 0
         while True:
@@ -53,7 +61,7 @@ def keyword_candidates(
             lookups=lookups,
             available=True,
         )
-        return selected
+        return KeywordRetrievalOutcome(selected, available=True)
     except Exception as error:  # noqa: BLE001 -- Optional plugin read failure uses the documented dense fallback.
         log_stage(
             logger, "keyword_search", available=False, error_type=type(error).__name__
@@ -62,7 +70,22 @@ def keyword_candidates(
             "[RETRIEVAL] keyword unavailable; continuing vector-only (%s)",
             type(error).__name__,
         )
-        return []
+        return KeywordRetrievalOutcome([], available=False)
+
+
+def keyword_candidates(
+    store: VectorStoreAdapter,
+    query: str,
+    limit: int,
+    filters: dict | None,
+    excluded: set[str],
+    allowed: set[str] | None,
+    enabled_types: set[str],
+) -> list[FragmentProfileCandidate]:
+    "Delegate to the outcome-aware helper without changing legacy callers."
+    return keyword_candidates_with_status(
+        store, query, limit, filters, excluded, allowed, enabled_types
+    ).candidates
 
 
 def _group_keyword_hits(

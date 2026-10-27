@@ -43,6 +43,8 @@ import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from search_core.plugin_api.retrieval import RetrievalIndex
+
 from app.domain.models.metadata_record import MetadataRecord
 from app.domain.services.profile_fragment_decomposer import ProfileFragmentDecomposer
 from app.domain.services.vector_store_adapter import VectorStoreAdapter
@@ -134,6 +136,7 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
         profile_filter: "WorkerProfileFilterAdapter" | None = None,
         fragment_config: FragmentRetrievalConfig | None = None,
         profile_content_store: Any | None = None,
+        fallback_index: RetrievalIndex | None = None,
     ):
         """
         初始化 WorkerVectorMatchService。
@@ -147,11 +150,13 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
                 - WorkerProfileFilterAdapter: 根据 Registry 状态过滤
             fragment_config: Fragment 检索配置（可选，从环境变量加载）
             profile_content_store: Profile 内容存储（可选，用于从 MySQL 加载完整 content）
+            fallback_index: 最终本地字面量兜底索引（可选，仅在 dense 和 keyword 均不可用时使用）
         """
         self._vector_store = vector_store
         self._metadata_store = metadata_store
         self._profile_filter = profile_filter
         self._profile_content_store = profile_content_store
+        self._fallback_index = fallback_index
 
         # V2: Fragment 配置
         self._fragment_config = fragment_config or FragmentRetrievalConfig.from_env()
@@ -425,7 +430,10 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
         # 提取运行时配置（并发安全，不修改全局配置）
         effective_config = runtime_config if runtime_config is not None else {}
         effective_config["_retrieval"] = {"score_source": "vector_weighted", "keyword_search_used": False,
-                                           "rerank_degraded": False}
+                                           "rerank_degraded": False,
+                                           "semantic_unavailable": False,
+                                           "keyword_unavailable": False,
+                                           "literal_fallback_used": False}
 
         if use_fragment:
             results = self._match_with_fragments(
@@ -453,7 +461,7 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
         # - 如果未启用 rerank，使用 vector_min_score 过滤
         effective_threshold = rerank_min_score if any(r.is_reranked for r in results) else vector_min_score
         # Dense eligibility was checked before fusion; RRF is not a cosine score.
-        if effective_config["_retrieval"]["score_source"] == "hybrid_rrf":
+        if effective_config["_retrieval"]["score_source"] in {"hybrid_rrf", "regex_fallback"}:
             effective_threshold = 0.0
 
         log_candidates(logger, "before_threshold", ((r.profile_key, r.score) for r in results), level=logging.INFO)
