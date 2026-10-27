@@ -38,6 +38,7 @@ from agentclaw.community.core.task.domain.errors import (
     TaskArtifactStorageError,
     TaskArtifactStorageNotConfiguredError,
     TaskArtifactUploadTooLargeError,
+    TaskStateError,
     TaskNotFoundError,
 )
 from agentclaw.community.core.task.repository.types import TaskArtifactRecord
@@ -57,6 +58,9 @@ from agentclaw.community.core.task.task_context.task_artifact.models import (
 from agentclaw.community.core.task.task_context.task_artifact.artifact_object_storage import (
     TaskArtifactObjectReadStatus,
     TaskArtifactObjectStoragePlugin,
+)
+from agentclaw.community.core.task.task_context.relay_attempt import (
+    verify_relay_attempt,
 )
 
 logger = logging.getLogger("task.artifact")
@@ -98,15 +102,21 @@ class TaskArtifactObjectFileServiceProtocol(Protocol):
         attempt: int,
         file_name: str,
         payload: bytes,
-        creator: str,
+        creator: str | None = None,
         artifact_name: str | None = None,
         content_type: str | None = None,
+        relay_token: str | None = None,
     ) -> TaskArtifactRecord:
         """一步原子上传:字节先落对象存储,成功后登记产排行(幂等)。
 
+        凭证二选一(spec §14/§14.2):``relay_token``(relay 尝试;creator 取节点
+        assignee,入参 creator 被忽略)或 ``creator``(用户登录态)。两者皆空 →
+        ``TaskArtifactContentError``。
+
         失败方向安全:put 失败→无行;遗留物至多是无引用对象。上抛域错误:
-        ``TaskNotFoundError``/``NodeNotFoundError``(404)、``TaskArtifactContentError``
-        (422)、``TaskArtifactStorageError``(502)、``TaskArtifactStorageNotConfiguredError``
+        ``TaskNotFoundError``/``NodeNotFoundError``(404)、``TaskStateError``(409,
+        token 失配/无认领)、``TaskArtifactContentError``(422)、
+        ``TaskArtifactStorageError``(502)、``TaskArtifactStorageNotConfiguredError``
         (503)、``TaskArtifactUploadTooLargeError``(413)。
         """
         ...
@@ -146,9 +156,10 @@ class TaskArtifactObjectFileService(TaskArtifactObjectFileServiceProtocol):
         attempt: int,
         file_name: str,
         payload: bytes,
-        creator: str,
+        creator: str | None = None,
         artifact_name: str | None = None,
         content_type: str | None = None,
+        relay_token: str | None = None,
     ) -> TaskArtifactRecord:
         if self._object_storage is None:
             raise TaskArtifactStorageNotConfiguredError(
@@ -171,6 +182,19 @@ class TaskArtifactObjectFileService(TaskArtifactObjectFileServiceProtocol):
         )
         if node is None:
             raise NodeNotFoundError(node_id)
+        # 凭证二选一(§14.2/§14.5 校验序:token fence → assignee → attempt 快照)。
+        if relay_token is not None:
+            verify_relay_attempt(node, relay_token)
+            if not (node.run_info.assignee or None):
+                raise TaskStateError(
+                    f"relay upload requires claimed assignee: "
+                    f"task_id={task_id}, node_id={node_id}"
+                )
+            creator = node.run_info.assignee
+        elif creator is None:
+            raise TaskArtifactContentError(
+                "上传须提供 creator(用户身份)或 relay_token(relay 尝试)之一"
+            )
         graph_attempt = graph_node_attempt(node)
         if attempt != graph_attempt:
             raise TaskArtifactContentError(

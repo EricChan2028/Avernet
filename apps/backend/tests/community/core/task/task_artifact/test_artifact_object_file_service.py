@@ -7,6 +7,7 @@ import pytest
 
 from agentclaw.community.core.task.domain.errors import (
     NodeNotFoundError,
+    TaskStateError,
     TaskArtifactContentError,
     TaskArtifactObjectNotFoundError,
     TaskArtifactStorageError,
@@ -372,3 +373,106 @@ def test_download_key_outside_task_prefix_refused():
     )
     with pytest.raises(TaskArtifactContentError):
         svc.read_object_file(record.artifact_id)
+
+# ------------------------------------------------------------------ relay 分支(spec §14)
+
+
+def _relay_graph(*, token="gen-1", assignee="bot-9"):
+    def factory(node_id, task_id="t-1"):
+        node = _node(node_id, task_id=task_id)
+        if token is not None:
+            node.run_info.extend_props["relay_token"] = token
+        node.run_info.assignee = assignee
+        return node
+
+    root = factory("t-1")
+    root.run_info.extend_props["session_id"] = "sess-graph"
+    return TaskExecutionGraph(
+        run_id=7,
+        loop_round=1,
+        status=Status.RUNNING,
+        output={},
+        extend_props={},
+        tasks=[root, factory("n-1")],
+        task_id="t-1",
+    )
+
+
+def _relay_service(*, token="gen-1", assignee="bot-9"):
+    return _service(
+        _StubObjectStorage(),
+        repo=_StubArtifactRepo(),
+        graph=_relay_graph(token=token, assignee=assignee),
+    )
+
+
+def test_relay_upload_records_assignee_as_creator():
+    repo = _StubArtifactRepo()
+    storage = _StubObjectStorage()
+    svc = _service(
+        storage, repo=repo, graph=_relay_graph(token="gen-1", assignee="bot-9")
+    )
+
+    record = svc.upload_object_file(
+        task_id="t-1",
+        node_id="n-1",
+        attempt=2,
+        file_name="report.pdf",
+        payload=_PAYLOAD,
+        creator="user-ignored",  # relay 分支忽略 creator 入参
+        relay_token="gen-1",
+    )
+    assert record.creator == "bot-9"
+    assert record.storage == "object_file"
+
+
+def test_relay_upload_rejects_tampered_token_even_when_attempt_mismatched():
+    # 校验序钉板(spec §14.5):fence(409)先于 attempt 快照(422)。
+    svc = _relay_service(token="gen-1")
+    with pytest.raises(TaskStateError, match="attempt has expired"):
+        svc.upload_object_file(
+            task_id="t-1",
+            node_id="n-1",
+            attempt=99,  # 故意失配,fence 应先触发
+            file_name="report.pdf",
+            payload=_PAYLOAD,
+            relay_token="gen-2",
+        )
+
+
+def test_relay_upload_rejects_unclaimed_node_and_blank_args():
+    unclaimed_svc = _service(
+        _StubObjectStorage(),
+        repo=_StubArtifactRepo(),
+        graph=_relay_graph(token="gen-1", assignee=None),
+    )
+    with pytest.raises(TaskStateError, match="assignee"):
+        unclaimed_svc.upload_object_file(
+            task_id="t-1",
+            node_id="n-1",
+            attempt=2,
+            file_name="report.pdf",
+            payload=_PAYLOAD,
+            relay_token="gen-1",
+        )
+    with pytest.raises(TaskArtifactContentError):
+        _relay_service().upload_object_file(
+            task_id="t-1",
+            node_id="n-1",
+            attempt=2,
+            file_name="report.pdf",
+            payload=_PAYLOAD,
+        )
+
+
+def test_relay_upload_does_not_relax_attempt_snapshot():
+    svc = _relay_service(token="gen-1")
+    with pytest.raises(TaskArtifactContentError):
+        svc.upload_object_file(
+            task_id="t-1",
+            node_id="n-1",
+            attempt=99,  # 合法 token 仍受快照对齐约束
+            file_name="report.pdf",
+            payload=_PAYLOAD,
+            relay_token="gen-1",
+        )
