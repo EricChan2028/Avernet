@@ -43,3 +43,4 @@ class CallbackResult:
     success: bool
     status_code: int | None = None
     message: str = ""
+    response_code: str | None = None

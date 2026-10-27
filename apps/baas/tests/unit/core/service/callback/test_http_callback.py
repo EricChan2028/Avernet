@@ -3,7 +3,9 @@
 
 """Unit tests for HttpCallback (PostRunCallback implementation)."""
 
+import hashlib
 import json
+import logging
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -15,6 +17,10 @@ from secbaas.community.core.service.callback import (
     CallbackPayload,
     CallbackResult,
     HttpCallback,
+)
+from secbaas.community.core.service.callback._http_callback import (
+    _endpoint_summary,
+    _response_code,
 )
 
 # ── helpers ──────────────────────────────────────────────────
@@ -55,24 +61,58 @@ def _make_response(status_code=200, text="OK"):
     return resp
 
 
+# ── helper sanitization ──────────────────────────────────────
+
+
+class TestCallbackLogHelpers:
+    def test_endpoint_summary_removes_userinfo_query_and_fragment(self):
+        assert (
+            _endpoint_summary(
+                "https://user:password@example.com:8443/callback?token=secret#fragment"
+            )
+            == "https://example.com:8443/callback"
+        )
+
+    def test_endpoint_summary_rejects_missing_scheme_or_host(self):
+        assert _endpoint_summary("callback.example/path") == "<invalid>"
+
+    def test_response_code_supports_nested_error_code(self):
+        assert _response_code('{"error":{"code":"NESTED_CODE"}}') == "NESTED_CODE"
+
+    def test_response_code_returns_placeholder_without_code(self):
+        assert _response_code('{"message":"rejected"}') == "-"
+        assert _response_code("[]") == "-"
+
+    def test_response_code_rejects_unsafe_or_structured_values(self):
+        assert _response_code('{"code":"INVALID?token=secret"}') == "-"
+        assert _response_code('{"code":{"secret":"value"}}') == "-"
+        assert _response_code('{"code":true}') == "-"
+
+
 # ── __call__ ─────────────────────────────────────────────────
 
 
 class TestHttpCallbackCall:
     @pytest.mark.asyncio
-    async def test_record_not_found(self):
+    async def test_record_not_found(self, caplog):
         repo = _make_repo(record=None)
         cb = HttpCallback(repo)
+        caplog.set_level(logging.INFO, logger="router")
         await cb("nonexistent-run-id")
         repo.get_by_run_id.assert_called_once_with(run_id="nonexistent-run-id")
+        assert "nonexistent-run-id" not in caplog.text
+        assert hashlib.sha256(b"nonexistent-run-id").hexdigest()[:12] in caplog.text
 
     @pytest.mark.asyncio
-    async def test_no_callback_url_in_metadata(self):
+    async def test_no_callback_url_in_metadata(self, caplog):
         repo = _make_repo(record=_make_record(metadata={"other": "val"}))
         cb = HttpCallback(repo)
+        caplog.set_level(logging.INFO, logger="router")
         with patch.object(cb, "_send", new=AsyncMock()) as mock_send:
             await cb("run-001")
         mock_send.assert_not_called()
+        assert "run-001" not in caplog.text
+        assert hashlib.sha256(b"run-001").hexdigest()[:12] in caplog.text
 
     @pytest.mark.asyncio
     async def test_none_metadata(self):
@@ -106,11 +146,29 @@ class TestHttpCallbackCall:
         assert url == "http://example.com/cb"
         assert isinstance(payload, CallbackPayload)
         assert payload.run_id == "run-001"
-        assert payload.bot_id == "bot-1"
+        assert payload.to_dict()["bot_id"] == "bot-1"
         assert payload.status == "COMPLETED"
         assert payload.result == "reply"
         assert payload.error is None
         assert payload.metadata == {"callback_url": "http://example.com/cb"}
+        assert payload.session_id == "sess-001"
+
+    @pytest.mark.asyncio
+    async def test_payload_uses_stored_record_identity(self):
+        record = _make_record(run_id="provider-message-id")
+        repo = _make_repo(record=record)
+        cb = HttpCallback(repo)
+        mock_result = CallbackResult(success=True, status_code=202, message="")
+
+        with patch.object(
+            cb, "_send", new=AsyncMock(return_value=mock_result)
+        ) as mock_send:
+            await cb("queue-run-id")
+
+        repo.get_by_run_id.assert_called_once_with(run_id="queue-run-id")
+        payload = mock_send.call_args.args[1]
+        assert payload.run_id == "provider-message-id"
+        assert payload.to_dict()["bot_id"] == "bot-1"
         assert payload.session_id == "sess-001"
 
     @pytest.mark.asyncio
@@ -347,6 +405,75 @@ class TestHttpCallbackSendOnce:
         assert result.success is False
         assert result.status_code == 404
         assert "HTTP 404" in result.message
+        assert result.response_code == "-"
+
+    @pytest.mark.asyncio
+    async def test_malformed_endpoint_is_redacted_without_raising(self, caplog):
+        cb = HttpCallback(_make_repo())
+        caplog.set_level(logging.INFO, logger="router")
+        mock_resp = _make_response(status_code=400, text='{"code":"INVALID"}')
+
+        with patch(
+            "secbaas.community.core.service.callback._http_callback.httpx.AsyncClient"
+        ) as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client_cls.return_value = mock_client
+
+            result = await cb._send_once(
+                "https://example.com:invalid-port/callback?token=secret",
+                CallbackPayload("r1", "b1", "COMPLETED"),
+            )
+
+        assert result.success is False
+        assert "endpoint=<invalid>" in caplog.text
+        assert "invalid-port" not in caplog.text
+        assert "token=secret" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_non_2xx_logs_redacted_identity_and_response_code(self, caplog):
+        run_id = "provider-message-id"
+        bot_identity = "bot-private"
+        session_id = "session-private"
+        callback_url = "https://example.com/callback?token=secret-token"
+        record = _make_record(
+            run_id=run_id,
+            **{"bot_id": bot_identity},
+            metadata={"callback_url": callback_url},
+            result_extra={"session_id": session_id},
+        )
+        cb = HttpCallback(_make_repo(record=record))
+        mock_resp = _make_response(
+            status_code=400,
+            text='{"code":"PIPELINE_CALLBACK_INVALID","message":"token-secret"}',
+        )
+        caplog.set_level(logging.INFO, logger="router")
+
+        with patch(
+            "secbaas.community.core.service.callback._http_callback.httpx.AsyncClient"
+        ) as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client_cls.return_value = mock_client
+
+            await cb("queue-run-id")
+
+        text = caplog.text
+        assert hashlib.sha256(run_id.encode()).hexdigest()[:12] in text
+        assert hashlib.sha256(bot_identity.encode()).hexdigest()[:12] in text
+        assert hashlib.sha256(session_id.encode()).hexdigest()[:12] in text
+        assert "https://example.com/callback" in text
+        assert "status=400" in text
+        assert "response_code=PIPELINE_CALLBACK_INVALID" in text
+        assert run_id not in text
+        assert bot_identity not in text
+        assert session_id not in text
+        assert "token=secret-token" not in text
+        assert "token-secret" not in text
 
     @pytest.mark.asyncio
     async def test_5xx_failure(self):
@@ -542,7 +669,7 @@ class TestHttpCallbackOrigin:
         assert "Origin" not in headers
 
     @pytest.mark.asyncio
-    async def test_response_body_logged(self):
+    async def test_response_body_is_not_logged(self):
         cb = HttpCallback(_make_repo())
         mock_resp = _make_response(status_code=200, text="all good")
         with (
@@ -571,12 +698,14 @@ class TestHttpCallbackOrigin:
         resp_log_call = mock_logger.info.call_args_list[0]
         assert (
             resp_log_call.args[0]
-            == "[callback] response: run_id=%s, url=%s, status=%s, body=%s"
+            == "[callback] response: identity(run=%s, bot=%s, session=%s), "
+            "endpoint=%s, status=%s, response_code=%s"
         )
-        assert "all good" in resp_log_call.args
+        assert "all good" not in resp_log_call.args
+        assert "-" in resp_log_call.args
 
     @pytest.mark.asyncio
-    async def test_response_body_logged_on_failure(self):
+    async def test_response_body_is_not_logged_on_failure(self):
         cb = HttpCallback(_make_repo())
         mock_resp = _make_response(status_code=500, text="server error")
         with (
@@ -604,6 +733,9 @@ class TestHttpCallbackOrigin:
 
         log_messages = [call.args[0] for call in mock_logger.info.call_args_list]
         assert any("response:" in msg for msg in log_messages)
+        assert all(
+            "server error" not in call.args for call in mock_logger.info.call_args_list
+        )
         assert any(
             "failed:" in call.args[0] for call in mock_logger.error.call_args_list
         )

@@ -459,6 +459,35 @@ class TestDeliverMessage:
 
 class TestDeliverMessageCallbackUrl:
     @pytest.mark.asyncio
+    async def test_explicit_message_id_is_returned_unchanged(self):
+        api_key = _make_api_key_record(app_type="system")
+        ctx = _make_context()
+        req = _make_message_request()
+        req.message_id = "provider-message-id"
+
+        mock_runner = AsyncMock()
+        mock_runner.deliver_message = AsyncMock(
+            return_value=("provider-message-id", "sess-cb-0")
+        )
+
+        with patch(
+            "secbaas.community.adapters.web.routers.open_api.message_router.validate_policy",
+            return_value="bot-1:entity-1",
+        ):
+            result = await deliver_message(
+                request=req,
+                api_key_record=api_key,
+                context=ctx,
+                bot_runner=mock_runner,
+                eval_session_log=_make_eval_session_log(),
+            )
+
+        assert result.data.message_id == "provider-message-id"
+        assert mock_runner.deliver_message.call_args.kwargs["message_id"] == (
+            "provider-message-id"
+        )
+
+    @pytest.mark.asyncio
     async def test_callback_url_sets_metadata_and_callback(self):
         """When callback_url is provided, metadata gets callback_url and callback='http_callback'."""
         api_key = _make_api_key_record(app_type="system")
