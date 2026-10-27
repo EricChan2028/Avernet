@@ -135,6 +135,8 @@ describe("AutoHealSaveService", () => {
     vi.spyOn(gitClient, "createTempRepo").mockResolvedValue("/tmp/cw-autoheal-xxx");
     vi.spyOn(gitClient, "removeTempRepo").mockResolvedValue();
     vi.spyOn(gitClient, "commitAndPushSaved").mockResolvedValue({ branch: "saved/wf-test", commit: "abc123" });
+    vi.spyOn(gitClient, "prepareBranchBase").mockResolvedValue("default");
+    vi.spyOn(gitClient, "pruneLegacyPackCopy").mockResolvedValue(false);
   });
 
   it("denies save when the actor lacks edit permission", async () => {
@@ -184,6 +186,10 @@ describe("AutoHealSaveService", () => {
     expect(result.packId).toBe("pack-1");
     expect(result.branch).toBe("saved/wf-test");
     expect(result.commit).toBe("abc123");
+    // The snapshot must be based on the previous save/deploy content (scripts
+    // inheritance) — never on a fresh default-branch base.
+    expect(gitClient.prepareBranchBase).toHaveBeenCalledWith("/tmp/cw-autoheal-xxx", "saved/wf-test", "wf/wf-test");
+    expect(gitClient.pruneLegacyPackCopy).toHaveBeenCalledWith("/tmp/cw-autoheal-xxx", "pack-1");
 
     const row = await specRepo.findByWorkflowId("wf-test");
     expect(row).not.toBeNull();
@@ -218,6 +224,8 @@ describe("AutoHealDeployService", () => {
       commit: "def456",
       deployNumber: 1,
     });
+    vi.spyOn(gitClient, "prepareBranchBase").mockResolvedValue("default");
+    vi.spyOn(gitClient, "pruneLegacyPackCopy").mockResolvedValue(false);
 
     await botPermRepo.upsert({
       bot_id: null,
@@ -263,6 +271,10 @@ describe("AutoHealDeployService", () => {
     expect(history[0].deploy_number).toBe(1);
     expect(history[0].is_active).toBe(1);
     expect(history[0].tag_name).toBe("deploy/wf-test/#1");
+    // The deploy must be based on the previous deploy content (scripts
+    // inheritance) — never on a fresh default-branch base.
+    expect(gitClient.prepareBranchBase).toHaveBeenCalledWith("/tmp/cw-autoheal-xxx", "wf/wf-test");
+    expect(gitClient.pruneLegacyPackCopy).toHaveBeenCalledWith("/tmp/cw-autoheal-xxx", "pack-1");
 
     const row = await specRepo.findByWorkflowId("wf-test");
     expect(row?.version).toBe(1);

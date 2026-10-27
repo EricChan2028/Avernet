@@ -27,6 +27,8 @@ import {
   createTempRepo,
   ensurePackManifest,
   getMaxDeployNumberFromGitTags,
+  prepareBranchBase,
+  pruneLegacyPackCopy,
   removeTempRepo,
   writeWorkflowSpecToRepo,
   type ClawFlowsGitConfig,
@@ -194,8 +196,12 @@ export class AutoHealDeployService {
       let gitResult: { branch: string; tagName: string; commit: string; deployNumber: number } | undefined;
       try {
         await cloneClawflows(repoDir, this.gitConfig);
+        // Base the deploy on the previous deploy content so Pack scripts and assets
+        // are inherited instead of being dropped (see prepareBranchBase).
+        await prepareBranchBase(repoDir, `wf/${workflowId}`);
         await writeWorkflowSpecToRepo(repoDir, packId, workflowId, spec);
         await ensurePackManifest(repoDir, packId, workflowId);
+        await pruneLegacyPackCopy(repoDir, packId);
 
         // Fall back to git tags if there are tags not yet reflected in the DB
         // (e.g. manual/external deploys). This is a safety net, not the primary
