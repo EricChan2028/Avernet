@@ -72,6 +72,35 @@ error. Equal/older versions do not replace current state.
 
 - Inline v1 and reference v2 coordination consumption through an injected resolver port.
 
+TaskDispatch output is admitted independently of the Manager's parent Run.
+Both direct and queued Worker dispatch freeze each subscribed connection's view
+and the Worker's producer facts before acceptance side effects. Queued dispatch
+preassigns its canonical Run and registers the output stream before committing
+admission; the scheduler never needs the submitting caller to bind it afterward.
+Explicit rejection and duplicate attempts release only unused fresh identities;
+unknown commit/transport outcomes retain permits (and direct callback ingress)
+until an existing terminal/connection cleanup. Worker frames use local permits,
+not per-frame authorization reads. Recipient resolution costs one batched call
+per TaskDispatch with subscribers, independent of delta count; producer freezing
+reuses the already loaded Session participants without an extra storage read.
+Task ledger resource notifications still authorize independently per event.
+This adds no durable replay guarantee, schema, configuration or queue-policy change.
+
+Authenticated Bot acceptance aliases are installed in the local MessageTracker
+before the WS adapter publishes the downstream alias. Event entry validates the
+accepted Bot/Group/Session scope and normalizes to the canonical Run before
+locks, producer facts, persistence and terminal cleanup. IM source correlation
+for admitted Runs stays on that canonical identity. Alias frames add no remote
+identity or authorization reads; aliases are removed with their source Run.
+
+Managed delivery composition binds weak output-lifecycle cleanup. A committed
+terminal Send that was never sent (cancellation, expiry, preparation failure)
+releases its output stream without waiting for a nonexistent Bot callback.
+Cleanup runs after the DB transaction inside the existing cancellation-retained
+persistence task, independent of lossy status notifications (which also perform
+idempotent cleanup). It adds no SQL, scanner or TTL. Running/uncertain Sends and
+callback-driven terminals retain their permit until normal output draining.
+
 Queued messages and run-reply display companions share the existing persisted
 visibility classifier. Read-only delivery queries reuse the configured Chat
 history window for recorded join anchors (one bounded repository resolution per batch). ManagerWorker and
@@ -229,3 +258,17 @@ policy readiness, cancellation uncertainty and the v3 HTTP/CLI contract.
 ## Provider collaboration scope
 
 Direct A2A and group caller authorization enforce Provider collaboration scope before legacy public/friend/organization exemptions; the authenticated caller and all group participants are checked.
+
+Nonqueued persistent sends carry the resolved eventing Session through outbound
+frames, Run registration and frozen producer facts, matching output admission.
+True Group-only sends retain their original scope. Producer snapshots require
+one Session read per send, not per target or output frame.
+
+Output lineage distinguishes an admitted operation, an explicitly registered
+live independent Run, and missing/retired identity. With protected admission
+configured, missing Run lineage never falls back to per-event authorization;
+independent resource notifications keep their separate publisher. Internal/relay
+sends register independent Runs before transport; terminal/rejection cleanup
+removes the marker and aliases. This uses the existing local Run map with no
+terminal tombstone cache, TTL, eviction loophole or frame-time database read.
+Task terminal publication precedes output binding cleanup, including errors.

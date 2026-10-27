@@ -57,6 +57,15 @@ pub async fn handle_bot_event(
     cmd: BotEventCommand,
 ) -> ServiceResult<BotEventOutcome> {
     let mut cmd = cmd;
+    // Resolve only aliases installed by authenticated acceptance. Everything
+    // below (locks, producer facts, persistence and terminal) uses ONE identity.
+    let scope = bcs_service_api::BotRunScope {
+        group_id: cmd.group_id.clone(), bot_id: cmd.bot_id.clone(),
+        session_id: cmd.bcs_session_id.clone().unwrap_or_else(|| cmd.group_id.clone()),
+    };
+    if let Some(canonical) = flow.message_tracker.canonical_output_run(&cmd.run_id, &scope).await? {
+        cmd.run_id = canonical;
+    }
     let task_intent_eligible = cmd
         .event_payload
         .as_object_mut()
@@ -377,6 +386,14 @@ pub async fn handle_bot_event(
             try_channel_outbound(flow, &cmd).await;
             flow.complete_send_context(&cmd.run_id).await?;
             flow.frontend_delivery.unregister_run(&cmd.run_id).await?;
+        }
+        // The task terminal must retain its producer binding until its final
+        // frontend publication; cleanup inside task handling loses that lineage.
+        if is_terminal_state(&cmd.state) && matches!(cmd.event_type.as_str(), "chat" | "chat.event")
+            && flow.task_store.get(&task_id).await.is_some_and(|entry|
+                entry.target_bot == cmd.bot_id && entry.status != TaskLedgerStatus::Dispatched) {
+            flow.message_tracker.cleanup_run(&cmd.run_id).await;
+            flow.message_tracker.cleanup_run(&crate::run_reply::chat_key(&cmd)).await;
         }
         notify_terminal_observer(flow, &cmd).await;
         return Ok(BotEventOutcome {
