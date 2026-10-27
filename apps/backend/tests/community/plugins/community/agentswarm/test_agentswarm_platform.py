@@ -29,6 +29,7 @@ from agentclaw.community.plugins.community.agentswarm.host import _idem_digest
 from agentclaw.community.core.agentswarm.domain.models import (
     BotCreateSpec, BotState,
 )
+from agentclaw.community.core.apply_engine.delivery import CreationSequence
 from agentclaw.community.core.apply_engine.outcomes import (
     ApplyStatus,
 )
@@ -64,11 +65,15 @@ class _Seam:
 
 
 class _Apply:
-    def __init__(self, report=None):
+    def __init__(self, report=None, sequence=CreationSequence.CREATE_BETWEEN_PHASES):
         self.report = report
+        self.sequence = sequence
 
     def last_apply(self, *, entity_id, bot_id):
         return self.report
+
+    def delivery_for_bot(self, bot):
+        return types.SimpleNamespace(creation_sequence=self.sequence)
 
 
 class _Repo:

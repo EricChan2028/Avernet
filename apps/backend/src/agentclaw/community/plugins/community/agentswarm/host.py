@@ -14,9 +14,9 @@ bind-agentswarm-host-bot-platform):
 - status maps the durable rows (creation job, bot record, newest apply report)
   to the swarm's ``BotState`` vocabulary through a deliberately narrow table:
   it reads only public surfaces of the creation flow and answers only for
-  creations this adapter submitted — the HTTP poll's W8 sequence machinery
-  (ordinary creates, record-first engines, later explicit applies) is out of
-  scope here, and the unit tests pin every branch of the narrow table.
+  creations this adapter submitted. The engine delivery strategy names the
+  terminal creation phase; a running apply or an earlier phase cannot declare
+  readiness. Later explicit applies do not answer how creation ended.
 - delete is phase-aware and best-effort: discard the pending creation when no
   bot exists, soft-delete the bot when one does, and never raise in
   teardown once a per-call owner is present — teardown must not change
@@ -83,6 +83,7 @@ from agentclaw.community.core.agentswarm.domain.models import (
     NonRetryableProvisioningError,
 )
 from agentclaw.community.plugin_api.agentswarm.bot import BotPlatform
+from agentclaw.community.core.apply_engine.delivery import CreationSequence
 from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_ON_CONTAINER_TRIGGER, CREATE_PRE_CONTAINER_TRIGGER,
@@ -504,16 +505,25 @@ class AvernetBotPlatform(BotPlatform):
             return BotState.CREATE_FAILED.value
         report = self._apply_service.last_apply(entity_id=owner, bot_id=bot_id)
         if report is not None and report.trigger in _CREATION_TRIGGERS:
-            # The creation's own apply outranks job liveness: the
-            # post-container phase runs while the job is still live, so
-            # READY/APPLY_FAILED are answerable from the report even then
-            # (a later explicit apply — "how is the bot configured now" —
-            # is not read here).
+            # start_apply returns before I/O finishes, and the creation job
+            # can already be SUCCEEDED. RUNNING is never a teardown verdict.
+            if report.status is ApplyStatus.RUNNING:
+                return BotState.PROVISIONING.value
             if report.status is ApplyStatus.SUCCEEDED:
-                if bot_status_ in _BOT_UP:
+                sequence = self._apply_service.delivery_for_bot(bot).creation_sequence
+                terminal_trigger = (
+                    CREATE_PRE_CONTAINER_TRIGGER
+                    if sequence is CreationSequence.RECORD_APPLY_PROVISION
+                    else CREATE_ON_CONTAINER_TRIGGER
+                )
+                if report.trigger == terminal_trigger and bot_status_ in _BOT_UP:
                     return BotState.READY.value
-                # Record-first engines apply before the container: applied,
-                # container still coming.
+                # An earlier phase is not the full identity; record-first
+                # engines also need their container to become ACTIVE. A job
+                # that failed cannot advance either remaining step.
+                if job.status in TERMINAL_STATUSES and job.status is not TaskStatus.SUCCEEDED:
+                    return (BotState.APPLY_FAILED.value if bot_status_ in _BOT_UP
+                            else BotState.CREATE_FAILED.value)
                 return BotState.PROVISIONING.value
             if (bot_status_ not in _BOT_UP
                     and bool((bot.get("device_id") or "").strip())):
