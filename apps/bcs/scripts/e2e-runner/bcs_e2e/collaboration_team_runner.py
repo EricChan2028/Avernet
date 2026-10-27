@@ -24,7 +24,19 @@ class CollaborationTeamRunnerError(RuntimeError):
     pass
 
 
-_DRIVER_TOKEN_OPERATIONS = frozenset({"group.status", "group.terminate"})
+_GROUP_CONTEXT_OPERATIONS = frozenset({
+    "group_context.workspace",
+    "group_context.add.group",
+    "group_context.add.session",
+    "group_context.add.round",
+    "group_context.get.initial",
+    "group_context.update.group",
+    "group_context.list.entries",
+    "group_context.get.updated",
+})
+_DRIVER_TOKEN_OPERATIONS = (
+    frozenset({"group.status", "group.terminate"}) | _GROUP_CONTEXT_OPERATIONS
+)
 _ROLE_OPERATIONS = {
     "visibility.protected": (
         "customer_service", "PUT",

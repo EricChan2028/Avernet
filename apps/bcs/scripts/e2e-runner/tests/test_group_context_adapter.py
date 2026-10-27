@@ -296,6 +296,16 @@ class GroupContextAdapterTests(unittest.TestCase):
         with self.assertRaises(RunStateError):
             self.adapter.create_workspace()
 
+    def test_preprod_runner_uses_driver_token_for_group_context_writes(self):
+        with patch.dict(os.environ, {"BCS_E2E_HUMAN_COOKIE": COOKIE,
+                                      "BCS_E2E_DRIVER_BOT_TOKEN": DRIVER_TOKEN}):
+            for operation in OPERATIONS:
+                kind, credential = self.runner._credential("driver", operation)
+                self.assertEqual(
+                    kind,
+                    "human_cookie_with_owned_driver_bot_token")
+                self.assertEqual(credential, DRIVER_TOKEN)
+
     def test_runner_rejects_cleanup_of_a_foreign_group(self):
         fresh = CollaborationTeamRunner(
             profile_value(gateway=True),
