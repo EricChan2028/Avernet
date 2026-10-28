@@ -510,7 +510,11 @@ class AvernetBotPlatform(BotPlatform):
             if report.status is ApplyStatus.RUNNING:
                 return BotState.PROVISIONING.value
             if report.status is ApplyStatus.SUCCEEDED:
-                sequence = self._apply_service.delivery_for_bot(bot).creation_sequence
+                # Match CreateJobHandler: submission freezes the sequence across
+                # mode changes/mixed instances; only legacy jobs use live delivery.
+                frozen = job.payload.get("creation_sequence")
+                sequence = (CreationSequence(str(frozen)) if frozen else
+                            self._apply_service.delivery_for_bot(bot).creation_sequence)
                 terminal_trigger = (
                     CREATE_PRE_CONTAINER_TRIGGER
                     if sequence is CreationSequence.RECORD_APPLY_PROVISION

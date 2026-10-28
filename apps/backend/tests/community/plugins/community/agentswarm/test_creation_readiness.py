@@ -27,6 +27,7 @@ from tests.community.plugins.community.agentswarm.test_agentswarm_platform impor
 from tests.community.plugins.community.agentswarm.test_bot_subagent import _mk_run, _mk_spec
 
 
+@pytest.mark.parametrize("frozen_sequence", [None, *CreationSequence])
 @pytest.mark.parametrize("sequence", list(CreationSequence))
 @pytest.mark.parametrize("trigger", [CREATE_PRE_CONTAINER_TRIGGER, CREATE_ON_CONTAINER_TRIGGER])
 @pytest.mark.parametrize("status", list(ApplyStatus))
@@ -34,14 +35,18 @@ from tests.community.plugins.community.agentswarm.test_bot_subagent import _mk_r
 @pytest.mark.parametrize("job_status", [
     TaskStatus.RUNNING, TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.TIMED_OUT,
 ])
-def test_creation_phase_status_matrix(sequence, trigger, status, bot_status, job_status):
+def test_creation_phase_status_matrix(
+    sequence, frozen_sequence, trigger, status, bot_status, job_status,
+):
     seam = _Seam()
     seam.jobs["persona"] = _job(job_status)
+    if frozen_sequence is not None:
+        seam.jobs["persona"].payload["creation_sequence"] = frozen_sequence.value
     repo = _Repo(bot={"status": bot_status, "engine_type": "openclaw"})
     report = SimpleNamespace(trigger=trigger, status=status)
     apply = _Apply(report, sequence=sequence)
     terminal = (CREATE_PRE_CONTAINER_TRIGGER
-                if sequence is CreationSequence.RECORD_APPLY_PROVISION
+                if (frozen_sequence or sequence) is CreationSequence.RECORD_APPLY_PROVISION
                 else CREATE_ON_CONTAINER_TRIGGER)
     if status is ApplyStatus.RUNNING:
         expected = BotState.PROVISIONING
@@ -56,6 +61,71 @@ def test_creation_phase_status_matrix(sequence, trigger, status, bot_status, job
         expected = BotState.APPLY_FAILED
     assert _mk(seam=seam, repo=repo, apply_=apply).bot_status(
         "persona", owner_id="owner") == expected.value
+
+
+@pytest.mark.parametrize("frozen_sequence", list(CreationSequence))
+@pytest.mark.parametrize("trigger", [CREATE_PRE_CONTAINER_TRIGGER, CREATE_ON_CONTAINER_TRIGGER])
+def test_mixed_instances_agree_on_the_jobs_frozen_sequence(frozen_sequence, trigger):
+    seam = _Seam()
+    seam.jobs["persona"] = _job(TaskStatus.SUCCEEDED)
+    seam.jobs["persona"].payload["creation_sequence"] = frozen_sequence.value
+    report = SimpleNamespace(trigger=trigger, status=ApplyStatus.SUCCEEDED)
+    repo = _Repo({"status": "ACTIVE", "engine_type": "teclaw"})
+    terminal = (CREATE_PRE_CONTAINER_TRIGGER
+                if frozen_sequence is CreationSequence.RECORD_APPLY_PROVISION
+                else CREATE_ON_CONTAINER_TRIGGER)
+    expected = BotState.READY if trigger == terminal else BotState.PROVISIONING
+    # Both instances read the same durable job/report, but disagree on mode.
+    for live_sequence in CreationSequence:
+        platform = _mk(seam=seam, repo=repo, apply_=_Apply(report, live_sequence))
+        assert platform.bot_status("persona", owner_id="owner") == expected.value
+
+
+class _FrozenOnlyApply(_Apply):
+    def delivery_for_bot(self, bot):
+        raise AssertionError("a frozen job must not consult the live delivery strategy")
+
+
+@pytest.mark.parametrize("frozen_sequence", list(CreationSequence))
+def test_frozen_sequence_does_not_resolve_the_live_strategy(frozen_sequence):
+    seam = _Seam()
+    seam.jobs["persona"] = _job(TaskStatus.SUCCEEDED)
+    seam.jobs["persona"].payload["creation_sequence"] = frozen_sequence.value
+    trigger = (CREATE_PRE_CONTAINER_TRIGGER
+               if frozen_sequence is CreationSequence.RECORD_APPLY_PROVISION
+               else CREATE_ON_CONTAINER_TRIGGER)
+    apply = _FrozenOnlyApply(SimpleNamespace(trigger=trigger, status=ApplyStatus.SUCCEEDED))
+    assert _mk(seam=seam, repo=_Repo({"status": "ACTIVE"}), apply_=apply).bot_status(
+        "persona", owner_id="owner") == BotState.READY.value
+
+
+@pytest.mark.parametrize("frozen_value", [None, ""])
+@pytest.mark.parametrize("sequence", list(CreationSequence))
+@pytest.mark.parametrize("trigger", [CREATE_PRE_CONTAINER_TRIGGER, CREATE_ON_CONTAINER_TRIGGER])
+def test_empty_legacy_sequence_falls_back_like_the_creation_handler(
+    frozen_value, sequence, trigger,
+):
+    seam = _Seam()
+    seam.jobs["persona"] = _job(TaskStatus.SUCCEEDED)
+    seam.jobs["persona"].payload["creation_sequence"] = frozen_value
+    terminal = (CREATE_PRE_CONTAINER_TRIGGER
+                if sequence is CreationSequence.RECORD_APPLY_PROVISION
+                else CREATE_ON_CONTAINER_TRIGGER)
+    expected = BotState.READY if trigger == terminal else BotState.PROVISIONING
+    apply = _Apply(SimpleNamespace(trigger=trigger, status=ApplyStatus.SUCCEEDED), sequence)
+    assert _mk(seam=seam, repo=_Repo({"status": "ACTIVE"}), apply_=apply).bot_status(
+        "persona", owner_id="owner") == expected.value
+
+
+def test_invalid_frozen_sequence_is_not_silently_replaced_with_the_live_strategy():
+    seam = _Seam()
+    seam.jobs["persona"] = _job(TaskStatus.SUCCEEDED)
+    seam.jobs["persona"].payload["creation_sequence"] = "unknown-sequence"
+    apply = _FrozenOnlyApply(SimpleNamespace(
+        trigger=CREATE_ON_CONTAINER_TRIGGER, status=ApplyStatus.SUCCEEDED))
+    with pytest.raises(ValueError, match="unknown-sequence"):
+        _mk(seam=seam, repo=_Repo({"status": "ACTIVE"}), apply_=apply).bot_status(
+            "persona", owner_id="owner")
 
 
 @pytest.mark.parametrize("bot_status", ["FAILED", "DELETED", "INACTIVE"])

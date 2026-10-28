@@ -185,7 +185,7 @@ class _ScriptedEngineWs:
 
 
 def _job(status, last_error=None):
-    return types.SimpleNamespace(status=status, last_error=last_error)
+    return types.SimpleNamespace(status=status, last_error=last_error, payload={})
 
 
 def _mk(config=None, seam=None, apply_=None, repo=None, bot_svc=None,
