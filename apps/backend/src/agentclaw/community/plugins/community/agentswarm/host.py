@@ -83,8 +83,6 @@ from agentclaw.community.core.agentswarm.domain.models import (
     NonRetryableProvisioningError,
 )
 from agentclaw.community.plugin_api.agentswarm.bot import BotPlatform
-from agentclaw.community.core.apply_engine.delivery import CreationSequence
-from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_ON_CONTAINER_TRIGGER, CREATE_PRE_CONTAINER_TRIGGER,
 )
@@ -110,6 +108,9 @@ from agentclaw.community.core.task_queue.types import (
     TERMINAL_STATUSES, TaskStatus,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.plugins.community.agentswarm._creation_readiness import (
+    creation_report_state,
+)
 
 logger = get_logger("agentswarm")
 
@@ -505,45 +506,11 @@ class AvernetBotPlatform(BotPlatform):
             return BotState.CREATE_FAILED.value
         report = self._apply_service.last_apply(entity_id=owner, bot_id=bot_id)
         if report is not None and report.trigger in _CREATION_TRIGGERS:
-            # start_apply returns before I/O finishes, and the creation job
-            # can already be SUCCEEDED. RUNNING is never a teardown verdict.
-            if report.status is ApplyStatus.RUNNING:
-                return BotState.PROVISIONING.value
-            if report.status is ApplyStatus.SUCCEEDED:
-                # Match CreateJobHandler: submission freezes the sequence across
-                # mode changes/mixed instances; only legacy jobs use live delivery.
-                frozen = job.payload.get("creation_sequence")
-                sequence = (CreationSequence(str(frozen)) if frozen else
-                            self._apply_service.delivery_for_bot(bot).creation_sequence)
-                terminal_trigger = (
-                    CREATE_PRE_CONTAINER_TRIGGER
-                    if sequence is CreationSequence.RECORD_APPLY_PROVISION
-                    else CREATE_ON_CONTAINER_TRIGGER
-                )
-                if report.trigger == terminal_trigger and bot_status_ in _BOT_UP:
-                    return BotState.READY.value
-                # An earlier phase is not the full identity; record-first
-                # engines also need their container to become ACTIVE. A job
-                # that failed cannot advance either remaining step.
-                if job.status in TERMINAL_STATUSES and job.status is not TaskStatus.SUCCEEDED:
-                    return (BotState.APPLY_FAILED.value if bot_status_ in _BOT_UP
-                            else BotState.CREATE_FAILED.value)
-                return BotState.PROVISIONING.value
-            if (bot_status_ not in _BOT_UP
-                    and bool((bot.get("device_id") or "").strip())):
-                # A failed create-apply over a mid-boot row with a live
-                # device binding is not a provisioning verdict: under N-way
-                # concurrent persona creates the quota serialization makes
-                # apply reports flap FAILED while the durable publish
-                # pipeline (row + BaaS device) is still booting — a burst
-                # APPLY_FAILED here tore down healthy mid-boot bots and
-                # pushed the re-create into bot_service's duplicate-row
-                # trap. The device pipeline owns the outcome; the caller's
-                # own poll budget bounds the wait. An UP row keeps the
-                # apply verdict (config-side failure on a working bot,
-                # under the anti-duplicate rule).
-                return BotState.PROVISIONING.value
-            return BotState.APPLY_FAILED.value
+            return creation_report_state(
+                report=report, job=job, bot_is_up=bot_status_ in _BOT_UP,
+                device_id=bot.get("device_id") or "",
+                live_sequence=lambda: self._apply_service.delivery_for_bot(bot).creation_sequence,
+            )
         if job.status not in TERMINAL_STATUSES:
             # Live job with no creation report yet: every remaining in-flight
             # state (authorization window, creating, applying) reads the same.

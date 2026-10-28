@@ -311,8 +311,8 @@ def test_pending_creation_keeps_bounded_cancel_and_deadline_cleanup(monkeypatch,
         if exit_mode == "deadline":
             poll_ready = sub._poll_ready
 
-            async def bounded_poll(bot_id):
-                return await poll_ready(bot_id, timeout=0.05, interval=0.01)
+            async def bounded_poll(bot_id, timeout=0.05):
+                return await poll_ready(bot_id, timeout=min(timeout, 0.05), interval=0.01)
 
             monkeypatch.setattr(sub, "_poll_ready", bounded_poll)
 
