@@ -318,7 +318,7 @@ def format_benchmark_prompt(task_spec: dict[str, Any]) -> str:
     parts.append(BENCHMARK_EXECUTION_CONSTRAINT)
     parts.append(OUTPUT_LANGUAGE_CONSTRAINT)
 
-    return "/task [TASK-LOOP-EVALUATION] " + "\n\n".join(parts)
+    return "/task-loop [TASK-LOOP-EVALUATION] " + "\n\n".join(parts)
 
 
 def _benchmark_task_title(task_spec: dict[str, Any]) -> str:

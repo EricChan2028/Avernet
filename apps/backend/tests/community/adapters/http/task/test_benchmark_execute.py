@@ -451,6 +451,7 @@ def test_benchmark_prompt_allows_internal_fact_execution_and_requires_relay() ->
         }
     )
 
+    assert prompt.startswith("/task-loop [TASK-LOOP-EVALUATION]")
     assert "禁止公共互联网检索，允许内部事实执行与接力" in prompt
     assert "内部查询/操作工具" in prompt
     assert "context、report、search、dispatch" in prompt
