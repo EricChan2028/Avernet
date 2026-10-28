@@ -294,15 +294,33 @@ def _validate_workspace_cli_profile(raw: object, contract_name: str) -> dict:
         _env_ref(auth["driver_token_env"], "auth.driver_token_env")
         _env_ref(auth["cookie_env"], "auth.cookie_env")
     elif contract_name == SESSION_CLI_COMPLETE_INVOKE_PROFILE_CONTRACT:
-        auth = object_keys(
-            profile["auth"], {"kind", "driver_token_env", "member_token_env"},
-            "auth")
-        if auth["kind"] != "owned-bot-tokens":
-            raise ConfigError(
-                "auth.kind: Session completion-invocation requires owned Bot "
-                "tokens on both tiers; service routes resolve Bot identity only")
-        _env_ref(auth["driver_token_env"], "auth.driver_token_env")
-        _env_ref(auth["member_token_env"], "auth.member_token_env")
+        if environment["tier"] == "local":
+            auth = object_keys(
+                profile["auth"], {"kind", "driver_token_env",
+                                  "member_token_env"}, "auth")
+            if auth["kind"] != "owned-bot-tokens":
+                raise ConfigError(
+                    "auth.kind: Session completion-invocation requires owned "
+                    "Bot tokens on both tiers; service routes resolve Bot "
+                    "identity only")
+            _env_ref(auth["driver_token_env"], "auth.driver_token_env")
+            _env_ref(auth["member_token_env"], "auth.member_token_env")
+        else:
+            auth = object_keys(
+                profile["auth"], {"kind", "driver_token_env",
+                                  "member_token_env", "cookie_env"}, "auth")
+            if auth["kind"] != "human-cookie-with-owned-bot-tokens":
+                raise ConfigError(
+                    "auth.kind: preprod Session completion-invocation needs "
+                    "the reviewed ACE trio; a bare owned Bot token is "
+                    "rejected by station ACE with USER_NOT_LOGIN / "
+                    "decisionBy=ACE [ACE-BOT-TOKEN-BEARER] while the Human "
+                    "Cookie alone cannot act as the service Session caller, "
+                    "so the profile must bundle the Human Cookie with both "
+                    "owned Bot tokens")
+            _env_ref(auth["driver_token_env"], "auth.driver_token_env")
+            _env_ref(auth["member_token_env"], "auth.member_token_env")
+            _env_ref(auth["cookie_env"], "auth.cookie_env")
     elif environment["tier"] == "local":
         auth = object_keys(profile["auth"], {"kind", "driver_token_env"}, "auth")
         if auth["kind"] != "owned-local-bot-tokens":

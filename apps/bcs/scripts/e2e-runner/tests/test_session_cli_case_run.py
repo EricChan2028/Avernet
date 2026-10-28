@@ -216,5 +216,59 @@ class SessionCliCaseRunTests(unittest.TestCase):
         self.assertEqual(json.loads(stdout.getvalue())["status"], "PASS")
 
 
+    def test_preprod_complete_invoke_receipt_labels_the_ace_trio(self):
+        profile = complete_invoke_profile(preprod=True)
+        self.assertEqual(profile["auth"]["kind"],
+                         "human-cookie-with-owned-bot-tokens")
+        profile_path = self.root / "trio-profile.json"
+        profile_path.write_text(json.dumps(profile), encoding="utf-8")
+        state_dir = self.root / "trio-state"
+        expected = execution("complete-invoke", gateway=True)
+        case_patch = {"adapter": FakeAdapter,
+                      "execute": lambda adapter: expected}
+        with patch.object(session_case_runner, "WorkspaceCliRunner",
+                          FakeRunner), \
+             patch.dict(_CASES["complete-invoke"], case_patch):
+            report = dual_session_cli_case_run(
+                profile_path=profile_path,
+                cli_binary=self.cli_binary,
+                cli_binary_sha256=self.cli_sha256,
+                case_key="complete-invoke",
+                state_dir=state_dir,
+                run_id=RUN_ID + "-trio",
+                allow_write=True,
+                confirm_run_id=RUN_ID + "-trio",
+            )
+        self.assertEqual(report["credential_kind"],
+                         "human_cookie_with_owned_bot_tokens")
+        self.assertEqual(report["environment"]["tier"], "preprod")
+        self.assertNotIn("owned-member-token",
+                         json.dumps(report, sort_keys=True))
+
+    def test_preprod_collection_receipt_stays_cookie_only(self):
+        profile = collection_profile(preprod=True)
+        self.assertEqual(profile["auth"]["kind"], "human-cookie")
+        profile_path = self.root / "collection-profile.json"
+        profile_path.write_text(json.dumps(profile), encoding="utf-8")
+        state_dir = self.root / "collection-state"
+        expected = execution("collection", gateway=True)
+        case_patch = {"adapter": FakeAdapter,
+                      "execute": lambda adapter: expected}
+        with patch.object(session_case_runner, "WorkspaceCliRunner",
+                          FakeRunner), \
+             patch.dict(_CASES["collection"], case_patch):
+            report = dual_session_cli_case_run(
+                profile_path=profile_path,
+                cli_binary=self.cli_binary,
+                cli_binary_sha256=self.cli_sha256,
+                case_key="collection",
+                state_dir=state_dir,
+                run_id=RUN_ID + "-collection",
+                allow_write=True,
+                confirm_run_id=RUN_ID + "-collection",
+            )
+        self.assertEqual(report["credential_kind"], "human_cookie")
+
+
 if __name__ == "__main__":
     unittest.main()

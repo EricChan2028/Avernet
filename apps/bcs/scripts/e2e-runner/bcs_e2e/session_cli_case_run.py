@@ -24,6 +24,7 @@ from .session_cli_shared import execute_session_cli_lifecycle_case
 from .session_cli_complete_invoke import RemoteSessionCliCompleteInvokeAdapter
 from .session_cli_complete_invoke import SESSION_CLI_COMPLETE_INVOKE_CASE_ID, SESSION_CLI_COMPLETE_INVOKE_EFFECT
 from .session_cli_complete_invoke import execute_session_cli_complete_invoke_case
+from .session_cli_profile import SESSION_CLI_COMPLETE_INVOKE_PROFILE_CONTRACT
 from .session_cli_collection import RemoteSessionCliCollectionAdapter
 from .session_cli_collection import SESSION_CLI_COLLECTION_CASE_ID, SESSION_CLI_COLLECTION_EFFECT
 from .session_cli_collection import execute_session_cli_collection_case
@@ -127,6 +128,16 @@ def load_session_cli_case_profile(path: Path, case_key: str) -> dict:
     return _CASES[case_key]["validator"](raw)
 
 
+def _receipt_credential_kind(profile: dict) -> str:
+    """Label the preprod credential family without echoing any secret."""
+    if profile["environment"]["tier"] == "local":
+        return "owned_local_bot_token"
+    if (profile["contract"] == SESSION_CLI_COMPLETE_INVOKE_PROFILE_CONTRACT
+            and profile["auth"]["kind"] == "human-cookie-with-owned-bot-tokens"):
+        return "human_cookie_with_owned_bot_tokens"
+    return "human_cookie"
+
+
 def dual_session_cli_case_run(
     *,
     profile_path: Path,
@@ -214,9 +225,7 @@ def dual_session_cli_case_run(
         "resource_disposition": _CASES[case_key]["fixture_effect"],
         "remote_validation": "NOT_RUN",
         "grants_release_credit": False,
-        "credential_kind": (
-            "owned_local_bot_token" if profile["environment"]["tier"] == "local" else "human_cookie"
-        ),
+        "credential_kind": _receipt_credential_kind(profile),
     }
     write(report_file, report)
     return report

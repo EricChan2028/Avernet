@@ -36,6 +36,10 @@ SESSION_CLI_COMPLETE_INVOKE_SOURCE_FUNCTION = "_story_complete_and_invoke_sessio
 SESSION_CLI_COMPLETE_INVOKE_CASE_METHOD = "execute_session_cli_complete_invoke_case"
 SESSION_CLI_COMPLETE_INVOKE_EFFECT = (
     "OWNED_SERVICE_SIGNOFF_AND_INVOCATION_THEN_GENERIC_GROUP_DELETE")
+SESSION_CLI_COMPLETE_INVOKE_CLI_OPERATIONS = frozenset({
+    "session-cli.service.group.create",
+    "session-cli.session.create",
+})
 
 
 def session_cli_complete_invoke_case_plan() -> dict:
@@ -77,9 +81,10 @@ def session_cli_complete_invoke_adaptability() -> dict:
         "remote_validation": "NOT_RUN",
         "grants_release_credit": False,
         "blocker": (
-            "Mock-only; live execution also requires owned preprod Bot "
-            "tokens for both dedicated pool Bots because the "
-            "service-invocation routes resolve Bot identity only."),
+            "Mock-only; live preprod execution also requires the owned Human "
+            "Cookie plus both dedicated pool Bot tokens (the reviewed ACE "
+            "trio) because the service-invocation routes resolve Bot "
+            "identity only [ACE-BOT-TOKEN-BEARER]."),
     }
 
 
@@ -102,10 +107,25 @@ class RemoteSessionCliCompleteInvokeAdapter:
 
     def _actor_profile(self, credential_ref: str) -> dict:
         value = json.loads(json.dumps(self.profile, allow_nan=False))
-        value["auth"] = {
-            "kind": "authenticated-product",
-            "header_env": {"Authorization": self.profile["auth"][credential_ref]},
-        }
+        if self.profile["environment"]["tier"] == "preprod":
+            # The station legacy face admits an owned Bot principal only as
+            # the reviewed ACE trio: the owned Human Cookie session plus the
+            # two owned Bot Bearer tokens (live evidence
+            # ACE-BOT-TOKEN-BEARER; a bare Bot Bearer returns USER_NOT_LOGIN
+            # / decisionBy=ACE).
+            value["auth"] = {
+                "kind": "human-cookie-with-owned-bot-tokens",
+                "header_env": {
+                    "Authorization": self.profile["auth"][credential_ref],
+                    "Cookie": self.profile["auth"]["cookie_env"],
+                },
+                "authorization_scheme": "bearer",
+            }
+        else:
+            value["auth"] = {
+                "kind": "authenticated-product",
+                "header_env": {"Authorization": self.profile["auth"][credential_ref]},
+            }
         value["entrypoint"] = {
             "kind": self.profile["entrypoint"]["kind"],
             "origin": self.profile["entrypoint"]["origin"],
@@ -114,8 +134,22 @@ class RemoteSessionCliCompleteInvokeAdapter:
         }
         return value
 
-    def _credential_kind(self) -> str:
-        return "owned_local_bot_token"
+    def _credential_kind(self, role: str = "driver") -> str:
+        if self.profile["environment"]["tier"] == "local":
+            return "owned_local_bot_token"
+        if role == "member":
+            return "human_cookie_with_owned_member_bot_token"
+        return "human_cookie_with_owned_driver_bot_token"
+
+    def expected_credential_kind(self, operation: str) -> str:
+        """Expected per-request credential label for one reviewed operation."""
+        if operation in SESSION_CLI_COMPLETE_INVOKE_CLI_OPERATIONS:
+            if self.profile["environment"]["tier"] == "local":
+                return "owned_local_bot_token"
+            return "human_cookie_with_owned_bot_tokens"
+        if operation == SESSION_CLI_SERVICE_SESSION_READ_MEMBER_OPERATION:
+            return self._credential_kind("member")
+        return self._credential_kind("driver")
 
     def create_service_cli_group(self) -> AdapterCall:
         result = self.runner.execute("session-cli.service.group.create")
@@ -178,7 +212,8 @@ class RemoteSessionCliCompleteInvokeAdapter:
         evidence.update({
             "transport": "PRODUCT_HTTP",
             "caller_role": caller_role,
-            "credential_kind": self._credential_kind(),
+            "credential_kind": self._credential_kind(
+                "member" if caller_role == "case_owned_member" else "driver"),
             "case_class": case_class,
             "fixture_effect": SESSION_CLI_COMPLETE_INVOKE_EFFECT,
             "remote_validation": "NOT_RUN",
@@ -542,14 +577,14 @@ def execute_session_cli_complete_invoke_case(adapter: object) -> CaseExecution:
             SESSION_CLI_GROUP_DELETE_OPERATION,
             SESSION_CLI_GROUP_VERIFY_DELETED_OPERATION,
         )
-        credential_kind = adapter._credential_kind()
         for call, operation in zip(calls, operations):
             if not isinstance(call, AdapterCall):
                 raise RunStateError(
                     f"Session completion-invocation {operation} did not "
                     "return AdapterCall")
             call.validate()
-            if (call.evidence.get("credential_kind") != credential_kind
+            if (call.evidence.get("credential_kind")
+                    != adapter.expected_credential_kind(operation)
                     or call.evidence.get("fixture_effect") != SESSION_CLI_COMPLETE_INVOKE_EFFECT
                     or call.evidence.get("remote_validation") != "NOT_RUN"
                     or call.evidence.get("grants_release_credit") is not False):

@@ -17,6 +17,7 @@ TEST_ROOT = Path(__file__).resolve().parent
 ROOT = TEST_ROOT.parent
 sys.path.insert(0, str(TEST_ROOT))
 sys.path.insert(0, str(ROOT))
+from bcs_e2e.workspace_cli_commands import WorkspaceCliRunnerError
 from bcs_e2e.workspace_cli_runner import WorkspaceCliRunner
 from bcs_e2e.session_cli_complete_invoke import (
     SESSION_CLI_COMPLETE_INVOKE_CASE_ID,
@@ -55,6 +56,7 @@ SESSION = GROUP + ":0d0e0f10"
 SERVICE = GROUP + ":1a1b1c1d"
 TOKEN = "owned-local-token"
 MEMBER_TOKEN = "owned-member-token"
+COOKIE = "owned-preprod-cookie"
 
 
 def profile_value(*, preprod=False, mutate=None):
@@ -78,9 +80,13 @@ def profile_value(*, preprod=False, mutate=None):
             "member": {"bot_id": MEMBER, "owner_id": "39464",
                        "dedicated": True, "visibility": "public"},
         },
-        "auth": {"kind": "owned-bot-tokens",
-                 "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN",
-                 "member_token_env": "BCS_E2E_MEMBER_BOT_TOKEN"},
+        "auth": ({"kind": "human-cookie-with-owned-bot-tokens",
+                  "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN",
+                  "member_token_env": "BCS_E2E_MEMBER_BOT_TOKEN",
+                  "cookie_env": "BCS_E2E_HUMAN_COOKIE"} if preprod else
+                 {"kind": "owned-bot-tokens",
+                  "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN",
+                  "member_token_env": "BCS_E2E_MEMBER_BOT_TOKEN"}),
         "relationships": {
             "group": "bounded-owned-bots-cli-service-invoke",
             "initial_session": "deleted-with-group",
@@ -229,6 +235,11 @@ def service_session_output():
     }
 
 
+class _StaticRunner:
+    def execute(self, *args, **kwargs):
+        raise AssertionError("product CLI must not run in a transport test")
+
+
 class SessionCliCompleteInvokeTests(unittest.TestCase):
     def setUp(self):
         self.root = Path(tempfile.mkdtemp())
@@ -327,7 +338,8 @@ class SessionCliCompleteInvokeTests(unittest.TestCase):
             }
 
         env = {"BCS_E2E_DRIVER_BOT_TOKEN": TOKEN,
-               "BCS_E2E_MEMBER_BOT_TOKEN": MEMBER_TOKEN}
+               "BCS_E2E_MEMBER_BOT_TOKEN": MEMBER_TOKEN,
+               "BCS_E2E_HUMAN_COOKIE": COOKIE}
         with patch.dict(os.environ, env), \
              patch("bcs_e2e.workspace_cli_runner.capture",
                    side_effect=fake_capture), \
@@ -346,7 +358,12 @@ class SessionCliCompleteInvokeTests(unittest.TestCase):
                 self.assertIsNone(adapter.service_session_id)
                 self.assertIn("--manager", commands[0])
                 self.assertEqual(commands[1][-2:], ["--title", "Release sign-off"])
-                self.assertIsNone(contexts[0][1])
+                if preprod:
+                    self.assertEqual(contexts[0][1], COOKIE)
+                    self.assertEqual(contexts[1][1], COOKIE)
+                else:
+                    self.assertIsNone(contexts[0][1])
+                    self.assertIsNone(contexts[1][1])
                 snapshot = result.snapshot()
                 requests = snapshot["steps"][0]["evidence"]["requests"]
                 self.assertEqual(requests[0]["case_class"], "setup")
@@ -361,6 +378,15 @@ class SessionCliCompleteInvokeTests(unittest.TestCase):
                                  "case_owned_member")
                 self.assertEqual(requests[13]["case_class"],
                                  "service-completion-guardrail")
+                expected_kinds = (
+                    ["human_cookie_with_owned_bot_tokens"] * 2
+                    + ["human_cookie_with_owned_driver_bot_token"] * 10
+                    + ["human_cookie_with_owned_member_bot_token"]
+                    + ["human_cookie_with_owned_driver_bot_token"] * 5
+                ) if preprod else ["owned_local_bot_token"] * 18
+                self.assertEqual(
+                    [row["credential_kind"] for row in requests],
+                    expected_kinds)
                 self.assertEqual(snapshot["steps"][0]["data"]["group_absence_verified"], True)
                 serialized = json.dumps(snapshot, sort_keys=True)
                 self.assertNotIn(TOKEN, serialized)
@@ -405,6 +431,100 @@ class SessionCliCompleteInvokeTests(unittest.TestCase):
         result, _, _, _ = self.run_case(deform=deform)
         self.assertEqual(result.status, "BLOCKED")
         self.assertEqual(result.error_type, "RunStateError")
+
+    def test_expected_credential_kind_partitions_cli_and_http_operations(self):
+        for preprod in (False, True):
+            with self.subTest(preprod=preprod):
+                profile = validate_session_cli_complete_invoke_profile(
+                    profile_value(preprod=preprod))
+                env = {"BCS_E2E_DRIVER_BOT_TOKEN": TOKEN,
+                       "BCS_E2E_MEMBER_BOT_TOKEN": MEMBER_TOKEN,
+                       "BCS_E2E_HUMAN_COOKIE": COOKIE}
+                with patch.dict(os.environ, env):
+                    adapter = RemoteSessionCliCompleteInvokeAdapter(
+                        profile, _StaticRunner())
+                cli_operations = ("session-cli.service.group.create",
+                                  "session-cli.session.create")
+                for operation in cli_operations:
+                    if preprod:
+                        self.assertEqual(
+                            adapter.expected_credential_kind(operation),
+                            "human_cookie_with_owned_bot_tokens")
+                    else:
+                        self.assertEqual(
+                            adapter.expected_credential_kind(operation),
+                            "owned_local_bot_token")
+                if preprod:
+                    self.assertEqual(
+                        adapter.expected_credential_kind(
+                            SESSION_CLI_SERVICE_SESSION_READ_MEMBER_OPERATION),
+                        "human_cookie_with_owned_member_bot_token")
+                    self.assertEqual(
+                        adapter.expected_credential_kind(
+                            SESSION_CLI_SESSION_READ_OPERATION),
+                        "human_cookie_with_owned_driver_bot_token")
+
+    def test_preprod_bare_owned_bot_tokens_are_rejected(self):
+        bare = profile_value(preprod=True)
+        bare["auth"]["kind"] = "owned-bot-tokens"
+        with self.assertRaisesRegex(ConfigError, "reviewed ACE trio"):
+            validate_session_cli_complete_invoke_profile(bare)
+
+    def test_preprod_http_actor_subprofiles_bind_the_ace_trio(self):
+        profile = validate_session_cli_complete_invoke_profile(
+            profile_value(preprod=True))
+        env = {"BCS_E2E_DRIVER_BOT_TOKEN": TOKEN,
+               "BCS_E2E_MEMBER_BOT_TOKEN": MEMBER_TOKEN,
+               "BCS_E2E_HUMAN_COOKIE": COOKIE}
+        with patch.dict(os.environ, env):
+            adapter = RemoteSessionCliCompleteInvokeAdapter(
+                profile, _StaticRunner())
+            driver_auth = adapter.driver_client.profile["auth"]
+            member_auth = adapter.member_client.profile["auth"]
+            local_adapter = RemoteSessionCliCompleteInvokeAdapter(
+                validate_session_cli_complete_invoke_profile(
+                    profile_value(preprod=False)), _StaticRunner())
+            local_auth = local_adapter.driver_client.profile["auth"]
+        self.assertEqual(driver_auth["kind"],
+                         "human-cookie-with-owned-bot-tokens")
+        self.assertEqual(driver_auth["header_env"],
+                         {"Authorization": "BCS_E2E_DRIVER_BOT_TOKEN",
+                          "Cookie": "BCS_E2E_HUMAN_COOKIE"})
+        self.assertEqual(driver_auth["authorization_scheme"], "bearer")
+        self.assertEqual(member_auth["kind"],
+                         "human-cookie-with-owned-bot-tokens")
+        self.assertEqual(member_auth["header_env"]["Authorization"],
+                         "BCS_E2E_MEMBER_BOT_TOKEN")
+        self.assertEqual(local_auth, {
+            "kind": "authenticated-product",
+            "header_env": {"Authorization": "BCS_E2E_DRIVER_BOT_TOKEN"}})
+        self.assertNotIn("authorization_scheme", local_auth)
+
+    def test_complete_invoke_credentials_admit_the_preprod_ace_trio(self):
+        profile = validate_session_cli_complete_invoke_profile(
+            profile_value(preprod=True))
+        runner = WorkspaceCliRunner(profile, binary=self.binary,
+                                    binary_sha256=self.digest,
+                                    state_dir=self.state)
+        with patch.dict(os.environ, {"BCS_E2E_DRIVER_BOT_TOKEN": TOKEN}):
+            with self.assertRaisesRegex(WorkspaceCliRunnerError, "ACE trio"):
+                runner._credentials()
+        env = {"BCS_E2E_DRIVER_BOT_TOKEN": TOKEN,
+               "BCS_E2E_HUMAN_COOKIE": COOKIE}
+        with patch.dict(os.environ, env):
+            self.assertEqual(
+                runner._credentials(),
+                ("human_cookie_with_owned_bot_tokens", TOKEN))
+        local = validate_session_cli_complete_invoke_profile(
+            profile_value(preprod=False))
+        local_runner = WorkspaceCliRunner(local, binary=self.binary,
+                                          binary_sha256=self.digest,
+                                          state_dir=self.state)
+        with patch.dict(os.environ, {"BCS_E2E_DRIVER_BOT_TOKEN": TOKEN,
+                                     "BCS_E2E_MEMBER_BOT_TOKEN": MEMBER_TOKEN}):
+            self.assertEqual(
+                local_runner._credentials(),
+                ("owned_local_bot_token", TOKEN))
 
     def test_case_guard_accepts_the_case_files(self):
         guard = ROOT.parents[3] / "scripts/ci/e2e_runner_case_guard.py"
