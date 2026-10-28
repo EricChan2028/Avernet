@@ -174,7 +174,9 @@ def test_read_and_completion_sql_never_scan_publication_history_or_all_bindings(
             assert "WHERE ac_bot_publish.id =" in sql, sql
             assert "JSON_" not in sql, sql
         if sql.startswith("UPDATE ac_bot_knowledge_binding"):
-            assert "kb_id IN (" in sql and "NOT IN" not in sql, sql
+            assert (
+                "WHERE ac_bot_knowledge_binding.id =" in sql and "avernet_tenant" in sql
+            ), sql
     assert first.ext["knowledge_selection_result"]["status"] == "applied"
 
 

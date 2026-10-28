@@ -41,16 +41,11 @@ from agentclaw.community.core.common_config.models import BotCommonConfigRecord
 from agentclaw.community.core.common_config.common_config_service_protocol import (
     CommonConfigServiceProtocol,
 )
-from agentclaw.community.kernel.knowledge import KNOWLEDGE_ONLINE_CONFIG_KEY
+from agentclaw.community.kernel.knowledge import require_generic_bot_config_key
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
 STORAGE_POLICY = "storage_policy"
-
-
-def _require_editable_key(config_key):
-    if config_key == KNOWLEDGE_ONLINE_CONFIG_KEY:
-        raise ValueError("knowledge publication summary is managed by publication completion")
 
 
 class BotCommonConfigService(BotCommonConfigServiceProtocol):
@@ -69,7 +64,7 @@ class BotCommonConfigService(BotCommonConfigServiceProtocol):
     def set_config(
         self, *, bot_id: str, entity_id: str, env: str, config_key: str, value: JsonValue
     ) -> None:
-        _require_editable_key(config_key)
+        require_generic_bot_config_key(config_key)
         self._repo.put(
             bot_id=bot_id,
             entity_id=entity_id,
@@ -112,7 +107,7 @@ class BotCommonConfigService(BotCommonConfigServiceProtocol):
     def create_record(
         self, *, bot_id: str, entity_id: str, env: str, config_key: str, value: JsonValue
     ) -> int:
-        _require_editable_key(config_key)
+        require_generic_bot_config_key(config_key)
         return self._repo.create_record(
             bot_id=bot_id,
             entity_id=entity_id,
@@ -124,7 +119,7 @@ class BotCommonConfigService(BotCommonConfigServiceProtocol):
     def update_record(self, *, config_id: int, value: JsonValue) -> bool:
         record = self._repo.get_record_by_id(config_id=config_id)
         if record is not None:
-            _require_editable_key(record.config_key)
+            require_generic_bot_config_key(record.config_key)
         return self._repo.update_record(
             config_id=config_id, config_value=self._dump(value)
         )
@@ -132,13 +127,13 @@ class BotCommonConfigService(BotCommonConfigServiceProtocol):
     def delete_record(self, *, config_id: int) -> bool:
         record = self._repo.get_record_by_id(config_id=config_id)
         if record is not None:
-            _require_editable_key(record.config_key)
+            require_generic_bot_config_key(record.config_key)
         return self._repo.delete_record(config_id=config_id)
 
     def upsert_record(
         self, *, bot_id: str, entity_id: str, env: str, config_key: str, value: JsonValue
     ) -> int:
-        _require_editable_key(config_key)
+        require_generic_bot_config_key(config_key)
         return self._repo.upsert_record(
             bot_id=bot_id,
             entity_id=entity_id,
@@ -151,7 +146,7 @@ class BotCommonConfigService(BotCommonConfigServiceProtocol):
         self, *, env: str, records: list[BotCommonConfigEntry]
     ) -> list[int]:
         for item in records:
-            _require_editable_key(item.config_key)
+            require_generic_bot_config_key(item.config_key)
         return self._repo.batch_upsert_records(
             records=[
                 {

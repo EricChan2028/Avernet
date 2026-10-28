@@ -43,7 +43,7 @@ from agentclaw.community.kernel.knowledge import (
 from agentclaw.community.plugin_api.models import BotCommonConfig, BotModel
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.env_utils import get_current_env
-from sqlalchemy import func, or_
+from sqlalchemy import bindparam, func, or_
 
 SNAPSHOT_KEY = "knowledge_selection_snapshot"
 RESULT_KEY = "knowledge_selection_result"
@@ -93,6 +93,40 @@ def _bindings(session, bot):
         Binding.space_id == bot.space_id,
         Binding.avernet_tenant == bot.avernet_tenant,
     )
+
+
+def _selected_bindings(session, bot, ids):
+    """Seek the existing unique KB key before checking mutable space/flags.
+
+    Including space/enabled in this SELECT lets SQLite pick idx_bk_enabled's
+    broad prefix for 100 IDs. These fields are validated on the locked rows.
+    """
+    if not ids:
+        return []
+    return session.query(Binding).filter(
+        Binding.bot_pk == bot.id, Binding.env == bot.env,
+        Binding.avernet_tenant == bot.avernet_tenant,
+        Binding.kb_id.in_(sorted(ids)),
+    ).populate_existing().with_for_update().all()
+
+
+def _write_online_rows(session, bot, rows, value, space_id):
+    """One bounded executemany of PK equality UPDATEs, not planner-dependent IN.
+
+    All native scope predicates (including tenant) remain explicit in this Core
+    batch; no unguarded connection or independent Session is used.
+    """
+    changed = [r for r in rows if r.space_id == space_id and r.online_enabled != value]
+    if not changed:
+        return
+    table = Binding.__table__
+    statement = table.update().where(
+        table.c.id == bindparam("_binding_pk"),
+        table.c.bot_pk == bot.id, table.c.env == bot.env,
+        table.c.avernet_tenant == bot.avernet_tenant, table.c.space_id == space_id,
+        table.c.online_enabled.is_(not value),
+    ).values(online_enabled=value)
+    session.execute(statement, [{"_binding_pk": r.id} for r in changed])
 
 
 def _ext(row):
@@ -290,18 +324,8 @@ def prepare_online(session, publish_id, expected_json, observed_workflow_id=None
             return None
         snapshot = validate_snapshot(publish, source)
         ids = snapshot["enabled_kb_ids"]
-        present = (
-            {
-                r[0]
-                for r in _bindings(session, source)
-                .with_entities(Binding.kb_id)
-                .filter(Binding.kb_id.in_(ids))
-                .with_for_update()
-                .all()
-            }
-            if ids
-            else set()
-        )
+        present = {r.kb_id for r in _selected_bindings(session, source, ids)
+                   if r.space_id == source.space_id}
         if not set(ids).issubset(present):
             raise KnowledgeError("KNOWLEDGE_SNAPSHOT_BINDING_MISSING")
     except KnowledgeError as exc:
@@ -344,16 +368,15 @@ def replace_online(session, change):
             old_ids = set(materialized["kb_ids"])
             removed = old_ids - ids if materialized["space_id"] == source.space_id else old_ids
             if removed:
-                session.query(Binding).filter(
-                    Binding.bot_pk == source.id, Binding.env == source.env,
-                    Binding.avernet_tenant == source.avernet_tenant,
-                    Binding.space_id == materialized["space_id"],
-                    Binding.kb_id.in_(sorted(removed)), Binding.online_enabled.is_(True),
-                ).update({Binding.online_enabled: False}, synchronize_session=False)
+                _write_online_rows(
+                    session, source, _selected_bindings(session, source, removed),
+                    False, materialized["space_id"],
+                )
         if ids:
-            _bindings(session, source).filter(
-                Binding.kb_id.in_(sorted(ids)), Binding.online_enabled.is_(False),
-            ).update({Binding.online_enabled: True}, synchronize_session=False)
+            _write_online_rows(
+                session, source, _selected_bindings(session, source, ids),
+                True, source.space_id,
+            )
         materialized = dict(
             avernet_tenant=source.avernet_tenant, space_id=source.space_id,
             kb_ids=sorted(ids),

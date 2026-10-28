@@ -57,15 +57,16 @@ def measure(engine, action):
     plans = []
     with engine.connect() as connection:
         for sql, params, many in statements:
-            if sql.startswith(("SELECT", "UPDATE")) and not many:
+            if sql.startswith(("SELECT", "UPDATE")):
                 plans.append(
                     dict(
                         sql=sql,
+                        batch_size=len(params) if many else 1,
                         plan=[
                             tuple(row)
                             for row in connection.exec_driver_sql(
                                 "EXPLAIN QUERY PLAN " + sql,
-                                params,
+                                params[0] if many else params,
                             )
                         ],
                     )
@@ -184,11 +185,122 @@ def test_current_work_is_bounded_as_publish_and_disabled_binding_history_grows(
                 if "FROM ac_bot_publish" in plan["sql"]:
                     assert "WHERE ac_bot_publish.id =" in plan["sql"]
                 if plan["sql"].startswith("UPDATE ac_bot_knowledge_binding"):
-                    assert "kb_id IN (" in plan["sql"] and "NOT IN" not in plan["sql"]
+                    assert "WHERE ac_bot_knowledge_binding.id =" in plan["sql"]
     print(
         "CURRENT_SUMMARY_VM_STEPS",
         {
             p: [r[p]["vm_steps"] for r in evidence]
             for p in ("reader", "page", "completion")
         },
+    )
+
+
+def test_hundred_id_validation_clear_set_and_unchanged_completion_use_key_seeks(
+    publication, tmp_path
+):
+    db, repo, record = publication
+    engine = db.factory.kw["bind"]
+    with db.orm_session() as session:
+        session.query(Binding).delete()
+        session.add_all(
+            [
+                Binding(
+                    bot_pk=1,
+                    space_id=9,
+                    env="dev",
+                    kb_id=f"{group}-{i:03d}",
+                    enabled=group == "left",
+                    online_enabled=False,
+                    revision=1,
+                    updated_by="owner",
+                )
+                for group in ("left", "right")
+                for i in range(100)
+            ]
+        )
+    finish(repo, _start_online(repo, record))
+    evidence = []
+    counter = 2
+    for noise in (1, 1000, 10000):
+        with db.orm_session() as session:
+            session.execute(
+                Binding.__table__.insert(),
+                [
+                    dict(
+                        bot_pk=1,
+                        space_id=9,
+                        env="dev",
+                        kb_id=f"noise-{noise}-{i}",
+                        enabled=False,
+                        online_enabled=False,
+                        revision=1,
+                        updated_by="owner",
+                    )
+                    for i in range(noise)
+                ],
+            )
+            session.query(Binding).update({"enabled": False})
+            group = "left" if noise == 1000 else "right"
+            session.query(Binding).filter(Binding.kb_id.like(group + "-%")).update(
+                {"enabled": True}
+            )
+        stage = dict(added_disabled=noise)
+        for mode in ("replacement", "unchanged"):
+            current = repo.insert(
+                dict(
+                    source_bot_pk=1,
+                    source_bot_id="service",
+                    publish_bot_id="service.pub",
+                    owner_id="owner",
+                    permission_owner="owner",
+                    name="Current",
+                    env="dev",
+                    version=counter,
+                    status=PublishStatus.DRAFT,
+                )
+            )
+            online = _start_online(repo, current)
+            completed, work = measure(
+                engine,
+                lambda: repo.compare_and_set_status_with_ext(
+                    publish_id=current.id,
+                    source_status=PublishStatus.ONLINE_PUB,
+                    target_status=PublishStatus.SUCCESS,
+                    expected_ext=online.ext,
+                    ext=online.ext,
+                    observed_workflow_id=counter + 100,
+                ),
+            )
+            assert completed.status == PublishStatus.SUCCESS
+            counter += 1
+            stage[mode] = work
+            with db.orm_session() as session:
+                active = {
+                    r[0]
+                    for r in session.query(Binding.kb_id).filter(
+                        Binding.online_enabled.is_(True)
+                    )
+                }
+            assert active == {f"{group}-{i:03d}" for i in range(100)}
+            updates = [
+                p
+                for p in work["plans"]
+                if p["sql"].startswith("UPDATE ac_bot_knowledge_binding")
+            ]
+            if mode == "unchanged":
+                assert updates == []
+            else:
+                assert len(updates) == 2
+                for p in updates:
+                    assert p["batch_size"] == 100
+                    assert all("INTEGER PRIMARY KEY" in row[-1] for row in p["plan"])
+        evidence.append(stage)
+    (tmp_path / "hundred-id-cost.json").write_text(json.dumps(evidence, indent=2))
+    for mode in ("replacement", "unchanged"):
+        work = [r[mode]["vm_steps"] for r in evidence]
+        assert max(work) < 50000, (mode, work)
+        assert max(work) - min(work) < 5000, (mode, work)
+    print(
+        "HUNDRED_ID_VM_STEPS",
+        {m: [r[m]["vm_steps"] for r in evidence] for m in ("replacement", "unchanged")},
     )
