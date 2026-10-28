@@ -164,16 +164,19 @@ def profile_value(case_key: str, *, preprod: bool = False) -> dict:
                                  database="agentclawdb",
                                  environment_binding_confirmed=True)
         value["policy"]["fixture_pool"] = "owned-edge-command-preprod-pool"
-        if case_key in {"friend-connections", "friend-requests"}:
+        if case_key in {"friend-connections", "friend-requests", "admission"}:
             value["auth"]["header_env"] = {"Cookie": "BCS_E2E_HUMAN_COOKIE"}
         if case_key == "friend-requests":
             value["edge_case_bindings"]["friend_requests.read"]["auth"] = "human_cookie"
+        if case_key == "admission":
+            for binding in value["edge_case_bindings"].values():
+                binding["auth"] = "human_cookie"
     return value
 
 
 def execution(case_key: str, *, preprod: bool = False) -> CaseExecution:
     credential_kind = (
-        "unauthenticated" if case_key == "admission"
+        "unauthenticated" if case_key == "admission" and not preprod
         else "human_cookie" if preprod or case_key == "bot-search-candidates"
         else "owned_local_bot_token")
     steps = tuple(
@@ -305,11 +308,12 @@ class EdgeReadCaseRunTests(unittest.TestCase):
                 self.assertNotIn("BCS_E2E_HUMAN_COOKIE", serialized)
                 self.assertNotIn("private-cookie", serialized)
 
-    def test_admission_remains_unauthenticated_in_both_environments(self):
+    def test_admission_uses_local_anonymous_or_station_cookie_contracts(self):
         for preprod in (False, True):
             with self.subTest(preprod=preprod):
                 report, _, _, _ = self.invoke("admission", preprod=preprod)
-                self.assertEqual(report["credential_kind"], "unauthenticated")
+                self.assertEqual(report["credential_kind"],
+                                 "human_cookie" if preprod else "unauthenticated")
 
     def test_profile_case_bindings_must_be_exact(self):
         profile = profile_value("friend-requests")

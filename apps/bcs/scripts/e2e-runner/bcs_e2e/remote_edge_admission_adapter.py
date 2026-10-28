@@ -55,11 +55,12 @@ class RemoteEdgeAdmissionAdapter:
         self._attempted.add(requirement.adapter_method)
         observation = self.client.read(operation)
         body, record = observation.data, observation.evidence
+        expected_cookie = binding["auth"] == "human_cookie"
         if (record.get("operation") != operation
                 or record.get("method") != "GET"
                 or record.get("path") != binding["path"]
                 or record.get("http_status") != 200
-                or record.get("credentials_sent") is not False
+                or record.get("credentials_sent") is not expected_cookie
                 or record.get("authorization_sent") is not False):
             raise RunStateError("Edge admission transport evidence differs from the fixed contract")
         if not isinstance(body, dict) or set(body) != _RESPONSE_KEYS:
@@ -79,9 +80,10 @@ class RemoteEdgeAdmissionAdapter:
         evidence = {
             "transport": "native-v1-http", "operation": operation,
             "path": record["path"], "http_method": "GET",
-            "http_status": record["http_status"], "identity": "UNAUTHENTICATED",
+            "http_status": record["http_status"],
+            "identity": "HUMAN_COOKIE_DRIVER_VIEW" if expected_cookie else "UNAUTHENTICATED",
             "target_actor_id": self.target_bot_id,
-            "actor_binding": actor_binding, "credentials_sent": False,
+            "actor_binding": actor_binding, "credentials_sent": expected_cookie,
             "authorization_sent": False, "fixture_effect": "NONE", **data,
         }
         if any(secret and secret in repr(evidence) for secret in self.client.headers.values()):

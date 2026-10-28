@@ -58,6 +58,9 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
+_EDGE_ADMISSION_READS = {"edge.admission.human_actor.read", "edge.admission.actor_kind.read"}
+
+
 _WEBHOOK_PRINCIPAL_READS = {"webhook.subscription.list", "webhook.subscription.read",
                              "webhook.subscription.deliveries.list", "webhook.delivery.read"}
 
@@ -273,8 +276,11 @@ class ReadClient:
         else:
             auth_headers = self.local_auth.headers(self.profile) if self.local_auth is not None else self.headers
         human_cookie_read = operation in _HUMAN_COOKIE_ONLY_READS
-        if (operation in {"edge.friend_requests.read", "edge.friend_connections.read"}
-                and binding["auth"] == "human_cookie"):
+        if operation in _EDGE_ADMISSION_READS:
+            if binding["auth"] == "human_cookie":
+                human_cookie_read = True
+        elif (operation in {"edge.friend_requests.read", "edge.friend_connections.read"}
+              and binding["auth"] == "human_cookie"):
             # Station Gateway admission happens through the browser context; the
             # exact actor query remains the dedicated-driver scope. Do not send
             # a Bot Authorization bearer to these public read routes.
@@ -282,8 +288,8 @@ class ReadClient:
         if human_cookie_read:
             auth_headers = {header: value for header, value in auth_headers.items()
                             if header != "Authorization"}
-        unauthenticated = operation in {"edge.admission.human_actor.read",
-                                         "edge.admission.actor_kind.read"}
+        unauthenticated = (operation in _EDGE_ADMISSION_READS
+                            and binding["auth"] == "unauthenticated")
         request = Request(self.base + path, method="GET", headers={
             **({} if unauthenticated else auth_headers),
             "Accept": "application/json", "X-Request-ID": request_id,

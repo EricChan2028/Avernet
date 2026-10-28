@@ -37,9 +37,8 @@ def profile(*, gateway=False):
     value["human"]["user_id"] = "owner-1"
     value["actors"]["driver"].update(bot_id="driver-bot", owner_id="owner-1")
     value["actors"]["member"].update(bot_id="member-bot", owner_id="owner-1")
-    value["auth"]["header_env"].update(Authorization="BCS_E2E_DRIVER_BOT_TOKEN",
-                                       Cookie="BCS_E2E_HUMAN_COOKIE")
     if gateway:
+        value["auth"]["header_env"] = {"Cookie": "BCS_E2E_HUMAN_COOKIE"}
         value["entrypoint"].update(kind="gateway", origin="https://teamclawgw.example.com")
         value["environment"].update(tier="preprod", expected_bcs_env="pre",
                                    lifecycle="remote-attach", deployment="managed",
@@ -47,15 +46,19 @@ def profile(*, gateway=False):
         value["observer"].update(kind="alisddbquery", server="observ",
                                  database="agentclawdb",
                                  environment_binding_confirmed=True)
+    else:
+        value["auth"]["header_env"].update(Authorization="BCS_E2E_DRIVER_BOT_TOKEN",
+                                           Cookie="BCS_E2E_HUMAN_COOKIE")
+    admission_auth = "human_cookie" if gateway else "unauthenticated"
     value["edge_case_bindings"] = {
         "edge_admission_human_actor.read": {
             "method": "GET", "path": edge_admission_human_actor_path(value),
-            "api_face": "internal-v1", "auth": "unauthenticated",
+            "api_face": "internal-v1", "auth": admission_auth,
             "response": "admission-json", "traceparent": "disabled",
         },
         "edge_admission_actor_kind.read": {
             "method": "GET", "path": edge_admission_actor_kind_path(value),
-            "api_face": "internal-v1", "auth": "unauthenticated",
+            "api_face": "internal-v1", "auth": admission_auth,
             "response": "admission-json", "traceparent": "disabled",
         },
     }
@@ -160,12 +163,29 @@ class RemoteEdgeAdmissionExecutionTests(unittest.TestCase):
         self.assertNotIn(TOKEN, serialized)
         self.assertNotIn(COOKIE, serialized)
 
-    def test_gateway_profile_reuses_the_same_two_read_contracts(self):
-        value = profile(gateway=True)  # Uses the same native paths and no credentials.
+    def test_gateway_admission_reads_use_the_same_routes_with_cookie_not_token(self):
+        value = profile(gateway=True)
         self.assertEqual(value["edge_case_bindings"]["edge_admission_human_actor.read"]["path"],
                          HUMAN_ACTOR_PATH)
         self.assertEqual(value["edge_case_bindings"]["edge_admission_actor_kind.read"]["path"],
                          ACTOR_KIND_PATH)
+        for binding in value["edge_case_bindings"].values():
+            self.assertEqual(binding["auth"], "human_cookie")
+        body = {"allowed": True, "grants": [], "reason_code": "ok",
+                "public_default": False}
+        execution, requests = self.run_case([Reply(body), Reply(body)], profile(gateway=True))
+        self.assertEqual(execution.status, "PASS")
+        for request in requests:
+            self.assertEqual(request.headers.get("Cookie"), COOKIE)
+            self.assertNotIn("Authorization", request.headers)
+        snapshot = execution.snapshot()
+        self.assertEqual([row["evidence"]["credentials_sent"] for row in snapshot["steps"]],
+                         [True, True])
+        self.assertEqual([row["evidence"]["identity"] for row in snapshot["steps"]],
+                         ["HUMAN_COOKIE_DRIVER_VIEW", "HUMAN_COOKIE_DRIVER_VIEW"])
+        serialized = json.dumps(snapshot, sort_keys=True)
+        self.assertNotIn(TOKEN, serialized)
+        self.assertNotIn(COOKIE, serialized)
 
     def test_invalid_admission_results_get_zero_partial_credit(self):
         bodies = (

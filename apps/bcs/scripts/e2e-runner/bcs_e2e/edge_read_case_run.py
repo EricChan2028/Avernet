@@ -79,6 +79,9 @@ def load_edge_read_case_profile(path: Path, case_key: str) -> dict:
 def _credential_kind(profile: dict, case_key: str) -> str:
     """Return only the credential kind, never a credential value."""
     if case_key == "admission":
+        if (profile["environment"].get("tier") == "preprod"
+                and profile["entrypoint"].get("kind") == "gateway"):
+            return "human_cookie"
         return "unauthenticated"
     headers = profile["auth"].get("header_env", {})
     if case_key == "bot-search-candidates":
