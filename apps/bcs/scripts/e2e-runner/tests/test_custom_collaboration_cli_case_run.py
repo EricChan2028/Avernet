@@ -383,7 +383,9 @@ class CustomCollaborationProfileValidatorTests(unittest.TestCase):
         for tier_profile in (local_profile(), preprod_profile(trio_auth()), preprod_profile(cookie_auth())):
             for operation in (VALIDATE_YAML_OPERATION, TRIAL_RUN_OPERATION, RUN_CANCEL_OPERATION):
                 if operation == VALIDATE_YAML_OPERATION:
-                    expected = "none"
+                    expected = ("none"
+                                if tier_profile["environment"]["tier"] == "local"
+                                else cc_leaf.custom_collaboration_cli_credential_kind(tier_profile))
                 elif operation in _HTTP_PRODUCT_OPERATIONS:
                     expected = "owned_local_bot_token" if tier_profile["environment"]["tier"] == "local" else "human_cookie"
                 else:
@@ -503,7 +505,9 @@ class CustomCollaborationExecutionTests(unittest.TestCase):
         records = [record for step in execution.steps for record in step.evidence["requests"]]
         for record in records:
             if record["transport"] == "PRODUCT_CLI":
-                expected = "none" if record["operation"] == VALIDATE_YAML_OPERATION else "human_cookie_with_owned_driver_bot_token"
+                # remote validation presents the family credential: the
+                # station gateway identity-gates the validation route live
+                expected = "human_cookie_with_owned_driver_bot_token"
             else:
                 expected = "human_cookie"
                 self.assertEqual(record["caller_role"], "case_owned_driver")
@@ -594,6 +598,12 @@ class CustomCollaborationLeafRunnerTests(unittest.TestCase):
                 self.assertEqual(result["data"], cli_projection(profile, TRIAL_CREATE_GROUP_OPERATION))
                 self.assertEqual(result["evidence"]["credential_kind"], kind)
                 self.assertEqual(capture.staged_session, staged)
+                validation_environment = capture.calls[0]["environment"]
+                if cookie_routed:
+                    self.assertEqual((validation_environment["BCS_COOKIE"], validation_environment["tc_sdb_nenv"]), (HUMAN_COOKIE, "production"))
+                else:
+                    self.assertNotIn("BCS_COOKIE", validation_environment)
+                    self.assertNotIn("tc_sdb_nenv", validation_environment)
                 environment = capture.calls[1]["environment"]
                 if cookie_routed:
                     self.assertEqual((environment["BCS_COOKIE"], environment["tc_sdb_nenv"]), (HUMAN_COOKIE, "production"))
@@ -603,19 +613,24 @@ class CustomCollaborationLeafRunnerTests(unittest.TestCase):
                 self.assertEqual(list(self.launch_base.glob("runner-*")), [])
                 self.assertNotIn(DRIVER_TOKEN, json.dumps(result, sort_keys=True))
 
-    def test_unauthenticated_remote_leaf_stages_the_direct_network_hint(self):
-        # Live preprod r1: the unauthenticated validation leaf still targets
-        # the gateway origin, and without tc_sdb_nenv the product CLI probes
-        # the gateway, classifies the office login interception, and demands
-        # office OAuth that the public CLI build cannot satisfy.
-        runner = self.fresh(preprod_profile(trio_auth()))
+    def test_validation_leaf_presents_identity_only_on_remote_tiers(self):
+        # Live preprod r1/r2: the station ACE gateway identity-gates the
+        # app-unauthenticated validation route (anonymous and driver-token
+        # requests refused with USER_NOT_LOGIN; the Human Cookie accepted),
+        # while the owned Singlebox face keeps its anonymous preflight.
         with patch.dict(os.environ, SECRETS), self.launcher(stdout=bytes_json({"valid": True, "summary": {"participants": 2, "nodes": 2}})) as capture:
-            runner.execute(VALIDATE_YAML_OPERATION, yaml_path=self.state / cc_run.DEFINITION_FILE)
-        environment = capture.calls[0]["environment"]
-        self.assertEqual(environment.get("tc_sdb_nenv"), "production")
-        self.assertNotIn("BCS_COOKIE", environment)
+            self.fresh().execute(VALIDATE_YAML_OPERATION, yaml_path=self.state / cc_run.DEFINITION_FILE)
+        local_environment = capture.calls[0]["environment"]
+        self.assertNotIn("BCS_COOKIE", local_environment)
+        self.assertNotIn("tc_sdb_nenv", local_environment)
         self.assertEqual(capture.staged_session,
-                         {"token": "", "bot_uuid": PREPROD_DRIVER, "api_base_url": "https://bcs-pre.alipay.com"})
+                         {"token": "", "bot_uuid": DRIVER_BOT, "api_base_url": "http://127.0.0.1:21000"})
+        with patch.dict(os.environ, SECRETS), self.launcher(stdout=bytes_json({"valid": True, "summary": {"participants": 2, "nodes": 2}})) as capture:
+            self.fresh(preprod_profile(trio_auth())).execute(VALIDATE_YAML_OPERATION, yaml_path=self.state / cc_run.DEFINITION_FILE)
+        remote_environment = capture.calls[0]["environment"]
+        self.assertEqual((remote_environment["BCS_COOKIE"], remote_environment["tc_sdb_nenv"]), (HUMAN_COOKIE, "production"))
+        self.assertEqual(capture.staged_session,
+                         {"token": DRIVER_TOKEN, "bot_uuid": PREPROD_DRIVER, "api_base_url": "https://bcs-pre.alipay.com"})
 
     def test_missing_credential_env_is_rejected(self):
         rows = ((self.fresh(), {}, "credential is absent"), (self.fresh(preprod_profile(trio_auth())), {DRIVER_TOKEN_ENV: DRIVER_TOKEN}, "bundle"), (self.fresh(preprod_profile(cookie_auth())), {DRIVER_TOKEN_ENV: DRIVER_TOKEN}, "Human Cookie is absent"))

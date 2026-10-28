@@ -225,9 +225,12 @@ def expected_step_transport(operation: str) -> str:
 
 def custom_collaboration_step_credential_kind(profile: dict,
                                               operation: str) -> str:
-    """Per-operation credential label; validate is unauthenticated."""
+    """Per-operation credential label; the Singlebox validation preflight is
+    anonymous, the remote one presents the family credential."""
     if operation == VALIDATE_YAML_OPERATION:
-        return "none"
+        if profile["environment"]["tier"] == "local":
+            return "none"
+        return custom_collaboration_cli_credential_kind(profile)
     if operation in _HTTP_PRODUCT_OPERATIONS:
         return ("owned_local_bot_token"
                 if profile["environment"]["tier"] == "local" else "human_cookie")
@@ -566,13 +569,6 @@ class CustomCollaborationCliRunner:
         elif credential_kind == "human_cookie":
             environment["BCS_COOKIE"] = cookie
             environment["tc_sdb_nenv"] = "production"
-        elif credential_kind == "none" and self.tier != "local":
-            # Unauthenticated remote leaves (YAML validation) still address the
-            # gateway origin through the product CLI. Without the direct hint
-            # the CLI probes the gateway, classifies the office login
-            # interception, and demands office-network OAuth that the public
-            # CLI build cannot satisfy.
-            environment["tc_sdb_nenv"] = "production"
         return root, context, environment
 
     @classmethod
@@ -627,7 +623,13 @@ class CustomCollaborationCliRunner:
                 "custom collaboration CLI operations cannot be reordered or skipped")
         role, arguments = self._contract(operation, **kwargs)
         credential_kind, token, cookie = self._credentials()
-        if operation == VALIDATE_YAML_OPERATION:
+        # Live preprod r1/r2: the station ACE gateway identity-gates the
+        # validation route even though the BCS application serves it
+        # unauthenticated (anonymous and driver-token requests are refused
+        # with USER_NOT_LOGIN; the Human Cookie identity is accepted). The
+        # remote validation leaf therefore presents the run's family
+        # credential; the owned Singlebox face keeps its anonymous preflight.
+        if operation == VALIDATE_YAML_OPERATION and self.tier == "local":
             credential_kind, token, cookie = "none", "", ""
         secrets = [value.encode() for value in (token, cookie) if value]
         root = context = environment = None

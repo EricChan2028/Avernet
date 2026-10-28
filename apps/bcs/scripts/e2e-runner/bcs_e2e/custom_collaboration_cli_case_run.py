@@ -16,8 +16,12 @@ notes, never silently repaired:
 - Every cleanup exit runs under the dedicated driver Bot identity (the
   owned-local parent never mutates through the member Bot), so the preprod
   bundle is the Human Cookie plus the owned driver Bot token.
-- YAML validation is unauthenticated, hence its per-operation credential
-  label is ``none``.
+- YAML validation is unauthenticated at the BCS application layer, but the
+  station gateway identity-gates the route on remote tiers (live r1/r2:
+  anonymous and driver-token requests are refused with USER_NOT_LOGIN while
+  the Human Cookie identity is accepted). The owned Singlebox preflight keeps
+  the anonymous ``none`` label; the remote validation leaf presents the
+  family credential.
 """
 
 from __future__ import annotations
