@@ -85,6 +85,62 @@ STRUCTURED_RUN_RERUN_PATH = "/api/v1/state-machine-runs/{run_id}/reruns"
 STRUCTURED_GROUP_DELETE_PATH = (
     "/api/v1/groups/{group_id}?bot_id={driver_actor_id}"
 )
+STRUCTURED_DIRECT_GROUPS_CREATE_PATH = "/groups"
+STRUCTURED_DIRECT_GROUP_PATH = "/groups/{group_id}"
+STRUCTURED_DIRECT_GROUP_DEFINITION_PATH = (
+    "/groups/{group_id}/collaboration-definition"
+)
+STRUCTURED_DIRECT_GROUP_DEFINITION_UPGRADE_PATH = (
+    "/groups/{group_id}/collaboration-definition/upgrade"
+)
+STRUCTURED_DIRECT_GROUP_RUN_START_PATH = "/groups/{group_id}/state-machine-runs"
+STRUCTURED_DIRECT_RUN_PATH = "/state-machine-runs/{run_id}"
+STRUCTURED_DIRECT_RUN_GRAPH_PATH = "/state-machine-runs/{run_id}/graph"
+STRUCTURED_DIRECT_RUN_NODE_PATH = "/state-machine-runs/{run_id}/nodes/answer"
+STRUCTURED_DIRECT_RUN_PENDING_HUMAN_PATH = (
+    "/state-machine-runs/{run_id}/pending-human-nodes"
+)
+STRUCTURED_DIRECT_RUN_HUMAN_RESPOND_PATH = (
+    "/state-machine-runs/{run_id}/nodes/answer/respond"
+)
+STRUCTURED_DIRECT_RUN_CANCEL_PATH = "/state-machine-runs/{run_id}/cancel"
+STRUCTURED_DIRECT_RUN_RERUN_PATH = "/state-machine-runs/{run_id}/reruns"
+STRUCTURED_DIRECT_GROUP_DELETE_PATH = (
+    "/groups/{group_id}?bot_id={driver_actor_id}"
+)
+STRUCTURED_DIRECT_PATHS = {
+    "structured.group.create": STRUCTURED_DIRECT_GROUPS_CREATE_PATH,
+    "structured.group.read": STRUCTURED_DIRECT_GROUP_PATH,
+    "structured.definition.read": STRUCTURED_DIRECT_GROUP_DEFINITION_PATH,
+    "structured.definition.patch": STRUCTURED_DIRECT_GROUP_DEFINITION_PATH,
+    "structured.definition.upgrade.missing": STRUCTURED_DIRECT_GROUP_DEFINITION_UPGRADE_PATH,
+    "structured.run.start": STRUCTURED_DIRECT_GROUP_RUN_START_PATH,
+    "structured.run.read": STRUCTURED_DIRECT_RUN_PATH,
+    "structured.run.graph.read": STRUCTURED_DIRECT_RUN_GRAPH_PATH,
+    "structured.run.node.read": STRUCTURED_DIRECT_RUN_NODE_PATH,
+    "structured.run.pending.human.nodes": STRUCTURED_DIRECT_RUN_PENDING_HUMAN_PATH,
+    "structured.run.human.response.denied": STRUCTURED_DIRECT_RUN_HUMAN_RESPOND_PATH,
+    "structured.run.cancel": STRUCTURED_DIRECT_RUN_CANCEL_PATH,
+    "structured.run.rerun.aborted.denied": STRUCTURED_DIRECT_RUN_RERUN_PATH,
+    "structured.group.delete": STRUCTURED_DIRECT_GROUP_DELETE_PATH,
+}
+
+def structured_case_path(profile: dict, operation: str) -> str | None:
+    """Return the exact station face for a reviewed structured Case operation."""
+    if not operation.startswith("structured."):
+        return None
+    if profile.get("entrypoint", {}).get("kind") == "bcs-direct":
+        return STRUCTURED_DIRECT_PATHS[operation]
+    return _EDGE_CASES[operation][1]
+
+def structured_case_response(profile: dict, operation: str) -> str | None:
+    """Return the reviewed wire response mode for a structured Case operation."""
+    if not operation.startswith("structured."):
+        return None
+    if profile.get("entrypoint", {}).get("kind") == "bcs-direct":
+        return "plain-json"
+    return "public-envelope"
+
 EDGE_BOT_SEARCH_NAME_READ_PREFIX = "/api/v1/collaboration/bots/"
 EDGE_BOT_SEARCH_NAME_READ_SUFFIX = "/candidates/search?q=CEO&purpose=discovery"
 EDGE_BOT_SEARCH_EMPTY_READ_SUFFIX = "/candidates/search?purpose=discovery"
@@ -334,8 +390,8 @@ def validate_edge_case_bindings(value: object, profile: dict) -> dict:
     """Validate optional opt-in cross-environment Case bindings."""
     from .profile import ConfigError, identifier, object_keys, text
     entrypoint = profile["entrypoint"]
-    if entrypoint["kind"] not in {"singlebox", "gateway"}:
-        raise ConfigError("edge_case_bindings: only public-v1 Singlebox or gateway profiles support cross-environment Case bindings")
+    if entrypoint["kind"] not in {"singlebox", "gateway", "bcs-direct"}:
+        raise ConfigError("edge_case_bindings: only public-v1 Singlebox, gateway, or station-direct profiles support cross-environment Case bindings")
     if not isinstance(value, dict) or not value or set(value) - set(_EDGE_CASES):
         raise ConfigError("edge_case_bindings: unsupported cross-environment Case declaration")
     result = {}
@@ -357,7 +413,7 @@ def validate_edge_case_bindings(value: object, profile: dict) -> dict:
             # The reviewed structured routes are Run-scoped templates; the
             # exact group/run IDs are substituted only at execution time and
             # every substitution is validated against the frozen template.
-            expected_path = path
+            expected_path = structured_case_path(profile, operation)
         elif operation == "network_actor_list.read":
             expected_path = actor_list_read_path(profile)
         elif operation == "network_actor_search.read":
@@ -439,7 +495,7 @@ def validate_edge_case_bindings(value: object, profile: dict) -> dict:
             "javascript-asset" if operation == "network_platform_asset.read"
             else "admission-json" if operation in {
                 "edge_admission_human_actor.read", "edge_admission_actor_kind.read"}
-            else "public-envelope"
+            else structured_case_response(profile, operation) or "public-envelope"
         )
         path_matches = (operation == "network_platform_asset.read"
                         or binding["path"] == expected_path)
@@ -475,11 +531,14 @@ def validate_edge_case_bindings(value: object, profile: dict) -> dict:
             if entrypoint["api_face"] != "public-v1" or entrypoint["manifest_face"] != "internal-v1":
                 raise ConfigError(f"{where}: structured templates require a public-v1 entrypoint with internal-v1 manifest face")
         elif operation.startswith("structured."):
-            # The reviewed structured collaboration group, definition and
-            # state-machine run routes are Run-scoped templates on the same
-            # origin's explicit internal-v1 face under a public-v1 entrypoint.
-            if entrypoint["api_face"] != "public-v1" or entrypoint["manifest_face"] != "internal-v1":
-                raise ConfigError(f"{where}: structured collaboration routes require a public-v1 entrypoint with internal-v1 manifest face")
+            # Gateway/Singlebox keep the explicit internal-v1 face. The station
+            # direct deployment serves the same reviewed slice as native legacy
+            # JSON under `/groups`, `/state-machine-runs`, and related routes.
+            if (entrypoint["api_face"] != "public-v1"
+                    or entrypoint["manifest_face"] not in {"internal-v1", "legacy"}
+                    or (entrypoint["manifest_face"] == "legacy"
+                        and entrypoint["kind"] != "bcs-direct")):
+                raise ConfigError(f"{where}: structured collaboration routes require a public-v1 entrypoint with internal-v1 or station-direct legacy face")
         elif operation == "network_platform_asset.read":
             auth_headers = profile["auth"].get("header_env") if isinstance(profile["auth"], dict) else None
             if (entrypoint["api_face"] != "public-v1"

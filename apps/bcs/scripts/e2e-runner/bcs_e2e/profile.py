@@ -297,7 +297,7 @@ def browser_headers(profile: dict) -> dict[str, str]:
     unauthenticated_gateway = (
         auth == {'principal_signing_key_env': 'BCS_E2E_UNAUTHENTICATED'}
     )
-    if (profile['entrypoint']['kind'] != 'gateway'
+    if (profile['entrypoint']['kind'] not in {'gateway', 'bcs-direct'}
             or not (cookie_gateway or bot_gateway or unauthenticated_gateway)):
         raise ConfigError(
             'browser_origin requires a Cookie-, Bot-token-authenticated, or explicit unauthenticated gateway binding')

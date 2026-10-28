@@ -338,7 +338,18 @@ class WriteClient:
                     raise WriteTransportError("structured response exceeds configured size limit")
                 if response.code == 204 or not raw:
                     return None, record
-                envelope = json.loads(raw, object_pairs_hook=unique_keys)
+                payload = json.loads(raw, object_pairs_hook=unique_keys)
+                if binding["response"] == "plain-json":
+                    if not isinstance(payload, dict):
+                        raise WriteTransportError("structured station response must be an object")
+                    if response.code >= 400:
+                        if not parse_error:
+                            raise WriteTransportError(
+                                "negative structured assertion requires explicit error admission")
+                        if not isinstance(payload.get("message"), str) or not payload["message"]:
+                            raise WriteTransportError("structured station error message is invalid")
+                    return payload, record
+                envelope = payload
                 expected_code = (self._STRUCTURED_SUCCESS_CODES.get(response.code)
                                  if response.code < 400
                                  else self._STRUCTURED_ERROR_CODES.get(response.code))

@@ -38,6 +38,7 @@ from bcs_e2e.route_bindings import (
     STRUCTURED_RUN_PENDING_HUMAN_PATH,
     STRUCTURED_RUN_PATH,
     STRUCTURED_RUN_RERUN_PATH,
+    STRUCTURED_DIRECT_PATHS,
     _EDGE_CASES,
 )
 from bcs_e2e.run_state import RunStateError
@@ -89,9 +90,41 @@ REVIEWED_OPERATION = {
 }
 
 
-def base_profile(*, gateway=False):
+DIRECT_BINDING_ROUTES = (
+    ('structured.group.create', STRUCTURED_DIRECT_PATHS['structured.group.create'],
+     'authenticated_bot'),
+    ('structured.group.read', STRUCTURED_DIRECT_PATHS['structured.group.read'],
+     'human_cookie'),
+    ('structured.definition.read',
+     STRUCTURED_DIRECT_PATHS['structured.definition.read'], 'human_cookie'),
+    ('structured.definition.patch',
+     STRUCTURED_DIRECT_PATHS['structured.definition.patch'], 'human_cookie'),
+    ('structured.definition.upgrade.missing',
+     STRUCTURED_DIRECT_PATHS['structured.definition.upgrade.missing'], 'human_cookie'),
+    ('structured.run.start', STRUCTURED_DIRECT_PATHS['structured.run.start'],
+     'human_cookie'),
+    ('structured.run.read', STRUCTURED_DIRECT_PATHS['structured.run.read'],
+     'human_cookie'),
+    ('structured.run.graph.read',
+     STRUCTURED_DIRECT_PATHS['structured.run.graph.read'], 'human_cookie'),
+    ('structured.run.node.read',
+     STRUCTURED_DIRECT_PATHS['structured.run.node.read'], 'human_cookie'),
+    ('structured.run.pending.human.nodes',
+     STRUCTURED_DIRECT_PATHS['structured.run.pending.human.nodes'], 'human_cookie'),
+    ('structured.run.human.response.denied',
+     STRUCTURED_DIRECT_PATHS['structured.run.human.response.denied'], 'human_cookie'),
+    ('structured.run.cancel', STRUCTURED_DIRECT_PATHS['structured.run.cancel'],
+     'human_cookie'),
+    ('structured.run.rerun.aborted.denied',
+     STRUCTURED_DIRECT_PATHS['structured.run.rerun.aborted.denied'], 'human_cookie'),
+    ('structured.group.delete', STRUCTURED_DIRECT_PATHS['structured.group.delete'],
+     'human_cookie'),
+)
+
+
+def base_profile(*, gateway=False, direct=False):
     value = json.loads((ROOT / 'profiles/local.singlebox.example.json').read_text())
-    value['environment'].update(id='preprod-structured-core' if gateway
+    value['environment'].update(id='preprod-structured-core' if gateway or direct
                                   else 'local-singlebox-structured-core')
     value['human']['user_id'] = 'owner-1'
     value['actors']['driver'].update(bot_id=DRIVER, owner_id='owner-1')
@@ -99,15 +132,27 @@ def base_profile(*, gateway=False):
     value['auth']['header_env'].update(Authorization='BCS_E2E_DRIVER_BOT_TOKEN',
                                        Cookie='BCS_E2E_HUMAN_COOKIE')
     bindings = {}
-    for operation, path, auth in BINDING_ROUTES:
+    operation_routes = DIRECT_BINDING_ROUTES if direct else BINDING_ROUTES
+    response_mode = 'plain-json' if direct else 'public-envelope'
+    for operation, path, auth in operation_routes:
         binding = {'method': _EDGE_CASES[operation][0], 'path': path,
                    'api_face': 'internal-v1', 'auth': auth,
-                   'response': 'public-envelope', 'traceparent': 'disabled'}
+                   'response': response_mode, 'traceparent': 'disabled'}
         if auth == 'authenticated_bot':
             binding['caller_actor_id'] = DRIVER
         bindings[operation] = binding
     value['edge_case_bindings'] = bindings
-    if gateway:
+    if direct:
+        value['entrypoint'].update(kind='bcs-direct',
+                                   origin='https://bcs-pre.example.com',
+                                   manifest_face='legacy')
+        value['environment'].update(tier='preprod', expected_bcs_env='pre',
+                                 lifecycle='remote-attach', deployment='managed',
+                                 provider='internal')
+        value['observer'].update(kind='alisddbquery', server='observ',
+                                 database='agentclawdb',
+                                 environment_binding_confirmed=True)
+    elif gateway:
         value['entrypoint'].update(kind='gateway', origin='https://teamclawgw.example.com')
         value['environment'].update(tier='preprod', expected_bcs_env='pre',
                                  lifecycle='remote-attach', deployment='managed',
@@ -136,6 +181,91 @@ def envelope(request, data, *, code=20000, message='OK', http=200):
 def respond(request, data=None, *, code=20000, message='OK', http=200):
     return envelope(request, {} if data is None else data,
                     code=code, message=message, http=http)
+
+
+def station(data, code=200):
+    return Reply(json.dumps(data).encode(), code=code)
+
+
+class StationDirectRecorder:
+    """Deterministic station-native plain-JSON responder."""
+
+    def __init__(self):
+        self.requests = []
+        self.published = {}
+        self.cancelled = False
+
+    def __call__(self, request, timeout=None):
+        self.requests.append(request)
+        parsed = urlsplit(request.full_url)
+        method, path, query = request.method, parsed.path, parsed.query
+        if method == 'POST' and path == STRUCTURED_DIRECT_PATHS['structured.group.create']:
+            create_body = json.loads(request.data)
+            if create_body['participant_bindings'] != {
+                    'driver': {'source': 'manual', 'bot_ids': [DRIVER]}}:
+                raise AssertionError(
+                    'station create must bind only the reviewed driver slot')
+            self.published['group'] = GROUP
+            return station({'id': GROUP})
+        if method == 'GET' and path == STRUCTURED_DIRECT_PATHS[
+                'structured.group.read'].format(group_id=GROUP):
+            return station({'id': GROUP, 'group_strategy': 'state_machine'})
+        if method == 'GET' and path == STRUCTURED_DIRECT_PATHS[
+                'structured.definition.read'].format(group_id=GROUP):
+            return station({'default_definition': {'id': DEFINITION, 'version': 1},
+                            'definition_yaml': 'instruction: Draft a concise release recommendation.',
+                            'yaml_source': 'original',
+                            'participant_bindings': {}})
+        if method == 'PATCH' and path == STRUCTURED_DIRECT_PATHS[
+                'structured.definition.patch'].format(group_id=GROUP):
+            return station({'default_definition': {'id': DEFINITION, 'version': 2},
+                            'definition_yaml': 'instruction: Draft and verify a concise release recommendation.',
+                            'yaml_source': 'original',
+                            'participant_bindings': {}})
+        if method == 'POST' and path == STRUCTURED_DIRECT_PATHS[
+                'structured.definition.upgrade.missing'].format(group_id=GROUP):
+            return station({'error': 'not_found',
+                            'message': f'collaboration definition not found: {DEFINITION}@102'},
+                           code=404)
+        if method == 'POST' and path == STRUCTURED_DIRECT_PATHS[
+                'structured.run.start'].format(group_id=GROUP):
+            run = {'run_id': RUN, 'group_id': GROUP, 'status': 'running'}
+            self.published['run'] = run
+            return station({'run': run, 'nodes': [{'node_id': 'answer'}]}, code=202)
+        if method == 'GET' and path == STRUCTURED_DIRECT_PATHS[
+                'structured.run.read'].format(run_id=RUN):
+            return station({'run': {'run_id': RUN,
+                                    'status': 'aborted' if self.cancelled else 'running'}})
+        if method == 'GET' and path == STRUCTURED_DIRECT_PATHS[
+                'structured.run.graph.read'].format(run_id=RUN):
+            return station({'run': {'run_id': RUN},
+                            'nodes': [{'node_id': 'answer'}]})
+        if method == 'GET' and path == STRUCTURED_DIRECT_PATHS[
+                'structured.run.node.read'].format(run_id=RUN):
+            return station({'node': {'node_id': 'answer', 'run_id': RUN}})
+        if method == 'GET' and path == STRUCTURED_DIRECT_PATHS[
+                'structured.run.pending.human.nodes'].format(run_id=RUN):
+            return station([])
+        if method == 'POST' and path == STRUCTURED_DIRECT_PATHS[
+                'structured.run.human.response.denied'].format(run_id=RUN):
+            return station({'error': 'invalid_request',
+                            'message': 'node answer is not a human_input node'}, code=400)
+        if method == 'POST' and path == STRUCTURED_DIRECT_PATHS[
+                'structured.run.cancel'].format(run_id=RUN):
+            self.cancelled = True
+            return station({'run': {'run_id': RUN, 'status': 'aborted'}})
+        if method == 'POST' and path == STRUCTURED_DIRECT_PATHS[
+                'structured.run.rerun.aborted.denied'].format(run_id=RUN):
+            return station({'error': 'conflict',
+                            'message': 'source state-machine Run must be failed before rerun'},
+                           code=409)
+        route = STRUCTURED_DIRECT_PATHS['structured.group.delete'].format(
+            group_id=GROUP, driver_actor_id=DRIVER)
+        if method == 'DELETE' and parsed.path == route.split('?', 1)[0]:
+            if query != 'bot_id=' + DRIVER:
+                raise AssertionError('unexpected station delete query ' + query)
+            return station({'deleted': True, 'id': GROUP})
+        raise AssertionError('unexpected station request ' + method + ' ' + path + query)
 
 
 class OpenRecorder:
@@ -422,7 +552,37 @@ class RemoteStructuredCoreExecutionTests(unittest.TestCase):
         for request in requests[1:]:
             self.assertNotIn('authorization', {name.lower() for name in request.headers})
 
-    def test_gateway_profile_reuses_the_same_route_contract(self):
+    def test_station_direct_profile_uses_native_routes_and_plain_json(self):
+        profile = base_profile(direct=True)
+        self.assertEqual(profile['entrypoint']['kind'], 'bcs-direct')
+        self.assertEqual(profile['entrypoint']['manifest_face'], 'legacy')
+        for operation, path, auth in DIRECT_BINDING_ROUTES:
+            binding = profile['edge_case_bindings'][operation]
+            self.assertEqual(binding['path'], path)
+            self.assertEqual(binding['response'], 'plain-json')
+            self.assertEqual(binding['auth'], auth)
+        recorder = StationDirectRecorder()
+        environment = {'BCS_E2E_DRIVER_BOT_TOKEN': TOKEN,
+                       'BCS_E2E_HUMAN_COOKIE': COOKIE}
+        with patch.dict('os.environ', environment),              patch('bcs_e2e.transport.build_opener') as factory,              patch('bcs_e2e.write_transport.build_opener') as write_factory:
+            factory.return_value.open.side_effect = recorder
+            write_factory.return_value.open.side_effect = recorder
+            execution = execute_structured_core_case(
+                RemoteStructuredCoreAdapter(profile))
+        self.assertEqual(execution.status, 'PASS')
+        self.assertEqual(execution.completed_count, 15)
+        self.assertFalse('X-Request-ID' in recorder.requests[1].headers)
+        self.assertEqual(urlsplit(recorder.requests[0].full_url).path,
+                         STRUCTURED_DIRECT_PATHS['structured.group.create'])
+        body = json.loads(recorder.requests[0].data)
+        self.assertEqual(body['participant_bindings']['driver'],
+                         {'source': 'manual', 'bot_ids': [DRIVER]})
+        self.assertEqual(urlsplit(recorder.requests[-1].full_url).path,
+                         STRUCTURED_DIRECT_PATHS['structured.group.delete'].split('?', 1)[0].format(
+                             group_id=GROUP))
+        self.assertNotIn(COOKIE, json.dumps(execution.snapshot(), sort_keys=True))
+        self.assertNotIn(TOKEN, json.dumps(execution.snapshot(), sort_keys=True))
+
         recorder = OpenRecorder()
         environment = {'BCS_E2E_DRIVER_BOT_TOKEN': TOKEN,
                        'BCS_E2E_HUMAN_COOKIE': COOKIE}

@@ -226,6 +226,7 @@ class ReadClient:
             if not isinstance(group_id, str) or not group_id:
                 raise ObservationError("structured group route requires a bound group ID")
             path = binding["path"].replace("{group_id}", quote(group_id, safe=""))
+            envelope = binding["response"] == "public-envelope"
         elif operation in {"structured.run.read", "structured.run.graph.read",
                            "structured.run.node.read",
                            "structured.run.pending.human.nodes"}:
@@ -233,6 +234,7 @@ class ReadClient:
             if not isinstance(run_id, str) or not run_id:
                 raise ObservationError("structured run route requires a bound run ID")
             path = binding["path"].replace("{run_id}", quote(run_id, safe=""))
+            envelope = binding["response"] == "public-envelope"
         elif operation == "edge.bot_search_name.read":
             binding = require_edge_case_binding(self.profile, "edge_bot_search_name.read")
             path = binding["path"]
@@ -353,7 +355,9 @@ class ReadClient:
                     body = json.loads(raw, object_pairs_hook=unique_keys)
                 else:
                     body = json.loads(raw)
-                if not isinstance(body, dict):
+                pending_human_nodes = operation == "structured.run.pending.human.nodes"
+                if not (isinstance(body, dict)
+                        or (pending_human_nodes and isinstance(body, list))):
                     raise ObservationError("expected JSON object")
                 if envelope:
                     if (type(body.get("code")) is not int or body["code"] != 20000
@@ -365,16 +369,17 @@ class ReadClient:
                                               sensitive_values=auth_headers.values()):
                         raise ObservationError('public response request ID is invalid')
                     body = body.get("data")
-                    if operation == "structured.run.pending.human.nodes":
-                        # The reviewed bot-only workflow must expose an empty
-                        # pending-Human array; a bare array is projected so the
-                        # pipeline keeps one response shape, and any entry is drift.
-                        if not isinstance(body, list) or body:
-                            raise ObservationError(
-                                "pending-human-nodes response must be an empty array")
-                        body = {"items": []}
-                    if not isinstance(body, dict):
-                        raise ObservationError("expected object in response data")
+                if pending_human_nodes:
+                    # The reviewed bot-only workflow must expose an empty
+                    # pending-Human array on both public-envelope and station-direct
+                    # faces; a bare array is projected so the pipeline keeps one
+                    # response shape, and any entry is drift.
+                    if not isinstance(body, list) or body:
+                        raise ObservationError(
+                            "pending-human-nodes response must be an empty array")
+                    body = {"items": []}
+                if not isinstance(body, dict):
+                    raise ObservationError("expected object in response data")
                 if operation == "identity.actor.read":
                     require_human_actor(self.profile, body)
                     body = {key: body[key] for key in ('bot_id', 'kind', 'created_by', 'env')}

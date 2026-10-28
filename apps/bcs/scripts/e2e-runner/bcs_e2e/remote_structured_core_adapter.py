@@ -49,15 +49,20 @@ class RemoteStructuredCoreAdapter:
             raise RunStateError('structured-core requires an admitted profile')
         entrypoint = profile.get('entrypoint', {})
         environment = profile.get('environment', {})
+        kind = entrypoint.get('kind')
         valid_entrypoint = (
-            entrypoint.get('kind') == 'singlebox' and environment.get('tier') == 'local'
-            or entrypoint.get('kind') == 'gateway' and environment.get('tier') == 'preprod'
+            kind == 'singlebox' and environment.get('tier') == 'local'
+            or kind == 'gateway' and environment.get('tier') == 'preprod'
+            or kind == 'bcs-direct' and environment.get('tier') == 'preprod'
+        )
+        valid_manifest_face = (
+            'internal-v1' if kind in {'singlebox', 'gateway'} else 'legacy'
         )
         if (not valid_entrypoint or entrypoint.get('api_face') != 'public-v1'
-                or entrypoint.get('manifest_face') != 'internal-v1'):
+                or entrypoint.get('manifest_face') != valid_manifest_face):
             raise RunStateError(
                 'structured-core requires an admitted public-v1/native-face '
-                'Singlebox or gateway profile')
+                'Singlebox, gateway, or station-direct profile')
         self.plan = structured_core_case_plan()
         self.bindings: dict[str, dict] = {}
         try:
@@ -179,6 +184,14 @@ class RemoteStructuredCoreAdapter:
             'group_strategy': 'state_machine',
             'collaboration_definition_yaml': definition_yaml,
         }
+        if self.profile['entrypoint']['kind'] == 'bcs-direct':
+            # The reviewed definition declares only the ``driver`` slot. The
+            # member Bot remains an explicit Group participant, but must not
+            # be sent as an undeclared state-machine binding slot.
+            body['participant_bindings'] = {
+                'driver': {'source': 'manual',
+                           'bot_ids': [self.driver_bot_id]},
+            }
         data, record = self.write_client.structured_call(
             'structured.group.create', body=body, expected=(200,))
         if (record.get('credentials_sent') is not True
@@ -484,4 +497,8 @@ class RemoteStructuredCoreAdapter:
                                   driver_actor_id=self.driver_bot_id)
         if not isinstance(data, dict):
             raise RunStateError('structured-core group delete acknowledgement is invalid')
+        acknowledged_group_id = data.get('id', data.get('group_id'))
+        if acknowledged_group_id != self._group_id:
+            raise RunStateError(
+                'structured-core group delete acknowledgement names another Group')
         return AdapterCall(data={'group_id': self._group_id}, evidence=evidence)
