@@ -639,11 +639,9 @@ class RemoteSessionCliCreateGetAdapter:
         exact = [row for row in items if isinstance(row, dict)
                  and (row.get("session_id") or row.get("id")) == self.session_id] \
             if isinstance(items, list) else []
-        if (not isinstance(data, dict) or type(data.get("offset")) is not int
-                or data.get("offset") != 0 or data.get("returned") != len(items if isinstance(items, list) else [])
-                or type(data.get("returned")) is not int
-                or data.get("returned") <= 0 or len(items) > 50
-                or type(data.get("total")) is not int or data["total"] < data["returned"]
+        if (not isinstance(data, dict) or set(data) != {"group_id", "items"}
+                or data.get("group_id") != self.group_id
+                or not isinstance(items, list) or not items or len(items) > 50
                 or len(exact) != 1 or exact[0].get("group_id") != self.group_id):
             raise RunStateError("Session CLI list did not contain the exact created Session")
         return result

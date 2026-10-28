@@ -177,6 +177,7 @@ class WorkspaceCliRunner:
             environment["tc_sdb_nenv"] = "production"
         elif credential_kind == "human_cookie":
             environment["BCS_COOKIE"] = credential
+            environment["tc_sdb_nenv"] = "production"
         return root, context, environment
 
     @staticmethod

@@ -84,6 +84,7 @@ class WorkspaceCliRunnerTests(unittest.TestCase):
             context = Path(environment["BOT_DATA_DIR"]) / ".bcs" / "session.json"
             context_state["context"] = json.loads(context.read_text())
             context_state["cookie"] = environment.get("BCS_COOKIE")
+            context_state["environment"] = environment
             if operation == "group.create":
                 raw = create.encode() if create is not None else (
                     f"Group created:\n  ID: {GROUP}\n  Driver: {DRIVER}\n"
@@ -123,6 +124,7 @@ class WorkspaceCliRunnerTests(unittest.TestCase):
         self.assertEqual(context["cookie"], COOKIE)
         self.assertEqual(context["context"], {"token": "", "bot_uuid": DRIVER,
                                                "api_base_url": "https://gateway.example.com"})
+        self.assertEqual(context["environment"]["tc_sdb_nenv"], "production")
         self.assertNotIn(COOKIE, json.dumps(result, sort_keys=True))
 
     def test_bad_create_output_blocks(self):

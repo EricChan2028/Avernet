@@ -125,8 +125,7 @@ def session_outputs(include_target=True):
                         "session_title": "cli-e2e-sess"})
     items.append({"id": "unrelated", "session_id": "unrelated:1",
                     "group_id": "unrelated"})
-    listing = json.dumps({"items": items, "offset": 0, "returned": len(items),
-                            "total": 20}).encode()
+    listing = json.dumps({"group_id": GROUP, "items": items}).encode()
     read = json.dumps({
         "id": SESSION, "session_id": SESSION, "group_id": GROUP,
         "session_title": "cli-e2e-sess",
@@ -173,7 +172,7 @@ class SessionCliCreateGetTests(unittest.TestCase):
             environment = kwargs["environment"]
             context = Path(environment["BOT_DATA_DIR"]) / ".bcs" / "session.json"
             contexts.append((json.loads(context.read_text()),
-                              environment.get("BCS_COOKIE")))
+                              environment.get("BCS_COOKIE"), environment))
             raw = group_output() if len(commands) == 1 else outputs[len(commands) - 2]
             return subprocess.CompletedProcess(cmd, 0, raw, b"")
 
@@ -217,7 +216,7 @@ class SessionCliCreateGetTests(unittest.TestCase):
         self.assertEqual(commands[1][-4:], ["create", "--group", GROUP, "--title", "cli-e2e-sess"][-4:])
         self.assertEqual(commands[2][-3:], ["list", "--group", GROUP])
         self.assertEqual(commands[3][-3:], ["session", "get", SESSION])
-        for context, cookie in contexts:
+        for context, cookie, _environment in contexts:
             self.assertEqual(context["token"], TOKEN)
             self.assertEqual(context["bot_uuid"], DRIVER)
             self.assertIsNone(cookie)
@@ -229,9 +228,10 @@ class SessionCliCreateGetTests(unittest.TestCase):
     def test_gateway_cookie_is_not_evidence(self):
         execution, _, _, contexts = self.run_case(gateway=True)
         self.assertEqual(execution.status, "PASS")
-        for context, cookie in contexts:
+        for context, cookie, environment in contexts:
             self.assertEqual(context["token"], "")
             self.assertEqual(cookie, COOKIE)
+            self.assertEqual(environment["tc_sdb_nenv"], "production")
         self.assertNotIn(COOKIE, json.dumps(execution.snapshot(), sort_keys=True))
 
     def test_missing_exact_session_blocks(self):
