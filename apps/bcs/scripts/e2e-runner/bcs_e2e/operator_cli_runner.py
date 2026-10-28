@@ -621,7 +621,7 @@ class OperatorCliRunner:
         envelope variant; both shapes must contain the exact pair member.
         """
         raw, _, _step, _credential_kind = self._invoke(
-            role, arguments=("friend", "list", "--json"), json_mode=True)
+            role, arguments=("friend", "list"), json_mode=True)
         try:
             payload = json.loads(raw.decode("utf-8"),
                                  object_pairs_hook=unique_keys)

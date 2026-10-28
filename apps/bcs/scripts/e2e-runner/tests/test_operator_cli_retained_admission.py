@@ -93,7 +93,7 @@ class RetainedAdmissionRunnerTests(OperatorCliHarness):
         tails = script.tails()
         self.assertNotIn(["friend", "accept", "--request-id", REQUEST_ID], tails)
         self.assertIn(["friend", "request", "--bot-uuid", BOT_IDS["member"]], tails)
-        self.assertIn(["friend", "list", "--json"], tails)
+        self.assertNotIn(["friend", "list", "--json"], tails)
         self.assertIn(["chat", "--bot-uuid", BOT_IDS["member"], "--message",
                        "operator e2e chat", "--detach"], tails)
 
@@ -112,7 +112,7 @@ class RetainedAdmissionRunnerTests(OperatorCliHarness):
         tails = script.tails()
         self.assertNotIn(["friend", "accept", "--request-id", REQUEST_ID], tails)
         self.assertIn(["friend", "list"], tails)
-        self.assertIn(["friend", "list", "--json"], tails)
+        self.assertNotIn(["friend", "list", "--json"], tails)
 
     def test_already_friends_answer_without_live_membership_blocks(self):
         script = CliScript()

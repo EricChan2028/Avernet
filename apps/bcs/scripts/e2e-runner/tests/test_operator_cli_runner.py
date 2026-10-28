@@ -171,7 +171,7 @@ def group_read_text():
             + "\n  Participants: " + BOT_IDS["member"] + "," + BOT_IDS["eng"] + "\n")
 
 
-def operation_tag(arguments):
+def operation_tag(arguments, json_global=False):
     head = tuple(arguments[:2])
     if arguments == ["health"]:
         return "health"
@@ -206,7 +206,7 @@ def operation_tag(arguments):
     if arguments == ["list-groups"]:
         return "list_groups"
     if head == ("friend", "list"):
-        return "friend_list_json" if "--json" in arguments else "friend_list"
+        return "friend_list_json" if json_global else "friend_list"
     raise AssertionError("unexpected CLI arguments: " + " ".join(arguments))
 
 
@@ -274,8 +274,9 @@ class CliScript:
         self.visibility_queue = []
 
     def __call__(self, command, **kwargs):
-        arguments = command[command.index("--log-level") + 2:]
-        tag = operation_tag(arguments)
+        log_level_index = command.index("--log-level")
+        arguments = command[log_level_index + 2:]
+        tag = operation_tag(arguments, "--json" in command[:log_level_index])
         self.commands.append(list(command))
         self.environments.append(dict(kwargs["environment"]))
         self.sessions.append(json.loads(
