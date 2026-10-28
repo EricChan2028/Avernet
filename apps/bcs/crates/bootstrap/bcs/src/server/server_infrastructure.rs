@@ -400,6 +400,19 @@ impl BcsServer {
             bcs_provider_http::BotTransportMux::new(ws_bot_delivery, provider_transport.clone()),
         );
         let bot_delivery = maybe_wrap_bot_delivery(&config, raw_bot_delivery);
+        // P1.4 caller dispatch gate: caller-enabled Bots are never
+        // content-dispatched on ordinary transports — they answer only on
+        // the protected caller wire. The decorator consults the
+        // authoritative configuration through the same control plane
+        // (cached path); unconfigured/disabled targets pass through
+        // unchanged, aborts and availability checks are never blocked.
+        // Not installable over the memory composition (no caller
+        // configuration storage there).
+        let bot_delivery: Arc<dyn BotDeliveryPort> =
+            Arc::new(bcs_bot::application::CallerConfigurationDeliveryGate::new(
+                bot_delivery,
+                provider_control_plane.clone(),
+            ));
         let raw_frontend_delivery: Arc<dyn FrontendDeliveryPort> =
             Arc::new(WorkbenchFrontendDelivery::new(
                 frontend_connections.clone(),
@@ -670,7 +683,8 @@ impl BcsServer {
                 observe_injector_factory: None,
             }
         });
-        let message_flow: Arc<dyn MessageFlowService> = crate::message_delivery_wiring::wire_with_caller_assembly(
+        let wired_message_flow =
+            crate::message_delivery_wiring::wire_with_caller_assembly(
             message_flow_builder,
             &config,
             leader_election.clone(),
@@ -686,6 +700,18 @@ impl BcsServer {
             Some(lease_store.clone()),
         )
         .await?;
+        // §15.83 S4 (review-VI P1): the production composition's single
+        // orchestration mount. The same pipeline instance that serves the
+        // delegate arm also implements the orchestration dispatch port and
+        // the instance registrar; with_caller_orchestration mounts the
+        // control-plane resolver alongside. No protected pipeline (no
+        // [caller_identity]) degrades to the Refusing resolver so a
+        // caller-enabled assignee never silently dispatches on the
+        // ordinary wire. The BcsMessageFlow type annotation keeps the
+        // concrete Arc so the pipeline can be read off it before the
+        // wider dyn MessageFlowService binding below.
+        let caller_orchestration_pipeline = wired_message_flow.caller_dispatch_pipeline.clone();
+        let message_flow: Arc<dyn MessageFlowService> = wired_message_flow;
         let speaking_leases = Some(lease_store);
         let mut delivery_startup_guard = crate::message_delivery_wiring::StartupGuard(Some(message_flow.clone()));
         frontend_connections
@@ -732,6 +758,18 @@ impl BcsServer {
             .with_history_persistence(config.state_machine_history.persistence_enabled)
             .with_history_cutoff_timestamp(config.message_history.state_machine_cutoff_timestamp)
                 .with_loop_instrumentation(state_machine_loop_instrumentation(metrics.as_ref()))
+                .with_caller_orchestration(
+                    Some(provider_control_plane.clone()),
+                    caller_orchestration_pipeline
+                        .clone()
+                        .map(|pipeline| pipeline as Arc<
+                            dyn bcs_service_api::port::OrchestrationCallerDispatchPort,
+                        >),
+                    caller_orchestration_pipeline
+                        .map(|pipeline| pipeline as Arc<
+                            dyn bcs_service_api::port::OrchestrationInstanceRegistrar,
+                        >),
+                )
                 .with_session_channel_outbound(session_channel_outbound)
                 .with_result_publisher(Arc::new(MessageFlowStateMachineResultPublisher::new(
                     message_flow.clone(),
