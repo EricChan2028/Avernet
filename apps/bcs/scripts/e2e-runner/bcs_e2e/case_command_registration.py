@@ -34,6 +34,7 @@ CASE_COMMANDS = frozenset({
     "dual-friend-run",
     "dual-edge-friend-mutation-run",
     "dual-session-service-run",
+    "dual-operator-cli-run",
 })
 
 
@@ -248,3 +249,13 @@ def register_case_commands(commands) -> None:
     session_service_case.add_argument("--run-id", required=True)
     session_service_case.add_argument("--confirm-run-id", required=True)
     session_service_case.add_argument("--allow-write", action="store_true")
+    operator_case = commands.add_parser(
+        "dual-operator-cli-run",
+        help="Run the reviewed dual Operator product-CLI story through Singlebox or preprod")
+    operator_case.add_argument("--profile", type=Path, required=True)
+    operator_case.add_argument("--cli-binary", type=Path, required=True)
+    operator_case.add_argument("--cli-binary-sha256", required=True)
+    operator_case.add_argument("--state-dir", type=Path, required=True)
+    operator_case.add_argument("--run-id", required=True)
+    operator_case.add_argument("--confirm-run-id", required=True)
+    operator_case.add_argument("--allow-write", action="store_true")

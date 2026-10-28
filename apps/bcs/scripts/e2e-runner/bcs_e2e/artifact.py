@@ -103,7 +103,11 @@ def disk_digest() -> str:
     # by exactly that one file. The dual-environment operator product-CLI command
     # lifecycle adds its focused remote Runner and Adapter modules, so the
     # allowance grows by exactly those two files in advance.
-    if len(paths) > 314:
+    # This session's dual Operator, Direct-chat, Custom-collaboration and
+    # Delivery-policy product-CLI command entries add four focused case-run
+    # modules, so the allowance grows by exactly those four files plus one
+    # slot of headroom for a future adapter split.
+    if len(paths) > 319:
         raise ValueError('executor artifact exceeds its source-file budget')
     digest = hashlib.sha256()
     for path in paths:
