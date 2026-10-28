@@ -505,6 +505,7 @@ def execute_session_service_roundtrip_case(adapter: object) -> CaseExecution:
             "service_session_id": service_session_id,
             "service_identity_preserved": True,
             "bounded_wait_contract_exact": True,
+            "settings_form": adapter.settings_form,
             "chat_session_deleted": True,
             "service_session_deleted": True,
             "group_deleted": True,

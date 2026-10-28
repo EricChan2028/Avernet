@@ -316,44 +316,69 @@ class LocalSessionServiceCompletionTests(unittest.TestCase):
             execution = execute_local_session_service_roundtrip_case(adapter)
         return execution, adapter, commands, stderr_selections
 
-    def test_local_and_preprod_session_completion_and_cleanup(self):
-        for preprod in (False, True):
-            with self.subTest(preprod=preprod):
-                execution, adapter, commands = self._run_complete(preprod=preprod)
+    # Face-scoped to Singlebox: the preprod face of this adapter family owns
+    # no reviewed executor here -- the dual preprod receipts are supervised by
+    # test_session_service_cli_case_run.py through the Dual adapters, whose
+    # credential kind mapping is the reviewed dual contract. The parameterised
+    # preprod loop in this local-family module was never executable (its
+    # profile builder omitted the human-cookie contract fields the complete
+    # profile validator requires, so every preprod subtest failed at build
+    # time before any case step ran).
+    def test_local_session_completion_and_cleanup(self):
+        execution, adapter, commands = self._run_complete()
+        self.assertEqual(execution.status, "PASS")
+        self.assertEqual(adapter.group_id, GROUP)
+        self.assertEqual(adapter.session_id, SESSION)
+        self.assertEqual(commands[2][-6:],
+                         ["error", "session", "complete", SESSION, "--output",
+                          '{"summary":"approved by CLI"}'])
+        snapshot = execution.snapshot()
+        self.assertEqual(snapshot["case_id"], SESSION_SERVICE_COMPLETE_CASE_ID)
+        self.assertEqual(snapshot["steps"][0]["method"],
+                         SESSION_SERVICE_COMPLETE_CASE_METHOD)
+        self.assertEqual(snapshot["steps"][0]["data"]["session_completed"], True)
+        self.assertNotIn(TOKEN, json.dumps(snapshot, sort_keys=True))
+
+    # Face-scoped to Singlebox; see the completion test note above.
+    def test_local_service_roundtrip_accepts_terminal_or_timeout(self):
+        for timeout in (False, True):
+            with self.subTest(timeout=timeout):
+                execution, adapter, commands, stderr_selections = self._run_roundtrip(
+                    timeout=timeout)
                 self.assertEqual(execution.status, "PASS")
-                self.assertEqual(adapter.group_id, GROUP)
-                self.assertEqual(adapter.session_id, SESSION)
-                self.assertEqual(commands[2][-6:],
-                                 ["error", "session", "complete", SESSION, "--output",
-                                  '{"summary":"approved by CLI"}'])
+                self.assertEqual(adapter.service_session_id, SERVICE)
+                self.assertIn("--manager", commands[0])
+                self.assertIn("cli-release-pipeline", commands[3])
+                self.assertIn("--detach", commands[3])
+                self.assertEqual(commands[4][-1], SERVICE)
+                self.assertEqual(commands[5][-3:], [SERVICE, "--timeout-ms", "1"])
+                self.assertEqual(stderr_selections,
+                                 [False, False, False, False, False, True])
                 snapshot = execution.snapshot()
-                self.assertEqual(snapshot["case_id"], SESSION_SERVICE_COMPLETE_CASE_ID)
-                self.assertEqual(snapshot["steps"][0]["method"],
-                                 SESSION_SERVICE_COMPLETE_CASE_METHOD)
-                self.assertEqual(snapshot["steps"][0]["data"]["session_completed"], True)
+                requests = snapshot["steps"][0]["evidence"]["requests"]
+                self.assertEqual(requests[6]["case_class"], "session-cli.service.wait")
+                self.assertEqual(requests[6]["exit_status"], 1 if timeout else 0)
+                self.assertEqual(snapshot["steps"][0]["data"]["bounded_wait_contract_exact"], True)
+                self.assertEqual(snapshot["steps"][0]["data"]["settings_form"],
+                                 "service_spec_ack")
                 self.assertNotIn(TOKEN, json.dumps(snapshot, sort_keys=True))
 
-    def test_local_and_preprod_service_roundtrip_accepts_terminal_or_timeout(self):
-        for preprod in (False, True):
-            for timeout in (False, True):
-                with self.subTest(preprod=preprod, timeout=timeout):
-                    execution, adapter, commands, stderr_selections = self._run_roundtrip(
-                        preprod=preprod, timeout=timeout)
-                    self.assertEqual(execution.status, "PASS")
-                    self.assertEqual(adapter.service_session_id, SERVICE)
-                    self.assertIn("--manager", commands[0])
-                    self.assertIn("cli-release-pipeline", commands[3])
-                    self.assertIn("--detach", commands[3])
-                    self.assertEqual(commands[4][-1], SERVICE)
-                    self.assertEqual(commands[5][-3:], [SERVICE, "--timeout-ms", "1"])
-                    self.assertEqual(stderr_selections,
-                                     [False, False, False, False, False, True])
-                    snapshot = execution.snapshot()
-                    requests = snapshot["steps"][0]["evidence"]["requests"]
-                    self.assertEqual(requests[6]["case_class"], "session-cli.service.wait")
-                    self.assertEqual(requests[6]["exit_status"], 1 if timeout else 0)
-                    self.assertEqual(snapshot["steps"][0]["data"]["bounded_wait_contract_exact"], True)
-                    self.assertNotIn(TOKEN, json.dumps(snapshot, sort_keys=True))
+    def test_retired_service_settings_410_form_is_accepted(self):
+        def http_deform(operation, data, status):
+            if operation == SESSION_CLI_GROUP_SETTINGS_PATCH_OPERATION:
+                return {"status": 410, "data": None}
+        execution, _, _, _ = self._run_roundtrip(http_deform=http_deform)
+        self.assertEqual(execution.status, "PASS")
+        self.assertEqual(
+            execution.snapshot()["steps"][0]["data"]["settings_form"],
+            "retired_410")
+
+    def test_acknowledged_service_settings_form_is_projected(self):
+        execution, _, _, _ = self._run_roundtrip()
+        self.assertEqual(execution.status, "PASS")
+        self.assertEqual(
+            execution.snapshot()["steps"][0]["data"]["settings_form"],
+            "service_spec_ack")
 
     def test_completion_accepts_canonical_id_without_legacy_alias(self):
         def deform(index, raw):

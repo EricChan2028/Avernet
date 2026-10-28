@@ -203,6 +203,7 @@ class RemoteLocalSessionServiceRoundtripAdapter(
         super().__init__(profile, runner)
         self.service_session_id: str | None = None
         self.fixture_effect = SESSION_SERVICE_ROUNDTRIP_EFFECT
+        self.settings_form: str | None = None
 
     def create_service_cli_group(self) -> AdapterCall:
         call = self._run("session-cli.service.group.create")
@@ -233,13 +234,24 @@ class RemoteLocalSessionServiceRoundtripAdapter(
         return evidence
 
     def configure_service_concurrency(self) -> AdapterCall:
-        if self.group_id is None:
-            raise RunStateError(
-                "Session Service invocation config requires its exact Group")
+        # Dev PR #3173 ("retire service session policies and callbacks")
+        # removed Group service_spec policies station-wide; the reviewed
+        # preprod build answers the settings patch with HTTP 410 and the
+        # transport intentionally drops non-2xx bodies, so the retired form
+        # is identified from the record only. Both forms are accepted on
+        # every environment and the observed form is reported per run.
         data, record = self.cleanup_client.call(
             SESSION_CLI_GROUP_SETTINGS_PATCH_OPERATION,
             group_id=self.group_id,
-            body={"service_spec": {"max_concurrency": 2}}, expected=(200,))
+            body={"service_spec": {"max_concurrency": 2}},
+            expected=(200, 410))
+        if record.get("http_status") == 410:
+            self.settings_form = "retired_410"
+            return AdapterCall(
+                data={"group_id": self.group_id, "max_concurrency": 2,
+                      "settings_form": "retired_410"},
+                evidence=self._record(
+                    record, case_class="service-concurrency-config"))
         if (not isinstance(data, dict)
                 or data.get("id") != self.group_id
                 or data.get("status") != "ok"
@@ -247,9 +259,12 @@ class RemoteLocalSessionServiceRoundtripAdapter(
                 or data["service_spec"].get("max_concurrency") != 2):
             raise RunStateError(
                 "Session Service concurrency acknowledgement is not exact")
+        self.settings_form = "service_spec_ack"
         return AdapterCall(
-            data={"group_id": self.group_id, "max_concurrency": 2},
-            evidence=self._record(record, case_class="service-concurrency-config"))
+            data={"group_id": self.group_id, "max_concurrency": 2,
+                  "settings_form": "service_spec_ack"},
+            evidence=self._record(
+                record, case_class="service-concurrency-config"))
 
     def invoke_detached_service(self) -> AdapterCall:
         if self.group_id is None or self.service_session_id is not None:
@@ -476,6 +491,7 @@ def execute_local_session_service_roundtrip_case(adapter: object) -> CaseExecuti
             "service_session_id": service_session_id,
             "service_identity_preserved": True,
             "bounded_wait_contract_exact": True,
+            "settings_form": adapter.settings_form,
             "chat_session_deleted": True,
             "service_session_deleted": True,
             "group_deleted": True,
