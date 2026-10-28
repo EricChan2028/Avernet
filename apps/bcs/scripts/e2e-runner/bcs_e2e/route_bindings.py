@@ -454,7 +454,7 @@ _EDGE_CASES = {
     "friend_connection_mutation.register_token.read": ("GET", STATION_REGISTER_TOKEN_PATH, "human_cookie"),
     "friend_connection_mutation.register_bot.create": ("POST", STATION_REGISTER_BOT_PATH, "register_token"),
     "friend_connection_mutation.legacy_revoke": ("DELETE", STATION_LEGACY_REVOKE_PATH, "human_cookie_owned_bot"),
-    "friend_connection_mutation.station_admission.read": ("GET", STATION_ADMISSION_PATH, "unauthenticated"),
+    "friend_connection_mutation.station_admission.read": ("GET", STATION_ADMISSION_PATH, "human_cookie"),
     "friend_connection_mutation.station_discover_collaborate.read": ("GET", STATION_DISCOVER_COLLABORATE_PATH, "human_cookie"),
     "friend_connection_mutation.station_discover_role_no_org.read": ("GET", STATION_DISCOVER_ROLE_PATH, "human_cookie"),
     "friend_connection_mutation.station_discover_org_no_requester.read": ("GET", STATION_DISCOVER_ORGANIZATION_PATH, "human_cookie"),

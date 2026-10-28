@@ -199,7 +199,7 @@ class FriendMutationBindingTests(unittest.TestCase):
         self.assertEqual(station["edge_case_bindings"][
             "friend_connection_mutation.legacy_revoke"]["auth"], "human_cookie_owned_bot")
         self.assertEqual(station["edge_case_bindings"][
-            "friend_connection_mutation.station_admission.read"]["auth"], "unauthenticated")
+            "friend_connection_mutation.station_admission.read"]["auth"], "human_cookie")
         self.assertEqual(station["entrypoint"]["kind"], "bcs-direct")
         self.assertEqual(station["entrypoint"]["api_face"], "public-v1")
         self.assertEqual(station["entrypoint"]["manifest_face"], "legacy")
@@ -439,12 +439,43 @@ class FriendMutationReadTransportTests(unittest.TestCase):
         expected_url = ORIGIN + "/bots/member-bot/admission?actor=owner-1"
         self.assertEqual([request.full_url for request in requests], [expected_url, expected_url])
         for request in requests:
-            self.assertNotIn("Cookie", request.headers)
+            # ACE gates bcs-pre admission behind the human browser context; the
+            # owned-Bot Authorization is stripped for this human_cookie slice.
+            self.assertEqual(request.headers.get("Cookie"), COOKIE)
             self.assertNotIn("Authorization", request.headers)
-        self.assertEqual(target_observation.data, admission)
-        self.assertEqual(bot_observation.data, admission)
-        self.assertEqual(target_observation.evidence["credentials_sent"], False)
+        projected = dict(admission, reason="ok", source=None)
+        self.assertEqual(target_observation.data, projected)
+        self.assertEqual(bot_observation.data, projected)
+        self.assertEqual(target_observation.evidence["credentials_sent"], True)
         self.assertEqual(target_observation.evidence["authorization_sent"], False)
+        self.assertEqual(target_observation.evidence["identity_kind"], "human_cookie")
+
+    def test_station_admission_projection_covers_the_reviewed_matrix(self):
+        cases = (
+            ({"allowed": False, "grants": [], "reason_code": "no_edge", "public_default": False},
+             "no_edge", None),
+            ({"allowed": False, "grants": [], "reason_code": "bot_not_found", "public_default": False},
+             "bot_not_found", None),
+            ({"allowed": True, "grants": [{"kind": "permission_profile", "ref_id": 4, "revision": 1,
+                                           "digest": "d", "source": "public_default"}],
+              "reason_code": "public_default", "public_default": True},
+             "public_default", "public_default"),
+            ({"allowed": True, "grants": [{"kind": "permission_profile", "ref_id": 4, "revision": 1,
+                                           "digest": "d", "source": "edge_grant"}],
+              "reason_code": "ok", "public_default": False},
+             "ok", "edge_grant"),
+        )
+        for body, reason, source in cases:
+            with patch.dict(os.environ, {"BCS_E2E_HUMAN_COOKIE": COOKIE,
+                                         "BCS_E2E_OWNED_BOT_TOKEN": BOT_TOKEN}), \
+                    patch("bcs_e2e.transport.build_opener") as factory, \
+                    self.subTest(reason=reason):
+                factory.return_value.open.return_value = Reply(body)
+                observation = ReadClient(station_profile()).read(
+                    "station.admission.read", target_actor_id=MEMBER, actor_id=HUMAN)
+            self.assertEqual(observation.data["allowed"], body["allowed"])
+            self.assertEqual(observation.data["reason"], reason)
+            self.assertEqual(observation.data["source"], source)
 
     def test_station_plain_json_negative_discovers_return_the_bounded_object(self):
         body = {"code": "invalid_operation", "error": "role_requires_organization_code",

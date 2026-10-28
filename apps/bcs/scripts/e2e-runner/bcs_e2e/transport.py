@@ -465,6 +465,20 @@ class ReadClient:
                     body = {"items": []}
                 if not isinstance(body, dict):
                     raise ObservationError("expected object in response data")
+                if operation == "station.admission.read" and binding["response"] == "admission-json":
+                    # Live bcs-pre shape carries reason_code and per-grant source;
+                    # project the reviewed canonical reason/source keys without
+                    # dropping any wire field.
+                    grants = body.get("grants")
+                    grant_source = (
+                        grants[0].get("source")
+                        if isinstance(grants, list) and grants
+                        and isinstance(grants[0], dict)
+                        and isinstance(grants[0].get("source"), str)
+                        else None
+                    )
+                    body = {**body, "reason": body.get("reason_code"), "source": grant_source}
+                    record["admission_projection"] = "grants-normalized"
                 if operation == "identity.actor.read":
                     require_human_actor(self.profile, body)
                     body = {key: body[key] for key in ('bot_id', 'kind', 'created_by', 'env')}

@@ -411,9 +411,16 @@ class RemoteEdgeFriendMutationAdapter:
         if no_edge_admission.get("allowed") is not False or no_edge_admission.get("reason") != "no_edge":
             raise RunStateError("protected no-edge station admission differs from the contract")
         human_actor = "human_" + self.human_user_id
+        # Live bcs-pre matrix: public_default only holds for a public target; a
+        # protected member stays no_edge even for the owning human. Flip the
+        # member public for this read-only branch, then restore protected.
+        _, public_patch_record = self.writer.patch_bot_friend_profile(member, visibility="public")
+        requests.append(public_patch_record)
         public_default = self._admission(bot_id=member, actor_id=human_actor, requests=requests)
         if public_default.get("allowed") is not True or public_default.get("reason") != "public_default":
             raise RunStateError("public default station admission differs from the contract")
+        _, protected_patch_record = self.writer.patch_bot_friend_profile(member, visibility="protected")
+        requests.append(protected_patch_record)
         first_data, first_record = self._create(self.driver_actor_id, member, expected=(201,))
         first_ids = self._valid_pending_create(first_data)
         duplicate_data, duplicate_record = self._create(self.driver_actor_id, member, expected=(201,))
