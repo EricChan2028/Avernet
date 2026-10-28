@@ -4508,8 +4508,10 @@ async def test_retry_from_success_calls_restart_with_flag():
     result = await svc.retry(publish_id=1, operator="op")
     svc.execute_restart.assert_awaited_once()
     assert result.action == "restart"
-    rollback_ext = publish_service.update_publish_status_with_ext.call_args.kwargs["ext"]
-    assert rollback_ext["retry"] is True
+    publish_service.restore_failed_online_restart.assert_called_once_with(
+        publish_id=1, expected_ext=record.ext,
+    )
+    publish_service.update_publish_status_with_ext.assert_not_called()
 
 
 @pytest.mark.asyncio

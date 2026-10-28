@@ -405,6 +405,19 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         logger.info(f"[update_publish_status_with_ext] id={publish_id}, target_status={target_status}, source_status={source_status}")
         return record
 
+    def restore_failed_online_restart(
+        self, *, publish_id: int, expected_ext: Optional[Dict[str, Any]],
+    ) -> BotPublishRecord:
+        """Restore a failed online restart for native retry, not publication."""
+        record = self._repo.restore_failed_online_restart(
+            publish_id=publish_id, expected_ext=expected_ext,
+        )
+        if record is None:
+            raise PublishNotFoundError(
+                f"Failed restart changed before retry: publish_id={publish_id}"
+            )
+        return record
+
     def commit_built_artifact(
         self,
         *,

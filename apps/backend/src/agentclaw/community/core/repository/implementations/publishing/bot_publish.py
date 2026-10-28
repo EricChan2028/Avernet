@@ -44,7 +44,7 @@ from agentclaw.community.kernel.knowledge import KnowledgeError, KnowledgePublic
 from sqlalchemy import func
 
 from agentclaw.community.core.models.skill import Skill
-from agentclaw.community.core.repository.implementations.publishing import knowledge_build, knowledge_selection
+from agentclaw.community.core.repository.implementations.publishing import knowledge_build, knowledge_selection, restart_retry
 from agentclaw.community.core.service_bot.repository.config_artifact_offload import (
     ConfigArtifactOffloader,
 )
@@ -720,6 +720,29 @@ class BotPublishRepository(
         if affected == 0:
             return None
         return self.get_by_id(publish_id)
+
+    def restore_failed_online_restart(self, *, publish_id, expected_ext):
+        """Restricted retry admission; never applies online knowledge effects."""
+        env = get_current_env()
+        expected_json, _ = self._offload.prepare(expected_ext, publish_id, env)
+        ext = {**(expected_ext or {}), "retry": True}
+        if not self._knowledge_policy.enabled:
+            return self.compare_and_set_status_with_ext(
+                publish_id=publish_id, source_status=PublishStatus.FAILED,
+                target_status=PublishStatus.SUCCESS, expected_ext=expected_ext, ext=ext,
+            )
+        staged = self._stage_artifact(
+            publish_id, ext, PublishStatus.FAILED, expected_json=expected_json,
+        )
+        if not staged:
+            return None
+        with self._publication_session() as db:
+            encoded, pending = self._offload.prepare(ext, publish_id, env)
+            self._validate_knowledge_ext(encoded)
+            restored = restart_retry.restore(db, publish_id, expected_json, encoded)
+            if restored:
+                self._upload_native(pending, staged)
+        return self.get_by_id(publish_id) if restored else None
 
     def compare_and_set_built_with_ext(
         self,

@@ -450,3 +450,13 @@ Knowledge online completion uses the existing common-config unique key for its
 current result/watermark and bounded previous ID set. Version snapshots/results
 still live in publication.ext. No historical-result scan, unbounded binding
 clear, new table/index or independent config Session participates in completion.
+
+## Failed online restart retry persistence
+
+`BotPublishRepositoryProtocol.restore_failed_online_restart` is a dedicated
+internal native retry admission. It accepts only publish ID and expected ext,
+checks current FAILED/source_status=success, environment, exact ext and the
+latest failed restart/recreate ledger under the caller-owned local transaction.
+It restores SUCCESS and adds retry without applying knowledge completion.
+Generic SUCCESS CAS still requires observed workflow evidence; no HTTP bypass
+parameter, schema, Plugin, queue or external I/O under added locks is introduced.

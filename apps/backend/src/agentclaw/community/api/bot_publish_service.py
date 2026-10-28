@@ -32,3 +32,9 @@ class BotPublishServiceProtocol(Protocol):
     def get_draft_restore_status(self, *args: Any, **kwargs: Any) -> Any: ...
 
     async def restore_draft(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def restore_failed_online_restart(
+        self, *, publish_id: int, expected_ext: dict[str, Any] | None,
+    ) -> Any:
+        """Internal native retry admission; not a generic SUCCESS write."""
+        ...

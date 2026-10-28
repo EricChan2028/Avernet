@@ -415,6 +415,17 @@ class BotPublishRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
+    def restore_failed_online_restart(
+        self, *, publish_id: int, expected_ext: Optional[Dict[str, Any]],
+    ) -> Optional[BotPublishRecord]:
+        """Restore FAILED/source_status=success for retry, with exact ext CAS.
+
+        Enabled integration additionally requires the latest failed online
+        restart ledger (including recreate). No observed ID or knowledge effect.
+        """
+        ...
+
+    @abstractmethod
     def compare_and_set_built_with_ext(
         self,
         *,

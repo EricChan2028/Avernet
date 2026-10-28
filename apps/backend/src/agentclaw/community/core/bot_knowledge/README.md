@@ -261,6 +261,16 @@ The legacy `/status` endpoint cannot supply that argument and returns an explici
 Other transitions and disabled integrations retain native behavior. A failed
 build retry retains its frozen generation; a new DRAFT admission captures anew.
 
+A failed restart of an already successful online version is different from a new
+observed completion. Native retry restores `FAILED` (`ext.source_status=success`)
+to `SUCCESS` before re-issuing restart. It uses the internal
+`restore_failed_online_restart(publish_id, expected_ext)` entry, never a fabricated
+observed workflow. Enabled recovery locks and checks status, exact ext, environment
+and the latest failed online restart ledger; a recreated target must match the
+observer's abandoned-RESTART / failed-FIRST_RELEASE workflow. Only native status
+and `retry` change: no knowledge table, result, summary or binding write. Ordinary
+status APIs cannot use this exception. Stale proof/DB failures precede re-issue.
+
 The publication switch does not disable explicitly requested online API reads.
 Their summary table prerequisite and rollout cadence must be checked separately.
 Historical publication-history probes in the 2026-10-27 verification are

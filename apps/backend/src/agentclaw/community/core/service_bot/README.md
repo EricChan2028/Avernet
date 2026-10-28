@@ -316,3 +316,10 @@ extended. Only the short local success CAS/binding write unit is atomic; actual
 DB failure leaves ONLINE_PUB so its existing progress poll can retry completion
 without issuing a new deployment. Missing historical knowledge does not reject
 native rollback/restore. See `core/bot_knowledge/README.md` for UNKNOWN semantics.
+
+Native retry admission after an online restart failure uses the restricted
+`restore_failed_online_restart` Service/Repository entry. This restores the prior
+stable state for re-issue, not a new observed publication success. It validates
+FAILED/source status, exact ext and the latest failed restart operation (including
+recreate) when knowledge integration is enabled. No HTTP bypass flag or knowledge
+effect is added; other retry branches and disabled compatibility remain native.
