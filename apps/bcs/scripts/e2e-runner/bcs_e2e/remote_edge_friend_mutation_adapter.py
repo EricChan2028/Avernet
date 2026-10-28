@@ -421,6 +421,24 @@ class RemoteEdgeFriendMutationAdapter:
             raise RunStateError("public default station admission differs from the contract")
         _, protected_patch_record = self.writer.patch_bot_friend_profile(member, visibility="protected")
         requests.append(protected_patch_record)
+
+        # The reviewed private-target drift must be observed while the member
+        # pair is still unconnected: a private target WITH an existing edge
+        # returns the connected approved idempotency instead of the denial
+        # branch (probe-locked on the live Gateway).
+        _, drift_private_patch_record = self.writer.patch_bot_friend_profile(member, visibility="private")
+        requests.append(drift_private_patch_record)
+        private_create, private_record = self._create(self.driver_actor_id, member, expected=(500,), admit_error=True)
+        private_error = self._error_projection(private_create, private_record)
+        private_defect = {"defect": "PD-PRIVATE-CREATE-500", "http_status": private_error["http_status"], "code": private_error["code"], "error_code": private_error["data"]}
+        if private_error["http_status"] != 500 or private_error["code"] != 50000 or private_error["data"] != {"error_code": "internal_error"}:
+            raise RunStateError("private friend create drift is outside the observed defect contract")
+        requests.append(private_record)
+        self._pending_pair_absent(
+            member=member, actor_id=self.driver_actor_id, requests=requests)
+        _, public_record = self.writer.patch_bot_friend_profile(member, visibility="public")
+        requests.append(public_record)
+
         first_data, first_record = self._create(self.driver_actor_id, member, expected=(201,))
         first_ids = self._valid_pending_create(first_data)
         duplicate_data, duplicate_record = self._create(self.driver_actor_id, member, expected=(201,))
@@ -448,19 +466,9 @@ class RemoteEdgeFriendMutationAdapter:
         if decision_data.get("status") != "approved":
             raise RunStateError("the error-branch fixture acceptance failed")
         connected_data, connected_record = self._create(self.driver_actor_id, member, expected=(201,))
+        requests.append(connected_record)
         if connected_data.get("status") != "approved" or connected_data.get("request_ids") != []:
             raise RunStateError("connected friend create was not idempotently approved")
-
-        self.writer.patch_bot_friend_profile(member, visibility="private")
-        private_create, private_record = self._create(self.driver_actor_id, member, expected=(500,), admit_error=True)
-        private_error = self._error_projection(private_create, private_record)
-        private_defect = {"defect": "PD-PRIVATE-CREATE-500", "http_status": private_error["http_status"], "code": private_error["code"], "error_code": private_error["data"]}
-        if private_error["http_status"] != 500 or private_error["code"] != 50000 or private_error["data"] != {"error_code": "internal_error"}:
-            raise RunStateError("private friend create drift is outside the observed defect contract")
-        _, public_record = self.writer.patch_bot_friend_profile(member, visibility="public")
-        self._pending_pair_absent(
-            member=member, actor_id=self.driver_actor_id, requests=requests)
-
 
         edge_admission = self._admission(bot_id=member, actor_id=human_actor, requests=requests)
         if edge_admission.get("allowed") is not True or edge_admission.get("reason") != "ok" or edge_admission.get("source") != "edge_grant":
@@ -479,7 +487,7 @@ class RemoteEdgeFriendMutationAdapter:
                 "human_public_default": "public_default", "human_edge_grant": "ok",
             },
         }
-        evidence = requests + [self_record, unknown_record, unknown_decision_record, first_record, duplicate_record, sent_record, decision_record, connected_record, private_record, public_record]
+        evidence = requests + [self_record, unknown_record, unknown_decision_record, first_record, duplicate_record, sent_record, decision_record]
         return self._finish(
             operation="friend.mutation.error_admission_branches",
             fixture_effect="REGISTERED_BOT_RETAINED", data=data, requests=evidence
