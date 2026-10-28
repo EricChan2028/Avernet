@@ -301,12 +301,12 @@ class RemoteEdgeFriendMutationAdapter:
             request_id=reverse["request_id"], expected=(200,)
         )
         requests.append(decision_record)
-        edge_ids = decision_data.get("edge_ids") if isinstance(decision_data, dict) else None
-        if not isinstance(edge_ids, list) or not edge_ids or any(type(value) is not int for value in edge_ids):
-            raise RunStateError("mutual friend acceptance did not create exact edge IDs")
+        edge_id = decision_data.get("edge_id") if isinstance(decision_data, dict) else None
+        if type(edge_id) is not int:
+            raise RunStateError("mutual friend acceptance did not create an exact edge ID")
         if decision_data.get("status") != "approved" or decision_data.get("decided_by") != self._actor(self.driver_actor_id):
             raise RunStateError("mutual friend acceptance did not acknowledge the receiver")
-        return reverse["request_id"], edge_ids[0]
+        return reverse["request_id"], edge_id
 
     def run_mutual_auto_approve(self) -> AdapterCall:
         member, requests = self._provision_member("mutual-auto-approve", visibility="protected", strategy="APPROVAL")
