@@ -33,6 +33,18 @@ export function CommunityPage() {
     !!community.query.trim() || community.scope === 'mine' || community.topicType !== 'all';
   const scrollRootRef = useRef<HTMLElement>(null);
 
+  if (editOpen && community.selectedTopic) {
+    return (
+      <EditTopicModal
+        open
+        topic={community.selectedTopic}
+        saving={community.editSaving}
+        onOpenChange={setEditOpen}
+        onSave={community.updateTopic}
+      />
+    );
+  }
+
   if (community.selectedTopic) {
     const topicTarget = { targetType: 'TOPIC' as const, id: community.selectedTopic.id };
     return (
@@ -67,18 +79,6 @@ export function CommunityPage() {
         replyPageCount={community.replyPageCount}
         replyPageSize={COMMUNITY_REPLY_PAGE_SIZE}
         onGoToReplyPage={(page) => void community.goToReplyPage?.(page)}
-      />
-    );
-  }
-
-  if (editOpen && community.selectedTopic) {
-    return (
-      <EditTopicModal
-        open
-        topic={community.selectedTopic}
-        saving={community.editSaving}
-        onOpenChange={setEditOpen}
-        onSave={community.updateTopic}
       />
     );
   }
