@@ -104,6 +104,7 @@ def case():
         'steps': [{
             'requirement_id': REQUIREMENT_IDS[index], 'method': ADAPTER_METHODS[index],
             'status': 'PASS', 'data': data[index], 'error_type': None,
+            'error_gap': None,
             'evidence': {
                 'case_operation': f'operation-{index}',
                 'requests': [request(index, 'PRODUCT_HTTP' if index == 4 else 'PRODUCT_CLI')],

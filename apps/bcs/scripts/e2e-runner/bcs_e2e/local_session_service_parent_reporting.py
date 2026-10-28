@@ -237,7 +237,7 @@ def _case_valid(root: Path, binding: dict, case: dict) -> bool:
     for index, step in enumerate(steps):
         if (not isinstance(step, dict)
                 or set(step) != {'requirement_id', 'method', 'status', 'data',
-                                 'evidence', 'error_type'}
+                                 'evidence', 'error_type', 'error_gap'}
                 or step.get('requirement_id')
                 != SESSIONS_SERVICES_REQUIREMENTS[index]
                 or step.get('method') != METHODS[index]
