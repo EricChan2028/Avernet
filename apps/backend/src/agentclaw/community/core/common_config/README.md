@@ -70,7 +70,10 @@ Backend/BaaS contract, deployment prerequisites, limitations and review order.
 
 `knowledge_online_selection` is maintained exclusively by knowledge publication
 completion in the same Session as native completion and binding changes. Generic
-config create/set/upsert/batch/update/delete methods reject that key. Ordinary
+config create/set/upsert/batch/update/delete methods reject that key and its
+case/accent/width/trailing-space aliases. Persistence also checks the actually
+matched key; the atomic put conflict branch preserves protected rows under the
+server's collation. Ordinary
 configuration keys keep their existing behavior. Operator reads remain available.
 The summary is a current result, not a second publication workflow or a cache
 which may be freely dropped. See core/bot_knowledge/README.md for scope and

@@ -9,20 +9,21 @@ None. 只使用已有列和唯一索引；不执行 DDL。
 
 ```python
 # core/bot_knowledge/repository/online_selection.py (new)
-def config_scope(source_pk, bot_id, env): ...
-def read_summary(session, bot): ...
-def known_predicate(raw_value, scope): ...
+def config_scope(source_pk, bot_id, entity_id, env): ...
+def read_selection(session, bot) -> OnlineSelection: ...
+class OnlineSelection:
+    def unchanged(self, session): ...
 def lock_summary(session, publish): ...
-def replace_summary(session, row, source, publish, outcome, ids): ...
+def write_summary(session, row, *, publish, source, outcome, ids, materialized): ...
 ```
 
 ## Key Files & Functions
 ```diff
 # core/bot_knowledge/repository/store.py
 - result = type_coerce(BotPublishModel.ext, JSON)[...]
-+ summary = read_summary(session, bot)
-+ ids = summary.current_ids(bot)  # bounded + scope checked
-+ query.filter(Binding.kb_id.in_(ids), known_predicate(...))
++ selection = read_selection(session, bot)
++ ids = selection.ids  # bounded + scope checked
++ query.filter(Binding.kb_id.in_(ids), selection.unchanged(session))
 ```
 ```diff
 # core/repository/implementations/publishing/knowledge_selection.py
@@ -30,8 +31,9 @@ def replace_summary(session, row, source, publish, outcome, ids): ...
 + summary = lock_summary(session, publish)
 + reject_newer_observed_workflow(summary, workflow_id)
 - clear_query.filter(Binding.kb_id.not_in(ids)).update(...)
-+ clear_query.filter(Binding.kb_id.in_(previous_ids - ids)).update(...)
-+ replace_summary(...)  # same Session after CAS
++ rows = _selected_bindings(session, source, previous_ids - ids)
++ _write_online_rows(session, source, rows, False, previous_space)
++ write_summary(...)  # same Session after CAS
 ```
 
 ## Dependencies
@@ -39,7 +41,9 @@ None. Existing BotCommonConfig ORM model only. Reserved key constant in kernel.
 
 ## Risks & Mitigations
 - 旧摘要不存在时不能有界推断历史：读取 UNKNOWN；可信重新发布显式初始化，无扫描回退。
-- 通用配置管理覆盖风险：保留专用键，所有通用写入/删除路径拒绝。
+- 通用配置管理覆盖风险：保留专用键，大小写/重音/宽度/尾空格别名同样拒绝；持久层检查实际匹配行。
+- 优化器可能把 100-ID IN+space 选成范围扫描：先按完整唯一键读行再校验 space/flags；批量写用带租户等范围条件的 PK 等值语句。
+- 最长多字节 IDs：正常结果只序列化一份集合，UNKNOWN 才保留显式历史 materialized IDs。
 - 双语句读取竞争：绑定查询同语句校验摘要原始值，变更时 fail closed。
 - 部署前确认已有配置表；本地测试不能证明生产存在或性能。
 

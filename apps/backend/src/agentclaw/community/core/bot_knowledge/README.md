@@ -260,3 +260,19 @@ The publication opt-in does not disable explicitly requested online API reads.
 Their summary table prerequisite and rollout cadence must be checked separately.
 Historical publication-history probes in the 2026-10-27 verification are
 superseded by the 2026-10-28 current-summary evidence, not rewritten as old passes.
+
+#### Bounded key access and encoding
+
+A bounded `IN` list alone is not a scan bound: at 100 IDs SQLite could choose
+the broad space/enabled index prefix. Completion now resolves the full unique
+KB key without space/enabled predicates, checks these fields on current locked
+rows, and executes at most 200 PK-equality updates in bounded driver batches.
+Every write retains explicit Bot/environment/tenant/space/prior-flag predicates
+in the same Session; no raw connection or tenant-free mutation is used. Already
+correct bindings cause no UPDATE. The boundary test inspects all emitted plans,
+including executemany, with 100 removed and 100 replacement IDs.
+
+Applied summaries encode the selected IDs once; decoding reconstructs the equal
+materialized set. UNKNOWN can retain an explicit previous materialized set, but
+its current set is empty. This preserves 100 valid 128-character multibyte IDs
+inside existing TEXT capacity without adding columns or reducing the ID limit.

@@ -1,5 +1,9 @@
 # Technical plan
 
+> The 2026-10-28 `knowledge-current-summary` supplement supersedes the historical
+> JSON-reader/fence and unbounded flag-clear implementation described below.
+> The native short-transaction, schema and lifecycle contracts remain in force.
+
 - Restore native publishing models and knowledge selection reads to the original
   PR schema: enabled/online_enabled in knowledge bindings, version snapshot in
   publication.ext. Delete journal DDL/columns, projector, lifecycle, retry CLI,
