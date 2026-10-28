@@ -38,6 +38,7 @@ from agentclaw.community.core.task.forum.models import (
     TOPIC_STATUS_CLOSED,
     TOPIC_STATUS_LOCKED,
     TOPIC_STATUS_OPEN,
+    TOPIC_TYPE_DISCUSSION,
     TOPIC_TYPE_HELP,
     TOPIC_TYPE_POLL,
     TOPIC_TYPE_SHARE,
@@ -286,7 +287,7 @@ class ForumService(ForumServiceProtocol):
         if topic is None:
             raise NotFound("topic not found")
         if (
-            topic.topic_type in (TOPIC_TYPE_POLL, TOPIC_TYPE_HELP)
+            topic.topic_type not in (TOPIC_TYPE_DISCUSSION, TOPIC_TYPE_SHARE)
             and normalized_reply_to_post_id is not None
         ):
             raise ValidationError(

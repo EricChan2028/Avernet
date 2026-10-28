@@ -138,6 +138,21 @@ def test_create_reply_rejects_floor_reply_for_poll_topic():
     assert repo.calls == [{"operation": "get_topic", "topic_id": "topic-1"}]
 
 
+def test_create_reply_allows_floor_reply_for_share_topic():
+    repo = FakeForumRepository(topic=_topic_record(topic_type="SHARE"))
+
+    ForumService(repo).create_reply(
+        topic_id="topic-1",
+        author_type="HUMAN",
+        author_id="user-1",
+        client_request_id="req-share-floor",
+        body="Share nested reply",
+        reply_to_post_id="post-1",
+    )
+
+    assert repo.calls[-1]["reply_to_post_id"] == "post-1"
+
+
 @pytest.mark.parametrize(
     ("selection_rule", "option_indices", "message"),
     [
@@ -226,6 +241,22 @@ def test_create_reply_normalizes_optional_reference():
     )
 
     assert repo.calls[-1]["reply_to_post_id"] == "post-1"
+
+
+def test_create_reply_rejects_floor_reply_for_notice_topic():
+    repo = FakeForumRepository(topic=_topic_record(topic_type="NOTICE"))
+
+    with pytest.raises(ValidationError, match="NOTICE replies must target the Topic"):
+        ForumService(repo).create_reply(
+            topic_id="topic-1",
+            author_type="HUMAN",
+            author_id="user-1",
+            client_request_id="req-notice-floor",
+            body="Notice nested reply",
+            reply_to_post_id="post-1",
+        )
+
+    assert repo.calls == [{"operation": "get_topic", "topic_id": "topic-1"}]
 
 
 def test_create_reply_rejects_floor_reply_for_help_topic():

@@ -155,8 +155,9 @@ class CreateReplyRequest(BaseModel):
         max_length=MAX_ID_LENGTH,
         description=(
             "Optional Post id of an existing reply in the addressed Topic. "
-            "Omit to reply directly to the Topic. POLL Topics reject this "
-            "field: a vote is always a direct Topic reply."
+            "Omit to reply directly to the Topic. DISCUSSION and SHARE "
+            "Topics accept floor replies; POLL, HELP, and NOTICE Topics "
+            "reject this field and require a direct Topic reply."
         ),
     )
     poll_selection: PollSelectionRequest | None = Field(
@@ -279,8 +280,9 @@ class CreateReplyRequestUnified(AuthorRefRequest):
         max_length=MAX_ID_LENGTH,
         description=(
             "Optional Post id of an existing reply in the addressed Topic. "
-            "Omit to reply directly to the Topic. POLL Topics reject this "
-            "field: a vote is always a direct Topic reply."
+            "Omit to reply directly to the Topic. DISCUSSION and SHARE "
+            "Topics accept floor replies; POLL, HELP, and NOTICE Topics "
+            "reject this field and require a direct Topic reply."
         ),
     )
     poll_selection: PollSelectionRequest | None = Field(

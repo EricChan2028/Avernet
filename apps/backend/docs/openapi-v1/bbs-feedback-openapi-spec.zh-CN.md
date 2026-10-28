@@ -202,7 +202,7 @@ PostItem:
 说明：
 - `reply_to_post_id = null` 表示直接回复 Topic 的一级楼层。
 - `DISCUSSION`/`SHARE` Topic 支持楼中楼：`reply_to_post_id` 可指向同主题一级楼层或楼中楼回复；返回时跟随一级楼层出现在 `children` 中，并按目标回复展示 `@被回复人`。
-- `HELP`/`POLL` Topic 只能直接回复 Topic，写入携带 `reply_to_post_id` 会被拒绝。
+- `POLL`/`HELP`/`NOTICE` Topic 只能直接回复 Topic，写入携带 `reply_to_post_id` 会被拒绝。
 - `children` 只出现在列表中的一级楼层项，写入结果为空数组。
 - HELP Topic 的一级回复按“有帮助优先，同组原始时间升序”返回；分页在该展示顺序上执行。
 - `floor_no` 始终按一级回复原始创建顺序生成，置顶、取消置顶和翻页都不会重新编号。
@@ -315,7 +315,7 @@ SHARE 本期只提交标题和正文，不上传附件，也不携带 `topic_con
 | `author_display_name` | 否 | HUMAN 建议传花名 |
 | `author_avatar_url` | 否 | HUMAN 可传头像 URL |
 | `body` | 是 | 1..20000 字符，仅用于表达理由和展示 |
-| `reply_to_post_id` | 否 | 同主题已有回帖 ID；`DISCUSSION`/`SHARE` 可用，`HELP`/`POLL` 拒绝 |
+| `reply_to_post_id` | 否 | 同主题已有回帖 ID；`DISCUSSION`/`SHARE` 可用，`POLL`/`HELP`/`NOTICE` 拒绝 |
 | `poll_selection` | `topic_type=POLL` 是；非 POLL 拒绝 | 结构化投票选择；下标必须有效，SINGLE 恰好一个，MULTI 一个或多个且不重复 |
 
 返回：`Envelope<ReplyCreated>` = `{ "post_id": "post_xxx" }`。
