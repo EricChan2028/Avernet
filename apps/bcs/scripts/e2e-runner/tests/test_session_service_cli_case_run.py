@@ -20,7 +20,7 @@ from bcs_e2e.cli import main
 from bcs_e2e.case_command_registration import CASE_COMMANDS
 from bcs_e2e.case_executor import CaseExecution, StepOutcome
 from bcs_e2e.migration_inventory import migration_plan
-from bcs_e2e.profile import ConfigError
+from bcs_e2e.profile import ConfigError, fingerprint
 from bcs_e2e.run_state import read
 from bcs_e2e.session_cli_profile import (
     SESSION_CLI_GROUP_DELETE_OPERATION,
@@ -28,6 +28,10 @@ from bcs_e2e.session_cli_profile import (
     SESSION_CLI_GROUP_VERIFY_DELETED_OPERATION,
     SESSION_CLI_SESSION_BOT_CREATOR_DELETE_OPERATION,
     SESSION_CLI_SESSION_CREATOR_DELETE_OPERATION,
+)
+from bcs_e2e.session_cli_profile import (
+    validate_session_cli_complete_invoke_profile,
+    validate_session_cli_lifecycle_profile,
 )
 from bcs_e2e import session_service_cli_case_run as session_service_case_runner
 from bcs_e2e.session_service_cli_case_run import (
@@ -307,6 +311,87 @@ class SessionServiceCaseRunTests(unittest.TestCase):
 
     def test_dual_session_service_run_is_a_registered_case_command(self):
         self.assertIn("dual-session-service-run", CASE_COMMANDS)
+
+
+VALIDATORS = {
+    "service-lifecycle": validate_session_cli_lifecycle_profile,
+    "service-member-chat": validate_session_cli_lifecycle_profile,
+    "service-complete": validate_session_cli_complete_invoke_profile,
+    "service-roundtrip": validate_session_cli_complete_invoke_profile,
+}
+
+
+class SessionServiceBrowserOriginTests(unittest.TestCase):
+    """Preprod dual Session Service profiles pin the workstation browser context."""
+
+    BROWSER_ORIGIN = "https://teamclaw-pre.alipay.com"
+
+    def with_browser_origin(self, value):
+        def mutate(profile):
+            profile["browser_origin"] = value
+        return mutate
+
+    def validated(self, case_key, *, preprod, value):
+        builders = {
+            "service-lifecycle": lifecycle_profile,
+            "service-member-chat": lifecycle_profile,
+            "service-complete": complete_invoke_profile,
+            "service-roundtrip": complete_invoke_profile,
+        }
+        profile = builders[case_key](preprod=preprod,
+                                     mutate=self.with_browser_origin(value))
+        return VALIDATORS[case_key](profile)
+
+    def test_preprod_dual_profiles_admit_and_preserve_browser_origin(self):
+        for case_key in PROFILE_BUILDERS:
+            with self.subTest(case_key=case_key):
+                profile = self.validated(case_key, preprod=True,
+                                         value=self.BROWSER_ORIGIN)
+                self.assertEqual(profile["browser_origin"], self.BROWSER_ORIGIN)
+
+    def test_local_dual_profiles_reject_browser_origin(self):
+        for case_key in PROFILE_BUILDERS:
+            with self.subTest(case_key=case_key), self.assertRaises(ConfigError):
+                self.validated(case_key, preprod=False, value=self.BROWSER_ORIGIN)
+
+    def test_browser_origin_format_is_enforced_on_preprod(self):
+        for value in ("http://teamclaw-pre.alipay.com",
+                      " https://teamclaw-pre.alipay.com",
+                      "https://teamclaw-pre.alipay.com/workbench",
+                      "https://name:secret@teamclaw-pre.alipay.com",
+                      "https://teamclaw-pre.alipay.com\n"):
+            with self.subTest(value=value), self.assertRaises(ConfigError):
+                self.validated("service-lifecycle", preprod=True, value=value)
+
+    def test_browser_origin_changes_the_profile_digest(self):
+        plain = validate_session_cli_lifecycle_profile(lifecycle_profile(preprod=True))
+        pinned = self.validated("service-lifecycle", preprod=True,
+                                value=self.BROWSER_ORIGIN)
+        self.assertNotEqual(fingerprint(plain), fingerprint(pinned))
+
+    def test_cleanup_write_client_carries_browser_context(self):
+        profile = lifecycle_profile(
+            preprod=True, mutate=self.with_browser_origin(self.BROWSER_ORIGIN))
+        with patch.dict(os.environ, {"BCS_E2E_HUMAN_COOKIE": "synthetic-cookie"}):
+            adapter = DualSessionServiceLifecycleAdapter(profile, FakeRunner)
+        self.assertEqual(adapter.cleanup_client.headers["Origin"], self.BROWSER_ORIGIN)
+        self.assertEqual(adapter.cleanup_client.headers["Referer"],
+                         self.BROWSER_ORIGIN + "/")
+        self.assertEqual(adapter.cleanup_client.headers["Cookie"], "synthetic-cookie")
+
+    def test_trio_cleanup_write_client_carries_browser_context(self):
+        profile = complete_invoke_profile(
+            preprod=True, mutate=self.with_browser_origin(self.BROWSER_ORIGIN))
+        environment = {
+            "BCS_E2E_HUMAN_COOKIE": "synthetic-cookie",
+            "BCS_E2E_DRIVER_BOT_TOKEN": "synthetic-driver",
+            "BCS_E2E_MEMBER_BOT_TOKEN": "synthetic-member",
+        }
+        with patch.dict(os.environ, environment):
+            adapter = DualSessionServiceCompleteAdapter(profile, FakeRunner)
+        self.assertEqual(adapter.cleanup_client.headers["Origin"], self.BROWSER_ORIGIN)
+        self.assertEqual(adapter.cleanup_client.headers["Referer"],
+                         self.BROWSER_ORIGIN + "/")
 
 
 if __name__ == "__main__":

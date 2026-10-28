@@ -195,6 +195,8 @@ def _validate_workspace_cli_profile(raw: object, contract_name: str) -> dict:
     }
     if contract_name == SESSION_FILE_CORE_PROFILE_CONTRACT and "file_transfer" in raw:
         expected_keys.add("file_transfer")
+    if isinstance(raw, dict) and "browser_origin" in raw:
+        expected_keys.add("browser_origin")
     profile = object_keys(raw, expected_keys, "workspace CLI profile")
     if (type(profile["schema_version"]) is not int
             or profile["schema_version"] != 1
@@ -417,6 +419,14 @@ def _validate_workspace_cli_profile(raw: object, contract_name: str) -> dict:
                      "api_face": "legacy"})
     if cli != expected_cli:
         raise ConfigError("cli: product CLI binding differs from the case contract")
+    if "browser_origin" in profile:
+        value = profile["browser_origin"]
+        if environment["tier"] != "preprod":
+            raise ConfigError("browser_origin: preprod browser context only")
+        if (not isinstance(value, str) or not value.isascii()
+                or any(ord(char) <= 32 or ord(char) == 127 for char in value)):
+            raise ConfigError("browser_origin: ASCII origin without whitespace or controls")
+        origin(value, "preprod")
     if "file_transfer" in profile:
         _validate_session_file_transfer(profile["file_transfer"], environment["tier"])
     return json.loads(json.dumps(profile, allow_nan=False), object_pairs_hook=unique_keys)
