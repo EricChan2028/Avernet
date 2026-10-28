@@ -61,7 +61,9 @@ class RemoteWorkspaceCliStatusAdapter:
         data = result.data
         if (not isinstance(data, dict)
                 or data.get("driver_bot") != self.driver_id
-                or data.get("participants") != [self.driver_id, self.member_id]):
+                or not isinstance(data.get("participants"), list)
+                or len(data.get("participants") or []) != 2
+                or set(data.get("participants") or []) != {self.driver_id, self.member_id}):
             raise RunStateError("workspace CLI completion Group binding differs")
         self.completion_group_id = data.get("group_id")
         return result
@@ -82,7 +84,9 @@ class RemoteWorkspaceCliStatusAdapter:
         data = result.data
         if (not isinstance(data, dict)
                 or data.get("driver_bot") != self.driver_id
-                or data.get("participants") != [self.driver_id, self.member_id]):
+                or not isinstance(data.get("participants"), list)
+                or len(data.get("participants") or []) != 2
+                or set(data.get("participants") or []) != {self.driver_id, self.member_id}):
             raise RunStateError("workspace CLI termination Group binding differs")
         self.termination_group_id = data.get("group_id")
         return result

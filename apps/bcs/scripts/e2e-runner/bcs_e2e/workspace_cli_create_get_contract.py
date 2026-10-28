@@ -104,6 +104,7 @@ def execute_workspace_cli_create_get_case(adapter: object) -> CaseExecution:
     plan = workspace_cli_create_get_case_plan()
     validate_workspace_cli_create_get_adapter(adapter)
     error_type: str | None = None
+    error_gap: str | None = None
     completed = 0
     records: list[dict] = []
     group_id = ""
@@ -139,12 +140,15 @@ def execute_workspace_cli_create_get_case(adapter: object) -> CaseExecution:
                 or value.get("id") != group_id
                 or value.get("driver_bot") != driver
                 or value.get("status") != "active"
-                or participant_ids != [driver, member]):
+                or not isinstance(participant_ids, list)
+                or len(participant_ids or []) != 2
+                or set(participant_ids or []) != {driver, member}):
             raise RunStateError("workspace CLI Group readback is not exact")
         records.append(fetched.evidence)
         completed = 1
     except Exception as error:
         error_type = type(error).__name__
+        error_gap = str(error) or None
 
     data = {
         "group_id": group_id,
@@ -167,6 +171,7 @@ def execute_workspace_cli_create_get_case(adapter: object) -> CaseExecution:
         data=data if error_type is None else None,
         evidence=evidence if error_type is None else {},
         error_type=error_type,
+        error_gap=error_gap,
     )
     execution = CaseExecution(
         case_id=CASE_ID, parent_id=WORKSPACE_PARENT,
@@ -210,7 +215,9 @@ class RemoteWorkspaceCliCreateGetAdapter:
         data = result.data
         if (not isinstance(data, dict)
                 or data.get("driver_bot") != self.driver_id
-                or data.get("participants") != [self.driver_id, self.member_id]):
+                or not isinstance(data.get("participants"), list)
+                or len(data.get("participants") or []) != 2
+                or set(data.get("participants") or []) != {self.driver_id, self.member_id}):
             raise RunStateError("workspace Group create returned the wrong participant binding")
         self.group_id = data.get("group_id")
         return result

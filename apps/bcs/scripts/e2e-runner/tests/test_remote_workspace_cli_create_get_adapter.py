@@ -96,6 +96,25 @@ class WorkspaceCliAdapterTests(unittest.TestCase):
         self.assertEqual(snapshot["steps"][0]["data"]["group_id"], GROUP)
         self.assertEqual(len(snapshot["steps"][0]["evidence"]["requests"]), 2)
 
+    def test_readback_tolerates_station_participant_order(self):
+        execution, _ = self.run_case(runner=ScriptedRunner(
+            create={"group_id": GROUP, "driver_bot": DRIVER,
+                    "participants": [DRIVER, MEMBER], "session_id": SESSION},
+            fetched={"id": GROUP, "driver_bot": DRIVER, "status": "active",
+                     "participants": [{"bot_uuid": MEMBER}, {"bot_uuid": DRIVER}]}))
+        self.assertEqual(execution.status, "PASS")
+
+    def test_error_gap_carries_the_contract_message(self):
+        execution, _ = self.run_case(runner=ScriptedRunner(
+            create={"group_id": GROUP, "driver_bot": DRIVER,
+                    "participants": [DRIVER, MEMBER], "session_id": SESSION},
+            fetched={"id": GROUP, "driver_bot": DRIVER, "status": "active",
+                     "participants": [{"bot_uuid": DRIVER}]}))
+        self.assertEqual(execution.status, "BLOCKED")
+        step = execution.snapshot()["steps"][0]
+        self.assertEqual(step["error_type"], "RunStateError")
+        self.assertIn("readback", step["error_gap"] or "")
+
     def test_wrong_business_result_blocks_without_credit(self):
         cases = {
             "wrong-driver": {"create": {"group_id": GROUP, "driver_bot": "wrong",

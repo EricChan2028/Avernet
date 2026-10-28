@@ -130,6 +130,17 @@ class WorkspaceCliFuseTests(unittest.TestCase):
                 RemoteWorkspaceCliFuseAdapter(profile, runner))
         return execution, runner, commands, contexts
 
+    def test_error_gap_carries_the_contract_message(self):
+        raw = (b"Fusion result:\n" + json.dumps({
+            "perspectives": [], "conflicts": [], "alignment_points": [],
+            "recommendation": None, "key_insights": [],
+            "extra": {"fusion_id": "fus-x", "fusion_mode": "agent"}}).encode())
+        execution, _, _, _ = self.run_case(fusion=raw)
+        self.assertEqual(execution.status, "BLOCKED")
+        step = execution.snapshot()["steps"][0]
+        self.assertEqual(step["error_type"], "RunStateError")
+        self.assertTrue(step["error_gap"])
+
     def test_case_guard_accepts_the_fusion_contract(self):
         guard = ROOT.parents[3] / "scripts/ci/e2e_runner_case_guard.py"
         files = (ROOT / "bcs_e2e/workspace_cli_profile.py",

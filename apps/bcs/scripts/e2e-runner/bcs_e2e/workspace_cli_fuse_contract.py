@@ -103,7 +103,9 @@ def _validate_created(group_id: str, data: object, driver: str, member: str) -> 
     session_id = data.get("session_id") if isinstance(data, dict) else None
     if (not isinstance(data, dict)
             or data.get("driver_bot") != driver
-            or data.get("participants") != [driver, member]
+            or not isinstance(data.get("participants"), list)
+            or len(data.get("participants") or []) != 2
+            or set(data.get("participants") or []) != {driver, member}
             or not isinstance(data.get("group_id"), str)
             or not data["group_id"] or data["group_id"] != group_id
             or not isinstance(session_id, str)
@@ -152,6 +154,7 @@ def execute_workspace_cli_fuse_case(adapter: object) -> CaseExecution:
     plan = workspace_cli_fuse_case_plan()
     validate_workspace_cli_fuse_adapter(adapter)
     error_type: str | None = None
+    error_gap: str | None = None
     completed = 0
     records: list[dict] = []
     group_id = ""
@@ -175,6 +178,7 @@ def execute_workspace_cli_fuse_case(adapter: object) -> CaseExecution:
         completed = 1
     except Exception as error:
         error_type = type(error).__name__
+        error_gap = str(error) or None
 
     fusion_perspectives = extracted.get("perspectives") if extracted else None
     data = {
@@ -202,6 +206,7 @@ def execute_workspace_cli_fuse_case(adapter: object) -> CaseExecution:
         data=data if error_type is None else None,
         evidence=evidence if error_type is None else {},
         error_type=error_type,
+        error_gap=error_gap,
     )
     execution = CaseExecution(
         case_id=CASE_ID, parent_id=WORKSPACE_PARENT,
@@ -245,7 +250,9 @@ class RemoteWorkspaceCliFuseAdapter:
         data = result.data
         if (not isinstance(data, dict)
                 or data.get("driver_bot") != self.driver_id
-                or data.get("participants") != [self.driver_id, self.member_id]):
+                or not isinstance(data.get("participants"), list)
+                or len(data.get("participants") or []) != 2
+                or set(data.get("participants") or []) != {self.driver_id, self.member_id}):
             raise RunStateError("workspace CLI fusion Group binding differs")
         self.group_id = data.get("group_id")
         return result

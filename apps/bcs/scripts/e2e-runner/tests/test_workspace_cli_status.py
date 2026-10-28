@@ -147,7 +147,7 @@ class WorkspaceCliStatusTests(unittest.TestCase):
         self.env = {"BCS_E2E_DRIVER_BOT_TOKEN": TOKEN,
                      "BCS_E2E_HUMAN_COOKIE": COOKIE}
 
-    def run_status_sequence(self, *, gateway=False, outputs=None):
+    def run_status_sequence(self, *, gateway=False, outputs=None, expect=None):
         outputs = {} if outputs is None else outputs
         profile = validate_workspace_cli_status_profile(profile_value(gateway=gateway))
         runner = WorkspaceCliRunner(profile, binary=self.binary,
@@ -199,7 +199,11 @@ class WorkspaceCliStatusTests(unittest.TestCase):
              patch("bcs_e2e.workspace_cli_runner.capture", side_effect=fake_capture) as capture:
             adapter = RemoteWorkspaceCliStatusAdapter(profile, runner)
             execution = execute_workspace_cli_status_case(adapter)
-            self.assertEqual(execution.status, "BLOCKED" if outputs else "PASS")
+            if expect is not None:
+                expected = expect
+            else:
+                expected = "BLOCKED" if outputs else "PASS"
+            self.assertEqual(execution.status, expected)
             capture.assert_called()
         return execution, runner, commands, contexts
 
@@ -301,6 +305,29 @@ class WorkspaceCliStatusTests(unittest.TestCase):
                 execution, _, _, _ = self.run_status_sequence(outputs=outputs)
                 self.assertEqual(execution.status, "BLOCKED")
                 self.assertEqual(execution.completed_count, 0)
+
+    def test_readback_tolerates_station_participant_order(self):
+        def shuffled(group_id, status):
+            return json.dumps({"id": group_id, "driver_bot": DRIVER, "status": status,
+                               "participants": [{"bot_uuid": MEMBER}, {"bot_uuid": DRIVER}]}).encode()
+        outputs = {
+            "status.group.read.active": shuffled(COMPLETION_GROUP, "active"),
+            "status.group.read.completed": shuffled(COMPLETION_GROUP, "completed"),
+            "termination.group.read.active": shuffled(TERMINATION_GROUP, "active"),
+            "termination.group.read.completed": shuffled(TERMINATION_GROUP, "completed"),
+        }
+        execution, _, _, _ = self.run_status_sequence(outputs=outputs, expect="PASS")
+        self.assertEqual(execution.status, "PASS")
+
+    def test_error_gap_carries_the_contract_message(self):
+        outputs = {"status.group.read.active": json.dumps(
+            {"id": COMPLETION_GROUP, "driver_bot": DRIVER, "status": "active",
+             "participants": [{"bot_uuid": DRIVER}]}).encode()}
+        execution, _, _, _ = self.run_status_sequence(outputs=outputs)
+        self.assertEqual(execution.status, "BLOCKED")
+        step = execution.snapshot()["steps"][0]
+        self.assertEqual(step["error_type"], "RunStateError")
+        self.assertIn("readback", step["error_gap"] or "")
 
     def test_adapter_requires_setup_before_reads(self):
         profile = validate_workspace_cli_status_profile(profile_value())

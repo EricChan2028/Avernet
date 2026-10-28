@@ -107,7 +107,9 @@ def _validate_evidence(result: AdapterCall, *, operation: str) -> None:
 def _validate_created(data: object, group_id: str, driver: str, member: str) -> None:
     if (not isinstance(data, dict)
             or data.get("driver_bot") != driver
-            or data.get("participants") != [driver, member]
+            or not isinstance(data.get("participants"), list)
+            or len(data.get("participants") or []) != 2
+            or set(data.get("participants") or []) != {driver, member}
             or not isinstance(data.get("group_id"), str)
             or not data["group_id"] or data["group_id"] != group_id
             or not isinstance(data.get("session_id"), str)
@@ -131,7 +133,9 @@ def _validate_readback(data: object, group_id: str, driver: str, member: str) ->
             or data.get("id") != group_id
             or data.get("driver_bot") != driver
             or data.get("status") != "active"
-            or participants != [driver, member]
+            or not isinstance(participants, list)
+            or len(participants or []) != 2
+            or set(participants or []) != {driver, member}
             or not isinstance(data.get("group_kind"), str)
             or not data["group_kind"]
             or not isinstance(data.get("visibility"), str)
@@ -143,6 +147,7 @@ def execute_workspace_cli_member_case(adapter: object) -> CaseExecution:
     plan = workspace_cli_member_case_plan()
     validate_workspace_cli_member_adapter(adapter)
     error_type: str | None = None
+    error_gap: str | None = None
     completed = 0
     records: list[dict] = []
     group_id = ""
@@ -174,6 +179,7 @@ def execute_workspace_cli_member_case(adapter: object) -> CaseExecution:
         completed = 1
     except Exception as error:
         error_type = type(error).__name__
+        error_gap = str(error) or None
 
     data = {
         "group_id": group_id,
@@ -199,6 +205,7 @@ def execute_workspace_cli_member_case(adapter: object) -> CaseExecution:
         data=data if error_type is None else None,
         evidence=evidence if error_type is None else {},
         error_type=error_type,
+        error_gap=error_gap,
     )
     execution = CaseExecution(
         case_id=CASE_ID, parent_id=WORKSPACE_PARENT,
@@ -244,7 +251,9 @@ class RemoteWorkspaceCliMemberAdapter:
         data = result.data
         if (not isinstance(data, dict)
                 or data.get("driver_bot") != self.driver_id
-                or data.get("participants") != [self.driver_id, self.member_id]):
+                or not isinstance(data.get("participants"), list)
+                or len(data.get("participants") or []) != 2
+                or set(data.get("participants") or []) != {self.driver_id, self.member_id}):
             raise RunStateError("workspace CLI member Group binding differs")
         self.group_id = data.get("group_id")
         return result
