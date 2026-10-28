@@ -59,6 +59,14 @@ class PreprodGapAdapter:
         raise error
 
 
+class HardFailureAdapter:
+    def __init__(self, *args):
+        pass
+
+    def run_revoke(self):
+        raise RunStateError("station legacy revoke did not revoke exactly both edges")
+
+
 class EdgeFriendMutationCaseRunTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -129,11 +137,21 @@ class EdgeFriendMutationCaseRunTests(unittest.TestCase):
         self.assertEqual(report["status"], "BLOCKED")
         self.assertEqual(report["execution"]["error_type"], "RunStateError")
         self.assertEqual(report["case"]["steps"][0]["status"], "NOT_RUN")
-        self.assertEqual(report["resource_disposition"], "UNKNOWN_OWNED_BOT_MUTATIONS")
+        # A pure documented-gap block never mutates; the receipt keeps the planned
+        # gap disposition rather than the conservative unknown-mutations label.
+        self.assertEqual(report["resource_disposition"], "PREPROD_SERVICE_SCOPE_GAP")
         self.assertFalse(report["grants_release_credit"])
         self.assertEqual(report["case_scope"]["public_operations"], [])
         self.assertEqual(report["documented_gaps"]["PREPROD_SERVICE_SCOPE_GAP"],
                          "ensure-bot, TC friend-auth sync, and department-scope extensions need a user-credential/mock-Provider batch unavailable in preprod.")
+
+    def test_non_gap_failure_keeps_unknown_mutations_disposition(self):
+        report = self.invoke("friend-revoke", HardFailureAdapter())
+        self.assertEqual(report["status"], "BLOCKED")
+        self.assertEqual(report["execution"]["error_type"], "RunStateError")
+        self.assertEqual(report["resource_disposition"], "UNKNOWN_OWNED_BOT_MUTATIONS")
+        self.assertFalse(report["grants_release_credit"])
+        self.assertEqual(report["case"]["steps"][0]["error_gap"], None)
 
     def test_gateway_loader_rejects_non_mutation_relationship_and_missing_browser_origin(self):
         profile = json.loads(self.gateway_path.read_text(), object_pairs_hook=dict)

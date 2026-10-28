@@ -180,6 +180,15 @@ def _load_station_profile(path: Path, gateway_profile: dict) -> dict:
     return profile
 
 
+def _singlebox_closure_gap(execution: object) -> bool:
+    """True when every blocking step is a reviewed singlebox-closure gap."""
+    gap_steps = [step for step in execution.steps if step.error_gap]
+    return bool(gap_steps) and all(
+        isinstance(step.error_gap, dict) and step.error_gap.get("singlebox_closure") is True
+        for step in gap_steps
+    )
+
+
 def normalize_edge_friend_mutation_case_key(value: str) -> str:
     if value in _CASE_KEY_BY_ID:
         return value
@@ -281,7 +290,15 @@ def dual_edge_friend_mutation_case_run(
             f"Edge friend-mutation case execution is unavailable: {error}") from None
 
     success = execution.status == "PASS"
-    disposition = planned_disposition if success else _FAILURE_DISPOSITION
+    if success:
+        disposition = planned_disposition
+    elif _singlebox_closure_gap(execution):
+        # A case blocked solely by a reviewed, documented preprod service scope
+        # gap never mutates the shared fixture; its receipt keeps the planned
+        # gap disposition instead of the conservative unknown-mutations label.
+        disposition = planned_disposition
+    else:
+        disposition = _FAILURE_DISPOSITION
     report = {
         "schema_version": SCHEMA_VERSION,
         "contract": REPORT_CONTRACT,
