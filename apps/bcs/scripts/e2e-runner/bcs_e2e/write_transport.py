@@ -626,13 +626,36 @@ class WriteClient:
                          + "?token=[REDACTED-register-token]&bot-name="
                          + quote(bot_name, safe=""))
         request_id = identifier("e2e-register-" + uuid.uuid4().hex, "request_id")
+        # The public-v1 product route stays anonymous: the minted register
+        # token is its product credential.  Through the deployed preprod
+        # Gateway, ACE rejects access without a browser Cookie even for an
+        # anonymous downstream route.  Carry that Cookie (and, when bound,
+        # Origin/Referer) as explicit platform ingress context; never send a
+        # Bot Authorization header with it.
+        platform_gateway = (
+            self.profile["entrypoint"]["kind"] == "gateway"
+            and self.profile["environment"]["tier"] == "preprod"
+        )
+        if platform_gateway:
+            platform_headers = {
+                **browser_headers(self.profile),
+                **{header: value for header, value in self.headers.items()
+                   if header != "Authorization"},
+            }
+        else:
+            platform_headers = {}
         request = Request(self.base + request_path, method="POST", headers={
-            "Accept": "application/json", "X-Request-ID": request_id})
+            **platform_headers,
+            "Accept": "application/json", "X-Request-ID": request_id,
+        })
         started = time.monotonic()
         record = {"operation": "register.bot.create", "method": "POST",
                   "path": evidence_path, "submitted_request_id": request_id,
-                  "http_status": None, "credentials_sent": False,
-                  "authorization_sent": False,
+                  "http_status": None,
+                  "credentials_sent": "Cookie" in platform_headers,
+                  "authorization_sent": "Authorization" in platform_headers,
+                  "platform_gateway_browser_context_sent": platform_gateway,
+                  "browser_origin_context_sent": bool(browser_headers(self.profile)),
                   "register_token_sha256": hashlib.sha256(token.encode()).hexdigest()}
         try:
             try:

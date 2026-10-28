@@ -103,7 +103,9 @@ class RemoteNetworkRegisterAdapter:
             token=register_token, bot_name=bot_name)
         if (create_record.get('method') != 'POST'
                 or create_record.get('http_status') != 201
-                or create_record.get('credentials_sent') is not False
+                or (create_record.get('credentials_sent') is not False
+                    and create_record.get(
+                        'platform_gateway_browser_context_sent') is not True)
                 or create_record.get('authorization_sent') is not False):
             raise RunStateError(
                 'register create transport evidence differs from the fixed contract')

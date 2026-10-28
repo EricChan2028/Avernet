@@ -82,6 +82,7 @@ def base_profile(*, gateway=False):
     if gateway:
         value['entrypoint'].update(kind='gateway',
                                    origin='https://teamclawgw.example.com')
+        value['browser_origin'] = 'https://bcs-pre.example.com'
         value['environment'].update(tier='preprod', expected_bcs_env='pre',
                                  lifecycle='remote-attach', deployment='managed',
                                  provider='internal')
@@ -424,6 +425,17 @@ class RemoteNetworkRegisterFlowTests(unittest.TestCase):
             create_request.full_url.split('https://teamclawgw.example.com', 1)[1],
             NETWORK_REGISTER_CREATE_PATH + '?token=' + REGISTER_TOKEN
             + '&bot-name=' + recorder.registered_name)
+        create_headers = {name.lower() for name in create_request.headers}
+        self.assertIn('cookie', create_headers)
+        self.assertIn('origin', create_headers)
+        self.assertIn('referer', create_headers)
+        self.assertNotIn('authorization', create_headers)
+        create_evidence = (
+            execution.steps[0].evidence['requests'][1])
+        self.assertTrue(create_evidence['credentials_sent'])
+        self.assertTrue(
+            create_evidence['platform_gateway_browser_context_sent'])
+        self.assertFalse(create_evidence['authorization_sent'])
 
     def test_current_station_public_v1_bot_projection_is_accepted(self):
         recorder = OpenRecorder(station_readback=True)

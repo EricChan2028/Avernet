@@ -4101,3 +4101,38 @@ The resulting resource disposition remains
 This live result is bound to the fresh post-rebase Run
 `collab-team-preprod-post-rebase-r13`, and it supersedes only the previous
 credential-blocked check. It is not a release qualification claim.
+
+## 2026-10-28 preprod network-register browser-context closure
+
+The first post-rebase live attempts for `PUBLIC-NETWORK-REGISTER-01` exposed
+two separate preprod facts. The registered-agent read-back used the station
+public-v1 projection (`bot_id`/`kind`/`name`, with `created_by` as the Human
+staff ID), not the older community `bot_uuid`/`capabilities` projection.
+The anonymous create request also reached the deployed Gateway's ACE ingress
+before the anonymous public-v1 route: without browser context it returned
+HTTP 200 with the platform `USER_NOT_LOGIN` envelope and the case correctly
+reported `WriteTransportError`.
+
+The reviewed product contract is unchanged.  `register.bot.create` still has
+route auth `register_token`, never sends a Bot Authorization header, requires
+HTTP 201 with envelope code 20100, and binds the exact new Bot to the minted
+token.  For a preprod Gateway profile the WriteClient now explicitly records
+that the Human Cookie and reviewed browser Origin/Referer are only platform
+ingress context (`platform_gateway_browser_context_sent=true`); locally the
+create remains fully anonymous.  The current station read-back projection is
+accepted only when it proves the exact reviewed name and `created_by==user_id`.
+
+Live validation was rerun with the refreshed Cookie and bound browser origin
+on run `network-register-preprod-20261028-browser-origin-r4`.  All three
+operations passed on the preprod Gateway:
+
+- `register.token.read`: HTTP 200, Human Cookie only.
+- `register.bot.create`: HTTP 201/code 20100, platform browser context plus the
+  minted register token; no Authorization header.
+- `register.bot.readback`: HTTP 200, Human Cookie only, exact station Bot
+  projection and exact Human ownership.
+
+The resulting temporary Bot remains retained under
+`REGISTERED_TEMPORARY_BOT_RETAINED`; this run is case validation, not release
+credit.  The focused remote-register adapter contract passed 17/17 tests and
+`compileall` remained clean.

@@ -3,9 +3,12 @@
 The slice freezes the reviewed register core of the Agent-network
 Story that transfers faithfully to the public-v1 Gateway/Singlebox
 face: the Human mints a register token, the minted token anonymously
-registers a new agent (the token is its sole credential), and the
-owning Human reads the registered agent back to prove the reviewed
-name and Human ownership. The reviewed BCN-only closures (Bot-token
+registers a new agent (the token is its sole product credential), and
+the owning Human reads the registered agent back to prove the reviewed
+name and Human ownership.  On the deployed preprod Gateway, the create
+may carry the Human Cookie/Origin only as explicit browser ingress
+context; it still never carries a Bot Authorization header and the
+reviewed product credential remains the minted register token. The reviewed BCN-only closures (Bot-token
 capability onboarding, the browser onboarding URL, administrator
 re-onboard, owner delete and the post-delete 404) have no public-v1
 gateway route and stay documented community-face obligations instead
@@ -179,10 +182,13 @@ def _validate_result(plan: NetworkRegisterCasePlan, result: AdapterCall) -> None
     create = requests[1]
     if ('[REDACTED-register-token]' not in create.get('path', '')
             or 'token=' not in create.get('path', '')
-            or create.get('credentials_sent') is not False
+            or (create.get('credentials_sent') is not False
+                and create.get('platform_gateway_browser_context_sent') is not True)
             or create.get('authorization_sent') is not False):
         raise RunStateError(
-            'register create evidence must stay anonymous with a redacted token path')
+            'register create evidence must keep the register token as its product '
+            'credential; only the explicit preprod Gateway browser context may carry '
+            'the Human Cookie')
     for row, identity in zip(requests, _REQUEST_IDENTITIES):
         if row.get('identity') != identity:
             raise RunStateError('register request identity differs from the reviewed contract')
