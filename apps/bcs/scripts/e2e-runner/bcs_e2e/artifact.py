@@ -107,7 +107,10 @@ def disk_digest() -> str:
     # Delivery-policy product-CLI command entries add four focused case-run
     # modules, so the allowance grows by exactly those four files plus one
     # slot of headroom for a future adapter split.
-    if len(paths) > 319:
+    # This session's Direct-chat and Custom-collaboration leaf splits consume
+    # the staged headroom and add two further focused leaf modules, so the
+    # allowance grows by exactly those two leaf files.
+    if len(paths) > 321:
         raise ValueError('executor artifact exceeds its source-file budget')
     digest = hashlib.sha256()
     for path in paths:
