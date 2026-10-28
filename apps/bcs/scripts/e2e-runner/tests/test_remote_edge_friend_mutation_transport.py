@@ -270,6 +270,22 @@ class FriendMutationWriteTransportTests(unittest.TestCase):
         self.assertTrue(request.full_url.endswith("/requests/1/accept"))
         self.assertEqual(request.method, "POST")
 
+    def test_self_add_negative_branch_reaches_the_wire(self):
+        denied = {"error_code": "cannot_add_self"}
+        with patch.dict(os.environ, {"BCS_E2E_HUMAN_COOKIE": COOKIE}), \
+                patch("bcs_e2e.write_transport.build_opener") as factory:
+            factory.return_value.open.return_value = envelope(
+                denied, code=40000, http=400, message="Bad Request")
+            projected, record = self.client().create_edge_friend_request(
+                DRIVER, DRIVER, expected=(400,), admit_error=True)
+            request = factory.return_value.open.call_args.args[0]
+        self.assertEqual(json.loads(request.data), {"from_actor": {"type": "bot", "id": DRIVER},
+                                                    "to_actor": {"type": "bot", "id": DRIVER}})
+        self.assertEqual(projected, {"code": 40000, "message": "Bad Request",
+                                      "data": denied, "error": "cannot_add_self"})
+        self.assertEqual(record["http_status"], 400)
+        self.assertNotIn(COOKIE, json.dumps(record, sort_keys=True))
+
     def test_negative_create_projection_is_admitted_only_explicitly(self):
         private = {"error_code": "internal_error"}
         with patch.dict(os.environ, {"BCS_E2E_HUMAN_COOKIE": COOKIE}), \

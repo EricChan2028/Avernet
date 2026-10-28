@@ -299,8 +299,9 @@ class WriteClient:
             self.profile, "friend_connection_mutation.create")
         from_actor_id = identifier(from_actor_id, "friend-mutation from actor ID")
         to_actor_id = identifier(to_actor_id, "friend-mutation to actor ID")
-        if from_actor_id == to_actor_id:
-            raise WriteTransportError("friend-mutation pair must be distinct")
+        # The reviewed self-add negative branch must reach BCS: actor
+        # distinctness is domain policy owned by the server (400
+        # cannot_add_self), never a client-side transport precondition.
         body = {
             "from_actor": self._friend_actor(from_actor_id, "from"),
             "to_actor": self._friend_actor(to_actor_id, "to"),
