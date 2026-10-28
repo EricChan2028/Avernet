@@ -165,3 +165,66 @@ Other deployment databases still require their own schema readiness checks.
 
 No merge, deployment, live config change, permission escalation or production
 DDL is authorized or performed by this follow-up. Remote CI is not established.
+
+
+## Failed online restart retry repair (2026-10-28)
+
+- Repair base: `c3f841bcdc926dd8f3c213407e1b286d59f1e48b`.
+- Final implementation/test source: `a3c8aee39291a736ee9ed2c046f48da8770d7214`.
+- Original defect: an actual failed restart writes FAILED with source_status=success;
+  retry needs to restore the stable state before issuing another restart. The generic
+  SUCCESS observation guard incorrectly rejected that native admission.
+- Red evidence: the real Flow/Service/Repository/operation-ledger witness produced
+  **2 failures with integration enabled, 2 passes disabled**, with/without KBs.
+  No new restart had been issued at the failure.
+- Dedicated internal `restore_failed_online_restart(publish_id, expected_ext)`
+  validates current FAILED/source_status=success, environment, complete ext and
+  latest failed online restart operation. Recreate uses the native observer's
+  abandoned RESTART plus matching failed FIRST_RELEASE workflow. The entry itself
+  creates retry=True and restores SUCCESS; it does not accept arbitrary ext, a
+  target state, a bypass flag or fabricated observed workflow.
+- The normal generic SUCCESS gate and old HTTP status behavior remain protected.
+  Recovery performs no KB/summary/snapshot/result changes, even for empty selection.
+  Disabled policy retains native CAS behavior. Changed artifacts stage outside the
+  explicit transaction; upload or commit failure precedes new restart issuance.
+- Final focused suite: **223 passed**, 18 warnings, 18.91 seconds. Includes real
+  retry with/without KBs, normal/recreated target, enabled/disabled policy; ledger
+  state/stage/env/workflow/latest-attempt negatives, wrong source, stale ext/env,
+  completion replay, commit rollback, no-KB-schema admission, artifact budget/PUT
+  failure, ordinary HTTP success refusal and normal configured Service resolution.
+- Final affected integrated suites: **2,848 passed, 44 warnings, 0 failed,
+  0 skipped**, 211.20 seconds. Uses the same affected-suite command above.
+- Ruff, blocking SAST/Flake8 and whitespace checks passed. Main publish repository
+  is 985 lines, helper is 64; existing service waiver is unchanged. No model, SQL,
+  configuration/default, migration, dependency, worker or HTTP route change in
+  this repair. Full remote-provider/prod/Singlebox/multi-instance acceptance and
+  remote CI are not established. No merge/deployment/live DB operation.
+
+### Independent repair closure
+
+- Standards: incremental review found no evidenced P2+ or new hard-rule violation;
+  normal DI wiring and generic API separation confirmed, 43 targeted tests passed.
+- Spec: original P2 closed; no new confirmed P2+. Independent original/permanent
+  witness plus Flow suites: 213 passed; guard/restore suites: 32 passed (overlap).
+  An additional witness kept native execute_restart and operation runner intact
+  and drove normal upgrade, direct recreate and BOT_NOT_FOUND recreate through
+  two consecutive failure/retry cycles: 3 passed, knowledge state unchanged.
+- Those three native-delivery scenarios are now permanent tests at
+  `tests/community/repository/publishing/test_knowledge_restart_retry_delivery.py`
+  (test-only commit `c678a5769`). No production source changed after review.
+- Performance: PASS WITH RISKS, no new evidenced P2+. No-artifact admission
+  measured 4 SQL/1 transaction/1 publish UPDATE, recreate 5 SQL. No Bot/KB/summary/
+  operation write. At 1 versus 10,000 operation rows, local work remained 210/277
+  SQLite VM steps respectively. Replay after success: 1 SELECT/zero writes.
+  A budget-triggered offload measured 6 SQL and 1 PUT/1 GET outside locks.
+  Production operation plans, lock contention and multi-instance remain unknown.
+
+### Final integrated gate including native delivery regressions
+
+At `c678a5769b77be23a20aefbc6f2c60a4c5a09365` (same reviewed production
+source plus the three permanent delivery tests), the full affected-suite command
+passed **2,851 tests, 44 warnings, 0 failed, 0 skipped**, 201.84 seconds.
+This supersedes 2,848 as the final integrated test count for this repair. Ruff,
+blocking SAST and whitespace checks passed. Documentation closure follows this
+source; normal remote push hooks remain required. No production acceptance, merge,
+deployment, live configuration or DB operation is claimed.

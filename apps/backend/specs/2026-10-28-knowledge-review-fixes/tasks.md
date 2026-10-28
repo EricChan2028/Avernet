@@ -12,6 +12,6 @@
 - C: Task 5, verification and closure.
 
 ## Failed Online Restart Retry
-- [ ] Reproduce enabled-policy failure via real failure observation/retry.
-- [ ] Add restricted recovery and ledger/status/ext/env fences; retain generic success gates.
-- [ ] Negative/race/rollback/config and affected regression suites, independent delta review, then update original PR.
+- [x] Reproduce enabled-policy failure via real failure observation/retry.
+- [x] Add restricted recovery and ledger/status/ext/env fences; retain generic success gates.
+- [x] Negative/race/rollback/config and affected regression suites; independent delta review. Original-PR delivery uses these verified commits.
