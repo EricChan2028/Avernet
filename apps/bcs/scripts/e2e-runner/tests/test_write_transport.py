@@ -114,6 +114,31 @@ class WriteTransportTests(unittest.TestCase):
                         with self.assertRaises(WriteTransportError):
                             WriteClient(profile()).call("session.messages", session_id="s1")
 
+    def test_legacy_session_cli_messages_projects_only_a_valid_array(self):
+        legacy = profile()
+        legacy["entrypoint"]["api_face"] = "legacy"
+        legacy["route_bindings"]["session_cli.session.messages"] = {
+            "method": "GET", "path": "/sessions/{session_id}/messages",
+            "traceparent": "disabled",
+        }
+        with patch.dict(os.environ, {"BCS_E2E_COOKIE": "private-cookie"}), \
+                patch("bcs_e2e.write_transport.build_opener") as factory:
+            client = WriteClient(legacy)
+            self.assertIn("session_cli.session.messages", client.profile["route_bindings"])
+            for messages in ([], [{"id": "m1"}], {}, ["invalid"], None):
+                factory.return_value.open.return_value = Reply(messages)
+                with self.subTest(messages=messages):
+                    if isinstance(messages, list) and all(isinstance(m, dict) for m in messages):
+                        data, record = client.call(
+                            "session_cli.session.messages", session_id="s1")
+                        self.assertEqual(data, {"items": messages})
+                        self.assertEqual(record["response_projection"],
+                                         "legacy-session-message-array-to-items")
+                    else:
+                        with self.assertRaises(WriteTransportError):
+                            client.call(
+                                "session_cli.session.messages", session_id="s1")
+
     def test_delete_operations_use_contract_200_not_204(self):
         with patch.dict(os.environ, {"BCS_E2E_COOKIE": "private-cookie"}), patch("bcs_e2e.write_transport.build_opener") as factory:
             body = {"code": 20000, "message": "OK", "request_id": "r", "data": {"deleted": True}}

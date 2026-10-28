@@ -267,6 +267,20 @@ class SessionCliLifecycleTests(unittest.TestCase):
                 else:
                     self.assertIsNone(contexts[0][1])
 
+    def test_missing_session_id_alias_matches_station_identity(self):
+        profile = validate_session_cli_lifecycle_profile(profile_value(preprod=True))
+        fake_runner = type("FakeRunner", (), {"execute": lambda self: None})()
+        with patch.dict(os.environ, {"BCS_E2E_HUMAN_COOKIE": COOKIE}):
+            adapter = RemoteSessionCliLifecycleAdapter(profile, fake_runner)
+        adapter.session_id = SESSION
+        adapter.group_id = GROUP
+        station_state = session_state(title="renamed-sess")
+        del station_state["session_id"]
+        self.assertEqual(
+            adapter._require_session_state(
+                station_state, session_title="renamed-sess"),
+            station_state)
+
     def test_foreign_rename_title_is_blocked(self):
         def deform(data, operation, kwargs):
             if operation == SESSION_CLI_SESSION_PATCH_TITLE_OPERATION:

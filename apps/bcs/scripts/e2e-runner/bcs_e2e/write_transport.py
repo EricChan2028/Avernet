@@ -491,10 +491,14 @@ class WriteClient:
                                               sensitive_values=auth_headers.values()):
                         raise WriteTransportError('public API response request ID is invalid')
                     payload = payload.get("data")
-                if operation == "session.messages":
+                if operation in {"session.messages", "session_cli.session.messages"}:
                     if not isinstance(payload, list) or not all(isinstance(item, dict) for item in payload):
                         raise WriteTransportError("session message response must be an array of objects")
-                    record["response_projection"] = "public-message-array-to-items"
+                    record["response_projection"] = (
+                        "public-message-array-to-items"
+                        if operation == "session.messages"
+                        else "legacy-session-message-array-to-items"
+                    )
                     return {"items": payload}, record
                 if payload is not None and not isinstance(payload, dict):
                     raise WriteTransportError("expected object response data")

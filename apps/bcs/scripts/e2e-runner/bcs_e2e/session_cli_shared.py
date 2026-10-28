@@ -481,8 +481,9 @@ class RemoteSessionCliLifecycleAdapter:
                                member_mode: str | None = None) -> dict:
         if not isinstance(data, dict):
             raise RunStateError("Session CLI lifecycle Session state is not an object")
-        if (data.get("session_id") != self.session_id
-                or data.get("id") != self.session_id
+        if (data.get("id") != self.session_id
+                or ("session_id" in data
+                    and data.get("session_id") != self.session_id)
                 or data.get("group_id") != self.group_id):
             raise RunStateError("Session CLI lifecycle Session state identity is not exact")
         if session_title is not None and data.get("session_title") != session_title:
@@ -616,8 +617,15 @@ class RemoteSessionCliLifecycleAdapter:
             SESSION_CLI_SESSION_MESSAGES_OPERATION,
             session_id=self.session_id, expected=(200,),
         )
-        if (not isinstance(data, list)
-                or not all(isinstance(item, dict) for item in data)):
+        items: list[object]
+        if isinstance(data, dict):
+            items = data.get("items")
+        elif isinstance(data, list):
+            items = data
+        else:
+            items = None
+        if (not isinstance(items, list)
+                or not all(isinstance(item, dict) for item in items)):
             raise RunStateError("Session CLI lifecycle history readback is not exact")
         evidence = dict(record)
         evidence.update({
@@ -630,7 +638,7 @@ class RemoteSessionCliLifecycleAdapter:
             "grants_release_credit": False,
         })
         return AdapterCall(
-            data={"session_id": self.session_id, "history_entries": len(data)},
+            data={"session_id": self.session_id, "history_entries": len(items)},
             evidence=evidence,
         )
 
