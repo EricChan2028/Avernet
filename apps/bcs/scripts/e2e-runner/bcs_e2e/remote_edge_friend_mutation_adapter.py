@@ -425,8 +425,13 @@ class RemoteEdgeFriendMutationAdapter:
         first_ids = self._valid_pending_create(first_data)
         duplicate_data, duplicate_record = self._create(self.driver_actor_id, member, expected=(201,))
         duplicate_ids = self._valid_pending_create(duplicate_data)
-        if duplicate_ids != first_ids:
-            raise RunStateError("duplicate friend create did not return the same request IDs")
+        # Live preprod matrix: a fresh pair mints [forward, reverse] on the
+        # first create; an exact same-direction duplicate is idempotent but
+        # projects only the stable forward ID, so the reviewed obligation is
+        # "no NEW request IDs" (subset) plus the bounded pending-row count,
+        # never a verbatim two-element list equality.
+        if not duplicate_ids or not set(duplicate_ids).issubset(set(first_ids)):
+            raise RunStateError("duplicate friend create minted new request IDs")
         sent_before, sent_record = self._read(self.reader, "friend.mutation.requests_sent.read", actor_id=self.driver_actor_id)
         pending_count = sum(
             row.get("from_actor") == self._actor(self.driver_actor_id)
