@@ -15,6 +15,8 @@ from .inventory import executor_digest
 from .profile import ConfigError, fingerprint, identifier, require_resolved, unique_keys
 from .run_state import RunStateError, write
 from .workspace_cli_profile import (
+    WORKSPACE_INCIDENT_CORE_PROFILE_CONTRACT,
+    WORKSPACE_ROUNDTRIP_PROFILE_CONTRACT,
     validate_workspace_incident_core_profile,
     validate_workspace_roundtrip_profile,
 )
@@ -35,6 +37,18 @@ from .workspace_roundtrip_contract import (
 SCHEMA_VERSION = 1
 REPORT_CONTRACT = "dual-workspace-story-case-run-v1"
 CASE_KEYS = ("incident-core", "roundtrip")
+
+
+def _receipt_credential_kind(profile: dict, case_key: str) -> str:
+    """Label the preprod credential family without echoing any secret."""
+    if profile["environment"]["tier"] == "local":
+        return "owned_local_bot_token"
+    contract = _CASES[case_key]["profile_contract"]
+    if contract == WORKSPACE_INCIDENT_CORE_PROFILE_CONTRACT:
+        return "human_cookie_with_owned_bot_tokens"
+    if contract == WORKSPACE_ROUNDTRIP_PROFILE_CONTRACT:
+        return "human_cookie_with_owned_driver_bot_token"
+    return "human_cookie"
 _CASES = {
     "incident-core": {
         "case_id": INCIDENT_CASE_ID,
@@ -42,6 +56,7 @@ _CASES = {
         "adapter": RemoteWorkspaceIncidentCoreAdapter,
         "execute": execute_workspace_incident_core_case,
         "fixture_effect": INCIDENT_EFFECT,
+        "profile_contract": WORKSPACE_INCIDENT_CORE_PROFILE_CONTRACT,
     },
     "roundtrip": {
         "case_id": ROUNDTRIP_CASE_ID,
@@ -49,6 +64,7 @@ _CASES = {
         "adapter": RemoteWorkspaceRoundtripAdapter,
         "execute": execute_workspace_roundtrip_case,
         "fixture_effect": ROUNDTRIP_EFFECT,
+        "profile_contract": WORKSPACE_ROUNDTRIP_PROFILE_CONTRACT,
     },
 }
 
@@ -143,9 +159,7 @@ def dual_workspace_story_case_run(
         "resource_disposition": _CASES[case_key]["fixture_effect"],
         "remote_validation": "NOT_RUN",
         "grants_release_credit": False,
-        "credential_kind": (
-            "owned_local_bot_token" if profile["environment"]["tier"] == "local" else "human_cookie"
-        ),
+        "credential_kind": _receipt_credential_kind(profile, case_key),
     }
     write(report_file, report)
     return report

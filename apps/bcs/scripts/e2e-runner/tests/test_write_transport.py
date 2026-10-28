@@ -219,5 +219,44 @@ class RouteResponseBudgetTests(unittest.TestCase):
                 self.assertEqual(factory.return_value.open.call_count, 0)
 
 
+class AuthorizationSchemeTests(unittest.TestCase):
+    """Opt-in Bearer shaping for the station ACE duo/trio writes."""
+
+    def _duo_profile(self, *, scheme=True):
+        value = profile()
+        value["auth"] = {
+            "kind": "human-cookie-with-owned-bot-token",
+            "header_env": {"Authorization": "BCS_E2E_DRIVER_BOT_TOKEN",
+                           "Cookie": "BCS_E2E_COOKIE"},
+        }
+        if scheme:
+            value["auth"]["authorization_scheme"] = "bearer"
+        return value
+
+    def test_bearer_scheme_prefixes_the_owned_bot_token_once(self):
+        with patch.dict(os.environ, {"BCS_E2E_DRIVER_BOT_TOKEN": "owned-token",
+                                     "BCS_E2E_COOKIE": "human-cookie"}), \
+                patch("bcs_e2e.write_transport.build_opener") as factory:
+            client = WriteClient(self._duo_profile())
+        self.assertEqual(client.headers["Authorization"], "Bearer owned-token")
+        self.assertEqual(client.headers["Cookie"], "human-cookie")
+
+    def test_missing_scheme_keeps_the_raw_authorization_value(self):
+        with patch.dict(os.environ, {"BCS_E2E_DRIVER_BOT_TOKEN": "owned-token",
+                                     "BCS_E2E_COOKIE": "human-cookie"}), \
+                patch("bcs_e2e.write_transport.build_opener") as factory:
+            client = WriteClient(self._duo_profile(scheme=False))
+        self.assertEqual(client.headers["Authorization"], "owned-token")
+        self.assertEqual(client.headers["Cookie"], "human-cookie")
+
+    def test_existing_bearer_prefix_is_not_duplicated(self):
+        with patch.dict(os.environ, {"BCS_E2E_DRIVER_BOT_TOKEN":
+                                     "Bearer owned-token",
+                                     "BCS_E2E_COOKIE": "human-cookie"}), \
+                patch("bcs_e2e.write_transport.build_opener") as factory:
+            client = WriteClient(self._duo_profile())
+        self.assertEqual(client.headers["Authorization"], "Bearer owned-token")
+
+
 if __name__ == "__main__":
     unittest.main()

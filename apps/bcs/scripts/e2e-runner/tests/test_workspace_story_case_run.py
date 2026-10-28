@@ -165,5 +165,22 @@ class WorkspaceStoryCaseRunTests(unittest.TestCase):
         self.assertEqual(json.loads(stdout.getvalue())["status"], "PASS")
 
 
+    def test_preprod_receipts_label_the_owned_bot_credential_family(self):
+        expected = {
+            "incident-core": "human_cookie_with_owned_bot_tokens",
+            "roundtrip": "human_cookie_with_owned_driver_bot_token",
+        }
+        for case_key, kind in expected.items():
+            with self.subTest(case_key=case_key):
+                report, profile, state_dir, _ = self.invoke_case(
+                    case_key, preprod=True)
+                self.assertEqual(report["status"], "PASS")
+                self.assertEqual(report["credential_kind"], kind)
+                self.assertEqual(report["environment"]["tier"], "preprod")
+                serialized = json.dumps(report, sort_keys=True)
+                self.assertNotIn("owned-driver-token", serialized)
+                self.assertNotIn("human-cookie", serialized)
+
+
 if __name__ == "__main__":
     unittest.main()

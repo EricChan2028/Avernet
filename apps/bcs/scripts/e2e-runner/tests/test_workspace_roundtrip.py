@@ -378,27 +378,29 @@ class WorkspaceRoundtripTests(unittest.TestCase):
                 serialized = json.dumps(snapshot, sort_keys=True)
                 self.assertNotIn(COOKIE, serialized)
                 self.assertNotIn(DRIVER_TOKEN, serialized)
+                driver_kind = ("human_cookie_with_owned_driver_bot_token"
+                               if preprod else "owned_local_bot_token")
                 self.assertEqual(
                     snapshot["steps"][0]["evidence"]["credential_kind"],
-                    "owned_local_bot_token")
+                    driver_kind)
                 self.assertEqual(
                     snapshot["steps"][1]["evidence"]["credential_kind"],
-                    "owned_local_bot_token")
+                    driver_kind)
                 self.assertEqual(
                     snapshot["steps"][2]["evidence"]["credential_kind"],
                     "human_cookie" if preprod else "owned_local_bot_token")
                 if preprod:
                     self.assertEqual(
                         snapshot["steps"][0]["evidence"]["credential_kinds"],
-                        ["owned_local_bot_token", "human_cookie",
-                         "human_cookie", "human_cookie"])
+                        [driver_kind, "human_cookie", "human_cookie",
+                         "human_cookie"])
                     self.assertEqual(
                         snapshot["steps"][1]["evidence"]["credential_kinds"],
-                        ["owned_local_bot_token", "human_cookie"])
+                        [driver_kind, "human_cookie"])
                     self.assertEqual(
                         snapshot["steps"][2]["evidence"]["credential_kinds"],
-                        ["human_cookie", "owned_local_bot_token",
-                         "human_cookie", "human_cookie", "human_cookie"])
+                        ["human_cookie", driver_kind, "human_cookie",
+                         "human_cookie", "human_cookie"])
                     self.assertEqual(
                         snapshot["steps"][0]["evidence"]["requests"][0][
                             "route_caller_binding"], "route_bound")
@@ -427,6 +429,32 @@ class WorkspaceRoundtripTests(unittest.TestCase):
                     self.assertEqual(
                         snapshot["steps"][2]["evidence"]["credential_kinds"],
                         ["owned_local_bot_token"] * 5)
+
+    def test_preprod_bot_subprofile_binds_the_reviewed_ace_duo(self):
+        env = {"BCS_E2E_DRIVER_BOT_TOKEN": DRIVER_TOKEN,
+               "BCS_E2E_HUMAN_COOKIE": COOKIE}
+        with patch.dict(os.environ, env):
+            adapter = RemoteWorkspaceRoundtripAdapter(
+                profile_value(preprod=True))
+            driver_auth = adapter.driver_client.profile["auth"]
+            human_auth = adapter.human_client.profile["auth"]
+            local_adapter = RemoteWorkspaceRoundtripAdapter(
+                profile_value(preprod=False))
+            local_auth = local_adapter.driver_client.profile["auth"]
+        self.assertEqual(driver_auth["kind"],
+                         "human-cookie-with-owned-driver-bot-token")
+        self.assertEqual(driver_auth["header_env"],
+                         {"Authorization": "BCS_E2E_DRIVER_BOT_TOKEN",
+                          "Cookie": "BCS_E2E_HUMAN_COOKIE"})
+        self.assertEqual(driver_auth["authorization_scheme"], "bearer")
+        self.assertEqual(human_auth["kind"], "human-cookie")
+        self.assertEqual(human_auth["header_env"],
+                         {"Cookie": "BCS_E2E_HUMAN_COOKIE"})
+        self.assertNotIn("authorization_scheme", human_auth)
+        self.assertEqual(local_auth, {
+            "kind": "authenticated-product",
+            "header_env": {"Authorization": "BCS_E2E_DRIVER_BOT_TOKEN"}})
+        self.assertNotIn("authorization_scheme", local_auth)
 
     def test_create_roster_drift_is_blocked(self):
         def deform(data, operation, kwargs):

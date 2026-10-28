@@ -262,9 +262,10 @@ def execute_workspace_incident_core_case(adapter: object) -> CaseExecution:
     plan = workspace_incident_core_case_plan()
     validate_workspace_incident_core_adapter(adapter)
     preprod = adapter.profile["environment"]["tier"] == "preprod"
-    bot_credential = "owned_local_bot_token"
     human_credential = ("human_cookie" if preprod
                         else "owned_local_bot_token")
+    driver_credential = adapter._credential_kind("driver")
+    qa_credential = adapter._credential_kind("qa")
     steps: list[StepOutcome] = []
     error_type: str | None = None
     completed = 0
@@ -283,8 +284,8 @@ def execute_workspace_incident_core_case(adapter: object) -> CaseExecution:
                 _validate_evidence(
                     result, operation=WORKSPACE_GROUP_CREATE_OPERATION,
                     case_class="incident_group",
-                    credential_kind=bot_credential,
-                    credential_kinds=[bot_credential, human_credential])
+                    credential_kind=driver_credential,
+                    credential_kinds=[driver_credential, human_credential])
                 _validate_created(result.data,
                                   result.data.get("group_id", ""),
                                   adapter.driver_id, adapter.member_id,
@@ -293,8 +294,8 @@ def execute_workspace_incident_core_case(adapter: object) -> CaseExecution:
                 _validate_evidence(
                     result, operation=WORKSPACE_GROUP_PARTICIPANT_MODE_OPERATION,
                     case_class="participant_mode",
-                    credential_kind=bot_credential,
-                    credential_kinds=[bot_credential, human_credential])
+                    credential_kind=qa_credential,
+                    credential_kinds=[qa_credential, human_credential])
                 _validate_mute(result.data,
                                    result.data.get("group_id", ""),
                                    adapter.qa_id)
@@ -358,10 +359,22 @@ class RemoteWorkspaceIncidentCoreAdapter:
 
     def _bot_profile(self, credential_ref: str) -> dict:
         value = json.loads(json.dumps(self.profile, allow_nan=False))
-        value["auth"] = {
-            "kind": "authenticated-product",
-            "header_env": {"Authorization": credential_ref},
-        }
+        if self.profile["environment"]["tier"] == "preprod":
+            # The station legacy face admits an owned Bot principal only as
+            # the reviewed ACE duo: the owned Human Cookie session plus the
+            # owned Bot Bearer token (live evidence ACE-BOT-TOKEN-BEARER; a
+            # bare Bot Bearer returns USER_NOT_LOGIN / decisionBy=ACE).
+            value["auth"] = {
+                "kind": "human-cookie-with-owned-bot-token",
+                "header_env": {"Authorization": credential_ref,
+                               "Cookie": self.profile["auth"]["cookie_env"]},
+                "authorization_scheme": "bearer",
+            }
+        else:
+            value["auth"] = {
+                "kind": "authenticated-product",
+                "header_env": {"Authorization": credential_ref},
+            }
         value["entrypoint"] = self._entrypoint(self.profile)
         return value
 
@@ -377,8 +390,9 @@ class RemoteWorkspaceIncidentCoreAdapter:
     def _credential_kind(self, credential: str) -> str:
         if self.profile["environment"]["tier"] == "local":
             return "owned_local_bot_token"
-        return ("human_cookie" if credential == "human"
-                else "owned_local_bot_token")
+        if credential == "human":
+            return "human_cookie"
+        return f"human_cookie_with_owned_{credential}_bot_token"
 
     def _evidence(self, *calls: tuple[dict, str], operation: str,
                     case_class: str) -> dict:

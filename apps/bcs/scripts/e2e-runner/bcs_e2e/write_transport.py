@@ -43,6 +43,10 @@ class WriteClient:
             if not value or not value.isascii() or any(ord(c) < 32 or ord(c) == 127 for c in value):
                 raise WriteTransportError("missing or invalid authentication reference")
             self.headers[header] = value
+        if profile["auth"].get("authorization_scheme") == "bearer" and "Authorization" in self.headers:
+            token = self.headers["Authorization"]
+            if token and not token.startswith("Bearer "):
+                self.headers["Authorization"] = "Bearer " + token
         self.opener = build_opener(ProxyHandler({}), NoRedirect()) if owned_local else build_opener(HTTPSHandler(context=tls_context()), NoRedirect())
 
     def patch_bot_status(self, target_actor_id: str, status: str) -> tuple[dict, dict]:
