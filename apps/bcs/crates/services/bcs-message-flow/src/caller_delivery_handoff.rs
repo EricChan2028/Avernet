@@ -18,7 +18,7 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 
-use bcs_service_api::application::caller_handoff::{HandoffClaim, HandoffError, HandoffScope, HumanCallerDeliveryHandoffService, QueuedAdmissionReceipt};
+use bcs_service_api::application::caller_handoff::{HandoffClaim, HandoffError, HandoffIdentityReadiness, HandoffScope, HumanCallerDeliveryHandoffService, QueuedAdmissionReceipt};
 use bcs_service_api::application::caller_identity::AuthenticatedHumanCallerIngress;
 
 /// Never derived and never persisted; the slot keeps it only until claimed.
@@ -130,6 +130,21 @@ impl HumanCallerDeliveryHandoffService for HumanCallerDeliveryHandoff {
         receipt: QueuedAdmissionReceipt,
     ) -> Result<(), HandoffError> {
         self.publish_for_targets(ingress, &[(scope.clone(), receipt)]).await
+    }
+
+    async fn identity_readiness(&self, scope: &HandoffScope) -> HandoffIdentityReadiness {
+        // Pure read: no sweep, no mutation, no close check beyond the empty
+        // map it leaves (close/seal wipe everything, and a wiped scope is
+        // Gone exactly like a never-reserved one).
+        let slots = self.slots.lock().expect("handoff lock");
+        match slots.map.get(scope) {
+            Some(Slot::Published { .. }) => HandoffIdentityReadiness::Published,
+            Some(Slot::Reserved { .. }) => HandoffIdentityReadiness::Reserved,
+            // Never published with the reservation gone (crash window,
+            // sweep, term seal, close), or already consumed by an earlier
+            // claim: either way no later attempt of this scope can claim.
+            None | Some(Slot::Claimed { .. }) => HandoffIdentityReadiness::Gone,
+        }
     }
 
     async fn publish_for_targets(

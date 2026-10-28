@@ -78,6 +78,26 @@ pub enum HandoffError {
     InvalidInput,
 }
 
+/// Read-only slot-state answer for the dispatch scheduler's pre-StartSend
+/// probe (the plan-A readiness gate). The probe never mutates the slot and
+/// never exposes identity material; it only tells which side of the
+/// admission race a committed caller row is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandoffIdentityReadiness {
+    /// The identity is parked; a committed dispatch attempt may claim it.
+    Published,
+    /// The slot is reserved but the identity is not published yet: a
+    /// same-process admission sits between its queue commit and its
+    /// publish. The dispatcher must PARK the row and pick it up again
+    /// later — converging now would permanently fail an accepted task
+    /// whose identity arrives microseconds after the verdict.
+    Reserved,
+    /// No identity can ever arrive for this scope again (never published
+    /// with the reservation lost/swept/sealed/closed, or an earlier claim
+    /// consumed it). The existing fail-closed convergence owns this case.
+    Gone,
+}
+
 impl QueuedAdmissionReceipt {
     pub fn new(delivery_id: impl Into<String>, state_version: u64, admitted_at_ms: i64) -> Self {
         Self {
@@ -142,6 +162,14 @@ pub trait HumanCallerDeliveryHandoffService: Send + Sync {
         scope: &HandoffScope,
         claim: HandoffClaim,
     ) -> Result<std::sync::Arc<AuthenticatedHumanCallerIngress>, HandoffError>;
+
+    /// Read-only probe of one scope's slot for the dispatch scheduler's
+    /// pre-StartSend gate: can identity still arrive for this scope?
+    /// Unlike `claim` this never consumes, never sweeps and stays cheap
+    /// (schedulers call it per caller row per tick). A `Reserved` answer
+    /// means an admission is still in flight — the caller parks the row,
+    /// never converges it.
+    async fn identity_readiness(&self, scope: &HandoffScope) -> HandoffIdentityReadiness;
 
     /// Publish one identity across MULTIPLE target scopes (spec §6.2: one
     /// canonical Human message, one identity, per-target dispatch).

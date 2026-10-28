@@ -3,7 +3,7 @@
 //! trusted envelopes move exactly once through it.
 
 use bcs_message_flow::caller_delivery_handoff::HumanCallerDeliveryHandoff;
-use bcs_service_api::application::caller_handoff::{HandoffClaim, HandoffError, HandoffScope, HumanCallerDeliveryHandoffService, QueuedAdmissionReceipt};
+use bcs_service_api::application::caller_handoff::{HandoffClaim, HandoffError, HandoffIdentityReadiness, HandoffScope, HumanCallerDeliveryHandoffService, QueuedAdmissionReceipt};
 use bcs_service_api::application::caller_identity::{
     AuthenticatedHumanCallerIngress, HumanCallerAuthSource,
 };
@@ -188,6 +188,45 @@ async fn scope_keys_are_independent_per_target_and_turn() {
     h.claim(&other_turn, HandoffClaim::new("d", 4, None, 1, NOW))
         .await
         .expect("independent claim per turn");
+}
+
+#[tokio::test]
+async fn identity_readiness_reports_the_admission_race_without_consuming() {
+    // Plan-A gate contract: the probe answers Reserved while a same-process
+    // admission sits between its reserve and its publish, Published once the
+    // identity is parked, Gone after a claim consumes it or the slot was
+    // never reserved — and never mutates or sweeps anything it observes.
+    let h = handoff(8);
+    // A scope nobody ever reserved (crash-window residue from the probe's
+    // point of view): no identity can ever arrive.
+    assert_eq!(h.identity_readiness(&scope("probe-unknown")).await, HandoffIdentityReadiness::Gone);
+
+    let s = scope("probe");
+    h.reserve(&s, 10_000, NOW).await.expect("reserve");
+    // Admission in flight: repeated probes keep answering Reserved and never
+    // disturb the slot the publish below still has to land on.
+    for _ in 0..3 {
+        assert_eq!(h.identity_readiness(&s).await, HandoffIdentityReadiness::Reserved);
+    }
+    h.publish(&s, ingress(300_000), QueuedAdmissionReceipt::new("d-1", 1, NOW))
+        .await
+        .expect("publish still lands after probing");
+    assert_eq!(h.identity_readiness(&s).await, HandoffIdentityReadiness::Published);
+    // The probe is not a claim: the identity still hands out exactly once.
+    h.claim(&s, HandoffClaim::new("d-1", 4, Some("run-1".into()), 1, NOW + 1_000))
+        .await
+        .expect("claim once after probing");
+    assert_eq!(h.identity_readiness(&s).await, HandoffIdentityReadiness::Gone);
+    // Term seals and closes read Gone: post-seal/post-close identity never
+    // arrives for an old parked scope.
+    let w = scope("probe-seal");
+    h.reserve(&w, 10_000, NOW).await.expect("reserve w");
+    h.publish(&w, ingress(300_000), QueuedAdmissionReceipt::new("d-2", 1, NOW))
+        .await
+        .expect("publish w");
+    assert_eq!(h.identity_readiness(&w).await, HandoffIdentityReadiness::Published);
+    h.seal_term();
+    assert_eq!(h.identity_readiness(&w).await, HandoffIdentityReadiness::Gone);
 }
 
 #[tokio::test]

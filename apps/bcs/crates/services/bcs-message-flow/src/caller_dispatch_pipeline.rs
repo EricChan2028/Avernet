@@ -24,7 +24,9 @@ use bcs_domain::{BotDeliveryTarget, RedactedToken};
 use bcs_service_api::application::caller_container::{
     CallerContainerPreparation, CallerPreparationError, PrepareOutcome,
 };
-use bcs_service_api::application::caller_handoff::{HandoffClaim, HandoffScope, HumanCallerDeliveryHandoffService};
+use bcs_service_api::application::caller_handoff::{HandoffClaim, HumanCallerDeliveryHandoffService};
+
+use readiness::dispatch_handoff_scope;
 use bcs_service_api::application::caller_identity::CallerExecutionToken as ProofToken;
 use bcs_service_api::port::{
     CallerContainerMinimum, CallerDispatchAck, CallerDispatchAssociation, CallerExecutionSendPort, CallerOpaqueRef, ContainerRunAssociation,
@@ -403,13 +405,13 @@ impl CallerDispatchPipeline {
         }
         // The scope mirrors the admission's make_scope exactly (the same
         // env resolution, session, group, canonical message id and target).
-        let scope = HandoffScope {
-            env: bcs_config::resolve_env_str(),
-            session_id: started.session_id.clone(),
-            group_id: Some(started.group_id.clone()),
-            source_message_id: started.source_message_id.clone(),
-            target_bot_id: started.target_bot_id.clone(),
-        };
+        let scope = dispatch_handoff_scope(
+            &bcs_config::resolve_env_str(),
+            &started.session_id,
+            Some(&started.group_id),
+            &started.source_message_id,
+            &started.target_bot_id,
+        );
         // Idempotence for ordinary retries: an AlreadyClaimed slot with the
         // association already registered is a retry's converged end state.
         if index.current(&run_id, now_ms).is_some() {
@@ -532,13 +534,13 @@ impl CallerDispatchPipeline {
         }
 
         // ---- One-shot identity claim (consumes on any later failure). ----
-        let scope = HandoffScope {
-            env: facts.environment.clone(),
-            session_id: facts.session_id.clone(),
-            group_id: facts.group_id.clone(),
-            source_message_id: facts.message_turn_id.clone(),
-            target_bot_id: facts.target_bot_id.clone(),
-        };
+        let scope = dispatch_handoff_scope(
+            &facts.environment,
+            &facts.session_id,
+            facts.group_id.as_deref(),
+            &facts.message_turn_id,
+            &facts.target_bot_id,
+        );
         let claim = HandoffClaim::new(
             facts.dispatch_id.clone(),
             0,
@@ -946,6 +948,7 @@ mod history_replay;
 mod observe;
 mod accepted;
 mod delegate;
+mod readiness;
 pub use barrier::HistoryBarrierConverger;
 pub use delegate::{DelegateDispatchError, DelegateDispatchFacts};
 

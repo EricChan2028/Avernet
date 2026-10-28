@@ -452,6 +452,40 @@ impl DeliveryRuntime {
                                 // committed digest/deadline facts, the row stays
                                 // fail-closed exactly as before.
                                 if row.semantic_projection_json.get("caller_required").is_some() {
+                                    // Plan-A identity-readiness gate (the P2
+                                    // admission race): the admission
+                                    // reserve()s this row's slot BEFORE the
+                                    // queue commit and publish()es only
+                                    // after it, so a tick landing in between
+                                    // sees a Reserved-but-unpublished slot.
+                                    // Reserved means the identity is still
+                                    // IN FLIGHT — park the attempt here (no
+                                    // StartSend, no last_send bump, no
+                                    // spawn) and pick the row up again on a
+                                    // later tick once the publish lands.
+                                    // Converging now would permanently fail
+                                    // an accepted task (retry:false) whose
+                                    // identity arrives microseconds later.
+                                    // Every other readiness (Published, or
+                                    // Gone via the None/Claimed slots)
+                                    // proceeds, so the fail-closed
+                                    // convergence and the DefinitelyNotSent
+                                    // evidence rules stay untouched — the
+                                    // queue TTL stays the parked row's
+                                    // convergence bound.
+                                    if let Some(pipeline) = self.caller_dispatch.as_ref() {
+                                        if matches!(
+                                            pipeline.dispatch_identity_readiness(&row).await,
+                                            bcs_service_api::application::caller_handoff::HandoffIdentityReadiness::Reserved
+                                        ) {
+                                            tracing::debug!(
+                                                delivery_id = %row.delivery_id,
+                                                bot_id = %row.target_bot_id,
+                                                "caller identity reserved but not yet published; the row parks this tick"
+                                            );
+                                            continue;
+                                        }
+                                    }
                                     let (handle, registration) = futures::future::AbortHandle::new_pair();
                                     caller_tasks.insert(delivery_id.clone(), (bot.clone(), handle));
                                     preparing.insert(delivery_id.clone());
