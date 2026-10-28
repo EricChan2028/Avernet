@@ -119,12 +119,12 @@ pub(super) fn web_ws_dispatch_state(
         frontend_connections: state.frontend_connections.clone(),
         run_channels: state.frontend_run_channels.clone(),
         delivery_admission: state.delivery_admission.clone(),
-        // Speaking-lease store (spec §6.3, P3.3): none wired in this
-        // composition keeps lease commands answering an explicit error.
-        // Speaking leases are wired at composition time by the caller
-        // assembly path; this shared constructor stays lease-less (lease
-        // commands answer an explicit error) when none is available here.
-        speaking_leases: None,
+        // Speaking-lease store (spec §6.3, P3.3): the SAME store instance
+        // server_infrastructure mounts feeds the flow's admission fence AND
+        // this WS lease command entrance — one store, one epoch. A None here
+        // (store-less compositions) keeps lease commands answering an
+        // explicit error, never a fake lease.
+        speaking_leases: state.speaking_leases.clone(),
         lease_idle_timeout_ms: 60_000,
     })
 }
