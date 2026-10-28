@@ -421,7 +421,7 @@ class AdapterTest(unittest.TestCase):
     def test_error_and_admission_branches(self):
         result, adapter, harness = self.run_method("run_error_admission_branches")
         methods = [name for name, _ in harness.writes]
-        self.assertEqual(methods, ["register", "patch", "create", "create", "accept", "patch", "patch", "create", "create", "accept", "create", "patch", "create", "patch"])
+        self.assertEqual(methods, ["register", "patch", "create", "create", "accept", "patch", "patch", "patch", "create", "patch", "create", "create", "accept", "create"])
         patches = [write for name, write in harness.writes if name == "patch"]
         self.assertEqual([patch["visibility"] for patch in patches],
                          ["protected", "public", "protected", "private", "public"])
