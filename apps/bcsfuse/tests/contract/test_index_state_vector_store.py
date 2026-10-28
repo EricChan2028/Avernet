@@ -9,6 +9,7 @@ from app.application.services.index_state_vector_store import (
     IndexStateWriteForbidden,
     wrap_vector_store_with_index_state,
 )
+from app.domain.models.index_state import IndexStateRecord
 from app.infra.public.stores.sqlite_index_state_store import SQLiteIndexStateStore
 
 
@@ -82,6 +83,108 @@ def wrapped(tmp_path, owner_id, backend=None, **kwargs):
     )
 
 
+class OldEmptyIndexStateStore:
+    """Simulates a durable empty index that was never updated or synchronized."""
+
+    def __init__(self, owner_id):
+        self.owner_id = owner_id
+        self.claims = 0
+
+    def claim_owner(self, collection_pair, owner_id, *, lease_seconds):
+        self.claims += 1
+        return self._record(owner_id)
+
+    def read_owner(self, collection_pair):
+        return self._record(self.owner_id)
+
+    @staticmethod
+    def _record(owner_id):
+        return IndexStateRecord(
+            collection_pair="profiles:dense+keyword",
+            owner_id=owner_id,
+            owner_expires_at=103.0,
+            index_version=0,
+            index_updated_at=100.0,
+            observed_at=200.0,
+        )
+
+
+class NoneReadyVectorStore(RecordingVectorStore):
+    def check_ready(self):
+        return None
+
+
+def test_successful_none_ready_probe_remains_ready(tmp_path):
+    owner = wrapped(tmp_path, "pod-a", backend=NoneReadyVectorStore())
+
+    assert owner.check_ready() is True
+
+
+class OldCurrentIndexStateStore:
+    """A reader that is synchronized to the current shared revision."""
+
+    def __init__(self, owner_id):
+        self.owner_id = owner_id
+
+    def claim_owner(self, collection_pair, owner_id, *, lease_seconds):
+        return self._record(owner_id)
+
+    def read_owner(self, collection_pair):
+        return self._record(self.owner_id)
+
+    @staticmethod
+    def _record(owner_id):
+        return IndexStateRecord(
+            collection_pair="profiles:dense+keyword",
+            owner_id=owner_id,
+            owner_expires_at=103.0,
+            index_version=1,
+            index_updated_at=100.0,
+            observed_at=200.0,
+        )
+
+
+def test_synchronized_reader_has_zero_revision_lag(tmp_path):
+    reader = IndexStateMaintainingVectorStore(
+        RecordingVectorStore(),
+        store=OldCurrentIndexStateStore("pod-a"),
+        owner_id="pod-b",
+        collection_pair="profiles:dense+keyword",
+        stale_after_seconds=2,
+        lease_seconds=3,
+    )
+
+    result = reader.synchronize_read_view()
+
+    assert result == {"read_only": True, "synchronized_version": 1}
+    assert reader.index_lag_seconds == 0.0
+    assert reader.index_stale is False
+
+
+def test_empty_index_age_is_not_staleness(tmp_path):
+    owner = IndexStateMaintainingVectorStore(
+        RecordingVectorStore(),
+        store=OldEmptyIndexStateStore("pod-a"),
+        owner_id="pod-a",
+        collection_pair="profiles:dense+keyword",
+        stale_after_seconds=2,
+        lease_seconds=3,
+    )
+    reader = IndexStateMaintainingVectorStore(
+        RecordingVectorStore(),
+        store=OldEmptyIndexStateStore("pod-a"),
+        owner_id="pod-b",
+        collection_pair="profiles:dense+keyword",
+        stale_after_seconds=2,
+        lease_seconds=3,
+    )
+
+    assert owner.index_lag_seconds == 0.0
+    assert owner.index_stale is False
+    assert reader.index_lag_seconds == 0.0
+    assert reader.index_stale is False
+
+
 def test_first_replica_acquires_ownership_and_publishes_versions(tmp_path):
     owner = wrapped(tmp_path, "pod-a")
 
@@ -150,6 +253,31 @@ def test_backend_failure_does_not_publish_a_new_index_version(tmp_path):
     owner.backend.fail = False
     owner.check_ready()
     assert owner.index_version == 0
+    owner.close()
+
+
+def test_state_store_outage_is_recoverable_and_explicit(tmp_path):
+    owner = wrapped(tmp_path, "pod-a")
+    store = owner._store
+    original_claim = store.claim_owner
+
+    assert owner.index_state_unavailable is False
+
+    def failing_claim(*args, **kwargs):
+        raise RuntimeError("state unavailable")
+
+    store.claim_owner = failing_claim
+    with pytest.raises(
+        IndexStateUnavailable, match="index owner lease renewal failed"
+    ):
+        owner.renew_owner_lease()
+
+    assert owner.index_state_unavailable is True
+
+    store.claim_owner = original_claim
+    assert owner.renew_owner_lease() is True
+    assert owner.index_state_unavailable is False
+
     owner.close()
 
 

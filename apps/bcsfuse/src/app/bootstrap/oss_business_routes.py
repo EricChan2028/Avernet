@@ -34,6 +34,7 @@ from fastapi import APIRouter, Request, HTTPException, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, model_validator
 
+from app.bootstrap.index_write_guard import ensure_writable_index
 from app.domain.services.search_filter_contract import (
     validate_v1_search_filters,
 )
@@ -723,6 +724,7 @@ def include_oss_business_routes(app) -> None:
         """Set worker online (OSS wrapper for test mode)."""
         # Require authentication for protected endpoint
         require_oss_auth(request)
+        ensure_writable_index(request)
 
         # Get runtime state service
         try:
@@ -800,6 +802,7 @@ def include_oss_business_routes(app) -> None:
         """Set worker offline (OSS wrapper for test mode)."""
         # Require authentication for protected endpoint
         require_oss_auth(request)
+        ensure_writable_index(request)
 
         # Get runtime state service
         try:
@@ -967,6 +970,7 @@ def include_oss_business_routes(app) -> None:
         """
         # Require authentication for protected endpoint
         require_oss_auth(request)
+        ensure_writable_index(request)
 
         # Route marker for Phase 3.4.1H diagnosis
         logger.info(
@@ -1453,13 +1457,24 @@ def include_oss_business_routes(app) -> None:
                 )
 
             # --- Generate query embedding ---
-            query_embedding = await run_search_in_threadpool(
-                embedding_gen.embed, search_req.query
-            )
-            logger.info(
-                "[Search OSS] Embedding generated, dimension=%d",
-                len(query_embedding) if query_embedding else 0,
-            )
+            # The fragment matcher treats an empty query vector as semantic
+            # unavailability and continues with keyword/literal retrieval.
+            # An embedding outage therefore degrades instead of failing search.
+            try:
+                query_embedding = await run_search_in_threadpool(
+                    embedding_gen.embed, search_req.query
+                )
+                logger.info(
+                    "[Search OSS] Embedding generated, dimension=%d",
+                    len(query_embedding) if query_embedding else 0,
+                )
+            except Exception as error:
+                logger.warning(
+                    "[Search OSS] Query embedding unavailable (%s); "
+                    "using bounded keyword/literal retrieval",
+                    type(error).__name__,
+                )
+                query_embedding = []
 
             # --- Visibility filters (aligned with internal defaults) ---
             default_visibility = {
@@ -1479,10 +1494,11 @@ def include_oss_business_routes(app) -> None:
             )
 
             # --- Build runtime_config (aligned with internal) ---
-            runtime_config = {}
-            reranker_model = os.getenv("RERANKER_MODEL", "Qwen3-Reranker-4B")
-            if reranker_model:
-                runtime_config["reranker_model"] = reranker_model
+            # V1 search is fast by default. Rerank is an explicit deployment
+            # choice through RERANKER_MODEL, never a silent hidden default.
+            runtime_config = {
+                "reranker_model": os.getenv("RERANKER_MODEL"),
+            }
 
             # --- Execute match via service (fragment-aware) ---
             results = await run_search_in_threadpool(

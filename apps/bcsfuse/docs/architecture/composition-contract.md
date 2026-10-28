@@ -316,9 +316,13 @@ releases its lease or the lease expires.
 Successful backend writes publish a new `index_version`; failed backend writes
 do not. Revisions are monotonic: the state store rejects an equal or lower value,
 and an owner that resumes after failover uses the shared revision as its base.
-Readers expose owner, version, lag, stale and read-only state through
-readiness and metrics. Shared state-store failure prevents writes and marks the
-replica not ready rather than returning a false write success or empty success.
+Readers expose owner, version, lag, stale, read-only and
+`index_state_unavailable` state through readiness and metrics. Shared
+state-store failure prevents writes and marks the replica not ready rather than
+returning a false write success or empty success. Readiness reports this
+explicitly as `index_state_unavailable: true`; index mutations fail closed with
+HTTP 503 and stable code `INDEX_STATE_UNAVAILABLE` rather than a misleading
+reader-only 403. A successful lease read clears the condition.
 Read replicas clear staleness only after reconstruction or sync reaches the
 shared revision.
 

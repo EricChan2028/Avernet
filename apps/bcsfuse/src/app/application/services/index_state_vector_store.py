@@ -52,6 +52,7 @@ class IndexStateMaintainingVectorStore:
         self.index_lag_seconds = 0.0
         self.index_stale = True
         self.read_only = True
+        self.index_state_unavailable = False
         try:
             self._refresh_from_record(self._store.claim_owner(
                 collection_pair, owner_id, lease_seconds=lease_seconds
@@ -90,9 +91,13 @@ class IndexStateMaintainingVectorStore:
 
     def check_ready(self) -> bool:
         try:
-            backend_ready = bool(self.backend.check_ready())
+            # Qdrant adapters use ``None`` for a successful probe. Only an
+            # explicitly returned ``False`` means the backing index is not ready.
+            backend_ready = self.backend.check_ready()
             self._refresh()
-            return backend_ready
+            # Staleness is transport-level grace handled by the composed wrapper.
+            # Here ``None`` is success; only ``False`` is an explicit outage.
+            return backend_ready is not False
         except Exception as error:
             logger.warning("[INDEX-STATE] readiness probe failed: %s", error)
             self._mark_unavailable()
@@ -144,6 +149,7 @@ class IndexStateMaintainingVectorStore:
         self._refresh_read_only()
         if self.read_only:
             self._local_version = self.index_version
+            self.index_lag_seconds = 0.0
             self._apply_staleness()
             return {
                 "read_only": True,
@@ -195,16 +201,27 @@ class IndexStateMaintainingVectorStore:
         self._apply_staleness()
 
     def _refresh_from_record(self, record: IndexStateRecord) -> None:
+        self.index_state_unavailable = False
         self.index_owner = record.owner_id
         self.index_version = record.index_version
-        self.index_lag_seconds = max(
-            0.0, record.observed_at - record.index_updated_at
+        # Revision lag measures how far a local projection is behind the shared
+        # revision. A synchronized or leading local projection has zero lag even
+        # when the durable data has itself been quiet for a long time.
+        self.index_lag_seconds = (
+            max(0.0, record.observed_at - record.index_updated_at)
+            if self._local_version < record.index_version
+            else 0.0
         )
         self.read_only = record.owner_id != self._owner_id
         self._apply_staleness()
 
     def _apply_staleness(self) -> None:
-        lag_stale = self.index_lag_seconds > self._stale_after_seconds
+        # An empty durable index (version 0) has no synchronized data to age.
+        # Do not turn a long-lived empty deployment into an unavailable one.
+        lag_stale = (
+            self.index_version > 0
+            and self.index_lag_seconds > self._stale_after_seconds
+        )
         local_stale = self.read_only and self._local_version < self.index_version
         self.index_stale = lag_stale or local_stale or self.index_owner is None
 
@@ -215,6 +232,7 @@ class IndexStateMaintainingVectorStore:
     def _mark_unavailable(self) -> None:
         self.read_only = True
         self.index_stale = True
+        self.index_state_unavailable = True
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.backend, name)

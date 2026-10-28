@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 
+from app.bootstrap.index_write_guard import ensure_writable_index as _ensure_writable_index
 from app.bootstrap.oss_business_routes import require_oss_auth
 from app.domain.exceptions import DuplicateWorkerException, WorkerNotFoundException
 from app.adapters.http.schemas.worker_config_schemas import (
@@ -104,20 +105,6 @@ def _get_runtime_service(request: Request):
         index_sync_adapter=registry.get("worker_index_sync_adapter"),
         vector_store=registry.get("vector_store"),
     )
-
-
-def _ensure_writable_index(request: Request) -> None:
-    """Reject writes before durable providers when this process is a reader."""
-    registry = request.app.state.context.registry
-    vector_store = registry.get("vector_store")
-    if vector_store is not None and getattr(vector_store, "read_only", False):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "code": "INDEX_READ_ONLY",
-                "message": "This replica is read-only; send updates to the index owner",
-            },
-        )
 
 
 def _runtime_response(worker) -> dict:

@@ -55,6 +55,9 @@ if TYPE_CHECKING:
 
 
 from app.application.services.worker_vector_match_fragments import FragmentMatchingMixin
+from app.application.services.keyword_candidate_selection import (
+    keyword_candidates_with_status,
+)
 from app.application.services.worker_vector_match_types import MatchResult, FragmentProfileCandidate as FragmentProfileCandidate
 
 logger = logging.getLogger(__name__)
@@ -455,6 +458,8 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
                 top_k=top_k,
                 filters=filters,
                 excluded_profile_keys=excluded_profile_keys,
+                query=query or "",
+                runtime_config=effective_config,
             )
 
         pre_filter_count = len(results)
@@ -607,12 +612,77 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
 
     # ==================== Legacy 模式 ====================
 
+
+    def _legacy_degraded_match(
+        self,
+        query: str,
+        top_k: int,
+        filters: dict[str, Any] | None,
+        excluded_profile_keys: list[str] | None,
+        allowed: set[str] | None,
+        runtime_config: dict[str, Any] | None,
+    ) -> list[MatchResult]:
+        """Use lexical retrieval only when the legacy dense provider fails."""
+        excluded = set(excluded_profile_keys or [])
+        keyword_outcome = keyword_candidates_with_status(
+            self._vector_store,
+            query,
+            max(top_k, 1),
+            filters,
+            excluded,
+            allowed,
+            self._enabled_fragment_types,
+        )
+        keyword_results: list[MatchResult] = []
+        for candidate in keyword_outcome.candidates:
+            metadata = self._build_metadata_from_payload(candidate.profile_key, candidate.metadata)
+            if metadata is None:
+                continue
+            keyword_results.append(
+                MatchResult(
+                    profile_key=candidate.profile_key,
+                    metadata=metadata,
+                    score=1.0,
+                    reasons=["keyword_fallback"],
+                    fragment_matches=candidate.fragments,
+                )
+            )
+
+        diagnostics = {
+            "score_source": "hybrid_rrf" if keyword_outcome.available else "vector_weighted",
+            "keyword_search_used": bool(keyword_results),
+            "rerank_degraded": False,
+            "semantic_unavailable": True,
+            "keyword_unavailable": not keyword_outcome.available,
+            "literal_fallback_used": False,
+        }
+        if runtime_config is not None:
+            runtime_config["_retrieval"] = diagnostics
+
+        if keyword_outcome.available:
+            return self._apply_registry_filter(keyword_results[:top_k])
+
+        if self._fallback_index is None:
+            raise RuntimeError("dense and keyword retrieval unavailable")
+
+        diagnostics["score_source"] = "regex_fallback"
+        diagnostics["literal_fallback_used"] = True
+        return self._literal_fallback_matches(
+            query=query,
+            top_k=top_k,
+            filters=filters or {},
+            excluded=excluded,
+            allowed=allowed,
+        )
+
     def _match_legacy(
         self,
         query_embedding: list[float],
         top_k: int,
         filters: dict[str, Any] | None,
         excluded_profile_keys: list[str] | None,
+        query: str,
+        runtime_config: dict[str, Any] | None,
     ) -> list[MatchResult]:
         """Legacy 模式匹配（单向量）"""
         logger.debug("[LEGACY-MATCH] start | dim=%d, top_k=%d", len(query_embedding), top_k)
@@ -645,6 +715,7 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
             logger.debug("[LEGACY-MATCH] no metadata filter")
 
         # Stage 2: Vector Search
+        vector_search_failed = False
         try:
             vector_size = self._vector_store.size()
             if vector_size == 0:
@@ -655,9 +726,20 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
             # 传递 filters 启用 Qdrant 前置过滤
             hits = self._vector_store.search(query_embedding, top_k=search_k, filters=filters)
             logger.debug("[LEGACY-MATCH] search | index_size=%d, search_k=%d, hits=%d", vector_size, search_k, len(hits))
-        except Exception as e:
-            logger.warning("Vector search failed: %s", e)
-            return []
+        except Exception as error:
+            vector_search_failed = True
+            log_stage(logger, "vector_search", reason="provider_error", error_type=type(error).__name__)
+            logger.warning("Vector search failed: %s", type(error).__name__)
+
+        if vector_search_failed:
+            return self._legacy_degraded_match(
+                query=query,
+                top_k=top_k,
+                filters=filters,
+                excluded_profile_keys=excluded_profile_keys,
+                allowed=candidate_keys,
+                runtime_config=runtime_config,
+            )
 
         # 组合结果并过滤
         results: list[MatchResult] = []

@@ -67,6 +67,103 @@ def test_literal_fallback_returns_stable_result_when_dense_and_keyword_are_down(
     assert diagnostics["keyword_unavailable"] is True
 
 
+def test_auto_mode_degrades_to_keyword_when_dense_search_fails(tmp_path):
+    from app.domain.models.vector_search_hit import VectorSearchHit
+
+    vector_store = Mock()
+    vector_store.size.return_value = 1
+    vector_store.search.side_effect = RuntimeError("qdrant unavailable")
+    vector_store.text_search.return_value = [
+        VectorSearchHit(
+            id="worker:default:full",
+            score=1.0,
+            payload={
+                "profile_key": "worker:default",
+                "worker_id": "worker",
+                "profile_id": "default",
+                "fragment_type": "full",
+                "content": "星河 数据分析",
+                "runtime_state": "online",
+                "availability": "public",
+            },
+        )
+    ]
+    service = service_for(
+        vector_store,
+        RegexFallbackIndex([fallback_point()]),
+        tmp_path,
+    )
+    service._fragment_config.enable_fragment_embedding = False
+
+    runtime_config = {}
+    results = service.match(
+        query_embedding=[1.0],
+        query="星河 数据分析",
+        mode="auto",
+        top_k=3,
+        vector_min_score=0.9,
+        runtime_config=runtime_config,
+    )
+
+    assert [result.profile_key for result in results] == ["worker:default"]
+    diagnostics = runtime_config["_retrieval"]
+    assert diagnostics["score_source"] == "hybrid_rrf"
+    assert diagnostics["keyword_search_used"] is True
+    assert diagnostics["semantic_unavailable"] is True
+    assert diagnostics["keyword_unavailable"] is False
+    assert diagnostics["literal_fallback_used"] is False
+
+
+def test_auto_mode_uses_literal_when_dense_and_keyword_fail(tmp_path):
+    vector_store = Mock()
+    vector_store.size.return_value = 1
+    vector_store.search.side_effect = RuntimeError("qdrant unavailable")
+    vector_store.text_search.side_effect = RuntimeError("keyword unavailable")
+    service = service_for(
+        vector_store, RegexFallbackIndex([fallback_point()]), tmp_path
+    )
+    service._fragment_config.enable_fragment_embedding = False
+
+    runtime_config = {}
+    results = service.match(
+        query_embedding=[1.0],
+        query="星河 数据分析",
+        mode="auto",
+        top_k=3,
+        vector_min_score=0.9,
+        runtime_config=runtime_config,
+    )
+
+    assert [result.profile_key for result in results] == ["worker:default"]
+    diagnostics = runtime_config["_retrieval"]
+    assert diagnostics["score_source"] == "regex_fallback"
+    assert diagnostics["literal_fallback_used"] is True
+    assert diagnostics["semantic_unavailable"] is True
+    assert diagnostics["keyword_unavailable"] is True
+
+
+def test_literal_fallback_matches_exact_worker_id(tmp_path):
+    vector_store = Mock()
+    vector_store.size.return_value = 1
+    vector_store.search.side_effect = RuntimeError("qdrant unavailable")
+    vector_store.text_search.side_effect = RuntimeError("keyword unavailable")
+    service = service_for(
+        vector_store, RegexFallbackIndex([fallback_point()]), tmp_path
+    )
+
+    runtime_config = {}
+    results = service.match(
+        query_embedding=[1.0],
+        query="worker:default",
+        mode="fragment",
+        top_k=3,
+        runtime_config=runtime_config,
+    )
+
+    assert [result.profile_key for result in results] == ["worker:default"]
+    assert runtime_config["_retrieval"]["literal_fallback_used"] is True
+
+
 def test_keyword_availability_prevents_literal_fallback(tmp_path):
     vector_store = Mock()
     vector_store.size.return_value = 1
@@ -109,6 +206,17 @@ def test_empty_vector_index_is_not_an_outage_and_has_no_literal_fallback(tmp_pat
 
     assert results == []
     assert runtime_config["_retrieval"]["literal_fallback_used"] is False
+
+
+def test_literal_fallback_accepts_scalar_exact_filters():
+    worker = "ha_worker_release_validator:8e155564f213"
+    point = fallback_point(worker, "release validation and production failover specialist")
+    point.payload["worker_id"] = worker
+    index = RegexFallbackIndex([point])
+
+    hits = index.keyword_search(worker, 3, {"worker_id": worker}, None)
+
+    assert [hit.payload["profile_key"] for hit in hits] == [worker]
 
 
 def test_literal_fallback_still_respects_exclusions(tmp_path):
@@ -394,3 +502,37 @@ def test_candidate_recommendation_continues_with_empty_embedding(monkeypatch):
     assert vector_match.calls[0]["query_embedding"] == []
     assert vector_match.calls[0]["query"] == "星河 数据分析"
     assert [rec.profile_key for rec in result[0]] == ["worker:default"]
+
+
+def test_vector_match_service_builds_when_index_size_probe_fails(monkeypatch, tmp_path):
+    from app.bootstrap.application_context import ApplicationContext
+    from app.bootstrap.provider_registry import ProviderRegistry
+    from app.adapters.http.dependencies import fusion_dependencies
+
+    class FailingSizeStore:
+        literal_fallback_index = RegexFallbackIndex([fallback_point()])
+        path = str(tmp_path / "qdrant")
+        collection_name = "bcsfuse_profiles"
+
+        def size(self):
+            raise RuntimeError("qdrant unavailable")
+
+    context = ApplicationContext(
+        mode="runtime",
+        startup_profile="acceptance",
+        registry=ProviderRegistry(),
+    )
+    context.registry.register("vector_store", FailingSizeStore())
+    monkeypatch.setenv("QDRANT_LOCAL_PATH", str(tmp_path / "qdrant"))
+    monkeypatch.delenv("ENABLE_REGISTRY_AWARE_FILTERING", raising=False)
+
+    try:
+        fusion_dependencies.reset_fusion_services()
+        fusion_dependencies.set_app_context(context)
+        service = fusion_dependencies._get_vector_match_service()
+
+        assert service is not None
+        assert service._fallback_index is not None
+    finally:
+        fusion_dependencies.reset_fusion_services()
+        fusion_dependencies.set_app_context(None)

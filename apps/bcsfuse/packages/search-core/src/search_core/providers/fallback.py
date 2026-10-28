@@ -27,11 +27,16 @@ def _query_tokens(query: str) -> set[str]:
     return tokens
 
 
-def _payload_matches_filter(payload: dict, key: str, requested: tuple[str, ...]) -> bool:
+def _payload_matches_filter(
+    payload: dict, key: str, requested: tuple[str, ...] | str
+) -> bool:
     actual = payload.get(key)
-    if isinstance(actual, list):
-        return any(str(value) in {str(item) for item in requested} for value in actual)
-    return str(actual) in {str(item) for item in requested}
+    actual_values = actual if isinstance(actual, list) else [actual]
+    requested_values = (
+        requested if isinstance(requested, (list, tuple, set, frozenset)) else [requested]
+    )
+    requested_scalars = {str(value) for value in requested_values}
+    return any(str(value) in requested_scalars for value in actual_values)
 
 
 class RegexFallbackIndex:
@@ -50,7 +55,7 @@ class RegexFallbackIndex:
         if any(key.startswith("_") for key in filters):
             raise ValueError("internal index fields cannot be caller filters")
         return all(
-            _payload_matches_filter(point.payload, key, tuple(values))
+            _payload_matches_filter(point.payload, key, values)
             for key, values in filters.items()
         )
 
@@ -61,6 +66,10 @@ class RegexFallbackIndex:
             "NFKC",
             " ".join(
                 [
+                    str(payload.get("id") or ""),
+                    str(payload.get("profile_key") or ""),
+                    str(payload.get("worker_id") or ""),
+                    str(payload.get("profile_id") or ""),
                     str(payload.get("name") or ""),
                     str(
                         payload.get("content")

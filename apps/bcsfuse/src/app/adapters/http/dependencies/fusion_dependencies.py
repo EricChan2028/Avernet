@@ -978,16 +978,6 @@ def _get_vector_match_service():
 
             logger.info(f"[Open-Core] Vector match service created (dimension={dimension}, mode=local)")
 
-            # 检查向量存储是否为空
-            vector_size = vector_store.size()
-            if vector_size == 0:
-                logger.warning(
-                    "⚠️  [VectorMatch] Vector store is EMPTY. "
-                    "Search/recommend will return no results until profiles are indexed. "
-                    "Indexing is triggered when a worker comes online (PUT /v1/workers/{id}/online)."
-                )
-            else:
-                logger.info(f"✅ [VectorMatch] Vector store has {vector_size} vectors indexed.")
         except Exception as e:
             logger.error(f"❌ [VectorMatch] Failed to create vector match service: {e}")
             import traceback

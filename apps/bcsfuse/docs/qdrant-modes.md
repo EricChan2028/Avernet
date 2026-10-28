@@ -80,7 +80,9 @@ and incremental sync calls are rejected before Qdrant; startup uses
 the process-local literal snapshot. After startup, the composed readiness check
 also performs this bounded revision sync once when a read-only replica observes
 a newer shared revision; it does not rebuild or mutate Qdrant. State-store
-failure is a 503 rather than a write success or empty 200. Set `BCSFUSE_INDEX_OWNER_ID` to a
+failure is a 503 rather than a write success or empty 200; readiness exposes
+`index_state_unavailable: true`, and mutations fail closed with stable code
+`INDEX_STATE_UNAVAILABLE` rather than a misleading `INDEX_READ_ONLY`. Set `BCSFUSE_INDEX_OWNER_ID` to a
 stable pod/application identity, and configure
 `vector.index.stale_after_seconds` (default 60) and
 `vector.index.lease_seconds` (default 120). Local/test modes remain single-store

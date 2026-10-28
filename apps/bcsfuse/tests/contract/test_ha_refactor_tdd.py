@@ -46,6 +46,7 @@ class FakeVectorStore:
         index_stale=False,
         is_ready=True,
         read_only=False,
+        index_state_unavailable=False,
     ):
         self.connection = type("Connection", (), {"mode": "server"})()
         self.collection_name = "worker_profiles"
@@ -55,6 +56,7 @@ class FakeVectorStore:
         self.index_stale = index_stale
         self.check_ready = lambda: is_ready
         self.read_only = read_only
+        self.index_state_unavailable = index_state_unavailable
 
     @property
     def path(self):
@@ -152,6 +154,71 @@ def test_read_only_replica_rejects_worker_writes_with_a_stable_contract():
     assert response.json()["detail"]["code"] == "INDEX_READ_ONLY"
 
 
+def test_index_state_unavailable_writes_fail_closed_instead_of_read_only():
+    store = FakeVectorStore(
+        owner_id="pod-a",
+        index_version=7,
+        index_lag_seconds=0,
+        read_only=True,
+        index_state_unavailable=True,
+    )
+    context = build_runtime_context(store)
+    context.registry.register("auth", AcceptingAuthProvider())
+    app = create_bcsfuse_app(context)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/workers",
+            json={
+                "id": "bot:state-outage",
+                "name": "State Outage",
+                "type": "bot",
+            },
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "INDEX_STATE_UNAVAILABLE"
+
+
+def test_read_only_replica_rejects_profile_writes_with_a_stable_contract():
+    store = FakeVectorStore(
+        owner_id="pod-b",
+        index_version=7,
+        index_lag_seconds=0,
+        read_only=True,
+    )
+    context = build_runtime_context(store)
+    context.registry.register("auth", AcceptingAuthProvider())
+    app = create_bcsfuse_app(context)
+
+    with TestClient(app) as client:
+        response = client.put(
+            "/v1/workers/bot:reader-profile/profiles/default",
+            json={"display_name": "Reader Profile"},
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "INDEX_READ_ONLY"
+
+
+def test_read_only_replica_rejects_runtime_state_writes_with_a_stable_contract():
+    store = FakeVectorStore(
+        owner_id="pod-b",
+        index_version=7,
+        index_lag_seconds=0,
+        read_only=True,
+    )
+    context = build_runtime_context(store)
+    context.registry.register("auth", AcceptingAuthProvider())
+    app = create_bcsfuse_app(context)
+
+    with TestClient(app) as client:
+        response = client.put("/api/v1/workers/bot:reader-state/online")
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "INDEX_READ_ONLY"
+
+
 def test_metrics_expose_index_owner_and_staleness_for_each_replica():
     store = FakeVectorStore(
         owner_id="pod-a",
@@ -191,6 +258,65 @@ def test_oversized_filters_are_rejected_before_search_execution():
 
     assert response.status_code in {413, 422}
     assert response.json()["detail"] is not None
+
+
+def test_search_degrades_to_keyword_when_query_embedding_fails(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.adapters.http.dependencies import fusion_dependencies
+    from app.application.services.worker_vector_match_types import MatchResult
+
+    class FailingEmbedding:
+        def embed(self, text):
+            raise RuntimeError("embedding unavailable")
+
+    class KeywordOnlyMatchService:
+        def __init__(self):
+            self.calls = []
+
+        def match(self, **kwargs):
+            self.calls.append(kwargs)
+            kwargs["runtime_config"]["_retrieval"] = {
+                "score_source": "hybrid_rrf",
+                "keyword_search_used": True,
+                "rerank_degraded": False,
+                "semantic_unavailable": True,
+                "keyword_unavailable": False,
+                "literal_fallback_used": False,
+            }
+            return [
+                MatchResult(
+                    profile_key="bot:reader:default",
+                    metadata=SimpleNamespace(
+                        profile_key="bot:reader:default", payload={}, short_profile="reader"
+                    ),
+                    score=1.0,
+                )
+            ]
+
+    match_service = KeywordOnlyMatchService()
+    monkeypatch.setattr(
+        fusion_dependencies, "_get_vector_match_service", lambda: match_service
+    )
+    monkeypatch.setattr(
+        fusion_dependencies, "_get_embedding_generator", lambda: FailingEmbedding()
+    )
+    context = build_runtime_context(FakeVectorStore(owner_id="pod-a", index_version=7, index_lag_seconds=0))
+    context.registry.register("auth", AcceptingAuthProvider())
+    app = create_bcsfuse_app(context)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/search", json={"query": "reader", "top_k": 5}
+        )
+
+    assert response.status_code == 200, response.text
+    assert match_service.calls[0]["query_embedding"] == []
+    assert match_service.calls[0]["runtime_config"]["reranker_model"] is None
+    body = response.json()
+    assert body["results"][0]["profile_key"] == "bot:reader:default"
+    assert body["config_applied"]["_retrieval"]["semantic_unavailable"] is True
+    assert body["config_applied"]["_retrieval"]["keyword_search_used"] is True
 
 
 def test_embedding_provider_has_no_default_inter_request_sleep(monkeypatch):

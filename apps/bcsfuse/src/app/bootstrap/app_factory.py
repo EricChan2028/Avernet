@@ -108,6 +108,9 @@ async def _index_readiness(context: ApplicationContext) -> tuple[bool, dict]:
         "index_version": getattr(vector_store, "index_version", None),
         "index_lag_seconds": getattr(vector_store, "index_lag_seconds", None),
         "index_stale": index_stale,
+        "index_state_unavailable": bool(
+            getattr(vector_store, "index_state_unavailable", False)
+        ),
         "read_only": bool(getattr(vector_store, "read_only", False)),
     }
     return is_ready, vector_store_info
