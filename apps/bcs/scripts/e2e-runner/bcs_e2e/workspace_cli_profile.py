@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 
-from .profile import ConfigError, identifier, object_keys, origin, parsed_origin, unique_keys
+from .profile import (
+    ConfigError, ROUTE_BINDING_RESPONSE_BUDGET_MAXIMUM, identifier,
+    object_keys, origin, parsed_origin, unique_keys,
+)
 
 
 WORKSPACE_CLI_CREATE_GET_PROFILE_CONTRACT = "dual-workspace-cli-profile-v1"
@@ -430,6 +433,18 @@ def validate_session_file_core_profile(raw: object) -> dict:
     return _validate_workspace_cli_profile(raw, SESSION_FILE_CORE_PROFILE_CONTRACT)
 
 
+def validate_route_response_budget(binding: dict, where: str) -> int | None:
+    """Validate the optional reviewed per-route response budget override."""
+    if "max_response_bytes" not in binding:
+        return None
+    value = binding["max_response_bytes"]
+    if (type(value) is not int
+            or not 1 <= value <= ROUTE_BINDING_RESPONSE_BUDGET_MAXIMUM):
+        raise ConfigError(
+            f"{where}: route response budget is outside the reviewed bound")
+    return value
+
+
 def validate_workspace_group_lifecycle_bindings(
         value: object, driver_id: str, member_id: str) -> dict:
     expected = {
@@ -462,9 +477,14 @@ def validate_workspace_group_lifecycle_bindings(
         raise ConfigError("workspace group lifecycle bindings are incomplete")
     result = {}
     for operation, route in expected.items():
-        binding = object_keys(value[operation], {
-            "method", "path", "api_face", "auth", "response", "traceparent",
-        }, f"route_bindings.{operation}")
+        raw_binding = value[operation]
+        budget = validate_route_response_budget(
+            raw_binding, f"route_bindings.{operation}")
+        binding = object_keys(
+            {key: item for key, item in raw_binding.items()
+             if key != "max_response_bytes"},
+            {"method", "path", "api_face", "auth", "response", "traceparent"},
+            f"route_bindings.{operation}")
         if (binding["method"] != route["method"] or binding["path"] != route["path"]
                 or binding["api_face"] != "legacy"
                 or binding["auth"] != "case_owned_driver"
@@ -473,6 +493,8 @@ def validate_workspace_group_lifecycle_bindings(
             raise ConfigError(
                 f"route_bindings.{operation}: workspace group lifecycle "
                 "route differs from the product contract")
+        if budget is not None:
+            binding = {**binding, "max_response_bytes": budget}
         result[operation] = dict(binding)
     if (identifier(driver_id, "actors.driver.bot_id") != driver_id
             or identifier(member_id, "actors.member.bot_id") != member_id):
@@ -524,9 +546,14 @@ def validate_workspace_group_governance_bindings(
         raise ConfigError("workspace group governance bindings are incomplete")
     result = {}
     for operation, route in expected.items():
-        binding = object_keys(value[operation], {
-            "method", "path", "api_face", "auth", "response", "traceparent",
-        }, f"route_bindings.{operation}")
+        raw_binding = value[operation]
+        budget = validate_route_response_budget(
+            raw_binding, f"route_bindings.{operation}")
+        binding = object_keys(
+            {key: item for key, item in raw_binding.items()
+             if key != "max_response_bytes"},
+            {"method", "path", "api_face", "auth", "response", "traceparent"},
+            f"route_bindings.{operation}")
         if (binding["method"] != route["method"] or binding["path"] != route["path"]
                 or binding["api_face"] != "legacy"
                 or binding["auth"] != "case_owned_driver"
@@ -535,6 +562,8 @@ def validate_workspace_group_governance_bindings(
             raise ConfigError(
                 f"route_bindings.{operation}: workspace group governance "
                 "route differs from the product contract")
+        if budget is not None:
+            binding = {**binding, "max_response_bytes": budget}
         result[operation] = dict(binding)
     if (identifier(driver_id, "actors.driver.bot_id") != driver_id
             or identifier(member_id, "actors.member.bot_id") != member_id):
@@ -586,9 +615,14 @@ def validate_workspace_incident_core_bindings(
         raise ConfigError("workspace incident core bindings are incomplete")
     result = {}
     for operation, route in expected.items():
-        binding = object_keys(value[operation], {
-            "method", "path", "api_face", "auth", "response", "traceparent",
-        }, f"route_bindings.{operation}")
+        raw_binding = value[operation]
+        budget = validate_route_response_budget(
+            raw_binding, f"route_bindings.{operation}")
+        binding = object_keys(
+            {key: item for key, item in raw_binding.items()
+             if key != "max_response_bytes"},
+            {"method", "path", "api_face", "auth", "response", "traceparent"},
+            f"route_bindings.{operation}")
         if (binding["method"] != route["method"] or binding["path"] != route["path"]
                 or binding["api_face"] != "legacy"
                 or binding["auth"] != "case_owned_driver"
@@ -597,6 +631,8 @@ def validate_workspace_incident_core_bindings(
             raise ConfigError(
                 f"route_bindings.{operation}: workspace incident core "
                 "route differs from the product contract")
+        if budget is not None:
+            binding = {**binding, "max_response_bytes": budget}
         result[operation] = dict(binding)
     if (identifier(driver_id, "actors.driver.bot_id") != driver_id
             or identifier(member_id, "actors.member.bot_id") != member_id
@@ -632,9 +668,14 @@ def _validate_exact_legacy_route_bindings(
         raise ConfigError(f"{family} bindings are incomplete")
     result = {}
     for operation, route in expected.items():
-        binding = object_keys(value[operation], {
-            "method", "path", "api_face", "auth", "response",
-            "traceparent"}, f"route_bindings.{operation}")
+        raw_binding = value[operation]
+        budget = validate_route_response_budget(
+            raw_binding, f"route_bindings.{operation}")
+        binding = object_keys(
+            {key: item for key, item in raw_binding.items()
+             if key != "max_response_bytes"},
+            {"method", "path", "api_face", "auth", "response", "traceparent"},
+            f"route_bindings.{operation}")
         if (binding["method"] != route["method"]
                 or binding["path"] != route["path"]
                 or binding["api_face"] != "legacy"
@@ -644,6 +685,8 @@ def _validate_exact_legacy_route_bindings(
             raise ConfigError(
                 f"route_bindings.{operation}: {family} route "
                 "differs from the product contract")
+        if budget is not None:
+            binding = {**binding, "max_response_bytes": budget}
         result[operation] = dict(binding)
     return result
 

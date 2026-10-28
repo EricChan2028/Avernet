@@ -10,6 +10,14 @@ from urllib.parse import urlsplit
 from .route_bindings import validate_route_bindings
 
 
+# Reviewed route bindings may declare a per-operation response budget above
+# the Profile policy default for bounded list operations whose rows carry
+# free-form context text (for example the owned Group listing). The policy
+# budget stays the fail-closed default; only an explicitly reviewed binding
+# override may exceed it.
+ROUTE_BINDING_RESPONSE_BUDGET_MAXIMUM = 16 * 1024 * 1024
+
+
 class ConfigError(ValueError):
     """Messages deliberately exclude untrusted configuration values."""
 

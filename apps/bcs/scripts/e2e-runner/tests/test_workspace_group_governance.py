@@ -303,6 +303,29 @@ class WorkspaceGroupGovernanceTests(unittest.TestCase):
                     validate_workspace_group_governance_profile(
                         profile_value(mutate=mutate))
 
+    def test_profile_accepts_the_reviewed_label_response_budget(self):
+        def mutate(value):
+            value["route_bindings"][WORKSPACE_GROUP_LABEL_OPERATION][
+                "max_response_bytes"] = 4194304
+
+        profile = validate_workspace_group_governance_profile(
+            profile_value(preprod=True, mutate=mutate))
+        self.assertEqual(
+            profile["route_bindings"][WORKSPACE_GROUP_LABEL_OPERATION][
+                "max_response_bytes"], 4194304)
+
+    def test_profile_rejects_unreviewed_label_response_budgets(self):
+        for budget in (0, -1, 16 * 1024 * 1024 + 1, "4194304",
+                       4194304.0, True):
+            def mutate(value, budget=budget):
+                value["route_bindings"][WORKSPACE_GROUP_LABEL_OPERATION][
+                    "max_response_bytes"] = budget
+
+            with self.subTest(budget=budget):
+                with self.assertRaises(ConfigError):
+                    validate_workspace_group_governance_profile(
+                        profile_value(preprod=True, mutate=mutate))
+
     def test_adaptability_is_registered_and_does_not_grant_credit(self):
         value = workspace_group_governance_adaptability()
         rows = migration_plan()["cross_environment_product_cli_case_slices"]

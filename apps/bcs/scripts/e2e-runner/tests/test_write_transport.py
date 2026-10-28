@@ -148,5 +148,76 @@ class WriteTransportTests(unittest.TestCase):
             self.assertEqual(request.method, "DELETE")
 
 
+class RouteResponseBudgetTests(unittest.TestCase):
+    """Reviewed per-route budgets for heavy bounded legacy lists."""
+
+    def legacy_list_profile(self, budget="unset"):
+        binding = {
+            "method": "GET", "path": "/groups?limit=50&group_kind=all",
+            "api_face": "legacy", "auth": "case_owned_driver",
+            "response": "legacy-json", "traceparent": "disabled"}
+        if budget != "unset":
+            binding["max_response_bytes"] = budget
+        return {
+            "schema_version": 1,
+            "environment": {"tier": "preprod", "id": "route-budget-test"},
+            "entrypoint": {"kind": "gateway",
+                           "origin": "https://bcs-pre.example.test",
+                           "api_face": "legacy", "manifest_face": "legacy"},
+            "auth": {"kind": "human-cookie",
+                     "header_env": {"Cookie": "BCS_E2E_COOKIE"}},
+            "policy": {"timeout_seconds": 10, "max_response_bytes": 65536},
+            "route_bindings": {"workspace_group.list": binding},
+        }
+
+    def heavy_list_body(self):
+        return {
+            "group_kind": "all", "limit": 50, "offset": 0, "total": 1,
+            "items": [{"id": "g-1", "driver_bot": "d-1",
+                       "label": "dual-group-lifecycle-e2e",
+                       "context": "x" * (128 * 1024)}],
+        }
+
+    def test_default_policy_budget_rejects_the_heavy_bounded_list(self):
+        with patch.dict(os.environ, {"BCS_E2E_COOKIE": "private-cookie"}), \
+                patch("bcs_e2e.write_transport.build_opener") as factory:
+            factory.return_value.open.return_value = Reply(self.heavy_list_body())
+            with self.assertRaises(WriteTransportError):
+                WriteClient(self.legacy_list_profile()).call(
+                    "workspace_group.list")
+
+    def test_binding_budget_override_admits_and_records_the_heavy_list(self):
+        with patch.dict(os.environ, {"BCS_E2E_COOKIE": "private-cookie"}), \
+                patch("bcs_e2e.write_transport.build_opener") as factory:
+            factory.return_value.open.return_value = Reply(self.heavy_list_body())
+            data, record = WriteClient(
+                self.legacy_list_profile(1024 * 1024)).call(
+                    "workspace_group.list")
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(data["items"][0]["id"], "g-1")
+        self.assertEqual(record["response_budget_bytes"], 1024 * 1024)
+        self.assertNotIn("private-cookie", json.dumps(record))
+
+    def test_policy_budget_is_recorded_without_an_override(self):
+        body = {"group_kind": "all", "items": [], "limit": 50,
+                "offset": 0, "total": 0}
+        with patch.dict(os.environ, {"BCS_E2E_COOKIE": "private-cookie"}), \
+                patch("bcs_e2e.write_transport.build_opener") as factory:
+            factory.return_value.open.return_value = Reply(body)
+            _, record = WriteClient(self.legacy_list_profile()).call(
+                "workspace_group.list")
+        self.assertEqual(record["response_budget_bytes"], 65536)
+
+    def test_invalid_binding_budgets_fail_closed_before_any_request(self):
+        for budget in (0, -1, 16 * 1024 * 1024 + 1, "1048576", 4096.0, True):
+            with self.subTest(budget=budget), \
+                    patch.dict(os.environ, {"BCS_E2E_COOKIE": "private-cookie"}), \
+                    patch("bcs_e2e.write_transport.build_opener") as factory:
+                with self.assertRaises(WriteTransportError):
+                    WriteClient(self.legacy_list_profile(budget)).call(
+                        "workspace_group.list")
+                self.assertEqual(factory.return_value.open.call_count, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -10,7 +10,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import HTTPRedirectHandler, Request, ProxyHandler, HTTPSHandler, build_opener
 
-from .profile import browser_headers, identifier, origin, unique_keys
+from .profile import (ROUTE_BINDING_RESPONSE_BUDGET_MAXIMUM, browser_headers,
+                       identifier, origin, unique_keys)
 from .transport import tls_context
 from .correlation import RequestFailure, new_traceparent, valid_traceparent, record_response_id
 from .route_bindings import (
@@ -643,6 +644,13 @@ class WriteClient:
             trace_mode = binding["traceparent"]
         except (KeyError, TypeError):
             raise WriteTransportError("operation has no validated route binding") from None
+        byte_budget = binding.get("max_response_bytes")
+        if byte_budget is None:
+            byte_budget = self.profile["policy"]["max_response_bytes"]
+        elif (type(byte_budget) is not int
+                or not 1 <= byte_budget <= ROUTE_BINDING_RESPONSE_BUDGET_MAXIMUM):
+            raise WriteTransportError(
+                "route binding response budget is outside the reviewed bound")
         if "{group_id}" in path:
             if not group_id:
                 raise WriteTransportError("group operation requires a bound group ID")
@@ -696,6 +704,7 @@ class WriteClient:
         record = {"operation": operation, "method": method, "path": evidence_path,
                   "submitted_request_id": request_id, "http_status": None,
                   "traceparent_mode": trace_mode,
+                  "response_budget_bytes": byte_budget,
                   "principal_sent": "X-Avernet-Principal" in auth_headers}
         if traceparent is not None:
             record["submitted_traceparent"] = traceparent
@@ -722,8 +731,8 @@ class WriteClient:
                 # is an assertion result, not a JSON success envelope.
                 if response.code >= 400 and not parse_error:
                     return None, record
-                raw = response.read(self.profile["policy"]["max_response_bytes"] + 1)
-                if len(raw) > self.profile["policy"]["max_response_bytes"]:
+                raw = response.read(byte_budget + 1)
+                if len(raw) > byte_budget:
                     raise WriteTransportError("response exceeds configured size limit")
                 if response.code == 204 or not raw:
                     return None, record
