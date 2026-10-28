@@ -77,7 +77,7 @@ def preprod_connections_profile():
     value = preprod_profile()
     value['edge_case_bindings'] = {'friend_connections.read': {
         'method': 'GET', 'path': CONNECTIONS_PATH, 'api_face': 'public-v1',
-        'auth': 'authenticated_bot', 'response': 'public-envelope',
+        'auth': 'human_cookie', 'response': 'public-envelope',
         'traceparent': 'disabled', 'caller_actor_id': 'bot-driver',
     }}
     return validate(value)
@@ -326,6 +326,30 @@ class RemoteEdgeReadAdapterTests(unittest.TestCase):
         self.assertEqual(len(connections_records), 2)
         self.assertFalse('Authorization' in json.dumps(requests_execution.snapshot(), sort_keys=True))
         self.assertFalse('Authorization' in json.dumps(connections_execution.snapshot(), sort_keys=True))
+
+    def test_preprod_friend_connections_send_cookie_not_bot_authorization(self):
+        records = []
+        with patch.dict(os.environ, {'BCS_E2E_DRIVER_BOT_TOKEN': TOKEN,
+                                      'BCS_E2E_HUMAN_COOKIE': COOKIE}), \
+             patch('bcs_e2e.transport.build_opener') as factory:
+            def open(request, timeout=None):
+                records.append(request)
+                return Reply(envelope(connection_data(0)))
+            factory.return_value.open.side_effect = open
+            client = ReadClient(preprod_connections_profile())
+            observation = client.read('edge.friend_connections.read')
+        request = records[0]
+        expected = (CONNECTIONS_PATH
+                    + '?actor_type=bot&actor_id=bot-driver&page=1&page_size=100')
+        self.assertEqual(request.full_url.split('https://gateway.example.com', 1)[1], expected)
+        self.assertEqual(request.headers.get('Cookie'), COOKIE)
+        self.assertNotIn('Authorization', request.headers)
+        evidence = observation.evidence
+        self.assertEqual(evidence['credentials_sent'], True)
+        self.assertEqual(evidence['authorization_sent'], False)
+        self.assertEqual(evidence['identity_kind'], 'human_cookie')
+        self.assertNotIn(TOKEN, json.dumps(evidence, sort_keys=True))
+        self.assertNotIn(COOKIE, json.dumps(evidence, sort_keys=True))
 
     def test_preprod_gateway_profiles_admit_the_public_edge_alias_slices(self):
         for case_id, profile_value in ((FRIEND_REQUESTS_PUBLIC_CASE_ID, preprod_profile()),

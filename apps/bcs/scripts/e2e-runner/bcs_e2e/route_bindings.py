@@ -343,6 +343,11 @@ def validate_edge_case_bindings(value: object, profile: dict) -> dict:
         if operation not in value:
             continue
         where = f"edge_case_bindings.{operation}"
+        # The station Gateway front door resolves the dedicated Bot actor from
+        # the browser context and the exact actor_id query. The community
+        # Singlebox contract still uses the Bot Authorization bearer.
+        if operation == "friend_connections.read" and profile["environment"].get("tier") == "preprod":
+            auth = "human_cookie"
         if operation in {"structured_templates.list", "structured_templates.detail"}:
             expected_path = path
         elif operation.startswith("structured."):

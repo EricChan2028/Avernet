@@ -435,7 +435,9 @@ class RemoteEdgeReadAdapter:
             "path": record["path"],
             "http_method": "GET",
             "http_status": record["http_status"],
-            "identity": "AUTHENTICATED_DRIVER_BOT",
+            "identity": ("HUMAN_COOKIE_DRIVER_VIEW"
+                          if self.binding["auth"] == "human_cookie"
+                          else "AUTHENTICATED_DRIVER_BOT"),
             "caller_actor_id": self.caller_actor_id,
             "fixture_effect": "NONE",
             **data,

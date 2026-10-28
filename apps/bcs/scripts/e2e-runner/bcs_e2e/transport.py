@@ -265,7 +265,13 @@ class ReadClient:
             auth_headers = minted_principal_headers(self.profile, self.local_auth)
         else:
             auth_headers = self.local_auth.headers(self.profile) if self.local_auth is not None else self.headers
-        if operation in _HUMAN_COOKIE_ONLY_READS:
+        human_cookie_read = operation in _HUMAN_COOKIE_ONLY_READS
+        if operation == "edge.friend_connections.read" and binding["auth"] == "human_cookie":
+            # Station Gateway admission happens through the browser context;
+            # actor_id remains the exact dedicated-driver filter. Do not send
+            # a Bot Authorization bearer to this public read route.
+            human_cookie_read = True
+        if human_cookie_read:
             auth_headers = {header: value for header, value in auth_headers.items()
                             if header != "Authorization"}
         unauthenticated = operation in {"edge.admission.human_actor.read",
@@ -280,9 +286,10 @@ class ReadClient:
         if unauthenticated:
             record["credentials_sent"] = False
             record["authorization_sent"] = False
-        elif operation in _HUMAN_COOKIE_ONLY_READS:
+        elif human_cookie_read:
             record["credentials_sent"] = "Cookie" in auth_headers
             record["authorization_sent"] = "Authorization" in auth_headers
+            record["identity_kind"] = "human_cookie"
         if operation in {"structured.group.read", "structured.definition.read"}:
             record["bound_group_id"] = group_id
         elif operation in {"structured.run.read", "structured.run.graph.read",
