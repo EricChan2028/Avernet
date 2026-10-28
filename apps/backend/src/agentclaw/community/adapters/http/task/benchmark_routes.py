@@ -137,7 +137,7 @@ async def benchmark_execute_task_internal(
                 metadata={
                     "benchmark": True,
                     "sender_options": {"from": body.owner_user_id},
-                    "bot_options": {"lifecycle_stage": "draft"},
+                    "bot_options": {"lifecycle_stage": "online"},
                 },
             )
         except Exception as exc:  # noqa: BLE001
@@ -177,10 +177,10 @@ async def benchmark_execute_task_internal(
         execution_config["runtime_profile"] = profile
     execution_config["main_session_id"] = session_id
     if not a2a:
-        # Both benchmark messages target the draft runtime binding. Persist that
+        # Both benchmark messages target the online runtime binding. Persist that
         # fact with the root node so liveness probing and harness resume use the
         # same runtime history that the user is inspecting.
-        execution_config["lifecycle_stage"] = "draft"
+        execution_config["lifecycle_stage"] = "online"
     task_request = replace(task_request, execution_config=execution_config)
 
     result = await service.execute(task_request)
@@ -222,7 +222,7 @@ async def benchmark_execute_task_internal(
                     "benchmark": True,
                     "session_id": session_id,
                     "sender_options": {"from": task_request.owner_user_id},
-                    "bot_options": {"lifecycle_stage": "draft"},
+                    "bot_options": {"lifecycle_stage": "online"},
                 },
             )
     except Exception as exc:  # noqa: BLE001

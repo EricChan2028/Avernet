@@ -262,7 +262,7 @@ class TestBenchmarkExecute:
 
         assert len(service.requests) == 1
         assert service.requests[0].execution_config["main_session_id"] == "benchmark-session-1"
-        assert service.requests[0].execution_config["lifecycle_stage"] == "draft"
+        assert service.requests[0].execution_config["lifecycle_stage"] == "online"
         assert service.node_updates[-1] == {
             "task_id": "task-1",
             "node_id": "task-1",
@@ -276,13 +276,13 @@ class TestBenchmarkExecute:
         assert bot_port.send_calls[0]["metadata"] == {
             "benchmark": True,
             "sender_options": {"from": "owner-1"},
-            "bot_options": {"lifecycle_stage": "draft"},
+            "bot_options": {"lifecycle_stage": "online"},
         }
         assert bot_port.send_calls[1]["metadata"] == {
             "benchmark": True,
             "session_id": "benchmark-session-1",
             "sender_options": {"from": "owner-1"},
-            "bot_options": {"lifecycle_stage": "draft"},
+            "bot_options": {"lifecycle_stage": "online"},
         }
         launch = bot_port.send_calls[1]["message"]
         assert "taskPanel.TaskLoopView" in launch
