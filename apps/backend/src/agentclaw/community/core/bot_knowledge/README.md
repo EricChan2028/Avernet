@@ -292,8 +292,15 @@ freeze needs a new object, it captures a candidate under the shared Bot lock,
 releases locks for the immutable PUT, then reacquires and recaptures with the same
 generation. Only matching native ext, selection and scope may commit BUILDING.
 Contention retries are bounded to three; upload failure commits no admission.
-Delete/PUT races retain prefix cleanup. The ordinary no-PUT path stays one short
-transaction. Later writers include protected metadata in pre-lock offload decisions.
+Delete/PUT races retain prefix cleanup. The inline/no-artifact path stays one
+short transaction. Existing markers are resolved outside locks and normalized
+against the new snapshot budget before revalidated admission; reducing a selection
+therefore cannot break the next exact ext CAS. Caller-supplied ext is never replayed
+against a concurrently changed native ext; that admission returns a CAS miss.
+Later writers include protected metadata in pre-lock offload decisions. Completion
+also reserves 2 KiB for its compact Owner/status/reason/workflow result. Every opted-in
+write checks its final pending object key against the pre-lock staged/reference key;
+a new unstaged marker causes rollback rather than committing an unreadable record.
 
 Source locking uses the immutable PK with tenant/env/native-identity validation
 and the existing SQLite writer reservation. Draft restore separates the indexed

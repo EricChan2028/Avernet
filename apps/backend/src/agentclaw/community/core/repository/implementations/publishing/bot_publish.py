@@ -124,7 +124,9 @@ class BotPublishRepository(
         # Validate against the current metadata before uploading, then re-check
         # under the transaction lock to close the preflight/write race.
         staged = knowledge_selection.merge_protected_ext(stored, staged)
-        encoded, pending = self._offload.prepare(staged, publish_id, env)
+        encoded, pending = self._offload.prepare(
+            staged, publish_id, env, reserve_bytes=cas.get("reserve_bytes", 0),
+        )
         self._validate_knowledge_ext(encoded)
         if pending and stored.get("config_artifact_oss", {}).get("oss_key") != pending[0]:
             self._offload.upload(pending)
@@ -136,12 +138,15 @@ class BotPublishRepository(
             if exists is None:
                 self._offload.cleanup(self._offload.prefix(env, publish_id))
                 return False
-        return True
+        return pending[0] if pending else True
 
-    def _upload_native(self, pending):
-        # Opted-in writers already staged their changed artifact outside locks.
+    def _upload_native(self, pending, staged):
         if not self._knowledge_policy.enabled:
             self._offload.upload(pending)
+        elif pending and pending[0] != staged:
+            # A protected-metadata race must roll back, never commit a marker
+            # whose bytes weren't staged before acquiring transaction locks.
+            raise KnowledgeError("KNOWLEDGE_ARTIFACT_STAGE_CHANGED")
 
     def _protect_knowledge_ext(self, db, publish_id, ext):
         if self._knowledge_policy.enabled:
@@ -579,7 +584,8 @@ class BotPublishRepository(
                 self._publication_session, self._offload, publish_id, incoming_ext=ext,
             )
             return self.get_by_id(publish_id) if frozen else None
-        if not self._stage_artifact(publish_id, ext, source_status):
+        staged = self._stage_artifact(publish_id, ext, source_status)
+        if not staged:
             return None
         with self._publication_session() as db:
             ext = self._protect_knowledge_ext(db, publish_id, ext)
@@ -601,7 +607,7 @@ class BotPublishRepository(
             # Disabled mode retains native upload-on-write behavior. Opted-in
             # mode has already staged changed immutable bytes before its locks.
             if affected > 0:
-                self._upload_native(pending)
+                self._upload_native(pending, staged)
         if source_status is not None and affected == 0:
             return None
         return self.get_by_id(publish_id)
@@ -621,7 +627,8 @@ class BotPublishRepository(
         """
         env = get_current_env()
         expected_json, _ = self._offload.prepare(expected_ext, publish_id, env)
-        if not self._stage_artifact(publish_id, ext, expected_json=expected_json):
+        staged = self._stage_artifact(publish_id, ext, expected_json=expected_json)
+        if not staged:
             return None
         with self._publication_session() as db:
             ext = self._protect_knowledge_ext(db, publish_id, ext)
@@ -640,7 +647,7 @@ class BotPublishRepository(
                 synchronize_session=False,
             )
             if affected > 0:
-                self._upload_native(pending)
+                self._upload_native(pending, staged)
         if affected == 0:
             return None
         return self.get_by_id(publish_id)
@@ -666,15 +673,19 @@ class BotPublishRepository(
                 incoming_ext=ext, expected_json=expected_json, compare_ext=True,
             )
             return self.get_by_id(publish_id) if frozen else None
-        if not self._stage_artifact(
-            publish_id, ext, source_status, expected_json=expected_json,
-        ):
-            return None
         online_success = (
             self._knowledge_policy.enabled
             and source_status == PublishStatus.ONLINE_PUB
             and target_status == PublishStatus.SUCCESS
         )
+        # Compact completion result: <=256-char Owner (<=1024 UTF-8 bytes),
+        # bounded status/reason and native workflow ID. Reserve before locks.
+        staged = self._stage_artifact(
+            publish_id, ext, source_status, expected_json=expected_json,
+            reserve_bytes=2048 if online_success else 0,
+        )
+        if not staged:
+            return None
         with self._publication_session(publish_id if online_success else None) as db:
             online = None
             if online_success:
@@ -703,7 +714,7 @@ class BotPublishRepository(
                 synchronize_session=False,
             )
             if affected > 0:
-                self._upload_native(pending)
+                self._upload_native(pending, staged)
                 if online is not None:
                     knowledge_selection.replace_online(db, online)
         if affected == 0:
@@ -725,9 +736,10 @@ class BotPublishRepository(
         self._require_observation(target_status)
         expected_json, _ = self._offload.prepare(expected_ext, publish_id, env)
         uuids = tuple(sorted(set(center_skill_uuids)))
-        if not self._stage_artifact(
+        staged = self._stage_artifact(
             publish_id, ext, source_status, expected_json=expected_json,
-        ):
+        )
+        if not staged:
             return None
         with self._publication_session() as db:
             skill_ids = [
@@ -771,7 +783,7 @@ class BotPublishRepository(
                 synchronize_session=False,
             )
             if affected > 0:
-                self._upload_native(pending)
+                self._upload_native(pending, staged)
         if affected == 0:
             return None
         return self.get_by_id(publish_id)
@@ -797,9 +809,11 @@ class BotPublishRepository(
             if (statuses.get(demoted_publish_id) != demoted_from_status
                     or statuses.get(restored_publish_id) != restored_from_status):
                 return False, False
-        if not self._stage_artifact(demoted_publish_id, demoted_ext, demoted_from_status):
+        demoted_stage = self._stage_artifact(demoted_publish_id, demoted_ext, demoted_from_status)
+        if not demoted_stage:
             return False, False
-        if not self._stage_artifact(restored_publish_id, restored_ext, restored_from_status):
+        restored_stage = self._stage_artifact(restored_publish_id, restored_ext, restored_from_status)
+        if not restored_stage:
             return False, False
         with self._publication_session() as db:
             incoming = {demoted_publish_id: demoted_ext, restored_publish_id: restored_ext}
@@ -850,9 +864,9 @@ class BotPublishRepository(
                 return False, False
             # Native disabled path uploads here; opted-in writes staged before locks.
             if demoted_affected > 0:
-                self._upload_native(demoted_pending)
+                self._upload_native(demoted_pending, demoted_stage)
             if restored_affected > 0:
-                self._upload_native(restored_pending)
+                self._upload_native(restored_pending, restored_stage)
         return demoted_affected > 0, restored_affected > 0
 
     def restore_draft_knowledge_selection(

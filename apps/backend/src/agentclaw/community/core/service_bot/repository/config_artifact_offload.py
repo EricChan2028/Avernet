@@ -76,13 +76,16 @@ class ConfigArtifactOffloader:
     # ── write ───────────────────────────────────────────────────
 
     def prepare(
-        self, ext: Optional[Dict[str, Any]], publish_id: int, env: str
+        self, ext: Optional[Dict[str, Any]], publish_id: int, env: str,
+        *, reserve_bytes: int = 0,
     ) -> Tuple[Optional[str], Optional[PendingUpload]]:
         """Produce the JSON string to store in the ext column, plus a pending
         object-storage upload.
 
         Returns ``(ext_json, pending)``; ``pending`` is a :data:`PendingUpload`
         to write via :meth:`upload`, or ``None``. Performs NO I/O — the caller
+        ``reserve_bytes`` budgets bounded completion metadata during preflight;
+        callers still persist the canonical zero-reserve representation. The caller
         uploads ``pending`` after write validation, or before its short DB-only
         transaction (with the native status/ext CAS still enforced).
         """
@@ -103,7 +106,7 @@ class ConfigArtifactOffloader:
         inline = json.dumps(base, ensure_ascii=False)
         # The artifact shares TEXT with snapshots and other native metadata.
         # Retain headroom for subsequent progress/result fields as before.
-        if size <= ARTIFACT_OSS_THRESHOLD_BYTES and len(inline.encode("utf-8")) <= 65535:
+        if size <= ARTIFACT_OSS_THRESHOLD_BYTES and len(inline.encode("utf-8")) + reserve_bytes <= 65535:
             return inline, None
         del base[ARTIFACT_KEY]
         digest = hashlib.sha1(artifact_json.encode("utf-8")).hexdigest()[:12]

@@ -160,3 +160,82 @@ def test_legacy_ext_writer_budgets_preserved_snapshot_before_staging(publication
     assert result.ext['knowledge_selection_snapshot'] == building.ext['knowledge_selection_snapshot']
     assert result.ext['knowledge_selection_snapshot']['enabled_kb_ids'] == ids
     assert storage.put_calls == 1
+
+
+def test_completion_result_crossing_text_budget_stages_artifact_first(publication):
+    import json
+
+    db, repo, record, _ids, storage = configure(publication)
+    building = repo.update_status(record.id, PublishStatus.BUILDING, PublishStatus.DRAFT)
+    ext = {**building.ext, 'publish': {'online': 77}, 'config_artifact': {'data': ''}}
+    empty_size = len(json.dumps(ext, ensure_ascii=False).encode())
+    ext['config_artifact']['data'] = 'x' * (65500 - empty_size)
+    online = repo.update_status_with_ext(record.id, PublishStatus.ONLINE_PUB,
+        ext, PublishStatus.BUILDING)
+    assert storage.put_calls == 0
+    completed = finish(repo, online)
+    assert completed.status == PublishStatus.SUCCESS
+    assert completed.ext['config_artifact'] == ext['config_artifact']
+    assert completed.ext['knowledge_selection_result']['status'] == 'applied'
+    assert storage.put_calls == 1
+
+
+def test_incoming_build_ext_does_not_overwrite_metadata_changed_during_put(publication):
+    _db, repo, record, _ids, storage = configure(publication)
+    incoming = {**record.ext, 'config_artifact': {'data': 'x' * 60000}}
+    put = storage.put_object
+
+    def racing_put(key, body):
+        old = repo.get_by_id(record.id)
+        repo.compare_and_set_ext(publish_id=record.id, expected_ext=old.ext,
+            ext={**old.ext, 'concurrent': 'keep'})
+        return put(key, body)
+
+    storage.put_object = racing_put
+    assert repo.update_status_with_ext(record.id, PublishStatus.BUILDING,
+        incoming, PublishStatus.DRAFT) is None
+    unchanged = repo.get_by_id(record.id)
+    assert unchanged.status == PublishStatus.DRAFT
+    assert unchanged.ext['concurrent'] == 'keep'
+
+
+def test_redraft_smaller_selection_keeps_current_artifact_ext_cas_working(publication):
+    db, repo, record, ids, storage = configure(publication)
+    repo.update_status_with_ext(record.id, PublishStatus.DRAFT,
+        {'config_artifact': {'data': 'x' * 60000}}, PublishStatus.DRAFT)
+    first = repo.update_status(record.id, PublishStatus.BUILDING, PublishStatus.DRAFT)
+    assert storage.put_calls == 1
+    repo.update_status(record.id, PublishStatus.DRAFT, PublishStatus.BUILDING)
+    with db.orm_session() as session:
+        session.query(Binding).filter_by(bot_pk=1).update({'enabled': False})
+        session.query(Binding).filter_by(kb_id=ids[0]).update({'enabled': True})
+    second = repo.update_status(record.id, PublishStatus.BUILDING, PublishStatus.DRAFT)
+    assert second.ext['knowledge_selection_snapshot']['enabled_kb_ids'] == ids[:1]
+    assert second.ext['knowledge_selection_snapshot']['generation'] != first.ext['knowledge_selection_snapshot']['generation']
+    updated = repo.compare_and_set_ext(publish_id=record.id, expected_ext=second.ext,
+        ext={**second.ext, 'progress': 'building'})
+    assert updated is not None
+    assert updated.ext['config_artifact'] == {'data': 'x' * 60000}
+
+
+def test_protected_metadata_race_cannot_commit_an_unstaged_marker(publication, monkeypatch):
+    from agentclaw.community.kernel.knowledge import KnowledgeError
+
+    _db, repo, record, ids, storage = configure(publication)
+    original_stage = repo._stage_artifact
+
+    def stage_then_race(*args, **kwargs):
+        staged = original_stage(*args, **kwargs)
+        # A real, independent admission adds protected metadata after preflight.
+        repo.update_status(record.id, PublishStatus.BUILDING, PublishStatus.DRAFT)
+        return staged
+
+    monkeypatch.setattr(repo, '_stage_artifact', stage_then_race)
+    with pytest.raises(KnowledgeError, match='KNOWLEDGE_ARTIFACT_STAGE_CHANGED'):
+        repo.update_status_with_ext(record.id, PublishStatus.FAILED,
+            {'config_artifact': {'data': 'x' * 60000}})
+    current = repo.get_by_id(record.id)
+    assert current.status == PublishStatus.BUILDING
+    assert current.ext['knowledge_selection_snapshot']['enabled_kb_ids'] == ids
+    assert 'config_artifact' not in current.ext
+    assert not storage.store

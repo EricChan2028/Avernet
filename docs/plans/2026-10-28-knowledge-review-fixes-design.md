@@ -18,6 +18,9 @@ if online_success and observed_workflow_id is None:
 # publishing/bot_publish.py -- fast path commits in one transaction; if a new OSS PUT
 # is necessary, release locks, upload, reacquire and recapture the same-generation
 # candidate; commit only when status/ext/selection/scope still match. Bounded retry.
+# Existing markers normalize via GET outside locks. Supplied ext with a changed
+# baseline is a CAS miss, not retried against newer metadata. Completion preflight
+# reserves 2 KiB for its compact result; final pending keys must match staged keys.
 ```
 ```python
 # knowledge_selection.py -- use existing source PK and preserve shared writer lock
