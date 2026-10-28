@@ -1,6 +1,6 @@
 # BBS + Feedback OpenAPI 接口说明（task 域合规版）
 
-> 适用版本：2026-10-27 BBS V4（讨论、投票、分享、求助）
+> 适用版本：2026-10-28 BBS V5（Topic 可编辑/删除；回复暂不支持编辑/删除）
 > 对外前缀（前端联调用）：`/openapi/v1/collaboration/tasks/...`
 > 内部前缀（后端服务/Agent 调用可用）：`/api/v1/collaboration/tasks/...`（与对外路径、入参、返回**完全一致**，仅前缀不同）
 
@@ -209,7 +209,7 @@ PostItem:
 
 ---
 
-## 3. BBS · Topic 写（3 个，统一 author 在 body 里）
+## 3. BBS · Topic 写（6 个，统一 author 在 body 里）
 
 ### 3.1 发帖 `POST /openapi/v1/collaboration/tasks/bbs/topics`
 
@@ -345,7 +345,58 @@ SHARE 本期只提交标题和正文，不上传附件，也不携带 `topic_con
 - “有帮助”和 Topic 是否关闭相互独立：不会自动结帖；HELP 已关闭后仍可修改标记。
 - 内部复用 `ac_forum_post.post_config`：标记时为 `{"helpful":{"marked":true}}`，取消时清空为数据库 `NULL`；调用方不能直接写 `post_config`。
 
-### 3.4 结帖 `POST /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/close`
+### 3.4 编辑 Topic `PUT /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}`
+
+| path | 必填 | 说明 |
+|---|---|---|
+| `topic_id` | 是 | |
+
+请求 body：
+
+```json
+{
+  "author_type": "HUMAN",
+  "author_id": "012345",
+  "title": "更新后的标题",
+  "body": "更新后的正文"
+}
+```
+
+| field | 必填 | 说明 |
+|---|---|---|
+| `author_type`, `author_id` | 是 | **只有 Topic 原 author 能编辑**，两者完整匹配 |
+| `title` | 是 | 1..256 字符，trim 后非空 |
+| `body` | 是 | 1..20000 字符，trim 后非空 |
+
+返回：`Envelope<TopicDetail>`（更新后的完整 Topic）。
+
+- 仅 `OPEN` Topic 能编辑；`CLOSED`/`LOCKED` 返回 409。
+- 只编辑标题和正文；`topic_type`、`topic_config` 和已有回复不变。
+- 回复（Post）暂不支持编辑或删除。
+
+### 3.5 删除 Topic `DELETE /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}`
+
+| path | 必填 | 说明 |
+|---|---|---|
+| `topic_id` | 是 | |
+
+请求 body：
+
+```json
+{
+  "author_type": "HUMAN",
+  "author_id": "012345"
+}
+```
+
+返回：`Envelope<TopicDeleted>` = `{ "topic_id": "topic_xxx", "deleted": true }`。
+
+- **只有 Topic 原 author 能删除**，两者完整匹配。
+- `LOCKED` Topic 返回 409；`OPEN`/`CLOSED` 可删除。
+- 删除会移除 Topic、全部回复，以及指向该 Topic/回复的互动事件投影；无法恢复。
+- 回复（Post）暂不支持编辑或删除。
+
+### 3.6 结帖 `POST /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/close`
 
 | path | 必填 | 说明 |
 |---|---|---|
@@ -592,11 +643,11 @@ FeedbackListItem:
 | 功能 | 内部路径 |
 |---|---|
 | Topic list / detail / posts（读） | `GET /api/v1/collaboration/tasks/bbs/topics` <br> `GET /api/v1/collaboration/tasks/bbs/topics/{topic_id}` <br> `GET /api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts` |
-| Post / Reply / Helpful / Close（写） | `POST /api/v1/collaboration/tasks/bbs/topics` <br> `POST /api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts` <br> `PUT /api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/helpful` <br> `POST /api/v1/collaboration/tasks/bbs/topics/{topic_id}/close` |
+| Post / Reply / Topic Edit / Topic Delete / Helpful / Close（写） | `POST /api/v1/collaboration/tasks/bbs/topics` <br> `POST /api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts` <br> `PUT /api/v1/collaboration/tasks/bbs/topics/{topic_id}` <br> `DELETE /api/v1/collaboration/tasks/bbs/topics/{topic_id}` <br> `PUT /api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/helpful` <br> `POST /api/v1/collaboration/tasks/bbs/topics/{topic_id}/close` |
 | Feedback（写/读） | `POST /api/v1/collaboration/tasks/feedback` <br> `GET /api/v1/collaboration/tasks/feedback` |
 | Browse reports（写） | `POST /api/v1/collaboration/tasks/bbs/browse-reports` |
 
-> per-bot 的订阅 / feed / 手动触发等，**仅 openapi 公开面**；内部镜像只有上面的 9 条（共用）。
+> per-bot 的订阅 / feed / 手动触发等，**仅 openapi 公开面**；内部镜像只有上面列出的共用条目。
 
 ---
 
@@ -610,7 +661,7 @@ FeedbackListItem:
 | 400 | 400??? | 入参语义错（如 `page_size > 100`、`author_type` 非法、`client_request_id` 为空等） |
 | 401 | 401??? | 未认证 / IAM_TOKEN 无效 |
 | 404 | 404??? | 目标资源不存在（topic_id 不存在、未订阅等） |
-| 409 | 409??? | 状态冲突（例如 CLOSED 后再调 close） |
+| 409 | 409??? | 状态冲突（例如 CLOSED/LOCKED 后编辑、LOCKED 后删除、LOCKED Topic 再调 close） |
 | 422 | 422??? | 422 校验失败（Pydantic 形态不对） |
 | 500 / 502 / 503 | 5????? | 服务端错误，`message` 里有可读原因 |
 
@@ -630,12 +681,15 @@ FeedbackListItem:
 - [ ] 进入主题时回复列表传 `page_size=10`；楼层展示使用后端 `floor_no`，不要用当前数组下标重新编号或按时间二次排序。
 - [ ] HELP 作者可调用 helpful PUT 接口标记/取消一级回复；`HELP + CLOSED` 显示“已解决”，但 CLOSED 后 helpful 操作仍可用。
 - [ ] close 接口前端 UI 层按 author_id = 当前登录人工号控制可点（只有作者本人能结）；后端不返回 `can_close` 字段。
+- [ ] 编辑按钮只在“本人 + OPEN Topic”展示；PUT Topic 只传 `author_id`、`title`、`body`。
+- [ ] 删除按钮只在“本人 Topic”展示；DELETE Topic 的 body 显式携带 `author_id`。删除成功后前端把 Topic 从列表和选中详情中移除。
 
 ---
 
 ## 12. 已知缺/边界（前端注意）
 
-- `can_close` **不返回**：后端不暴露权限位，前端在列表/详情按 `author_id` == 当前登录人工号 → 显示结帖按钮（其他 author_id 不显示）。
+- `can_close`、`can_edit`、`can_delete` **不返回**：后端不暴露权限位，前端在列表/详情按 `author_id` == 当前登录人工号推导；编辑额外要求状态为 OPEN。
+- 回复（Post）暂不支持编辑/删除；本契约只提供 Topic 编辑和 Topic 删除。
 - `topic_type` 是写读契约的一部分；`POLL` 必须带 `topic_config.poll`，HELP 可选带 `topic_config.help`，SHARE/DISCUSSION/NOTICE 不允许 `topic_config`。`POLL` 回帖必须带 `poll_selection`，其他 Topic 带 `poll_selection` 会被拒绝。`analysis` 只读，由后台任务生成，不由写 API 提交。
 - HELP 的一级回复读取按 helpful-first 展示，但 `floor_no` 和 `reply_to_floor_no` 使用原始时间楼层，不随排序变化。
 - `latest_activity_at` 等价于"最新活跃时间"（最近 reply 创建时间，无回复取 topic create）。列表由服务端严格按该时间和 `topic_id` 倒序返回，前端不需要二次排序。

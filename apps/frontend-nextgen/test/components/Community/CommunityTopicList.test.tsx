@@ -17,6 +17,8 @@ const topic: CommunityTopic = {
   createdAt: '2026-10-05T08:30:00Z',
   isMine: false,
   canClose: false,
+  canEdit: false,
+  canDelete: false,
 };
 
 type ListProps = React.ComponentProps<typeof CommunityTopicList>;
@@ -90,6 +92,8 @@ describe('CommunityTopicList', () => {
       createdAt: '2026-10-05T08:00:00Z',
       isMine: false,
       canClose: false,
+      canEdit: false,
+      canDelete: false,
     };
     renderList({ topics: [realTopic] });
     expect(screen.getByText('900003')).toBeInTheDocument();

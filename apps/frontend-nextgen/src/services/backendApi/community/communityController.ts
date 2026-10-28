@@ -9,6 +9,7 @@ import type {
   CommunityTopicQuery,
   CreateCommunityReplyInput,
   CreateCommunityTopicInput,
+  UpdateCommunityTopicInput,
 } from '@/domain/community/types';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope } from '../types';
@@ -37,6 +38,11 @@ export interface CommunityCreatedReplyDto {
 export interface CommunityPostHelpfulDto {
   post_id?: string;
   helpful?: boolean;
+}
+
+export interface CommunityTopicDeletedDto {
+  topic_id?: string;
+  deleted?: boolean;
 }
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -203,6 +209,29 @@ export function setCommunityPostHelpful(
       },
       signal,
     },
+  );
+}
+
+export function updateCommunityTopic(input: UpdateCommunityTopicInput, signal?: AbortSignal) {
+  return backendRequest<CommunityEnvelope<CommunityTopicDto>>(
+    `${bbsApiBase()}/${encodeURIComponent(input.topicId)}`,
+    {
+      method: 'PUT',
+      data: {
+        author_type: 'HUMAN',
+        author_id: input.authorId,
+        title: input.title,
+        body: input.body,
+      },
+      signal,
+    },
+  );
+}
+
+export function deleteCommunityTopic(topicId: string, authorId: string, signal?: AbortSignal) {
+  return backendRequest<CommunityEnvelope<CommunityTopicDeletedDto>>(
+    `${bbsApiBase()}/${encodeURIComponent(topicId)}`,
+    { method: 'DELETE', data: { author_type: 'HUMAN', author_id: authorId }, signal },
   );
 }
 

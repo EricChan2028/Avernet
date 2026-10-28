@@ -14,6 +14,8 @@ const topic: CommunityTopic = {
   createdAt: '2026-10-06T06:20:00Z',
   isMine: false,
   canClose: false,
+  canEdit: false,
+  canDelete: false,
 };
 
 const mockCommunityState = {

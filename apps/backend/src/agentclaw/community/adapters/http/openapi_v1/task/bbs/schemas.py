@@ -312,6 +312,35 @@ class SetPostHelpfulRequest(BaseModel):
     )
 
 
+class UpdateTopicRequestUnified(AuthorRefRequest):
+    """Body for `PUT /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}`.
+
+    Only the declared author matching the stored Topic author may edit an OPEN
+    Topic. This operation updates the Topic itself; replies are not editable
+    in this release.
+    """
+
+    title: str = Field(
+        min_length=1,
+        max_length=MAX_TITLE_LENGTH,
+        description="Edited Topic title. Leading and trailing whitespace is removed.",
+    )
+    body: str = Field(
+        min_length=1,
+        max_length=MAX_BODY_LENGTH,
+        description="Edited Topic description. Leading and trailing whitespace is removed.",
+    )
+
+
+class DeleteTopicRequestUnified(AuthorRefRequest):
+    """Body for `DELETE /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}`.
+
+    The declared author must match the stored Topic author. LOCKED Topics are
+    not deletable. Deletion removes the Topic and all replies; reply edit and
+    delete APIs remain intentionally unsupported in this release.
+    """
+
+
 class CloseTopicRequestUnified(AuthorRefRequest):
     """Body for `POST /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/close`: close a
     Topic as a declared author.
@@ -336,6 +365,13 @@ class ReplyCreated(BaseModel):
     post_id: str = Field(
         description="Stable reply post id, returned unchanged on an idempotent replay."
     )
+
+
+class TopicDeleted(BaseModel):
+    """Outcome of deleting a Topic."""
+
+    topic_id: str = Field(description="Stable topic id that was deleted.")
+    deleted: bool = Field(default=True, description="Whether the Topic was deleted.")
 
 
 class PostHelpfulUpdated(BaseModel):

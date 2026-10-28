@@ -36,6 +36,7 @@ export interface CommunityTopicDetailProps {
   loading: boolean;
   error: string | null;
   closing: boolean;
+  deleting: boolean;
   helpfulPostId: string | null;
   onBack: () => void;
   currentUserId?: string;
@@ -49,6 +50,8 @@ export interface CommunityTopicDetailProps {
   onLike?: (target: ForumTargetRef) => void;
   onFavorite?: (target: ForumTargetRef) => void;
   onCloseTopic: () => Promise<boolean>;
+  onEditTopic: () => void;
+  onDeleteTopic: () => Promise<boolean>;
   onSetPostHelpful: (postId: string, helpful: boolean) => Promise<boolean>;
   // 回帖分页
   replyLoading: boolean;
@@ -65,6 +68,7 @@ export function CommunityTopicDetail({
   loading,
   error,
   closing,
+  deleting,
   helpfulPostId,
   onBack,
   currentUserId,
@@ -78,6 +82,8 @@ export function CommunityTopicDetail({
   onLike,
   onFavorite,
   onCloseTopic,
+  onEditTopic,
+  onDeleteTopic,
   onSetPostHelpful,
   replyLoading,
   replyError,
@@ -137,11 +143,14 @@ export function CommunityTopicDetail({
       <TopicDetailHeader
         topic={topic}
         closing={closing}
+        deleting={deleting}
         replyPage={replyPage}
         replyPageCount={replyPageCount}
         replyLoading={replyLoading}
         onBack={onBack}
         onCloseTopic={onCloseTopic}
+        onEditTopic={onEditTopic}
+        onDeleteTopic={onDeleteTopic}
         onGoToReplyPage={onGoToReplyPage}
       />
       <main className="app-scrollbar min-h-0 flex-1 overflow-y-auto">

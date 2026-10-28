@@ -9,6 +9,7 @@ import { ArrowLeft, Plus, Search, UserRound } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { CommunityPersonalCenter } from '../CommunityPersonalCenter';
 import { CommunityTopicDetail } from '../CommunityTopicDetail';
+import { EditTopicModal } from '../CommunityTopicDetail/EditTopicModal';
 import { CommunityTopicList } from '../CommunityTopicList';
 import { PublishTopicModal } from '../PublishTopicModal';
 
@@ -23,6 +24,7 @@ const topicTypeOptions: Array<{ value: CommunityTopicFilter; label: string }> = 
 export function CommunityPage() {
   const community = useCommunity();
   const [publishOpen, setPublishOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [showPersonalCenter, setShowPersonalCenter] = useState(false);
   const hasFilter =
     !!community.query.trim() || community.scope === 'mine' || community.topicType !== 'all';
@@ -47,9 +49,12 @@ export function CommunityPage() {
         loading={community.detailLoading}
         error={community.detailError}
         closing={community.closing}
+        deleting={community.deleting}
         helpfulPostId={community.helpfulPostId}
         onBack={community.closeDetail}
         onCloseTopic={community.closeTopic}
+        onEditTopic={() => setEditOpen(true)}
+        onDeleteTopic={community.deleteTopic}
         onSetPostHelpful={community.setPostHelpful}
         replyLoading={community.replyLoading}
         replyError={community.replyError}
@@ -57,6 +62,18 @@ export function CommunityPage() {
         replyPageCount={community.replyPageCount}
         replyPageSize={COMMUNITY_REPLY_PAGE_SIZE}
         onGoToReplyPage={(page) => void community.goToReplyPage?.(page)}
+      />
+    );
+  }
+
+  if (editOpen && community.selectedTopic) {
+    return (
+      <EditTopicModal
+        open
+        topic={community.selectedTopic}
+        saving={community.editSaving}
+        onOpenChange={setEditOpen}
+        onSave={community.updateTopic}
       />
     );
   }

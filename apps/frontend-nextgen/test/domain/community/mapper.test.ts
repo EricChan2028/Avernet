@@ -1,4 +1,5 @@
 import { mapCommunityReplyDto, mapCommunityTopicDto } from '@/domain/community/mapper';
+import { enrichOwnership } from '@/domain/community/ownership';
 
 describe('community mapper', () => {
   test('maps topic metadata and page totals for the BBS list item', () => {
@@ -27,10 +28,20 @@ describe('community mapper', () => {
       createdAt: '2026-10-05T09:00:00Z',
       isMine: true,
       canClose: true,
+      canEdit: false,
+      canDelete: false,
       topicType: 'poll',
     });
     expect(topic.topicConfig).toBeUndefined();
     expect(topic.analysis).toBeUndefined();
+
+    const owned = enrichOwnership(topic, 'user-1');
+    expect(owned).toMatchObject({
+      isMine: true,
+      canClose: true,
+      canEdit: true,
+      canDelete: true,
+    });
   });
 
   test('maps bot replies and normalizes unknown topic status to closed', () => {

@@ -45,6 +45,8 @@ const topic: CommunityTopic = {
   createdAt: '2026-10-05T08:30:00Z',
   isMine: true,
   canClose: true,
+  canEdit: true,
+  canDelete: true,
 };
 const reply: CommunityReply = {
   id: 'reply-1',
@@ -355,6 +357,8 @@ describe('useCommunity', () => {
       ...helpTopic,
       isMine: false,
       canClose: false,
+      canEdit: false,
+      canDelete: false,
       author: { ...helpTopic.author, id: 'other-user' },
     };
     mockedService.getTopic.mockResolvedValue(otherHelpTopic);
@@ -424,6 +428,8 @@ describe('useCommunity', () => {
       createdAt: '2026-10-08T08:00:00Z',
       isMine: false,
       canClose: false,
+      canEdit: false,
+      canDelete: false,
     };
     mockedService.listTopics.mockResolvedValue({ items: [botTopic], total: 1 });
 

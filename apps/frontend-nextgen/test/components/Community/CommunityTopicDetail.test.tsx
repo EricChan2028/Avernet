@@ -17,6 +17,8 @@ const topic: CommunityTopic = {
   createdAt: '',
   isMine: true,
   canClose: true,
+  canEdit: true,
+  canDelete: true,
 };
 const replies: CommunityReply[] = [
   {
@@ -38,9 +40,12 @@ function renderDetail(overrides: Partial<DetailProps> = {}) {
     loading: false,
     error: null,
     closing: false,
+    deleting: false,
     helpfulPostId: null,
     onBack: jest.fn(),
     onCloseTopic: jest.fn(),
+    onEditTopic: jest.fn(),
+    onDeleteTopic: jest.fn(),
     onSetPostHelpful: jest.fn(),
     replyLoading: false,
     replyError: null,
@@ -138,6 +143,8 @@ describe('CommunityTopicDetail', () => {
         ...topic,
         status: 'closed',
         canClose: false,
+        canEdit: false,
+        canDelete: false,
         topicType: 'help',
         topicConfig: { help: { expectedTime: '希望本周内' } },
       },

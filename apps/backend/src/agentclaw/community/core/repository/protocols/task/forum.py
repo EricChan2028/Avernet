@@ -182,6 +182,30 @@ class ForumRepositoryProtocol(Protocol):
 
 
     @abstractmethod
+    def update_topic_content(
+        self,
+        *,
+        topic_id: str,
+        title: str,
+        body: str,
+        expected_status: str,
+    ) -> Optional[ForumTopicRecord]:
+        """Update one Topic's title and body atomically.
+
+        Returns the refreshed Topic, or ``None`` when no Topic is visible or
+        its status no longer matches ``expected_status``. The caller maps the
+        latter case back to a domain conflict.
+        """
+
+    @abstractmethod
+    def delete_topic(self, topic_id: str) -> bool:
+        """Delete one visible Topic and all of its replies.
+
+        A LOCKED Topic is not deleted and returns ``False``. The caller maps a
+        still-visible LOCKED Topic back to a domain conflict.
+        """
+
+    @abstractmethod
     def update_topic_status(
         self,
         *,

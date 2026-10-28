@@ -2,10 +2,12 @@ import {
   closeCommunityTopic,
   createCommunityReply,
   createCommunityTopic,
+  deleteCommunityTopic,
   getCommunityTopic,
   listCommunityReplies,
   listCommunityTopics,
   setCommunityPostHelpful,
+  updateCommunityTopic,
 } from '@/services/backendApi/community/communityController';
 import * as http from '@/services/backendApi/httpClient';
 
@@ -210,6 +212,40 @@ describe('communityController', () => {
     await createCommunityTopic({ title: '标题', body: '正文', authorId: 'u1', authorName: '   ' });
     const arg = mockedRequest.mock.calls[0];
     expect(arg?.[1].data).not.toHaveProperty('author_display_name');
+  });
+
+  test('编辑主题使用 PUT，删除主题使用 DELETE，两者均携带声明作者', async () => {
+    await updateCommunityTopic({
+      topicId: 'topic/1',
+      authorId: 'u1',
+      title: '新标题',
+      body: '新正文',
+    });
+    await deleteCommunityTopic('topic/1', 'u1');
+
+    expect(mockedRequest).toHaveBeenNthCalledWith(
+      1,
+      '/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1',
+      {
+        method: 'PUT',
+        data: {
+          author_type: 'HUMAN',
+          author_id: 'u1',
+          title: '新标题',
+          body: '新正文',
+        },
+        signal: undefined,
+      },
+    );
+    expect(mockedRequest).toHaveBeenNthCalledWith(
+      2,
+      '/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1',
+      {
+        method: 'DELETE',
+        data: { author_type: 'HUMAN', author_id: 'u1' },
+        signal: undefined,
+      },
+    );
   });
 
   test('详情请求透传 viewer 身份参数', async () => {

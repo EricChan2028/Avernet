@@ -72,6 +72,8 @@ export interface CommunityTopic {
   createdAt: string;
   isMine: boolean;
   canClose: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
 }
 
 export interface CommunityReply {
@@ -146,6 +148,13 @@ export interface CreateCommunityTopicInput extends CreateCommunityTopicDraft {
   authorId: string;
   authorName: string;
   authorAvatarUrl?: string;
+}
+
+export interface UpdateCommunityTopicInput {
+  topicId: string;
+  authorId: string;
+  title: string;
+  body: string;
 }
 
 export interface CreateCommunityReplyInput {
