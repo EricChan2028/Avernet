@@ -253,8 +253,15 @@ class Harness:
         if operation == "station.discover.collaborate.read":
             if self.current_visibility == "private":
                 return {"bots": [], "count": 0}, record
-            row = {"bot_uuid": DRIVER, "is_friend": True, "visibility": "public", "provider_info": {}}
-            return {"bots": [row], "count": 1}, record
+            # Live station rows are heterogeneous: provider_info is an
+            # optional projection key on a subset of rows. Pin one row
+            # without it and one row with it.
+            rows = [
+                {"bot_uuid": DRIVER, "is_friend": True, "visibility": "public"},
+                {"bot_uuid": "peer-bot", "is_friend": False,
+                 "visibility": "protected", "provider_info": {}},
+            ]
+            return {"bots": rows, "count": len(rows)}, record
         if operation == "station.discover.role_no_org.read":
             record["http_status"] = 400
             return {"code": "invalid_operation", "message": "role",

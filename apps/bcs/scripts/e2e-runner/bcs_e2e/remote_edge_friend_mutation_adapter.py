@@ -542,10 +542,12 @@ class RemoteEdgeFriendMutationAdapter:
             or len(directory_rows) != len(bots)
             or any(row.get("bot_uuid") == member for row in directory_rows)
             or any(
+                # provider_info is an optional projection key on a subset of
+                # live directory rows; the bounded shape gates only the
+                # bot_uuid / visibility / is_friend triple, mirroring the twin.
                 not isinstance(row.get("bot_uuid"), str)
                 or row.get("visibility") not in ("public", "protected")
                 or not isinstance(row.get("is_friend"), bool)
-                or "provider_info" not in row
                 for row in directory_rows
             )
         ):
