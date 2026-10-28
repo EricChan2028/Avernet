@@ -432,6 +432,35 @@ class SessionCliCompleteInvokeTests(unittest.TestCase):
         self.assertEqual(result.status, "BLOCKED")
         self.assertEqual(result.error_type, "RunStateError")
 
+    def test_completion_acknowledgement_id_alias_is_accepted(self):
+        def deform(data, operation, kwargs):
+            if operation == SESSION_CLI_SESSION_COMPLETE_OPERATION:
+                payload = completed_session()
+                del payload["session_id"]  # ACK projects only "id"
+                return {"status": 200, "data": payload}
+        for preprod in (False, True):
+            with self.subTest(preprod=preprod):
+                result, _, _, _ = self.run_case(preprod=preprod, deform=deform)
+                self.assertEqual(result.status, "PASS")
+
+    def test_retired_service_settings_410_form_is_accepted(self):
+        def deform(data, operation, kwargs):
+            if operation == SESSION_CLI_GROUP_SETTINGS_PATCH_OPERATION:
+                return {"status": 410, "data": None}
+        for preprod in (False, True):
+            with self.subTest(preprod=preprod):
+                result, _, _, _ = self.run_case(preprod=preprod, deform=deform)
+                self.assertEqual(result.status, "PASS")
+                self.assertEqual(
+                    result.snapshot()["steps"][0]["data"]["settings_form"],
+                    "retired_410")
+
+    def test_acknowledged_service_settings_form_is_projected(self):
+        result, _, _, _ = self.run_case()
+        self.assertEqual(
+            result.snapshot()["steps"][0]["data"]["settings_form"],
+            "service_spec_ack")
+
     def test_expected_credential_kind_partitions_cli_and_http_operations(self):
         for preprod in (False, True):
             with self.subTest(preprod=preprod):

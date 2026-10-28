@@ -139,6 +139,71 @@ class WriteTransportTests(unittest.TestCase):
                             client.call(
                                 "session_cli.session.messages", session_id="s1")
 
+    def test_cli_message_deliveries_pass_a_valid_array_through_verbatim(self):
+        legacy = profile()
+        legacy["entrypoint"]["api_face"] = "legacy"
+        legacy["route_bindings"] = dict(legacy["route_bindings"])
+        for operation, method, path in (
+                ("session_cli.message.deliveries.read", "GET",
+                 ("/openapi/v1/collaboration/messages/not-a-message"
+                  "/deliveries?session_id={session_id}")),
+                ("session_cli.message.deliveries.query", "POST",
+                 ("/openapi/v1/collaboration/sessions/{session_id}"
+                  "/message-deliveries/query"))):
+            legacy["route_bindings"][operation] = {
+                "method": method, "path": path, "traceparent": "disabled"}
+        with patch.dict(os.environ, {"BCS_E2E_COOKIE": "private-cookie"}), \
+                patch("bcs_e2e.write_transport.build_opener") as factory:
+            client = WriteClient(legacy)
+            for operation in ("session_cli.message.deliveries.read",
+                              "session_cli.message.deliveries.query"):
+                for deliveries in ([], [{"delivery_id": "d1"}]):
+                    factory.return_value.open.return_value = Reply(deliveries)
+                    with self.subTest(operation=operation,
+                                      deliveries=deliveries):
+                        data, record = client.call(operation, session_id="s1")
+                        self.assertEqual(data, deliveries)
+                        self.assertEqual(
+                            record["response_projection"],
+                            "cli-delivery-array-passthrough")
+                factory.return_value.open.return_value = Reply(
+                    {"session_id": "s1"})
+                data, record = client.call(operation, session_id="s1")
+                self.assertEqual(data, {"session_id": "s1"})
+                self.assertNotIn("response_projection", record)
+                for invalid in (["invalid"], "array", 12):
+                    factory.return_value.open.return_value = Reply(invalid)
+                    with self.subTest(operation=operation, invalid=invalid), \
+                            self.assertRaises(WriteTransportError):
+                        client.call(operation, session_id="s1")
+
+    def test_public_delivery_arrays_pass_through_after_the_envelope(self):
+        value = profile()
+        value["route_bindings"] = dict(value["route_bindings"])
+        value["route_bindings"]["session_cli.message.deliveries.read"] = {
+            "method": "GET",
+            "path": ("/openapi/v1/collaboration/messages/not-a-message"
+                     "/deliveries?session_id={session_id}"),
+            "traceparent": "disabled"}
+        with patch.dict(os.environ, {"BCS_E2E_COOKIE": "private-cookie"}), \
+                patch("bcs_e2e.write_transport.build_opener") as factory:
+            client = WriteClient(value)
+            factory.return_value.open.return_value = Reply(
+                {"code": 20000, "message": "OK", "request_id": "r",
+                 "data": [{"delivery_id": "d1"}]})
+            data, record = client.call(
+                "session_cli.message.deliveries.read", session_id="s1")
+            self.assertEqual(data, [{"delivery_id": "d1"}])
+            self.assertEqual(record["response_projection"],
+                             "cli-delivery-array-passthrough")
+            factory.return_value.open.return_value = Reply(
+                {"code": 20000, "message": "OK", "request_id": "r",
+                 "data": {"session_id": "s1"}})
+            data, record = client.call(
+                "session_cli.message.deliveries.read", session_id="s1")
+            self.assertEqual(data, {"session_id": "s1"})
+            self.assertNotIn("response_projection", record)
+
     def test_delete_operations_use_contract_200_not_204(self):
         with patch.dict(os.environ, {"BCS_E2E_COOKIE": "private-cookie"}), patch("bcs_e2e.write_transport.build_opener") as factory:
             body = {"code": 20000, "message": "OK", "request_id": "r", "data": {"deleted": True}}

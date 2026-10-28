@@ -762,6 +762,21 @@ class WriteClient:
                         else "legacy-session-message-array-to-items"
                     )
                     return {"items": payload}, record
+                if (operation in {"session_cli.message.deliveries.read",
+                                  "session_cli.message.deliveries.query"}
+                        and isinstance(payload, list)):
+                    # The reviewed station withdrawals surface projects the
+                    # delivery batch as a bare JSON array (empty when no
+                    # delivery exists); pass arrays through verbatim instead
+                    # of forcing the object envelope. Object payloads keep
+                    # the generic contract below.
+                    if not all(isinstance(item, dict) for item in payload):
+                        raise WriteTransportError(
+                            "message delivery response must be an array of "
+                            "objects")
+                    record["response_projection"] = (
+                        "cli-delivery-array-passthrough")
+                    return payload, record
                 if payload is not None and not isinstance(payload, dict):
                     raise WriteTransportError("expected object response data")
                 return payload, record

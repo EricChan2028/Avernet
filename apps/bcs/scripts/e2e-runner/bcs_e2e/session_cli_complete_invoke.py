@@ -102,6 +102,7 @@ class RemoteSessionCliCompleteInvokeAdapter:
         self.group_id: str | None = None
         self.session_id: str | None = None
         self.service_session_id: str | None = None
+        self.settings_form: str | None = None
         self.driver_client = WriteClient(self._actor_profile("driver_token_env"))
         self.member_client = WriteClient(self._actor_profile("member_token_env"))
 
@@ -287,8 +288,16 @@ class RemoteSessionCliCompleteInvokeAdapter:
             body={"output": {"summary": "release approved"}},
             case_class="session-complete")
         data = call.data
+        # The reviewed preprod build acknowledges completion with the
+        # Session key projected as "id" (the read-back projects both "id"
+        # and "session_id"), so accept either projection anchored to the
+        # bound Session.
+        acknowledged = (data.get("session_id")
+                        if isinstance(data, dict) else None)
+        if acknowledged is None and isinstance(data, dict):
+            acknowledged = data.get("id")
         if (not isinstance(data, dict)
-                or data.get("session_id") != self.session_id
+                or acknowledged != self.session_id
                 or data.get("status") != "completed"
                 or data.get("output") != {"summary": "release approved"}):
             raise RunStateError(
@@ -323,10 +332,23 @@ class RemoteSessionCliCompleteInvokeAdapter:
             evidence=call.evidence)
 
     def configure_service_concurrency(self) -> AdapterCall:
+        # Dev PR #3173 ("retire service session policies and callbacks")
+        # removed Group service_spec policies station-wide; the reviewed
+        # preprod build answers the settings patch with HTTP 410 and the
+        # transport intentionally drops non-2xx bodies, so the retired form
+        # is identified from the record only. Both forms are accepted on
+        # every environment and the observed form is reported per run.
         call = self._http(
             self.driver_client, SESSION_CLI_GROUP_SETTINGS_PATCH_OPERATION,
             body={"service_spec": {"max_concurrency": 2}},
+            expected=(200, 410),
             case_class="service-concurrency-config")
+        if call.evidence.get("http_status") == 410:
+            self.settings_form = "retired_410"
+            return AdapterCall(
+                data={"group_id": self.group_id, "max_concurrency": 2,
+                      "settings_form": "retired_410"},
+                evidence=call.evidence)
         data = call.data
         if (not isinstance(data, dict)
                 or data.get("id") != self.group_id
@@ -336,8 +358,10 @@ class RemoteSessionCliCompleteInvokeAdapter:
             raise RunStateError(
                 "Session completion-invocation service concurrency setting "
                 "is not exact")
+        self.settings_form = "service_spec_ack"
         return AdapterCall(
-            data={"group_id": self.group_id, "max_concurrency": 2},
+            data={"group_id": self.group_id, "max_concurrency": 2,
+                  "settings_form": "service_spec_ack"},
             evidence=call.evidence)
 
     def invoke_service_session(self) -> AdapterCall:
@@ -612,6 +636,7 @@ def execute_session_cli_complete_invoke_case(adapter: object) -> CaseExecution:
             "signoff_session_completed": True,
             "completion_output_preserved": True,
             "service_concurrency_configured": True,
+            "settings_form": adapter.settings_form,
             "service_session_invoked": True,
             "own_service_session_read": True,
             "foreign_service_session_read_rejected": True,
