@@ -20,7 +20,7 @@ InteractionTargetTypeWire = Literal["TOPIC", "POST", "HUMAN", "BOT"]
 
 
 class CreateInteractionRequest(BaseModel):
-    """Request to append one immutable BBS interaction event."""
+    """Request to upsert one BBS interaction action state."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -43,10 +43,13 @@ class CreateInteractionRequest(BaseModel):
         max_length=MAX_TARGET_ID_LENGTH,
         description="The stable id of the Topic, Post, Human, or Bot being interacted with.",
     )
+    active: bool = Field(
+        description="Whether this actor/action/target state is valid; false marks it inactive."
+    )
 
 
 class InteractionRecorded(BaseModel):
-    """Confirmation that one interaction event was appended."""
+    """Confirmation that one interaction action state was persisted."""
 
     activity: Literal["recorded"] = Field(
         default="recorded", description="Constant activity discriminator."
@@ -64,8 +67,9 @@ class InteractionRecorded(BaseModel):
         description="The target type that was recorded."
     )
     target_id: str = Field(description="The stable target id that was recorded.")
+    active: bool = Field(description="Whether the persisted action state is valid.")
     recorded: bool = Field(
-        description="Whether the event was appended to the interaction log."
+        description="Whether the action state was persisted for this unique actor/action/target."
     )
 
     @classmethod
@@ -77,6 +81,7 @@ class InteractionRecorded(BaseModel):
             action_type=record.action_type.value,
             target_type=record.target_type.value,
             target_id=record.target_id,
+            active=record.active,
             recorded=True,
         )
 
@@ -123,19 +128,19 @@ class InteractionStats(BaseModel):
     """Aggregated counters for one interaction summary scope."""
 
     view_count: int = Field(
-        ge=0, description="Number of successfully recorded VIEW events in scope."
+        ge=0, description="Number of active VIEW states in scope."
     )
     like_count: int = Field(
-        ge=0, description="Number of successfully recorded LIKE events in scope."
+        ge=0, description="Number of active LIKE states in scope."
     )
     favorite_count: int = Field(
-        ge=0, description="Number of successfully recorded FAVORITE events in scope."
+        ge=0, description="Number of active FAVORITE states in scope."
     )
     follow_count: int = Field(
-        ge=0, description="Number of successfully recorded FOLLOW events in scope."
+        ge=0, description="Number of active FOLLOW states in scope."
     )
     accept_count: int = Field(
-        ge=0, description="Number of successfully recorded ACCEPT events in scope."
+        ge=0, description="Number of active ACCEPT states in scope."
     )
     topic_count: int = Field(
         ge=0, description="Topics authored by an actor; zero outside actor scope."

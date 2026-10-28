@@ -115,7 +115,7 @@ export function useCommunityInteractions({
       if (pendingActions[actionKey]) return false;
       setPendingActions((previous) => ({ ...previous, [actionKey]: true }));
       try {
-        const input: RecordInteractionInput = { actor: viewer, actionType, target };
+        const input: RecordInteractionInput = { actor: viewer, actionType, target, active: true };
         await communityService.createInteraction(input);
         if (options?.refresh !== false) {
           await refreshSummaries(targetQueries(target), { force: true });

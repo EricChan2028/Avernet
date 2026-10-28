@@ -342,6 +342,7 @@ export interface InteractionRecordedDto {
   action_type?: string;
   target_type?: string;
   target_id?: string;
+  active?: boolean;
   recorded?: boolean;
   [key: string]: unknown;
 }

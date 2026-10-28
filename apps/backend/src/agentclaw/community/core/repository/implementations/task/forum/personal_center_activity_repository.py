@@ -66,6 +66,7 @@ def _selected_topic_query(
         )
         .filter(
             ForumInteractionModel.env == get_current_env(),
+            ForumInteractionModel.active.is_(True),
             tuple_(
                 ForumInteractionModel.actor_type, ForumInteractionModel.actor_id
             ).in_(_actor_pairs(actors)),
@@ -122,6 +123,7 @@ def _liked_post_query(
         )
         .filter(
             ForumInteractionModel.env == get_current_env(),
+            ForumInteractionModel.active.is_(True),
             tuple_(
                 ForumInteractionModel.actor_type, ForumInteractionModel.actor_id
             ).in_(_actor_pairs(actors)),

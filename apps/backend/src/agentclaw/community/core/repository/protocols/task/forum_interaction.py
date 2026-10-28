@@ -1,4 +1,4 @@
-"""Repository contract for BBS interaction event persistence and summaries."""
+"""Repository contract for BBS interaction state persistence and summaries."""
 
 from __future__ import annotations
 
@@ -26,8 +26,9 @@ class ForumInteractionRepositoryProtocol(Protocol):
         action_type: str,
         target_type: str,
         target_id: str,
+        active: bool,
     ) -> ForumInteractionRecord:
-        """Append one event in the current environment."""
+        """Upsert one action state in the current environment."""
 
     @abstractmethod
     def get_summary(
@@ -56,4 +57,4 @@ class ForumInteractionRepositoryProtocol(Protocol):
     def batch_get_actor_target_summaries(
         self, pairs: tuple[ForumActorTargetRef, ...]
     ) -> dict[ForumActorTargetRef, ForumStatsRecord]:
-        """Read event counts for exact actor-target pairs."""
+        """Read active action counts for exact actor-target pairs."""

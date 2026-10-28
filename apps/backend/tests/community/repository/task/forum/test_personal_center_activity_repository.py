@@ -97,8 +97,9 @@ def test_activity_projection_mixes_actors_targets_and_activity_sources(db):
                 actor_id="user-a",
                 action_type="VIEW",
                 target_type="TOPIC",
-                target_id=topic.topic_id,
+                target_id=bot_topic.topic_id,
                 env="dev",
+                active=False,
                 gmt_create=base + timedelta(minutes=1),
                 gmt_modified=base + timedelta(minutes=1),
             ),
@@ -159,7 +160,7 @@ def test_activity_projection_mixes_actors_targets_and_activity_sources(db):
 
     viewed = _list(activity_repo, activity_type=PersonalCenterActivityType.VIEWED)
     assert viewed.total == 1
-    assert viewed.items[0].happened_at == base + timedelta(minutes=1)
+    assert viewed.items[0].happened_at == base
 
     liked_topic = _list(
         activity_repo,
@@ -171,7 +172,7 @@ def test_activity_projection_mixes_actors_targets_and_activity_sources(db):
     assert liked_topic.items[0].post_id is None
 
 
-def test_activity_pages_and_dedupes_on_the_database(db):
+def test_activity_pages_orders_states_on_the_database(db):
     content_repo = ForumRepository(db)
     activity_repo = ForumPersonalCenterActivityRepository(db)
     topic_ids = []
@@ -185,19 +186,18 @@ def test_activity_pages_and_dedupes_on_the_database(db):
         ).topic
         topic_ids.append(topic.topic_id)
         with db.orm_session() as session:
-            for minute in (0, 5):
-                session.add(
-                    ForumInteractionModel(
-                        actor_type="HUMAN",
-                        actor_id="user-a",
-                        action_type="VIEW",
-                        target_type="TOPIC",
-                        target_id=topic.topic_id,
-                        env="dev",
-                        gmt_create=datetime(2026, 10, 27, 12, index * 10 + minute),
-                        gmt_modified=datetime(2026, 10, 27, 12, index * 10 + minute),
-                    )
+            session.add(
+                ForumInteractionModel(
+                    actor_type="HUMAN",
+                    actor_id="user-a",
+                    action_type="VIEW",
+                    target_type="TOPIC",
+                    target_id=topic.topic_id,
+                    env="dev",
+                    gmt_create=datetime(2026, 10, 27, 12, index * 10),
+                    gmt_modified=datetime(2026, 10, 27, 12, index * 10),
                 )
+            )
 
     page = _list(activity_repo, activity_type=PersonalCenterActivityType.VIEWED)
 

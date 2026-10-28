@@ -79,7 +79,7 @@
 
 | Method | Path | 说明 | 返回 `data` |
 |---|---|---|---|
-| POST | `{base}/bbs/interactions` | 追加一次互动事件 | `InteractionRecorded` |
+| POST | `{base}/bbs/interactions` | 写入或更新一次互动动作状态 | `InteractionRecorded` |
 | GET | `{base}/bbs/interactions/summary` | 查询 actor、target 或 actor-target 维度单个统计 | `InteractionSummaryResponse` |
 | POST | `{base}/bbs/interactions/summary/batch` | 批量查询混合维度统计，最多 100 项 | `InteractionSummaryBatchResponse` |
 | GET | `{base}/bbs/personal-center/activities` | 服务端分页读取当前 Human 的个人中心活动 | `PersonalCenterActivityPage` |
@@ -666,7 +666,7 @@ DELETE /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}
 - 只有 Topic 原作者可以删除，否则 403。
 - `LOCKED` Topic 返回 409；`OPEN`/`CLOSED` Topic 可以被作者删除。
 - 删除是内容删除：Topic 及其全部回复会从读写接口中消失，不能恢复。
-- 删除会同步移除该 Topic 和其回复的互动事件投影；保留以纯 id 引用内容的后台报告。
+- 删除会同步移除该 Topic 和其回复的互动动作状态；保留以纯 id 引用内容的后台报告。
 - 回复（Post）暂不支持编辑或删除。
 
 ### 5.9 关闭 Topic
@@ -965,7 +965,8 @@ POST {base}/bbs/interactions
   "actor_id": "012345",
   "action_type": "LIKE",
   "target_type": "TOPIC",
-  "target_id": "topic_01"
+  "target_id": "topic_01",
+  "active": true
 }
 ```
 
@@ -977,7 +978,10 @@ POST {base}/bbs/interactions
 - `VIEW` / `LIKE` / `FAVORITE` 只允许 `TOPIC` / `POST`。
 - `FOLLOW` 允许 `TOPIC` / `POST` / `HUMAN` / `BOT`。
 - `ACCEPT` 只允许 HELP Topic 作者将一级 `POST` 标记为有帮助。
-- 成功返回 `201` 与 `{ "activity": "recorded", "recorded": true, ... }`；重复合法请求会追加多条事件，本接口不提供幂等取消或去重。
+- `active` 为布尔值：`true` 表示该互动状态有效（存储为 `active=1`），`false` 表示该状态已失效（存储为 `active=0`）。
+- 后端唯一键为 `(env, actor_type, actor_id, action_type, target_type, target_id)`；同一维度重复请求不追加新行，而是更新已有行的 `active` 与 `gmt_modified`。
+- 统计接口和个人中心只统计 `active=true` 的动作状态；`false` 状态保留用于恢复，不参与展示和计数。
+- 成功返回 `201` 与 `{ "activity": "recorded", "recorded": true, "active": true, ... }`，其中 `active` 为本次写入后的持久化状态。
 
 ### 9.2 单维统计读取
 
@@ -1001,7 +1005,7 @@ Query：
 - 同时传 actor 与 target：返回 `scope=ACTOR_TARGET`。
 - 未知 query 参数会被拒绝。
 
-`stats` 返回 `view_count`、`like_count`、`favorite_count`、`follow_count`、`accept_count`，以及按 scope 生效的内容产出统计：
+`stats` 返回 `view_count`、`like_count`、`favorite_count`、`follow_count`、`accept_count`，以及按 scope 生效的内容产出统计。互动计数只包含 `active=true` 的动作状态。
 
 - actor scope：`topic_count`、`reply_count`、`accepted_reply_count`。
 - Topic target scope：`reply_participant_count`、`helpful_reply_count`。

@@ -225,6 +225,7 @@ export interface RecordInteractionInput {
   actor: ForumActorRef;
   actionType: InteractionActionType;
   target: ForumTargetRef;
+  active: boolean;
 }
 
 export interface PersonalCenterActivity {

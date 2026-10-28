@@ -1,4 +1,4 @@
-"""Immutable records for the BBS interaction domain."""
+"""Records and contracts for BBS interaction state."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ class ForumActorType(StrEnum):
 
 
 class ForumInteractionActionType(StrEnum):
-    """Interaction events; every successful write appends one immutable row."""
+    """Interaction actions stored as one active/inactive state per unique key."""
 
     VIEW = "VIEW"
     LIKE = "LIKE"
@@ -110,7 +110,7 @@ class ForumActorTargetRef:
 
 @dataclass(frozen=True)
 class ForumInteractionRecord:
-    """One persisted append-only interaction event."""
+    """One persisted interaction action state."""
 
     actor_type: ForumActorType
     actor_id: str
@@ -118,6 +118,7 @@ class ForumInteractionRecord:
     target_type: ForumInteractionTargetType
     target_id: str
     env: str
+    active: bool
     created_at: datetime
     updated_at: datetime
 

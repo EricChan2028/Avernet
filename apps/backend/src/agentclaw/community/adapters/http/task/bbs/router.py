@@ -678,6 +678,7 @@ async def create_interaction_internal(
         action_type=body.action_type,
         target_type=body.target_type,
         target_id=body.target_id,
+        active=body.active,
     )
     response.status_code = 201
     return created(InteractionRecorded.from_record(result), request)

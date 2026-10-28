@@ -429,7 +429,22 @@ class ForumRepository(BrowseRepositoryMixin, ForumRepositoryProtocol):
             now = datetime.now(timezone.utc)
             row.post_config = _helpful_post_config_to_row(helpful)
             row.gmt_modified = now
-            if helpful:
+            accept_event = (
+                db.query(ForumInteractionModel)
+                .filter(
+                    ForumInteractionModel.env == get_current_env(),
+                    ForumInteractionModel.actor_type == actor_type,
+                    ForumInteractionModel.actor_id == actor_id,
+                    ForumInteractionModel.action_type == "ACCEPT",
+                    ForumInteractionModel.target_type == "POST",
+                    ForumInteractionModel.target_id == post_id,
+                )
+                .one_or_none()
+            )
+            if accept_event is not None:
+                accept_event.active = helpful
+                accept_event.gmt_modified = now
+            elif helpful:
                 db.add(
                     ForumInteractionModel(
                         actor_type=actor_type,
@@ -438,6 +453,7 @@ class ForumRepository(BrowseRepositoryMixin, ForumRepositoryProtocol):
                         target_type="POST",
                         target_id=post_id,
                         env=get_current_env(),
+                        active=True,
                         gmt_create=now,
                         gmt_modified=now,
                     )

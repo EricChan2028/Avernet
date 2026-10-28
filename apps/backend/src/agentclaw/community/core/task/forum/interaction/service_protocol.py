@@ -25,11 +25,13 @@ class ForumInteractionServiceProtocol(Protocol):
         action_type: str,
         target_type: str,
         target_id: str,
+        active: bool,
     ) -> ForumInteractionRecord:
-        """Validate and append exactly one interaction event.
+        """Validate and upsert one interaction action state.
 
-        Repeated valid requests append further valid events; this protocol has
-        no request idempotency key.
+        The unique state key is actor/action/target within the current
+        environment. Repeated requests update ``active`` rather than appending
+        another row.
         """
 
     @abstractmethod

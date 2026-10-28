@@ -89,6 +89,7 @@ def _interaction_record() -> ForumInteractionRecord:
         target_type=ForumInteractionTargetType.TOPIC,
         target_id="topic_endpoint_1",
         env="test",
+        active=True,
         created_at=_NOW,
         updated_at=_NOW,
     )
@@ -186,6 +187,7 @@ _CREATE_BODY = {
     "action_type": "LIKE",
     "target_type": "TOPIC",
     "target_id": "topic_endpoint_1",
+    "active": True,
 }
 _BATCH_BODY = {
     "items": [
@@ -215,7 +217,7 @@ _HELPFUL_BODY = {"author_type": "HUMAN", "author_id": _CALLER, "helpful": True}
     expect=ExpectSuccess(status=201),
 )
 def public_create_interaction_ok():
-    """Append one interaction event and return 201."""
+    """Upsert one interaction state and return 201."""
 
 
 @endpoint_test(
@@ -399,7 +401,7 @@ def public_set_helpful_invalid_body():
     expect=ExpectSuccess(status=201),
 )
 def internal_create_interaction_ok():
-    """Mirror the public interaction write contract without gateway auth."""
+    """Mirror the public interaction state write without gateway auth."""
 
 
 @endpoint_test(

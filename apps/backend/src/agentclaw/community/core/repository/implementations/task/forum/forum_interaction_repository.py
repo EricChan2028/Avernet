@@ -1,4 +1,4 @@
-"""Persistence and aggregate queries for BBS interaction events."""
+"""Persistence and aggregate queries for BBS interaction states."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ _ACTION_TO_FIELD = {
 }
 
 
-def _stats_from_event_counts(
+def _stats_from_action_counts(
     rows: list[tuple[str, int]], *, actor_scope: bool = False
 ) -> ForumStatsRecord:
     stats = ForumStatsRecord()
@@ -110,7 +110,7 @@ def _topic_projection_counts(
 
 
 class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
-    """Store events and calculate immediate aggregates without counters."""
+    """Store one state per unique action and calculate aggregates without counters."""
 
     @inject
     def __init__(self, db: DatabasePlugin) -> None:
@@ -124,21 +124,70 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
         action_type: str,
         target_type: str,
         target_id: str,
+        active: bool,
     ) -> ForumInteractionRecord:
+        """Atomically insert or update the active state of one action row.
+
+        SQLAlchemy has no portable one-statement upsert. The dialect branch is
+        storage correctness only: both arms use the same unique key and update
+        the same ``active`` state.
+        """
         now = datetime.now(timezone.utc)
-        row = ForumInteractionModel(
-            actor_type=actor_type,
-            actor_id=actor_id,
-            action_type=action_type,
-            target_type=target_type,
-            target_id=target_id,
-            env=get_current_env(),
-            gmt_create=now,
-            gmt_modified=now,
+        env = get_current_env()
+        values = {
+            "actor_type": actor_type,
+            "actor_id": actor_id,
+            "action_type": action_type,
+            "target_type": target_type,
+            "target_id": target_id,
+            "env": env,
+            "active": active,
+            "gmt_create": now,
+            "gmt_modified": now,
+        }
+        unique_columns = (
+            "env",
+            "actor_type",
+            "actor_id",
+            "action_type",
+            "target_type",
+            "target_id",
         )
         with self._db.orm_session() as db:
-            db.add(row)
-            db.flush()
+            dialect = db.get_bind().dialect.name
+            if dialect == "sqlite":
+                from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+                statement = sqlite_insert(ForumInteractionModel.__table__).values(
+                    **values
+                )
+                statement = statement.on_conflict_do_update(
+                    index_elements=unique_columns,
+                    set_={"active": active, "gmt_modified": now},
+                )
+            else:
+                from sqlalchemy.dialects.mysql import insert as mysql_insert
+
+                statement = mysql_insert(ForumInteractionModel.__table__).values(
+                    **values
+                )
+                statement = statement.on_duplicate_key_update(
+                    active=active,
+                    gmt_modified=now,
+                )
+            db.execute(statement)
+            row = (
+                db.query(ForumInteractionModel)
+                .filter(
+                    ForumInteractionModel.env == env,
+                    ForumInteractionModel.actor_type == actor_type,
+                    ForumInteractionModel.actor_id == actor_id,
+                    ForumInteractionModel.action_type == action_type,
+                    ForumInteractionModel.target_type == target_type,
+                    ForumInteractionModel.target_id == target_id,
+                )
+                .one()
+            )
             return row.to_record()
 
     def get_summary(
@@ -173,7 +222,7 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
                 db.query(
                     ForumInteractionModel.target_type,
                     ForumInteractionModel.target_id,
-                    func.count().label("event_count"),
+                    func.count().label("state_count"),
                 )
                 .filter(
                     ForumInteractionModel.env == get_current_env(),
@@ -183,6 +232,7 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
                     ).in_((ref.type.value, ref.id) for ref in unique_refs),
                     ForumInteractionModel.action_type
                     == ForumInteractionActionType.FOLLOW,
+                    ForumInteractionModel.active.is_(True),
                 )
                 .group_by(
                     ForumInteractionModel.target_type,
@@ -194,7 +244,7 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
             ref = _actor_ref(actor_type, actor_id)
             if ref not in result:
                 continue
-            result[ref] = _stats_from_event_counts(
+            result[ref] = _stats_from_action_counts(
                 [(ForumInteractionActionType.FOLLOW, count)], actor_scope=True
             )
         return result
@@ -212,7 +262,7 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
                     ForumInteractionModel.target_type,
                     ForumInteractionModel.target_id,
                     ForumInteractionModel.action_type,
-                    func.count().label("event_count"),
+                    func.count().label("state_count"),
                 )
                 .filter(
                     ForumInteractionModel.env == get_current_env(),
@@ -220,6 +270,7 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
                         ForumInteractionModel.target_type,
                         ForumInteractionModel.target_id,
                     ).in_((ref.type.value, ref.id) for ref in unique_refs),
+                    ForumInteractionModel.active.is_(True),
                 )
                 .group_by(
                     ForumInteractionModel.target_type,
@@ -245,7 +296,7 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
                 (action, int(count))
             )
         for ref, action_rows in grouped_counts.items():
-            stats = _stats_from_event_counts(action_rows)
+            stats = _stats_from_action_counts(action_rows)
             if ref.type is ForumInteractionTargetType.TOPIC:
                 participant_count, helpful_count = projections.get(ref.id, (0, 0))
                 stats = replace(
@@ -271,7 +322,7 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
                     ForumInteractionModel.target_type,
                     ForumInteractionModel.target_id,
                     ForumInteractionModel.action_type,
-                    func.count().label("event_count"),
+                    func.count().label("state_count"),
                 )
                 .filter(
                     ForumInteractionModel.env == get_current_env(),
@@ -288,6 +339,7 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
                             for pair in unique_pairs
                         )
                     ),
+                    ForumInteractionModel.active.is_(True),
                 )
                 .group_by(
                     ForumInteractionModel.actor_type,
@@ -308,5 +360,5 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
             if pair in grouped_rows:
                 grouped_rows[pair].append((action, int(count)))
         for pair, action_rows in grouped_rows.items():
-            result[pair] = _stats_from_event_counts(action_rows)
+            result[pair] = _stats_from_action_counts(action_rows)
         return result

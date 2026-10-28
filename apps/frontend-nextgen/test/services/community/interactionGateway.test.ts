@@ -64,6 +64,7 @@ describe('CommunityApiGateway interaction and Personal Center contracts', () => 
       actor,
       actionType: 'FOLLOW',
       target: { targetType: 'HUMAN', id: '149844' },
+      active: true,
     })).resolves.toBeUndefined();
     await expect(gateway.getInteractionSummary({ actor })).resolves.toMatchObject({
       scope: 'ACTOR',

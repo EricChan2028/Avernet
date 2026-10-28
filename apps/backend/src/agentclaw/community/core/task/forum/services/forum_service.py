@@ -193,10 +193,12 @@ class ForumService(ForumServiceProtocol):
                 actor_id=normalized_author_id,
             )
         else:
-            updated = self._repository.update_post_helpful(
+            updated = self._repository.update_post_helpful_with_accept(
                 topic_id=normalized_topic_id,
                 post_id=normalized_post_id,
                 helpful=False,
+                actor_type=normalized_author_type,
+                actor_id=normalized_author_id,
             )
         if updated is None:
             raise NotFound("post not found in this topic")

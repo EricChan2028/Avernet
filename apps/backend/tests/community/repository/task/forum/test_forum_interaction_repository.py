@@ -1,4 +1,4 @@
-"""Repository tests for append-only BBS interaction events and summaries."""
+"""Repository tests for BBS interaction states and summaries."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ class FailingDatabase:
         yield None
 
 
-def _events(repo, *, actor_type="HUMAN", actor_id="user-a"):
+def _events(repo, *, actor_type="HUMAN", actor_id="user-a", active=True):
     def add(action, target_type, target_id):
         repo.insert_interaction(
             actor_type=actor_type,
@@ -44,14 +44,14 @@ def _events(repo, *, actor_type="HUMAN", actor_id="user-a"):
             action_type=action,
             target_type=target_type,
             target_id=target_id,
+            active=active,
         )
 
     return add
 
 
-def test_interaction_repository_appends_repeated_actor_target_events(db):
+def test_interaction_repository_upserts_repeated_actor_target_state(db):
     repo = ForumInteractionRepository(db)
-    add = _events(repo)
 
     first = repo.insert_interaction(
         actor_type="HUMAN",
@@ -59,6 +59,7 @@ def test_interaction_repository_appends_repeated_actor_target_events(db):
         action_type="LIKE",
         target_type="TOPIC",
         target_id="topic-1",
+        active=True,
     )
     second = repo.insert_interaction(
         actor_type="HUMAN",
@@ -66,23 +67,44 @@ def test_interaction_repository_appends_repeated_actor_target_events(db):
         action_type="LIKE",
         target_type="TOPIC",
         target_id="topic-1",
+        active=False,
     )
 
-    assert first.actor_id == second.actor_id == "user-a"
+    assert first.active is True
+    assert second.active is False
     with db.orm_session() as session:
-        rows = (
-            session.query(
-                ForumInteractionModel.action_type,
-                ForumInteractionModel.target_id,
-            )
-            .order_by(ForumInteractionModel.id)
-            .all()
-        )
-    assert len(rows) == 2
-    assert [(row.action_type, row.target_id) for row in rows] == [
-        ("LIKE", "topic-1"),
-        ("LIKE", "topic-1"),
-    ]
+        rows = session.query(
+            ForumInteractionModel.action_type,
+            ForumInteractionModel.target_id,
+            ForumInteractionModel.active,
+        ).all()
+    assert len(rows) == 1
+    assert rows[0] == ("LIKE", "topic-1", False)
+
+
+def test_interaction_summaries_exclude_inactive_state(db):
+    repo = ForumInteractionRepository(db)
+    target = ForumTargetRef(type=ForumInteractionTargetType.TOPIC, id="topic-1")
+
+    repo.insert_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="LIKE",
+        target_type="TOPIC",
+        target_id="topic-1",
+        active=False,
+    )
+    assert repo.batch_get_target_summaries((target,))[target].like_count == 0
+
+    repo.insert_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="LIKE",
+        target_type="TOPIC",
+        target_id="topic-1",
+        active=True,
+    )
+    assert repo.batch_get_target_summaries((target,))[target].like_count == 1
 
 
 def test_summary_dimensions_and_topic_projections_do_not_share_counts(db):
@@ -112,7 +134,6 @@ def test_summary_dimensions_and_topic_projections_do_not_share_counts(db):
 
     repo = ForumInteractionRepository(db)
     _events(repo)("VIEW", "TOPIC", topic.topic_id)
-    _events(repo)("VIEW", "TOPIC", topic.topic_id)
     _events(repo)("LIKE", "TOPIC", topic.topic_id)
     _events(repo)("FAVORITE", "POST", first.post_id)
     _events(repo, actor_type="HUMAN", actor_id="user-b")("FOLLOW", "HUMAN", "user-a")
@@ -129,12 +150,12 @@ def test_summary_dimensions_and_topic_projections_do_not_share_counts(db):
         target_id=topic.topic_id,
     )
 
-    assert (target.view_count, target.like_count, target.follow_count) == (2, 1, 1)
+    assert (target.view_count, target.like_count, target.follow_count) == (1, 1, 1)
     assert target.reply_participant_count == 2
     assert target.helpful_reply_count == 0
     assert actor.follow_count == 1
     assert (actor.view_count, actor.like_count, actor.favorite_count) == (0, 0, 0)
-    assert (pair.view_count, pair.like_count, pair.follow_count) == (2, 1, 0)
+    assert (pair.view_count, pair.like_count, pair.follow_count) == (1, 1, 0)
     assert (pair.favorite_count, pair.topic_count, pair.reply_count) == (0, 0, 0)
 
 
@@ -183,19 +204,26 @@ def test_database_failure_propagates_and_never_returns_a_summary():
         repo.batch_get_target_summaries((target,))
 
 
-def test_interaction_ddl_and_orm_contract_stay_additive_and_unique_free():
+def test_interaction_ddl_and_orm_contract_define_active_unique_state():
     ddl_path = Path(
         "src/agentclaw/community/core/task/forum/sql/2026_10_27_forum_interaction.sql"
     )
+    migration_path = Path(
+        "src/agentclaw/community/core/task/forum/sql/"
+        "2026_10_28_forum_interaction_active_unique.sql"
+    )
     ddl = ddl_path.read_text()
+    migration = migration_path.read_text()
 
     assert "ac_forum_interaction" in ddl
-    assert "UNIQUE KEY" not in ddl
-    assert "uk_forum_interaction" not in ddl.upper()
-    assert "avernet_tenant" not in ddl
-    assert "active" not in ddl
-    assert "dedupe_date" not in ddl
-    assert "COLLATE utf8mb4_bin" in ddl
+    assert "`active`          tinyint(1)   NOT NULL DEFAULT 1" in ddl
+    assert "UNIQUE KEY `uk_forum_interaction_action`" in ddl
+    assert (
+        "(`env`, `actor_type`, `actor_id`, `action_type`, `target_type`, `target_id`)"
+        in ddl
+    )
+    assert "`active` tinyint(1) NOT NULL DEFAULT 1" in migration
+    assert "ADD UNIQUE KEY `uk_forum_interaction_action`" in migration
     columns = {column.name for column in ForumInteractionModel.__table__.columns}
     assert columns == {
         "id",
@@ -205,15 +233,18 @@ def test_interaction_ddl_and_orm_contract_stay_additive_and_unique_free():
         "target_type",
         "target_id",
         "env",
+        "active",
         "gmt_create",
         "gmt_modified",
     }
-    indexes = {index.name for index in ForumInteractionModel.__table__.indexes}
+    indexes = {
+    index.name: index.unique for index in ForumInteractionModel.__table__.indexes
+}
     assert indexes == {
-        "idx_forum_interaction_target",
-        "idx_forum_interaction_actor",
+        "uk_forum_interaction_action": True,
+        "idx_forum_interaction_target": False,
+        "idx_forum_interaction_actor": False,
     }
-    assert not any(index.unique for index in ForumInteractionModel.__table__.indexes)
 
 
 def test_helpful_accept_transaction_rolls_back_state_and_event(db, monkeypatch):
@@ -254,7 +285,7 @@ def test_helpful_accept_transaction_rolls_back_state_and_event(db, monkeypatch):
         assert session.query(ForumInteractionModel).count() == 0
 
 
-def test_helpful_accept_is_emitted_once_and_cleared_without_negative_event(db):
+def test_helpful_accept_updates_one_state_row_to_active(db):
     content_repo = ForumRepository(db)
     topic = content_repo.create_topic(
         author_type="HUMAN",
@@ -299,10 +330,12 @@ def test_helpful_accept_is_emitted_once_and_cleared_without_negative_event(db):
             ForumInteractionModel.action_type,
             ForumInteractionModel.target_type,
             ForumInteractionModel.target_id,
+            ForumInteractionModel.active,
         ).all()
     assert len(rows) == 1
     assert rows[0] == (
         "ACCEPT",
         "POST",
         post.post_id,
+        False,
     )
