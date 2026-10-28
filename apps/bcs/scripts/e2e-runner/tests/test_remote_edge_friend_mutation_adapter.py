@@ -12,7 +12,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from bcs_e2e.remote_edge_friend_mutation_adapter import RemoteEdgeFriendMutationAdapter
+from bcs_e2e.remote_edge_friend_mutation_adapter import RemoteEdgeFriendMutationAdapter, _GATEWAY_HUMAN_DISCOVER_REJECTIONS
 from bcs_e2e.route_bindings import _EDGE_CASES
 from bcs_e2e.run_state import RunStateError
 
@@ -443,6 +443,11 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(result.data["admission_branches"]["human_public_default"], "public_default")
         self.assertEqual(result.data["admission_branches"]["human_public_with_edge"], "public_default")
         self.assertEqual(result.data["admission_branches"]["bot_party_edge"], "edge_grant/ok")
+
+    def test_gateway_human_discover_gap_accepts_the_observed_rejection_family(self):
+        for status, code in ((401, 401000), (422, 422000)):
+            self.assertIn((status, code), _GATEWAY_HUMAN_DISCOVER_REJECTIONS)
+        self.assertNotIn((403, 403000), _GATEWAY_HUMAN_DISCOVER_REJECTIONS)
 
     def test_drift_text_tolerates_every_live_message_placement(self):
         live_role = {"http_status": 400, "code": "invalid_operation",

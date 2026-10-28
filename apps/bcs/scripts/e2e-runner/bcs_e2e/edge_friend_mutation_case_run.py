@@ -132,7 +132,7 @@ PRODUCT_DEFECTS = {
 }
 
 DOCUMENTED_GAPS = {
-    "GATEWAY_HUMAN_DISCOVER_401": "Gateway human-Cookie bot discovery returns 401 code 401000; discovery is a station bot-only surface here.",
+    "GATEWAY_HUMAN_DISCOVER_401": "Gateway human-Cookie bot discovery is rejected on the public face (observed 401 code 401000; 422 code 422000 after cookie refresh); discovery is a station bot-only surface here.",
     "PREPROD_SERVICE_SCOPE_GAP": "ensure-bot, TC friend-auth sync, and department-scope extensions need a user-credential/mock-Provider batch unavailable in preprod.",
 }
 

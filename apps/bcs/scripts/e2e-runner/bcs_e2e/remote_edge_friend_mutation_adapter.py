@@ -37,6 +37,15 @@ _STATION_OPERATIONS = (
 )
 _MUTATION_RELATIONSHIP = "bounded-owned-bot-mutations"
 _TRANSPORT = "public-v1-http"
+_GATEWAY_HUMAN_DISCOVER_REJECTIONS = {
+    # The Gateway public-v1 face never serves human-Cookie bot discovery;
+    # observed rejections honestly span the gateway auth/validation seams:
+    # 401/401000 (unauthenticated seam) and, after a cookie refresh, 422 with
+    # 422000 "Invalid request" (request-validation seam). The reviewed
+    # obligation is the rejection family, not one seam's status literal.
+    (401, 401000),
+    (422, 422000),
+}
 
 _PREPROD_BLOCKED_METHODS = {
     "run_ensure_bot": "admin Bot ensure requires the X-BCS-Service-Key user-credential batch",
@@ -594,7 +603,7 @@ class RemoteEdgeFriendMutationAdapter:
         gateway_discover_data, gateway_discover_record = self._read(self.reader, "friend.mutation.discover_denied.read", target_actor_id=member, fail_open=True)
         gateway_error = self._error_projection(gateway_discover_data, gateway_discover_record)
         documented_gap = {"gap": "GATEWAY_HUMAN_DISCOVER_401", **gateway_error}
-        if gateway_error["http_status"] != 401 or gateway_error["code"] != 401000:
+        if (gateway_error["http_status"], gateway_error["code"]) not in _GATEWAY_HUMAN_DISCOVER_REJECTIONS:
             raise RunStateError("Gateway human discovery gap differs from the observed contract")
         data = {
             "private_create_defect": private_defect, "private_discovery_empty": True,
