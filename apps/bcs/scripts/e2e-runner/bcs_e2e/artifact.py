@@ -97,8 +97,13 @@ def disk_digest() -> str:
     # The enforced count keeps runner.py alongside the focused modules.
     # The dual-environment Edge friend-mutation remote slice adds its focused
     # remote Adapter and command Run lifecycle modules, so the focused-module
-    # allowance grows by exactly those two files.
-    if len(paths) > 311:
+    # allowance grows by exactly those two files. The dual-environment Session
+    # Service product-CLI command Run lifecycle adds one focused module that
+    # reuses the owned-local Session Service adapters, so the allowance grows
+    # by exactly that one file. The dual-environment operator product-CLI command
+    # lifecycle adds its focused remote Runner and Adapter modules, so the
+    # allowance grows by exactly those two files in advance.
+    if len(paths) > 314:
         raise ValueError('executor artifact exceeds its source-file budget')
     digest = hashlib.sha256()
     for path in paths:

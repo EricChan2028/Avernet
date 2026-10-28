@@ -7,6 +7,7 @@ from pathlib import Path
 from .edge_read_case_run import CASE_KEYS as EDGE_CASE_KEYS
 from .network_read_case_run import CASE_KEYS as NETWORK_READ_CASE_KEYS
 from .edge_friend_mutation_case_run import CASE_KEYS as EDGE_FRIEND_MUTATION_CASE_KEYS
+from .session_service_cli_case_run import CASE_KEYS as SESSION_SERVICE_CASE_KEYS
 
 
 CASE_COMMANDS = frozenset({
@@ -32,6 +33,7 @@ CASE_COMMANDS = frozenset({
     "dual-network-status-run",
     "dual-friend-run",
     "dual-edge-friend-mutation-run",
+    "dual-session-service-run",
 })
 
 
@@ -235,3 +237,14 @@ def register_case_commands(commands) -> None:
     edge_friend_mutation_case.add_argument("--run-id", required=True)
     edge_friend_mutation_case.add_argument("--confirm-run-id", required=True)
     edge_friend_mutation_case.add_argument("--allow-write", action="store_true")
+    session_service_case = commands.add_parser(
+        "dual-session-service-run",
+        help="Run the reviewed dual Session Service product-CLI stories through Singlebox or preprod")
+    session_service_case.add_argument("--profile", type=Path, required=True)
+    session_service_case.add_argument("--cli-binary", type=Path, required=True)
+    session_service_case.add_argument("--cli-binary-sha256", required=True)
+    session_service_case.add_argument("--case", choices=tuple(SESSION_SERVICE_CASE_KEYS), required=True)
+    session_service_case.add_argument("--state-dir", type=Path, required=True)
+    session_service_case.add_argument("--run-id", required=True)
+    session_service_case.add_argument("--confirm-run-id", required=True)
+    session_service_case.add_argument("--allow-write", action="store_true")

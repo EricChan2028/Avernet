@@ -195,6 +195,12 @@ def migration_plan() -> dict:
         PARENT_CASE_SUITE as SESSION_SERVICE_PARENT_CASE_SUITE,
         session_service_parent_adaptability,
     )
+    from .session_service_cli_case_run import (
+        dual_session_service_lifecycle_adaptability,
+        dual_session_service_member_chat_adaptability,
+        dual_session_service_complete_adaptability,
+        dual_session_service_roundtrip_adaptability,
+    )
     from .session_cli_shared import (
         session_cli_invite_join_adaptability,
         session_cli_lifecycle_adaptability,
@@ -552,6 +558,10 @@ def migration_plan() -> dict:
                 local_session_service_member_chat_adaptability(),
                 local_session_service_complete_adaptability(),
                 local_session_service_roundtrip_adaptability(),
+                dual_session_service_lifecycle_adaptability(),
+                dual_session_service_member_chat_adaptability(),
+                dual_session_service_complete_adaptability(),
+                dual_session_service_roundtrip_adaptability(),
                 workspace_cli_create_get_adaptability(),
                 workspace_cli_status_adaptability(),
                 workspace_cli_list_adaptability(),

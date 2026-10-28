@@ -35,6 +35,7 @@ from .workspace_story_case_run import dual_workspace_story_case_run
 from .session_cli_case_run import dual_session_cli_case_run
 from .session_public_case_run import dual_session_public_case_run
 from .session_file_core_case_run import dual_session_file_core_case_run
+from .session_service_cli_case_run import dual_session_service_case_run
 from .friend_cli_case_run import dual_friend_cli_case_run
 from .channel_cli_case_run import dual_channel_cli_case_run
 from .collaboration_team_case_run import dual_collaboration_team_cli_case_run
@@ -510,6 +511,16 @@ def main(argv: list[str] | None = None) -> int:
                                                case_key=args.case, state_dir=args.state_dir,
                                                run_id=args.run_id, allow_write=args.allow_write,
                                                confirm_run_id=args.confirm_run_id)
+            rc = 0 if report["status"] == "PASS" else 2
+        elif args.command == "dual-session-service-run":
+            report = dual_session_service_case_run(profile_path=args.profile,
+                                                   cli_binary=args.cli_binary,
+                                                   cli_binary_sha256=args.cli_binary_sha256,
+                                                   case_key=args.case,
+                                                   state_dir=args.state_dir,
+                                                   run_id=args.run_id,
+                                                   allow_write=args.allow_write,
+                                                   confirm_run_id=args.confirm_run_id)
             rc = 0 if report["status"] == "PASS" else 2
         elif args.command == "dual-session-public-run":
             report = dual_session_public_case_run(
