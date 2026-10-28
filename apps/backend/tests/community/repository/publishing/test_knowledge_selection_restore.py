@@ -73,6 +73,13 @@ def restore_case(request):
         "bot_type": "service",
         "entity_id": "owner",
     }
+    # dev baseline resolves the draft-restore source Bot through the internal
+    # address lookup; keep the stub JSON-serializable for the operation result.
+    flow._bot_service.get_bot_by_address.return_value = {
+        "binding_id": 11,
+        "bot_type": "service",
+        "entity_id": "owner",
+    }
     flow._publish_service.get_device_binding_by_id = MagicMock(
         return_value=SimpleNamespace(device_id="draft-device", status="ACTIVE"),
     )

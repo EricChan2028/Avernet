@@ -774,6 +774,12 @@ def _real_flow(repo):
 
     bot_service, device_repo, queue = MagicMock(), MagicMock(), MagicMock()
     bot_service.get_bot.return_value = {"active_engine": "teclaw", "entity_id": "owner"}
+    # dev baseline resolves the draft-restore source Bot through the internal
+    # address lookup instead of the current-Owner get_bot contract.
+    bot_service.get_bot_by_address.return_value = {
+        "active_engine": "teclaw",
+        "entity_id": "owner",
+    }
     publish = BotPublishService(
         repo,
         MagicMock(),
