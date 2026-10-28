@@ -653,6 +653,23 @@ impl BcsServer {
             crate::env::resolve_env(),
             db_flavor,
         ));
+        // Caller identity chain (spec §10.13.7): the optional
+        // [caller_identity] section assembles the identity plugin; absent
+        // keeps the protected dispatch unmounted (fail-closed, no caller
+        // execution is fabricated). The SAME provider transport instance
+        // serves the container gateway (H2A chat.send downlink) and the
+        // execution send port.
+        let caller_identity =
+            crate::caller_identity_wiring::assemble_caller_identity_plugin(&config)?;
+        let caller_protected = caller_identity.map(|identity| {
+            crate::message_delivery_wiring::CallerProtectedAssembly {
+                provider_core: provider_core.clone(),
+                gateway: provider_transport.clone(),
+                sender: provider_transport.clone(),
+                identity,
+                observe_injector_factory: None,
+            }
+        });
         let message_flow: Arc<dyn MessageFlowService> = crate::message_delivery_wiring::wire_with_caller_assembly(
             message_flow_builder,
             &config,
@@ -665,7 +682,7 @@ impl BcsServer {
             // any_bot_caller_enabled as false (Plain) and never consults
             // the lease store.
             Some(provider_control_plane.clone()),
-            None,
+            caller_protected,
             Some(lease_store.clone()),
         )
         .await?;
