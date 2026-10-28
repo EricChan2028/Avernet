@@ -49,11 +49,13 @@ from bcs_e2e.operator_cli_runner import (
     OPERATOR_CLI_UPDATE_STATUS,
     OPERATOR_CLI_VISIBILITY,
     OPERATOR_CLI_ROUTES,
+    OPERATOR_CLI_STATION_BINDINGS,
     OperatorCliRunner,
     OperatorCliRunnerError,
     validate_operator_cli_profile,
 )
 from bcs_e2e.profile import ConfigError
+from bcs_e2e.route_bindings import validate_edge_case_bindings
 from bcs_e2e.remote_operator_cli_adapter import (
     OPERATOR_CLI_ADAPTER_METHODS,
     OPERATOR_CLI_BLOCKER,
@@ -508,6 +510,35 @@ class OperatorCliAdapterAdmissionTests(unittest.TestCase):
         value["environment"]["tier"] = "staging"
         with self.assertRaises(ConfigError):
             RemoteOperatorCliAdapter(value, ScriptedRunner())
+
+    def test_reader_and_writer_profile_contracts_split_by_identity(self):
+        profile = profile_value(preprod=True)
+        with patch.dict(os.environ, preprod_environment()):
+            adapter = RemoteOperatorCliAdapter(profile, ScriptedRunner())
+            reader = adapter._register_reader_profile()
+            self.assertEqual(
+                set(reader["edge_case_bindings"]),
+                {"friend_connection_mutation.register_token.read"})
+            self.assertEqual(reader["auth"],
+                             {"kind": "human-cookie",
+                              "header_env": {"Cookie": COOKIE_ENV}})
+            self.assertEqual(
+                set(validate_edge_case_bindings(
+                    reader["edge_case_bindings"], reader)),
+                {"friend_connection_mutation.register_token.read"})
+            # Drift lock: the cookie-only identity cannot submit the
+            # dual-identity disposal vocabulary, and whole-dict validation
+            # must keep rejecting that combination.
+            with self.assertRaisesRegex(
+                    ConfigError, "dual-identity route requires"):
+                validate_edge_case_bindings(profile["edge_case_bindings"], reader)
+            station = adapter._station_profile()
+            self.assertEqual(station["edge_case_bindings"],
+                             OPERATOR_CLI_STATION_BINDINGS)
+            self.assertEqual(
+                set(validate_edge_case_bindings(
+                    station["edge_case_bindings"], station)),
+                set(OPERATOR_CLI_STATION_BINDINGS))
 
 
 class OperatorCliCaseTests(unittest.TestCase):

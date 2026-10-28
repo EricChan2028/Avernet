@@ -219,6 +219,19 @@ class RemoteOperatorCliAdapter:
             "kind": "human-cookie",
             "header_env": {"Cookie": self.cookie_env},
         }
+        # The cookie-only station reader submits exactly the reviewed
+        # register-token read contract. The owned-Bot disposal vocabulary
+        # (station_bot_delete/station_bot_read) is dual-identity and its
+        # fail-closed validation requires Cookie and Authorization
+        # references; a cookie-only reader deliberately holds only the Cookie
+        # reference, so the derived bindings must not advertise disposal
+        # contracts this identity cannot submit.
+        bindings = value.get("edge_case_bindings")
+        if isinstance(bindings, dict):
+            value["edge_case_bindings"] = {
+                key: binding for key, binding in bindings.items()
+                if key == "friend_connection_mutation.register_token.read"
+            }
         return value
 
     def _credential_kind(self) -> str:
