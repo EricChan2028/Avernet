@@ -59,7 +59,8 @@ def profile_value(*, gateway=False, mutate=None):
                         "dedicated": True, "visibility": "public"},
         },
         "auth": ({"kind": "owned-local-bot-tokens", "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN"}
-                 if local else {"kind": "human-cookie", "cookie_env": "BCS_E2E_HUMAN_COOKIE"}),
+                 if local else {"kind": "owned-bot-tokens",
+                                "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN"}),
         "relationships": {"group": "bounded-owned-bots-retained-cli-status-termination",
                            "initial_session": "retained", "cleanup": "none",
                            "participant_mode": "driver-member"},
@@ -177,10 +178,16 @@ class WorkspaceCliStatusTests(unittest.TestCase):
                     raw = create_output(group_id, session_id)
                 elif operation == "status.group.status":
                     raw = json.dumps({"updated": True, "group_id": group_id,
-                                       "status": "completed", "changed_by": DRIVER}).encode()
+                                       "status": "completed", "reason": None,
+                                       "changed_by": DRIVER}).encode()
                 elif operation == "termination.group.terminate":
                     raw = json.dumps({"terminated": True, "group_id": group_id,
-                                       "status": "completed", "terminated_by": DRIVER}).encode()
+                                       "status": "completed", "terminated_by": DRIVER,
+                                       "session": {"id": group_id,
+                                                   "label": "bcs-e2e-workspace-cli-status",
+                                                   "driver_bot": DRIVER,
+                                                   "participants": [DRIVER, MEMBER],
+                                                   "status": "completed"}}).encode()
                 else:
                     status = ("active" if operation.endswith(".active")
                               else "completed")
@@ -234,12 +241,19 @@ class WorkspaceCliStatusTests(unittest.TestCase):
             self.assertIsNone(cookie)
         self.assertNotIn(TOKEN, json.dumps(snapshot, sort_keys=True))
 
-    def test_gateway_cookie_is_not_evidence(self):
+    def test_preprod_human_cookie_is_not_admitted_for_status(self):
+        def mutate(value):
+            value["auth"] = {"kind": "human-cookie", "cookie_env": "BCS_E2E_HUMAN_COOKIE"}
+        with self.assertRaises(ConfigError):
+            validate_workspace_cli_status_profile(profile_value(gateway=True, mutate=mutate))
+
+    def test_gateway_owned_bot_token_is_not_evidence(self):
         execution, runner, _, contexts = self.run_status_sequence(gateway=True)
+        self.assertEqual(execution.status, "PASS")
         for context, cookie in contexts:
-            self.assertEqual(context["token"], "")
-            self.assertEqual(cookie, COOKIE)
-        self.assertNotIn(COOKIE, json.dumps(execution.snapshot(), sort_keys=True))
+            self.assertEqual(context["token"], TOKEN)
+            self.assertIsNone(cookie)
+        self.assertNotIn(TOKEN, json.dumps(execution.snapshot(), sort_keys=True))
 
     def test_status_slices_stay_one_shot(self):
         profile = validate_workspace_cli_status_profile(profile_value())

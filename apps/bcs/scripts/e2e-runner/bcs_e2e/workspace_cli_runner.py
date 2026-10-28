@@ -150,6 +150,13 @@ class WorkspaceCliRunner:
             if not value:
                 raise WorkspaceCliRunnerError("workspace CLI owned Bot credential is absent")
             return "owned_local_bot_token", value
+        if (self.profile["contract"] in {WORKSPACE_CLI_LIST_PROFILE_CONTRACT,
+                                         WORKSPACE_CLI_STATUS_PROFILE_CONTRACT}
+                and self.profile["environment"]["tier"] == "preprod"):
+            value = os.environ.get(self.profile["auth"]["driver_token_env"], "")
+            if not value:
+                raise WorkspaceCliRunnerError("workspace CLI owned Bot credential is absent")
+            return "owned_bot_token", value
         if self.profile["environment"]["tier"] == "local":
             value = os.environ.get(self.profile["auth"]["driver_token_env"], "")
             if not value:
@@ -175,7 +182,8 @@ class WorkspaceCliRunner:
         context = root / "bot" / ".bcs" / "session.json"
         data = {
             "token": credential if credential_kind in {
-                "owned_local_bot_token", "human_cookie_with_owned_driver_bot_token"
+                "owned_local_bot_token", "owned_bot_token",
+                "human_cookie_with_owned_driver_bot_token"
             } else "",
             "bot_uuid": self.driver_id,
             "api_base_url": self.origin,

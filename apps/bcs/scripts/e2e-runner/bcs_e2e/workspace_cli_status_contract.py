@@ -96,7 +96,7 @@ def _validate_evidence(result: AdapterCall, *, operation: str) -> None:
             or evidence.get("transport") != "PRODUCT_CLI"
             or evidence.get("operation") != operation
             or evidence.get("caller_role") != "driver"
-            or evidence.get("credential_kind") not in {"owned_local_bot_token", "human_cookie"}
+            or evidence.get("credential_kind") not in {"owned_local_bot_token", "owned_bot_token"}
             or evidence.get("fixture_effect") != FIXTURE_EFFECT
             or evidence.get("remote_validation") != "NOT_RUN"
             or evidence.get("grants_release_credit") is not False):
@@ -154,9 +154,14 @@ def execute_workspace_cli_status_case(adapter: object) -> CaseExecution:
         updated = adapter.update_completion_group_status()
         updated.validate()
         _validate_evidence(updated, operation="status.group.status")
+        # Station update_group_status responds with updated/group_id/status/
+        # reason/changed_by; assert the admission-relevant fields so an added
+        # echo field cannot fake a PASS and a drift cannot hide as a crash.
         if (not isinstance(updated.data, dict)
-                or updated.data != {"updated": True, "group_id": completion_group,
-                                     "status": "completed", "changed_by": driver}):
+                or updated.data.get("updated") is not True
+                or updated.data.get("group_id") != completion_group
+                or updated.data.get("status") != "completed"
+                or updated.data.get("changed_by") != driver):
             raise RunStateError("workspace CLI status update result is not exact")
         records.append(updated.evidence)
 
@@ -182,9 +187,13 @@ def execute_workspace_cli_status_case(adapter: object) -> CaseExecution:
         terminated = adapter.terminate_termination_group()
         terminated.validate()
         _validate_evidence(terminated, operation="termination.group.terminate")
+        # Station terminate_group echoes the terminated Group plus a nested
+        # session view; assert the admission-relevant fields only.
         if (not isinstance(terminated.data, dict)
-                or terminated.data != {"terminated": True, "group_id": termination_group,
-                                       "status": "completed", "terminated_by": driver}):
+                or terminated.data.get("terminated") is not True
+                or terminated.data.get("group_id") != termination_group
+                or terminated.data.get("status") != "completed"
+                or terminated.data.get("terminated_by") != driver):
             raise RunStateError("workspace CLI terminate result is not exact")
         records.append(terminated.evidence)
 

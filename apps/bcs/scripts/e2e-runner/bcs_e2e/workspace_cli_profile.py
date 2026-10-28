@@ -308,6 +308,18 @@ def _validate_workspace_cli_profile(raw: object, contract_name: str) -> dict:
         if auth["kind"] != "owned-local-bot-tokens":
             raise ConfigError("auth.kind: local workspace CLI requires an owned Bot token")
         _env_ref(auth["driver_token_env"], "auth.driver_token_env")
+    elif (contract_name in {WORKSPACE_CLI_LIST_PROFILE_CONTRACT,
+                            WORKSPACE_CLI_STATUS_PROFILE_CONTRACT}
+            and environment["tier"] == "preprod"):
+        auth = object_keys(profile["auth"], {"kind", "driver_token_env"}, "auth")
+        if auth["kind"] != "owned-bot-tokens":
+            raise ConfigError(
+                "auth.kind: preprod workspace CLI list/status operate on the "
+                "station legacy product face, where the Group list resolves "
+                "the authenticated Bot actor domain and status/termination "
+                "mandate a Bot principal; an owned driver Bot token is "
+                "required instead of the Human Cookie")
+        _env_ref(auth["driver_token_env"], "auth.driver_token_env")
     elif contract_name == SESSION_FILE_CORE_PROFILE_CONTRACT:
         auth = object_keys(
             profile["auth"], {"kind", "cookie_env", "driver_token_env"}, "auth")

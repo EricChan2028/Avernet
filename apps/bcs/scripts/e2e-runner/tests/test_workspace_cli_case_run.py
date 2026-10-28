@@ -83,6 +83,9 @@ def profile_value(case_key: str, *, gateway=False) -> dict:
                        "dedicated": True, "visibility": "public"},
         },
         "auth": (
+            {"kind": "owned-bot-tokens",
+             "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN"}
+            if gateway and case_key == "list" else
             {"kind": "human-cookie", "cookie_env": "BCS_E2E_HUMAN_COOKIE"}
             if gateway else
             {"kind": "owned-local-bot-tokens",
@@ -111,10 +114,19 @@ def fake_process(argument: object, operation: str) -> subprocess.CompletedProces
                 "fuse": "fuse", "member": "member"}[operation.split(".", 1)[0]]
     if operation == "list.group.list":
         value = {"items": [
-            {"id": GROUPS["list"], "driver_bot": DRIVER, "status": "active"},
-            {"id": "bcs_grp_unrelated", "driver_bot": "unrelated", "status": "active"},
-        ], "offset": 0, "returned": 2, "total": 10, "has_more": True,
-         "next_offset": 2}
+            {"group_id": GROUPS["list"], "label": "bcs-e2e-workspace-cli-list",
+             "coordinator_bot": DRIVER,
+             "participants": [{"bot_uuid": DRIVER}, {"bot_uuid": MEMBER}],
+             "created_at": 1, "updated_at": 1, "group_kind": "chat",
+             "group_strategy": "cooperative", "visibility": "private",
+             "human_mention_notify_mode": "driver_bot_only"},
+            {"group_id": "bcs_grp_unrelated", "label": "unrelated",
+             "coordinator_bot": "unrelated",
+             "participants": [{"bot_uuid": "unrelated"}],
+             "created_at": 1, "updated_at": 1, "group_kind": "chat",
+             "group_strategy": "cooperative", "visibility": "private",
+             "human_mention_notify_mode": "driver_bot_only"},
+        ], "offset": 0, "returned": 2, "total": 10, "has_more": False}
         raw = json.dumps(value).encode()
     elif operation == "fuse.group.fuse":
         value = {"perspectives": [
@@ -213,6 +225,14 @@ class WorkspaceCliCaseRunTests(unittest.TestCase):
         self.assertEqual(report["credential_kind"], "human_cookie")
         self.assertEqual(report["environment"]["entrypoint_kind"], "gateway")
         self.assertNotIn(PREPROD_COOKIE, json.dumps(report, sort_keys=True))
+
+    def test_preprod_gateway_list_case_reports_owned_bot_token_kind(self):
+        self.state_dir = self.root / "state-preprod-list"
+        report, _ = self.invoke_case("list", gateway=True)
+        self.assertEqual(report["status"], "PASS")
+        self.assertEqual(report["credential_kind"], "owned_bot_token")
+        self.assertEqual(report["environment"]["entrypoint_kind"], "gateway")
+        self.assertNotIn(LOCAL_TOKEN, json.dumps(report, sort_keys=True))
 
     def test_bad_cli_output_produces_a_blocked_report_without_credit(self):
         report, _ = self.invoke_case("detail", return_process=lambda argument, operation:

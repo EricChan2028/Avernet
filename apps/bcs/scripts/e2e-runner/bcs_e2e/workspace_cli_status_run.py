@@ -111,7 +111,9 @@ def dual_workspace_cli_status_run(
         "remote_validation": "NOT_RUN",
         "grants_release_credit": False,
         "credential_kind": (
-            "owned_local_bot_token" if profile["environment"]["tier"] == "local" else "human_cookie"
+            "owned_local_bot_token" if profile["environment"]["tier"] == "local"
+            else "owned_bot_token" if profile["auth"]["kind"] == "owned-bot-tokens"
+            else "human_cookie"
         ),
     }
     write(state_dir / REPORT_FILE, report)

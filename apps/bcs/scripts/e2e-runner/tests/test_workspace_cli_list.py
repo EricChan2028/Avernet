@@ -53,7 +53,8 @@ def profile_value(*, gateway=False, mutate=None):
                    "member": {"bot_id": MEMBER, "owner_id": "owner-1",
                               "dedicated": True, "visibility": "public"}},
         "auth": ({"kind": "owned-local-bot-tokens", "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN"}
-                 if not gateway else {"kind": "human-cookie", "cookie_env": "BCS_E2E_HUMAN_COOKIE"}),
+                 if not gateway else {"kind": "owned-bot-tokens",
+                                      "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN"}),
         "relationships": {"group": "bounded-owned-bots-retained-cli-create-list",
                            "initial_session": "retained", "cleanup": "none",
                            "participant_mode": "driver-member"},
@@ -72,14 +73,22 @@ def create_output():
             f"  Participants: {DRIVER},{MEMBER}\n  Session: {SESSION}\n").encode()
 
 
+def _group_row(group_id, coordinator, participants):
+    return {"group_id": group_id, "label": "bcs-e2e-workspace-cli-list",
+            "coordinator_bot": coordinator,
+            "participants": [{"bot_uuid": bot} for bot in participants],
+            "created_at": 1, "updated_at": 1, "group_kind": "chat",
+            "group_strategy": "cooperative", "visibility": "private",
+            "human_mention_notify_mode": "driver_bot_only"}
+
+
 def list_output(include_target=True):
     items = []
     if include_target:
-        items.append({"id": GROUP, "driver_bot": DRIVER, "status": "active"})
-    items.append({"id": "bcs_grp_unrelated", "driver_bot": "unrelated", "status": "active"})
+        items.append(_group_row(GROUP, DRIVER, [DRIVER, MEMBER]))
+    items.append(_group_row("bcs_grp_unrelated", "unrelated", ["unrelated"]))
     return json.dumps({"items": items, "offset": 0, "returned": len(items),
-                        "total": 10, "has_more": True,
-                        "next_offset": 2}).encode()
+                        "total": 10, "has_more": False}).encode()
 
 
 class WorkspaceCliListTests(unittest.TestCase):
@@ -149,13 +158,19 @@ class WorkspaceCliListTests(unittest.TestCase):
         self.assertEqual(len(snapshot["steps"][0]["evidence"]["requests"]), 2)
         self.assertNotIn(TOKEN, json.dumps(snapshot, sort_keys=True))
 
-    def test_gateway_cookie_is_not_evidence(self):
+    def test_preprod_human_cookie_is_not_admitted_for_list(self):
+        def mutate(value):
+            value["auth"] = {"kind": "human-cookie", "cookie_env": "BCS_E2E_HUMAN_COOKIE"}
+        with self.assertRaises(ConfigError):
+            validate_workspace_cli_list_profile(profile_value(gateway=True, mutate=mutate))
+
+    def test_gateway_owned_bot_token_is_not_evidence(self):
         execution, _, _, contexts = self.run_case(gateway=True)
         self.assertEqual(execution.status, "PASS")
         for context, cookie in contexts:
-            self.assertEqual(context["token"], "")
-            self.assertEqual(cookie, COOKIE)
-        self.assertNotIn(COOKIE, json.dumps(execution.snapshot(), sort_keys=True))
+            self.assertEqual(context["token"], TOKEN)
+            self.assertIsNone(cookie)
+        self.assertNotIn(TOKEN, json.dumps(execution.snapshot(), sort_keys=True))
 
     def test_nonzero_total_without_exact_group_blocks(self):
         execution, _, _, _ = self.run_case(include_target=False)

@@ -59,7 +59,8 @@ def profile_value(*, gateway=False):
         },
         "auth": (
             {"kind": "owned-local-bot-tokens", "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN"}
-            if local else {"kind": "human-cookie", "cookie_env": "BCS_E2E_HUMAN_COOKIE"}
+            if local else {"kind": "owned-bot-tokens",
+                           "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN"}
         ),
         "relationships": {
             "group": "bounded-owned-bots-retained-cli-status-termination",
@@ -201,7 +202,7 @@ class WorkspaceCliStatusRunTests(unittest.TestCase):
     def test_preprod_gateway_case_is_command_invokable_and_reported(self):
         report, _, calls = self.invoke_case(gateway=True)
         self.assertEqual(report["status"], "PASS")
-        self.assertEqual(report["credential_kind"], "human_cookie")
+        self.assertEqual(report["credential_kind"], "owned_bot_token")
         self.assertEqual(report["environment"]["entrypoint_kind"], "gateway")
         self.assertNotIn(PREPROD_COOKIE, json.dumps(report, sort_keys=True))
         self.assertEqual(calls[-1], "termination.group.read.completed")

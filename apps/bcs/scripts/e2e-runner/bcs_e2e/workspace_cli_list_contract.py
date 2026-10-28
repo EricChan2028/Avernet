@@ -93,7 +93,7 @@ def _validate_evidence(result: AdapterCall, *, operation: str) -> None:
             or evidence.get("transport") != "PRODUCT_CLI"
             or evidence.get("operation") != operation
             or evidence.get("caller_role") != "driver"
-            or evidence.get("credential_kind") not in {"owned_local_bot_token", "human_cookie"}
+            or evidence.get("credential_kind") not in {"owned_local_bot_token", "owned_bot_token"}
             or evidence.get("fixture_effect") != FIXTURE_EFFECT
             or evidence.get("remote_validation") != "NOT_RUN"
             or evidence.get("grants_release_credit") is not False):
@@ -112,19 +112,41 @@ def _validate_created(group_id: str, data: object, driver: str, member: str) -> 
         raise RunStateError("workspace CLI list Group create output is not exact")
 
 
-def _validate_list(group_id: str, data: object, driver: str) -> None:
+def _validate_list(group_id: str, data: object, driver: str, member: str) -> None:
     items = data.get("items") if isinstance(data, dict) else None
     if (not isinstance(data, dict) or not isinstance(items, list)
             or type(data.get("offset")) is not int or data["offset"] != 0
             or type(data.get("returned")) is not int or data["returned"] <= 0
             or data["returned"] != len(items)
-            or type(data.get("total")) is not int or data["total"] < data["returned"]):
+            or type(data.get("total")) is not int or data["total"] < data["returned"]
+            or type(data.get("has_more")) is not bool):
         raise RunStateError("workspace CLI list pagination result is not exact")
-    exact = [row for row in items if isinstance(row, dict) and row.get("id") == group_id]
-    if (len(exact) != 1
-            or exact[0].get("driver_bot") != driver
-            or exact[0].get("status") != "active"):
+    # Station legacy list projection (bcs-http bot_group_list_entry_to_legacy_json):
+    # group_id/coordinator_bot/participants[{bot_uuid}] without status/id keys,
+    # and the authenticated Bot token resolves the actor domain on preprod.
+    exact = []
+    for row in items:
+        if not isinstance(row, dict):
+            continue
+        row_id = row.get("group_id")
+        if not isinstance(row_id, str):
+            row_id = row.get("id")
+        if row_id == group_id:
+            exact.append(row)
+    if len(exact) != 1:
         raise RunStateError("workspace CLI list did not contain the exact newly created Group")
+    row = exact[0]
+    coordinator = row.get("coordinator_bot")
+    if not isinstance(coordinator, str):
+        coordinator = row.get("driver_bot")
+    participant_ids = {
+        item.get("bot_uuid") for item in row.get("participants", [])
+        if isinstance(item, dict)
+    }
+    if (coordinator != driver or not {driver, member} <= participant_ids):
+        raise RunStateError("workspace CLI list Group projection is not exact")
+    # The active-status obligation is proven by the get-group leaf, which the
+    # station projects with an explicit status field (see the detail slice).
 
 
 def execute_workspace_cli_list_case(adapter: object) -> CaseExecution:
@@ -147,7 +169,7 @@ def execute_workspace_cli_list_case(adapter: object) -> CaseExecution:
         listed = adapter.list_workspace_groups()
         listed.validate()
         _validate_evidence(listed, operation="list.group.list")
-        _validate_list(group_id, listed.data, driver)
+        _validate_list(group_id, listed.data, driver, member)
         records.append(listed.evidence)
         completed = 1
     except Exception as error:

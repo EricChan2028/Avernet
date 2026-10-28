@@ -16,6 +16,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from bcs_e2e.workspace_cli_profile import (
+    validate_workspace_cli_list_profile,
     validate_workspace_cli_profile,
 )
 from bcs_e2e.workspace_cli_runner import WorkspaceCliRunner, WorkspaceCliRunnerError
@@ -150,6 +151,69 @@ class WorkspaceCliRunnerTests(unittest.TestCase):
     def test_nonzero_cli_blocks(self):
         with self.assertRaisesRegex(WorkspaceCliRunnerError, "nonzero"):
             self.run_execute("group.create", returncode=1)
+
+    def list_profile(self):
+        return {
+            "schema_version": 1,
+            "contract": "dual-workspace-cli-list-profile-v1",
+            "environment": {"tier": "preprod", "id": "workspace-runner-list-preprod",
+                            "expected_bcs_env": "pre"},
+            "entrypoint": {"kind": "gateway", "origin": "https://gateway.example.com",
+                           "api_face": "legacy", "manifest_face": "legacy"},
+            "human": {"user_id": "owner-1"},
+            "actors": {
+                "driver": {"bot_id": DRIVER, "owner_id": "owner-1",
+                           "dedicated": True, "visibility": "public"},
+                "member": {"bot_id": MEMBER, "owner_id": "owner-1",
+                           "dedicated": True, "visibility": "public"},
+            },
+            "auth": {"kind": "owned-bot-tokens",
+                     "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN"},
+            "relationships": {"group": "bounded-owned-bots-retained-cli-create-list",
+                              "initial_session": "retained", "cleanup": "none",
+                              "participant_mode": "driver-member"},
+            "policy": {"fixture_pool": "workspace-cli-list-pool",
+                       "exclusive_use_confirmed": True, "timeout_seconds": 10,
+                       "max_response_bytes": 65536, "failure_retention_hours": 24},
+            "cli": {"transport": "product-cli", "command_family": "group",
+                    "api_face": "legacy"},
+        }
+
+    def test_preprod_owned_bot_token_is_written_to_the_cli_session_file(self):
+        profile = validate_workspace_cli_list_profile(self.list_profile())
+        runner = WorkspaceCliRunner(profile, binary=self.binary,
+                                    binary_sha256=self.digest, state_dir=self.state)
+        context_state: dict[str, object] = {}
+
+        def fake_capture(cmd, **kwargs):
+            environment = kwargs["environment"]
+            context_path = Path(environment["BOT_DATA_DIR"]) / ".bcs" / "session.json"
+            context_state["context"] = json.loads(context_path.read_text())
+            context_state["cookie"] = environment.get("BCS_COOKIE")
+            raw = (f"Group created:\n  ID: {GROUP}\n  Driver: {DRIVER}\n"
+                   f"  Participants: {DRIVER},{MEMBER}\n  Session: {SESSION}\n").encode()
+            return subprocess.CompletedProcess(cmd, 0, raw, b"")
+
+        with patch.dict(os.environ, {"BCS_E2E_DRIVER_BOT_TOKEN": TOKEN}), \
+             patch("bcs_e2e.workspace_cli_runner.capture", side_effect=fake_capture):
+            result = runner.execute("list.group.create")
+        self.assertEqual(result["evidence"]["credential_kind"], "owned_bot_token")
+        self.assertEqual(context_state["context"],
+                         {"token": TOKEN, "bot_uuid": DRIVER,
+                          "api_base_url": "https://gateway.example.com"})
+        self.assertIsNone(context_state["cookie"])
+        self.assertNotIn(TOKEN, json.dumps(result, sort_keys=True))
+
+    def test_preprod_owned_bot_token_absence_blocks_before_process(self):
+        profile = validate_workspace_cli_list_profile(self.list_profile())
+        runner = WorkspaceCliRunner(profile, binary=self.binary,
+                                    binary_sha256=self.digest, state_dir=self.state)
+        with patch.dict(os.environ, {}, clear=True), \
+             patch("bcs_e2e.workspace_cli_runner.capture") as capture:
+            with self.assertRaisesRegex(WorkspaceCliRunnerError,
+                                        "owned Bot credential is absent"):
+                runner.execute("list.group.create")
+        capture.assert_not_called()
 
     def test_missing_credential_blocks_before_process(self):
         for gateway in (False, True):
