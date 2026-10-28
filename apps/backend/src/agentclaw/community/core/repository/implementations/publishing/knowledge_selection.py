@@ -11,7 +11,6 @@ import json
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from uuid import uuid4
 
 from agentclaw.community.core.bot_knowledge.repository.models import (
     BotKnowledgeBindingModel as Binding,
@@ -228,18 +227,18 @@ def validate_snapshot(publish, source):
     return snapshot
 
 
-def freeze_build(session, publish_id):
+def prepare_build(session, publish_id, generation, incoming_ext=None):
     publish = session.query(Publish).filter(Publish.id == publish_id).one_or_none()
     if publish is None or publish.status != PublishStatus.DRAFT:
         return False
     ext = _ext(publish)
-    generation = uuid4().hex
     source = None
     try:
         source = _locked_source(session, publish)
         if publish.status != PublishStatus.DRAFT:
             return False
-        ext = _ext(publish)
+        ext = (_ext(publish) if incoming_ext is None else
+               merge_protected_ext(_ext(publish), incoming_ext))
         ids = [
             r[0]
             for r in _bindings(session, source)
@@ -257,31 +256,27 @@ def freeze_build(session, publish_id):
             "generation": generation,
             "enabled_kb_ids": ids,
         }
-        encoded = encode_ext(ext)
     except KnowledgeError as exc:
         # Not an empty selection, and never recaptured from a later draft.
         # SQL/storage failures are deliberately NOT caught.
         session.refresh(publish, with_for_update=True)
         if publish.status != PublishStatus.DRAFT:
             return False
-        ext = _ext(publish)
+        ext = (_ext(publish) if incoming_ext is None else
+               merge_protected_ext(_ext(publish), incoming_ext))
         ext[SNAPSHOT_KEY] = {
             **(_snapshot_scope(publish, source) if source is not None else {}),
             "generation": generation,
             **_unknown(exc),
         }
-        try:
-            encoded = encode_ext(ext)
-        except KnowledgeError as overflow:
-            # Even the bounded UNKNOWN snapshot cannot fit the remaining ext
-            # budget. This is a deterministic terminal failure; surface the
-            # stable size code instead of leaking an unmanaged in-except error.
-            raise KnowledgeError("KNOWLEDGE_PUBLISH_EXT_TOO_LARGE") from overflow
+    return publish, ext
+
+
+def commit_build(session, publish, encoded):
     publish.ext = encoded
     publish.status = PublishStatus.BUILDING
     publish.gmt_modified = func.now()
     session.flush()
-    return True
 
 
 def protected_ext(session, publish_id, incoming):

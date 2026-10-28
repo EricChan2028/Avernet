@@ -44,7 +44,7 @@ from agentclaw.community.kernel.knowledge import KnowledgePublicationPolicy
 from sqlalchemy import func
 
 from agentclaw.community.core.models.skill import Skill
-from agentclaw.community.core.repository.implementations.publishing import knowledge_selection
+from agentclaw.community.core.repository.implementations.publishing import knowledge_build, knowledge_selection
 from agentclaw.community.core.service_bot.repository.config_artifact_offload import (
     ConfigArtifactOffloader,
 )
@@ -105,13 +105,8 @@ class BotPublishRepository(
         """
         if not self._knowledge_policy.enabled:
             return True
-        _encoded, pending = self._offload.prepare(ext, publish_id, get_current_env())
-        if pending is None:
-            return True  # no remote I/O to move outside the transaction
-        if cas.get("expected_json"):
-            expected = json.loads(cas["expected_json"])
-            if expected.get("config_artifact_oss", {}).get("oss_key") == pending[0]:
-                return True  # immutable object is already referenced; exact CAS fences it
+        if "config_artifact" not in ext:
+            return True
         with self._db.orm_session() as db:
             row = db.query(self.Model).filter(self.Model.id == publish_id).first()
             if row is None or (source_status is not None and row.status != source_status):
@@ -543,9 +538,9 @@ class BotPublishRepository(
         target_status: str,
         source_status: Optional[str] = None,
     ) -> Optional[BotPublishRecord]:
-        if self._knowledge_policy.enabled and source_status == PublishStatus.DRAFT and target_status == PublishStatus.BUILDING:
-            with self._publication_session(publish_id) as db:
-                frozen = knowledge_selection.freeze_build(db, publish_id)
+        if (self._knowledge_policy.enabled and target_status == PublishStatus.BUILDING
+                and source_status in (None, PublishStatus.DRAFT)):
+            frozen = knowledge_build.freeze_build(self._publication_session, self._offload, publish_id)
             return self.get_by_id(publish_id) if frozen else None
         with self._publication_session() as db:
             query = db.query(self.Model).filter(
@@ -571,6 +566,12 @@ class BotPublishRepository(
         ext: Dict[str, Any],
         source_status: Optional[str] = None,
     ) -> Optional[BotPublishRecord]:
+        if (self._knowledge_policy.enabled and target_status == PublishStatus.BUILDING
+                and source_status in (None, PublishStatus.DRAFT)):
+            frozen = knowledge_build.freeze_build(
+                self._publication_session, self._offload, publish_id, incoming_ext=ext,
+            )
+            return self.get_by_id(publish_id) if frozen else None
         if not self._stage_artifact(publish_id, ext, source_status):
             return None
         with self._publication_session() as db:
@@ -650,6 +651,13 @@ class BotPublishRepository(
         """CAS status and the exact serialized ext snapshot in one UPDATE."""
         env = get_current_env()
         expected_json, _ = self._offload.prepare(expected_ext, publish_id, env)
+        if (self._knowledge_policy.enabled and target_status == PublishStatus.BUILDING
+                and source_status == PublishStatus.DRAFT):
+            frozen = knowledge_build.freeze_build(
+                self._publication_session, self._offload, publish_id,
+                incoming_ext=ext, expected_json=expected_json, compare_ext=True,
+            )
+            return self.get_by_id(publish_id) if frozen else None
         if not self._stage_artifact(
             publish_id, ext, source_status, expected_json=expected_json,
         ):

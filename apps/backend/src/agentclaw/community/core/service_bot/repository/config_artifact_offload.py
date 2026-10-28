@@ -99,9 +99,13 @@ class ConfigArtifactOffloader:
             return json.dumps(base, ensure_ascii=False), None
         artifact_json = json.dumps(artifact, ensure_ascii=False)
         size = len(artifact_json.encode("utf-8"))
-        if size <= ARTIFACT_OSS_THRESHOLD_BYTES:
-            base[ARTIFACT_KEY] = artifact
-            return json.dumps(base, ensure_ascii=False), None
+        base[ARTIFACT_KEY] = artifact
+        inline = json.dumps(base, ensure_ascii=False)
+        # The artifact shares TEXT with snapshots and other native metadata.
+        # Retain headroom for subsequent progress/result fields as before.
+        if size <= ARTIFACT_OSS_THRESHOLD_BYTES and len(inline.encode("utf-8")) <= ARTIFACT_OSS_THRESHOLD_BYTES:
+            return inline, None
+        del base[ARTIFACT_KEY]
         digest = hashlib.sha1(artifact_json.encode("utf-8")).hexdigest()[:12]
         key = self._key(env, publish_id, digest)
         base[ARTIFACT_OSS_MARKER] = {
@@ -117,6 +121,11 @@ class ConfigArtifactOffloader:
                 "on read."
             ),
         }
+        if size <= ARTIFACT_OSS_THRESHOLD_BYTES:
+            base[ARTIFACT_OSS_MARKER]["note"] = (
+                "config_artifact plus sibling metadata exceeded the inline ext "
+                "budget; artifact stored in object storage at oss_key"
+            )
         return json.dumps(base, ensure_ascii=False), (key, artifact_json)
 
     def upload(self, pending: Optional[PendingUpload]) -> None:
