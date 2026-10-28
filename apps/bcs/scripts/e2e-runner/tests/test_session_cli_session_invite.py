@@ -198,7 +198,13 @@ class SessionInviteTests(unittest.TestCase):
                     self.assertEqual(contexts[0][1], COOKIE)
                 else:
                     self.assertIsNone(contexts[0][1])
-                self.assertTrue(all(context[0].startswith(str(self.root)) for context in contexts))
+                # Launcher-root contract (workspace_cli_runner._context): the frozen
+                # simulator-wrapper product CLI gets a private bind-mountable root under
+                # ~/.bcs-e2e/runner-<uuid> (Colima shares only $HOME); roots are 0700,
+                # per-operation unique, and swept after 24h. Pin the new contract.
+                launch_base = str(WorkspaceCliRunner._LAUNCHER_ROOT_BASE)
+                self.assertTrue(all(context[0].startswith(launch_base + "/runner-") for context in contexts))
+                self.assertEqual(len({context[0] for context in contexts}), len(contexts))
                 self.assertNotIn(COOKIE, json.dumps(result.snapshot(), sort_keys=True))
 
     def test_foreign_invite_url_is_blocked(self):
