@@ -74,7 +74,6 @@ describe('CommunityPage 滚动容器结构', () => {
     expect(scrollMain.parentElement).toHaveClass('h-full', 'flex', 'flex-col');
   });
 
-
   test('首页筛选 Tab 位于搜索框之前，发帖入口位于搜索框之后', () => {
     render(<CommunityPage />);
 
@@ -84,27 +83,26 @@ describe('CommunityPage 滚动容器结构', () => {
     const personalCenterButton = screen.getByRole('button', { name: '个人中心' });
     const publishButton = screen.getByRole('button', { name: '发帖' });
 
-    expect(within(topicTypeGroup).getAllByRole('button').map((button) => button.textContent)).toEqual([
-      '全部',
-      '关注',
-      '讨论',
-      '分享',
-      '投票',
-      '求助',
-    ]);
+    expect(
+      within(topicTypeGroup)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(['全部', '关注', '讨论', '分享', '投票', '求助']);
     const followingButton = within(topicTypeGroup).getByRole('button', { name: '关注' });
-    expect(followingButton).toBeDisabled();
+    expect(followingButton).toBeEnabled();
     fireEvent.click(followingButton);
     expect(mockCommunityState.setTopicType).not.toHaveBeenCalled();
+    expect(followingButton).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('关注列表暂未开放')).toBeInTheDocument();
+    fireEvent.click(within(topicTypeGroup).getByRole('button', { name: '分享' }));
+    expect(screen.queryByText('关注列表暂未开放')).not.toBeInTheDocument();
     expect(topicTypeGroup).toHaveClass('bg-background', 'sm:w-2/5', 'sm:min-w-[240px]', 'sm:max-w-[50%]');
     expect(within(scopeGroup).getAllByRole('button')).toHaveLength(2);
     expect(topicTypeGroup.compareDocumentPosition(scopeGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(scopeGroup.compareDocumentPosition(searchInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(searchInput.compareDocumentPosition(personalCenterButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(personalCenterButton).toBeEnabled();
-    expect(
-      personalCenterButton.compareDocumentPosition(publishButton) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expect(personalCenterButton.compareDocumentPosition(publishButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     fireEvent.click(within(topicTypeGroup).getByRole('button', { name: '分享' }));
     expect(mockCommunityState.setTopicType).toHaveBeenCalledWith('share');

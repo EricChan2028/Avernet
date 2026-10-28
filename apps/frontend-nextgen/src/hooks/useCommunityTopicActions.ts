@@ -1,6 +1,7 @@
 import { notifyError, notifySuccess } from '@/components/ui/notify';
 import { COMMUNITY_REPLY_PAGE_SIZE } from '@/domain/community/constants';
 import { communityErrorMessage } from '@/domain/community/errors';
+import { forumAuthorRef } from '@/domain/community/interactionQueries';
 import type {
   CommunityAuthor,
   CommunityTopic,
@@ -8,7 +9,6 @@ import type {
   ForumTargetRef,
   InteractionSummary,
 } from '@/domain/community/types';
-import { forumAuthorRef } from '@/domain/community/interactionQueries';
 import { communityService } from '@/services/community';
 import { useCallback, useState } from 'react';
 import type { UseCommunityInteractionsResult } from './useCommunityInteractions';
@@ -59,14 +59,7 @@ export function useCommunityTopicActions({
         setReplySaving(false);
       }
     },
-    [
-      currentAuthorName,
-      currentUserId,
-      goToReplyPage,
-      replyPage,
-      replyTotal,
-      selectedTopic,
-    ],
+    [currentAuthorName, currentUserId, goToReplyPage, replyPage, replyTotal, selectedTopic],
   );
 
   const getAuthorSummary = useCallback(
@@ -75,15 +68,21 @@ export function useCommunityTopicActions({
     [interactions],
   );
 
-  const loadAuthorSummary = useCallback((author: CommunityAuthor) => {
-    void interactions.refreshSummaries([{ actor: forumAuthorRef(author) }]);
-  }, [interactions]);
+  const loadAuthorSummary = useCallback(
+    (author: CommunityAuthor) => {
+      void interactions.refreshSummaries([{ actor: forumAuthorRef(author) }]);
+    },
+    [interactions],
+  );
 
-  const authorFollowPending = useCallback((author: CommunityAuthor): boolean =>
-    interactions.isActionPending('FOLLOW', {
-      targetType: author.type === 'bot' ? 'BOT' : 'HUMAN',
-      id: author.id,
-    }), [interactions]);
+  const authorFollowPending = useCallback(
+    (author: CommunityAuthor): boolean =>
+      interactions.isActionPending('FOLLOW', {
+        targetType: author.type === 'bot' ? 'BOT' : 'HUMAN',
+        id: author.id,
+      }),
+    [interactions],
+  );
 
   const followAuthor = useCallback(
     async (author: CommunityAuthor) => {
@@ -92,10 +91,7 @@ export function useCommunityTopicActions({
         id: author.id,
       });
       if (success) {
-        await interactions.refreshSummaries(
-          [{ actor: forumAuthorRef(author) }],
-          { force: true },
-        );
+        await interactions.refreshSummaries([{ actor: forumAuthorRef(author) }], { force: true });
       }
       return success;
     },
@@ -107,6 +103,15 @@ export function useCommunityTopicActions({
     [interactions],
   );
 
+  const likeReply = useCallback(
+    (postId: string) =>
+      interactions.recordInteraction('LIKE', {
+        targetType: 'POST',
+        id: postId,
+      }),
+    [interactions],
+  );
+
   const favoriteTopic = useCallback(
     (target: ForumTargetRef) => interactions.recordInteraction('FAVORITE', target),
     [interactions],
@@ -114,9 +119,7 @@ export function useCommunityTopicActions({
 
   const targetSummary = useCallback(
     (topic: CommunityTopic | null): InteractionSummary | undefined =>
-      topic
-        ? interactions.getSummary({ target: { targetType: 'TOPIC', id: topic.id } })
-        : undefined,
+      topic ? interactions.getSummary({ target: { targetType: 'TOPIC', id: topic.id } }) : undefined,
     [interactions],
   );
 
@@ -157,6 +160,7 @@ export function useCommunityTopicActions({
     authorFollowPending,
     followAuthor,
     likeTopic,
+    likeReply,
     favoriteTopic,
     targetSummary,
   };

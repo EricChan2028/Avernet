@@ -6,10 +6,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 
 const mockedCenter: UsePersonalCenterResult = {
   ownerUserId: '149844',
-  botActors: [{ actorType: 'BOT', id: 'bot-A' }],
-  actorScope: 'ALL',
   activityType: 'AUTHORED',
-  targetType: 'ALL',
   page: 1,
   pageSize: 10,
   activityPage: {
@@ -25,53 +22,9 @@ const mockedCenter: UsePersonalCenterResult = {
     ],
     total: 1,
   },
-  identityStats: [
-    {
-      actor: { actorType: 'HUMAN', id: '149844' },
-      followCount: 1,
-      topicCount: 2,
-      replyCount: 3,
-      acceptedReplyCount: 1,
-      viewCount: 0,
-      likeCount: 0,
-      favoriteCount: 0,
-      acceptCount: 0,
-      replyParticipantCount: 0,
-      helpfulReplyCount: 0,
-    },
-    {
-      actor: { actorType: 'BOT', id: 'bot-A' },
-      followCount: 4,
-      topicCount: 5,
-      replyCount: 6,
-      acceptedReplyCount: 0,
-      viewCount: 0,
-      likeCount: 0,
-      favoriteCount: 0,
-      acceptCount: 0,
-      replyParticipantCount: 0,
-      helpfulReplyCount: 0,
-    },
-  ],
-  aggregateStats: {
-    followCount: 5,
-    topicCount: 7,
-    replyCount: 9,
-    acceptedReplyCount: 1,
-    viewCount: 0,
-    likeCount: 0,
-    favoriteCount: 0,
-    acceptCount: 0,
-    replyParticipantCount: 0,
-    helpfulReplyCount: 0,
-  },
   loading: false,
-  loadingStats: false,
-  subscriptionLoading: false,
   error: null,
-  setActorScope: jest.fn(),
   setActivityType: jest.fn(),
-  setTargetType: jest.fn(),
   goToPage: jest.fn(),
   reload: jest.fn(),
 };
@@ -82,39 +35,95 @@ jest.mock('@/hooks/usePersonalCenter', () => ({
 }));
 
 describe('CommunityPersonalCenter', () => {
-  it('defaults to ALL identity scope and renders aggregate cards with stable actor identifiers', () => {
+  it('renders the PRD-style My page and content tabs', () => {
     render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={jest.fn()} />);
 
+    expect(screen.getByText('我的')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '返回' })).toBeInTheDocument();
     expect(
-      within(screen.getByRole('group', { name: '身份筛选' }))
-        .getByRole('button', { name: '全部' }),
-    ).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByText('关注者')).toBeInTheDocument();
-    expect(screen.getAllByText('5').length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/bot-A/).length).toBeGreaterThan(0);
-    expect(screen.getByText('AUTHORED · TOPIC')).toBeInTheDocument();
+      within(screen.getByRole('group', { name: '我的内容' }))
+        .getAllByRole('button')
+        .map((item) => item.textContent),
+    ).toEqual(['我的帖子', '我的回贴', '我的收藏', '我的点赞', '浏览历史']);
+    expect(screen.queryByRole('group', { name: '身份筛选' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: '内容类型' })).not.toBeInTheDocument();
+    expect(screen.getByText('Bot · bot-A')).toBeInTheDocument();
   });
 
-  it('renders five activity tabs and provides the shared target filter', () => {
+  it('renders first-level replies as quoted rows when the backend returns a topic target', () => {
+    mockedCenter.activityType = 'REPLIED';
+    mockedCenter.activityPage = {
+      items: [
+        {
+          activityType: 'REPLIED',
+          actor: { actorType: 'HUMAN', id: '149844' },
+          target: { targetType: 'TOPIC', id: 'topic-2' },
+          topicId: 'topic-2',
+          postId: 'post-1',
+          happenedAt: '2026-10-27T10:00:00Z',
+          bodyPreview: '这是我发出的一级回复',
+        },
+      ],
+      total: 1,
+    };
     render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={jest.fn()} />);
 
-    const activities = screen.getByRole('group', { name: '活动类型' });
-    expect(within(activities).getAllByRole('button').map((item) => item.textContent)).toEqual([
-      '我的发布',
-      '我的收藏',
-      '我的浏览',
-      '我的点赞',
-      '我的回复',
-    ]);
-    expect(
-      within(screen.getByRole('group', { name: '内容类型' })).getAllByRole('button').length,
-    ).toBe(3);
+    expect(screen.getByText('回复')).toBeInTheDocument();
+    expect(screen.getByText('这是我发出的一级回复')).toBeInTheDocument();
+
+    mockedCenter.activityType = 'AUTHORED';
+    mockedCenter.activityPage = {
+      items: [
+        {
+          activityType: 'AUTHORED',
+          actor: { actorType: 'BOT', id: 'bot-A' },
+          target: { targetType: 'TOPIC', id: 'topic-1' },
+          topicId: 'topic-1',
+          happenedAt: '2026-10-27T10:00:00Z',
+          bodyPreview: 'Bot 发布的主题',
+        },
+      ],
+      total: 1,
+    };
   });
 
-  it('opens the related Topic when a Post or Topic activity row is clicked', () => {
+  it('renders reply activities as quoted rows and opens the related topic', () => {
+    mockedCenter.activityType = 'REPLIED';
+    mockedCenter.activityPage = {
+      items: [
+        {
+          activityType: 'REPLIED',
+          actor: { actorType: 'HUMAN', id: '149844' },
+          target: { targetType: 'POST', id: 'post-1' },
+          topicId: 'topic-2',
+          postId: 'post-1',
+          happenedAt: '2026-10-27T10:00:00Z',
+          bodyPreview: '这是我发出的回复',
+        },
+      ],
+      total: 1,
+    };
     const onOpenTopic = jest.fn();
     render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={onOpenTopic} />);
-    fireEvent.click(screen.getByText('Bot 发布的主题'));
-    expect(onOpenTopic).toHaveBeenCalledWith('topic-1');
+
+    expect(screen.getByText('话题 #topic-2')).toBeInTheDocument();
+    expect(screen.getByText('这是我发出的回复')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('这是我发出的回复'));
+    expect(onOpenTopic).toHaveBeenCalledWith('topic-2');
+
+    mockedCenter.activityType = 'AUTHORED';
+    mockedCenter.activityPage = {
+      items: [
+        {
+          activityType: 'AUTHORED',
+          actor: { actorType: 'BOT', id: 'bot-A' },
+          target: { targetType: 'TOPIC', id: 'topic-1' },
+          topicId: 'topic-1',
+          happenedAt: '2026-10-27T10:00:00Z',
+          bodyPreview: 'Bot 发布的主题',
+        },
+      ],
+      total: 1,
+    };
   });
 });

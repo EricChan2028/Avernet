@@ -1,68 +1,87 @@
-import { Button } from '@/components/ui/Button';
 import type { ForumTargetRef, InteractionStats } from '@/domain/community/types';
-import { Eye, Heart, Star } from 'lucide-react';
+import { cn } from '@/utils/cn';
+import { Heart, Pencil, Star } from 'lucide-react';
+import { formatDateTime } from '../CommunityTopicDetail/model';
 
 export interface TopicInteractionBarProps {
   topicId: string;
   topicStats: InteractionStats;
-  likePending: boolean;
-  favoritePending: boolean;
+  publishedAt: string;
+  liked?: boolean;
+  favorited?: boolean;
+  likePending?: boolean;
+  favoritePending?: boolean;
+  canEdit?: boolean;
   onLike: (target: ForumTargetRef) => void;
   onFavorite: (target: ForumTargetRef) => void;
+  onEdit?: () => void;
 }
 
 /**
- * Interaction controls are event buttons, not state toggles. Counts always come
- * from the latest server-side summary; only the in-flight request is disabled.
+ * Main-topic action row. As in the product design, actions live under the body,
+ * share a row with the published time, and do not introduce an extra divider.
  */
 export function TopicInteractionBar({
   topicId,
   topicStats,
-  likePending,
-  favoritePending,
+  publishedAt,
+  liked = false,
+  favorited = false,
+  likePending = false,
+  favoritePending = false,
+  canEdit = false,
   onLike,
   onFavorite,
+  onEdit,
 }: TopicInteractionBarProps) {
   const target: ForumTargetRef = { targetType: 'TOPIC', id: topicId };
+
   return (
-    <section
-      aria-label="主题互动"
-      className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-4 py-3"
-    >
-      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-        <Eye className="size-4" aria-hidden />
-        {topicStats.viewCount} 浏览
-      </span>
-      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-        <Heart className="size-4" aria-hidden />
-        {topicStats.likeCount} 点赞
-      </span>
-      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-        <Star className="size-4" aria-hidden />
-        {topicStats.favoriteCount} 收藏
-      </span>
-      <span className="ml-auto inline-flex items-center gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-8 px-3 text-xs"
+    <section aria-label="主题互动" className="mt-2 flex items-center justify-between gap-3">
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          disabled={likePending}
           aria-label="点赞主题"
-          loading={likePending}
+          aria-pressed={liked}
           onClick={() => onLike(target)}
+          className={cn(
+            'flex items-center gap-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+            liked ? 'text-destructive' : 'text-muted-foreground hover:text-foreground',
+          )}
         >
-          点赞
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-8 px-3 text-xs"
+          <Heart className={cn('size-3.5', liked && 'fill-current')} aria-hidden />
+          {topicStats.likeCount}
+        </button>
+        <button
+          type="button"
+          disabled={favoritePending}
           aria-label="收藏主题"
-          loading={favoritePending}
+          aria-pressed={favorited}
           onClick={() => onFavorite(target)}
+          className={cn(
+            'flex items-center gap-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+            favorited ? 'text-warning' : 'text-muted-foreground hover:text-foreground',
+          )}
         >
-          收藏
-        </Button>
-      </span>
+          <Star className={cn('size-3.5', favorited && 'fill-current')} aria-hidden />
+          {favorited ? '已收藏' : '收藏'}
+        </button>
+        {onEdit ? (
+          <button
+            type="button"
+            disabled={!canEdit}
+            aria-label="编辑"
+            title={canEdit ? '编辑主题' : '仅发布人可编辑开放的帖子'}
+            className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={onEdit}
+          >
+            <Pencil className="size-3.5" aria-hidden />
+            编辑
+          </button>
+        ) : null}
+      </div>
+      <span className="text-xs text-muted-foreground">发表于：{formatDateTime(publishedAt)}</span>
     </section>
   );
 }

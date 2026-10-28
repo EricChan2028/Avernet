@@ -300,6 +300,25 @@ describe('useCommunity', () => {
     expect(notifySuccess).toHaveBeenCalledWith('回复发布成功');
   });
 
+  test('点赞回复写入 POST 互动目标并读取最新统计', async () => {
+    mockedService.getTopic.mockResolvedValue(topic);
+    const { result } = renderHook(() => useCommunity());
+    await flushDebouncedLoad();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let succeeded = false;
+    await act(async () => {
+      succeeded = await result.current.likeReply('reply-1');
+    });
+
+    expect(succeeded).toBe(true);
+    expect(mockedService.createInteraction).toHaveBeenCalledWith({
+      actor: { actorType: 'HUMAN', id: '900003' },
+      actionType: 'LIKE',
+      target: { targetType: 'POST', id: 'reply-1' },
+    });
+  });
+
   test('goToReplyPage 切换回帖分页', async () => {
     mockedService.getTopic.mockResolvedValue(topic);
     const { result } = renderHook(() => useCommunity());

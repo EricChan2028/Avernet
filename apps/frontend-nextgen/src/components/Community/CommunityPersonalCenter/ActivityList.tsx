@@ -1,9 +1,8 @@
 import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
 import type { PersonalCenterActivity } from '@/domain/community/types';
-import { RefreshCw } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
 import { formatDateTime } from '../CommunityTopicDetail/model';
 import { actorLabel } from './model';
 
@@ -18,7 +17,7 @@ export interface ActivityListProps {
 export function ActivityList({ items, loading, error, onRetry, onOpenTopic }: ActivityListProps) {
   if (loading) {
     return (
-      <div className="overflow-hidden rounded-xl border border-border bg-card" aria-label="个人中心活动加载中">
+      <div className="overflow-hidden rounded-lg border border-border bg-card" aria-label="个人中心列表加载中">
         {[1, 2, 3].map((item) => (
           <Skeleton.ListItem key={item} />
         ))}
@@ -27,12 +26,12 @@ export function ActivityList({ items, loading, error, onRetry, onOpenTopic }: Ac
   }
   if (error) {
     return (
-      <div className="rounded-xl border border-border bg-card">
+      <div className="rounded-lg border border-border bg-card">
         <Empty
-          title="活动加载失败"
+          title="列表加载失败"
           description={error}
           action={
-            <Button variant="outline" leftIcon={<RefreshCw className="size-4" />} onClick={onRetry}>
+            <Button variant="outline" onClick={onRetry}>
               重试
             </Button>
           }
@@ -42,35 +41,50 @@ export function ActivityList({ items, loading, error, onRetry, onOpenTopic }: Ac
   }
   if (!items.length) {
     return (
-      <div className="rounded-xl border border-border bg-card">
-        <Empty title="暂无活动" description="当前身份还没有对应的社区活动。" />
+      <div className="rounded-lg border border-border bg-card">
+        <Empty title="暂无内容" description="当前身份在这个分类下还没有社区记录。" />
       </div>
     );
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-card">
-      {items.map((item) => (
-        <Button
-          key={`${item.actor.actorType}:${item.actor.id}:${item.activityType}:${item.target.targetType}:${item.target.id}`}
-          variant="ghost"
-          size="md"
-          className="grid w-full grid-cols-[80px_1fr_160px_170px] items-center gap-3 rounded-none border-b border-border/60 px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-muted"
-          onClick={() => onOpenTopic(item.topicId)}
-        >
-          <Badge tone={item.actor.actorType === 'BOT' ? 'primary' : 'neutral'}>
-            {actorLabel(item.actor.actorType)}
-          </Badge>
-          <span className="min-w-0">
-            <span className="block truncate text-sm text-foreground">{item.bodyPreview || '社区内容'}</span>
-            <span className="mt-0.5 block truncate text-xs text-muted-foreground">{item.actor.id}</span>
-          </span>
-          <span className="truncate text-xs text-muted-foreground">
-            {item.activityType} · {item.target.targetType}
-          </span>
-          <span className="text-right text-xs text-muted-foreground">{formatDateTime(item.happenedAt)}</span>
-        </Button>
-      ))}
+    <div className="overflow-hidden rounded-lg border border-border bg-card" aria-label="个人中心内容列表">
+      {items.map((item) => {
+        const isReply = item.target.targetType === 'POST' || (item.activityType === 'REPLIED' && !!item.postId);
+        const primaryText = isReply ? `话题 #${item.topicId}` : item.bodyPreview || '社区内容';
+        return (
+          <Button
+            key={`${item.actor.actorType}:${item.actor.id}:${item.activityType}:${item.target.targetType}:${item.target.id}`}
+            variant="ghost"
+            className="block h-auto w-full rounded-none border-b border-border/60 px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-muted"
+            onClick={() => onOpenTopic(item.topicId)}
+          >
+            <span className="block w-full">
+              <span className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_150px]">
+                <span className="min-w-0">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-sm font-semibold text-foreground">{primaryText}</span>
+                    <Badge tone={isReply ? 'neutral' : 'outline'} className="h-5 shrink-0 rounded px-1.5 text-[10px]">
+                      {isReply ? '回复' : '主题'}
+                    </Badge>
+                  </span>
+                  {isReply && item.bodyPreview ? (
+                    <span className="mt-2 block line-clamp-2 rounded-md bg-muted/50 px-2.5 py-2 text-xs leading-relaxed text-foreground/90">
+                      {item.bodyPreview}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="min-w-0 text-xs text-muted-foreground sm:text-right">
+                  <span className="block truncate">
+                    {actorLabel(item.actor.actorType)} · {item.actor.id}
+                  </span>
+                  <span className="mt-1 block tabular-nums">{formatDateTime(item.happenedAt)}</span>
+                </span>
+              </span>
+            </span>
+          </Button>
+        );
+      })}
     </div>
   );
 }
