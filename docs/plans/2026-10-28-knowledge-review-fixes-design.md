@@ -44,3 +44,8 @@ None: no package, ORM, DDL, table or index change.
 
 ## Test Strategy
 Focused config/DI, real handler/service/repository status tests, below-threshold artifact with maximum multibyte selections, OSS failure/CAS/delete races, same-name/disabled-history VM tests, all affected publishing/knowledge/services/config/architecture suites and lint.
+
+## Approved default enablement follow-up (2026-10-28)
+用户明确要求通过 ODC CLI 只读核对指定数据库，结构就绪后在本 PR 开启发布集成，不处理历史。已用 SHOW CREATE TABLE 核对知识绑定、通用配置、发布表，并用 SHOW INDEX 核对源 Bot 主键/唯一键；知识字段和所需索引均存在。公开文档不记录内部数据库 ARN、域名或调用者信息。
+
+选择：随包 application.yaml 显式 enabled: true；仍允许部署显式设 false，缺失配置/直接构造策略对象的兼容 fallback 保留 false。拒绝仅开启本机配置（不能随 PR 交付）或修改全局策略 fallback（无必要扩大直接构造调用者影响）。不修改数据库、历史 UNKNOWN 语义或消费端。验证现有配置合并/DI 生命周期/发布 HTTP 服务边界及相关完整回归。

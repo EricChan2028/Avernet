@@ -44,3 +44,12 @@ None: no package, ORM, DDL, table or index change.
 
 ## Test Strategy
 Focused config/DI, real handler/service/repository status tests, below-threshold artifact with maximum multibyte selections, OSS failure/CAS/delete races, same-name/disabled-history VM tests, all affected publishing/knowledge/services/config/architecture suites and lint.
+
+## Enablement Follow-up
+结构只读核对完成后，改动如下，不修改业务算法或 schema：
+```diff
+ # configs/application.yaml / user_config.bot_knowledge_publication
+- enabled: false
++ enabled: true
+```
+同步三种 community 配置快照及当前 README。先以真实默认 DI 回归证明旧配置失败，再验证 true/false 两种生命周期及默认配置下正常服务/仓储接线，最后重跑原相关回归集与推送门禁。
