@@ -16,6 +16,7 @@ from sqlalchemy import LargeBinary, cast, literal, select
 
 from agentclaw.community.kernel.knowledge import (
     KNOWLEDGE_ONLINE_CONFIG_KEY,
+    KnowledgeError,
     require_knowledge_id,
 )
 from agentclaw.community.plugin_api.models import BotCommonConfig
@@ -84,6 +85,10 @@ def decode_summary(raw, *, source_pk, bot_id, entity_id, env):
                 or type(materialized.get("space_id")) not in (int, type(None))
             ):
                 return None
+            if "kb_ids" not in materialized and value["status"] == "applied":
+                # Applied state has exactly one ID set. Persisting it twice can
+                # overflow TEXT for 100 valid multibyte 128-character IDs.
+                materialized["kb_ids"] = value["enabled_kb_ids"]
             _ids(materialized.get("kb_ids"))
         if value["status"] == "applied":
             if (
@@ -183,6 +188,9 @@ def lock_summary(session, publish):
 
 
 def write_summary(session, row, *, publish, source, outcome, ids, materialized):
+    materialized = dict(materialized) if materialized is not None else None
+    if materialized is not None and outcome["status"] == "applied":
+        materialized.pop("kb_ids", None)  # decode from the sole enabled_kb_ids set
     value = dict(
         schema_version=1,
         source_bot_pk=publish.source_bot_pk,
@@ -197,6 +205,8 @@ def write_summary(session, row, *, publish, source, outcome, ids, materialized):
         materialized=materialized,
     )
     encoded = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    if len(encoded.encode("utf-8")) > 65535:
+        raise KnowledgeError("KNOWLEDGE_CURRENT_SUMMARY_TOO_LARGE")
     if row is None:
         row = BotCommonConfig(
             **config_scope(

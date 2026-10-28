@@ -186,7 +186,10 @@ def test_read_and_completion_sql_never_scan_publication_history_or_all_bindings(
         ("avernet_tenant", "foreign"),
         ("owner_id", "foreign"),
         ("space_id", 999),
-        ("enabled_kb_ids", ["A"]),
+        (
+            "materialized",
+            {"avernet_tenant": "teamclaw", "space_id": 9, "kb_ids": ["A"]},
+        ),
         ("enabled_kb_ids", ["B", "B"]),
     ],
 )
@@ -256,7 +259,8 @@ def test_space_change_clears_only_tracked_old_keys_and_installs_new_selection(
             "B": True,
         }
         summary = json.loads(session.query(BotCommonConfig).one().config_value)
-        assert summary["space_id"] == 10 and summary["materialized"]["kb_ids"] == ["B"]
+        assert summary["space_id"] == 10 and summary["enabled_kb_ids"] == ["B"]
+        assert "kb_ids" not in summary["materialized"]
 
 
 @pytest.mark.parametrize("dialect_name", ["sqlite", "mysql", "postgresql"])
@@ -285,3 +289,49 @@ def test_current_summary_query_uses_text_fence_not_json_operators(dialect_name):
     )
     if dialect_name == "mysql":
         assert " AS BINARY" in sql  # don't inherit a case-insensitive TEXT collation
+
+
+@pytest.mark.parametrize("character", ["知", "😀"])
+def test_maximum_multibyte_selection_fits_existing_text_and_round_trips(
+    publication, character
+):
+    from agentclaw.community.core.bot_knowledge.repository.online_selection import (
+        decode_summary,
+    )
+
+    db, repo, record = publication
+    space(db)
+    ids = [character * 125 + f"{i:03d}" for i in range(100)]
+    with db.orm_session() as session:
+        session.query(Binding).delete()
+        session.add_all(
+            [
+                Binding(
+                    bot_pk=1,
+                    space_id=9,
+                    env="dev",
+                    kb_id=kb,
+                    enabled=True,
+                    online_enabled=False,
+                    revision=1,
+                    updated_by="owner",
+                )
+                for kb in ids
+            ]
+        )
+    completed = finish(repo, _start_online(repo, record))
+    assert completed.ext["knowledge_selection_result"]["status"] == "applied"
+    with db.orm_session() as session:
+        raw = session.query(BotCommonConfig).one().config_value
+    assert len(raw.encode("utf-8")) <= 65535
+    decoded = decode_summary(
+        raw, source_pk=1, bot_id="service", entity_id="owner", env="dev"
+    )
+    assert decoded is not None
+    assert (
+        set(decoded["enabled_kb_ids"])
+        == set(decoded["materialized"]["kb_ids"])
+        == set(ids)
+    )
+    assert "kb_ids" not in json.loads(raw)["materialized"]
+    assert set(selected(db)) == set(ids)
