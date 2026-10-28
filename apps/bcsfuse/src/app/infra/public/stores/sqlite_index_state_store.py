@@ -186,6 +186,8 @@ class SQLiteIndexStateStore:
         row = cursor.fetchone()
         if row is None or row[1] != owner_id or row[2] <= now:
             return None
+        if int(row[3]) >= index_version:
+            return None
         cursor.execute(
             """
             UPDATE bcsfuse_index_states

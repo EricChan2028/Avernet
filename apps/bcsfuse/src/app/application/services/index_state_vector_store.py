@@ -68,6 +68,26 @@ class IndexStateMaintainingVectorStore:
     def index_revision_stale(self) -> bool:
         return self._local_version < self.index_version
 
+    @property
+    def lease_seconds(self) -> float:
+        return self._lease_seconds
+
+    @property
+    def lease_heartbeat_seconds(self) -> float:
+        """Renew often enough to survive one missed background renewal."""
+        return self._lease_seconds / 3.0
+
+    def renew_owner_lease(self) -> bool:
+        """Extend the owner lease without issuing a backend or index write."""
+        try:
+            self._refresh()
+        except Exception as error:
+            self._mark_unavailable()
+            raise IndexStateUnavailable(
+                f"index owner lease renewal failed: {type(error).__name__}"
+            ) from error
+        return not self.read_only
+
     def check_ready(self) -> bool:
         try:
             backend_ready = bool(self.backend.check_ready())
@@ -218,6 +238,11 @@ class _OwneredWrite:
                 f"is owned by {self._owner.index_owner!r}"
             )
         self._record = record
+        # A lease owner that failed over and later resumed must resume from the
+        # shared revision, not from its pre-failure in-process counter.
+        self._owner._local_version = max(
+            record.index_version, self._owner._local_version
+        )
 
     def __exit__(self, exc_type, exc_value, traceback):
         if exc_type is not None:

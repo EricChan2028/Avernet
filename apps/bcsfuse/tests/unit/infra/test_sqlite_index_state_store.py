@@ -103,3 +103,14 @@ def test_expired_owner_cannot_publish_index_version(tmp_path):
 
     assert expired_owner.owner_id == "pod-b"
     assert store.publish_index_version("profiles", "pod-a", 2) is None
+
+
+def test_publishing_a_non_increasing_index_version_is_rejected(tmp_path):
+    store = SQLiteIndexStateStore(str(tmp_path / "index-state.sqlite"))
+    store.claim_owner("profiles", "pod-a", lease_seconds=60)
+    assert store.publish_index_version("profiles", "pod-a", 3).index_version == 3
+
+    assert store.publish_index_version("profiles", "pod-a", 3) is None
+    assert store.publish_index_version("profiles", "pod-a", 2) is None
+
+    assert store.read_owner("profiles").index_version == 3

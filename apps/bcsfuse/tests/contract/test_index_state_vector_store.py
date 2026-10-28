@@ -272,6 +272,52 @@ def _make_point(profile_key="worker:default"):
     )
 
 
+def test_owner_resumes_from_the_latest_shared_revision(tmp_path):
+    import sqlite3
+    import time
+
+    backend = RecordingVectorStore()
+    state_store = SQLiteIndexStateStore(str(tmp_path / "index-state.sqlite"))
+    collection_pair = "profiles:dense+keyword"
+
+    def wrapped_owner(owner_id: str):
+        return wrap_vector_store_with_index_state(
+            backend,
+            store=state_store,
+            owner_id=owner_id,
+            collection_pair=collection_pair,
+            stale_after_seconds=60,
+            lease_seconds=120,
+        )
+
+    def expire_active_owner():
+        connection = sqlite3.connect(state_store.db_path)
+        try:
+            connection.execute(
+                "UPDATE bcsfuse_index_states SET owner_expires_at = ? "
+                "WHERE collection_pair = ?",
+                (time.time() - 0.001, collection_pair),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    owner = wrapped_owner("pod-a")
+    owner.upsert(["first"])
+
+    expire_active_owner()
+    takeover = wrapped_owner("pod-b")
+    takeover.upsert(["second"])
+    state_store.release_owner(collection_pair, "pod-b")
+
+    owner.upsert(["resumed"])
+
+    assert owner.index_version == 3
+    assert state_store.read_owner(collection_pair).index_version == 3
+    assert backend.points == ["first", "second", "resumed"]
+    owner.close()
+
+
 def test_read_only_rebuild_is_rejected_before_backend_rebuild(tmp_path):
     backend = SharedViewVectorStore()
     owner = wrapped(tmp_path, "pod-a", backend=backend)
@@ -458,3 +504,35 @@ def test_real_ready_endpoint_recovers_stale_reader_without_index_mutation(
 
     owner_composed.close()
     reader_composed.close()
+
+
+def test_active_owner_lease_can_be_renewed_without_a_backend_write(tmp_path):
+    owner = wrapped(tmp_path, "pod-a")
+    store = SQLiteIndexStateStore(str(tmp_path / "index-state.sqlite"))
+    before = store.read_owner("profiles:dense+keyword").owner_expires_at
+
+    assert owner.renew_owner_lease() is True
+    after = store.read_owner("profiles:dense+keyword").owner_expires_at
+
+    assert after > before
+    assert owner.read_only is False
+    assert owner.backend.points == []
+    owner.close()
+
+
+def test_non_owner_lease_renewal_does_not_steal_a_live_owner(tmp_path):
+    owner = wrapped(tmp_path, "pod-a")
+    reader = wrapped(tmp_path, "pod-b")
+
+    assert reader.renew_owner_lease() is False
+    assert reader.read_only is True
+    assert reader.index_owner == "pod-a"
+
+    record = SQLiteIndexStateStore(
+        str(tmp_path / "index-state.sqlite")
+    ).read_owner("profiles:dense+keyword")
+    assert record.owner_id == "pod-a"
+    assert record.index_version == 0
+
+    owner.close()
+    reader.close()

@@ -153,8 +153,9 @@ class MySQLIndexStateStore:
                     WHERE collection_pair = %s
                       AND owner_id = %s
                       AND owner_expires_at > %s
+                      AND index_version < %s
                     """,
-                    (index_version, now, collection_pair, owner_id, now),
+                    (index_version, now, collection_pair, owner_id, now, index_version),
                 )
                 if cursor.rowcount != 1:
                     connection.rollback()

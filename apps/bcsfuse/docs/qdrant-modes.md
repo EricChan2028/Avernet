@@ -70,7 +70,10 @@ Runtime mode adds a shared durable ownership catalog in MySQL
 (`bcsfuse_index_states`). Only the active lease owner may mutate a dense/keyword
 collection pair; graceful shutdown releases the lease and an expired lease permits
 failsafe takeover. The lease owner publishes a revision after each successful
-backend write. Non-owner replicas are read-only and `/ready` reports them stale
+backend write. Revisions are monotonically increasing; the durable state store
+rejects an equal or lower revision, and an owner that later resumes after failover
+resumes its next publication from the shared revision rather than a stale local
+counter. Non-owner replicas are read-only and `/ready` reports them stale
 until reconstruction or sync reaches the shared revision. Direct reader rebuild
 and incremental sync calls are rejected before Qdrant; startup uses
 `synchronize_read_view`, which only acknowledges the shared revision and reloads
