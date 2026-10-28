@@ -78,8 +78,9 @@ PYTHONPATH="src:/tmp/tc-knowledge-1027-public-deps:/Users/qiaoyifan/Antcode/ocb/
 
 ## Bounded local SQL evidence
 
-`local-query-plan.json` records actual emitted SQL/EXPLAIN plans and SQLite VM
-steps from `test_knowledge_summary_cost.py`. Each stage ADDS 1, 1000, 10000
+A local query-plan capture (raw artifact intentionally not carried in this PR)
+recorded actual emitted SQL/EXPLAIN plans and SQLite VM steps from
+`test_knowledge_summary_cost.py`. Each stage ADDS 1, 1000, 10000
 historical publications and disabled bindings to the same DB. Including native
 current publications, cumulative publication rows are 3 / 1004 / 11005 and
 binding rows are 3 / 1003 / 11003. One live KB is selected; the final two pages

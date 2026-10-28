@@ -220,8 +220,7 @@ that races after staging may leave an unreferenced immutable object under the
 existing per-record cleanup prefix. Build/deploy/grant/OSS work is never wrapped
 in a knowledge transaction. Disabled integration retains native session and
 upload behavior and accesses no knowledge table. See
-`specs/2026-10-27-knowledge-short-transaction/` for current acceptance evidence;
-earlier stage verification counts are historical, not this refactor's result.
+`specs/2026-10-28-knowledge-current-summary/` for current acceptance evidence.
 
 #### Production enablement gate
 
