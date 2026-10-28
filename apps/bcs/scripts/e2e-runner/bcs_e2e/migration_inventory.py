@@ -217,6 +217,8 @@ def migration_plan() -> dict:
     from .local_network_register_contract import network_register_adaptability
     from .remote_channel_cli_adapter import channel_cli_adaptability
     from .remote_operator_cli_adapter import operator_cli_adaptability
+    from .direct_chat_cli_case_run import dual_direct_chat_adaptability
+    from .delivery_policy_cli_case_run import delivery_policy_adaptability
     from .local_webhook_subscription_contract import webhook_subscription_adaptability
     from .local_structured_public_contract import structured_templates_adaptability
     structured_templates = structured_templates_adaptability()
@@ -583,7 +585,9 @@ def migration_plan() -> dict:
                 workspace_incident_core_adaptability(),
                 workspace_roundtrip_adaptability(),
                 channel_cli_adaptability(),
-                operator_cli_adaptability()],
+                operator_cli_adaptability(),
+                dual_direct_chat_adaptability(),
+                delivery_policy_adaptability()],
             'case_rewrite_plans': [{
                 'case_id': slow_judge_rewrite.case_id,
                 'parent_id': slow_judge_rewrite.parent_id,

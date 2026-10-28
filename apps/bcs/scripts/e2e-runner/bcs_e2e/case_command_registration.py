@@ -8,6 +8,8 @@ from .edge_read_case_run import CASE_KEYS as EDGE_CASE_KEYS
 from .network_read_case_run import CASE_KEYS as NETWORK_READ_CASE_KEYS
 from .edge_friend_mutation_case_run import CASE_KEYS as EDGE_FRIEND_MUTATION_CASE_KEYS
 from .session_service_cli_case_run import CASE_KEYS as SESSION_SERVICE_CASE_KEYS
+from .direct_chat_cli_case_run import CASE_KEYS as DIRECT_CHAT_CASE_KEYS
+from .delivery_policy_cli_case_run import CASE_KEYS as DELIVERY_POLICY_CASE_KEYS
 
 
 CASE_COMMANDS = frozenset({
@@ -35,6 +37,8 @@ CASE_COMMANDS = frozenset({
     "dual-edge-friend-mutation-run",
     "dual-session-service-run",
     "dual-operator-cli-run",
+    "dual-direct-chat-run",
+    "dual-delivery-policy-run",
 })
 
 
@@ -259,3 +263,25 @@ def register_case_commands(commands) -> None:
     operator_case.add_argument("--run-id", required=True)
     operator_case.add_argument("--confirm-run-id", required=True)
     operator_case.add_argument("--allow-write", action="store_true")
+    direct_chat_case = commands.add_parser(
+        "dual-direct-chat-run",
+        help="Run the reviewed dual Direct-chat product-CLI story through Singlebox or preprod")
+    direct_chat_case.add_argument("--profile", type=Path, required=True)
+    direct_chat_case.add_argument("--cli-binary", type=Path, required=True)
+    direct_chat_case.add_argument("--cli-binary-sha256", required=True)
+    direct_chat_case.add_argument("--case", choices=tuple(DIRECT_CHAT_CASE_KEYS), required=True)
+    direct_chat_case.add_argument("--state-dir", type=Path, required=True)
+    direct_chat_case.add_argument("--run-id", required=True)
+    direct_chat_case.add_argument("--confirm-run-id", required=True)
+    direct_chat_case.add_argument("--allow-write", action="store_true")
+    delivery_policy_case = commands.add_parser(
+        "dual-delivery-policy-run",
+        help="Run the reviewed dual Delivery Policy product-HTTP story through Singlebox or preprod")
+    delivery_policy_case.add_argument("--profile", type=Path, required=True)
+    delivery_policy_case.add_argument("--cli-binary", type=Path, required=True)
+    delivery_policy_case.add_argument("--cli-binary-sha256", required=True)
+    delivery_policy_case.add_argument("--case", choices=tuple(DELIVERY_POLICY_CASE_KEYS), required=True)
+    delivery_policy_case.add_argument("--state-dir", type=Path, required=True)
+    delivery_policy_case.add_argument("--run-id", required=True)
+    delivery_policy_case.add_argument("--confirm-run-id", required=True)
+    delivery_policy_case.add_argument("--allow-write", action="store_true")
