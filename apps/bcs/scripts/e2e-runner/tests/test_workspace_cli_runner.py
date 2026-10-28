@@ -118,6 +118,71 @@ class WorkspaceCliRunnerTests(unittest.TestCase):
         self.assertEqual(result["evidence"]["transport"], "PRODUCT_CLI")
         self.assertNotIn(TOKEN, json.dumps(result, sort_keys=True))
 
+    def test_simulator_wrapper_envelope_carries_docker_launcher(self):
+        profile = validate_workspace_cli_profile(profile_value())
+        runner = WorkspaceCliRunner(profile, binary=self.binary,
+                                    binary_sha256=self.digest,
+                                    state_dir=self.state)
+        with patch("bcs_e2e.workspace_cli_runner.shutil.which",
+                   return_value="/opt/custom/bin/docker"), \
+             patch.dict(os.environ, {"DOCKER_HOST": "unix:///tmp/fake-docker.sock",
+                                     "BCS_E2E_DRIVER_BOT_TOKEN": TOKEN}, clear=False):
+            credential_kind, credential = runner._credentials()
+            root, context, environment = runner._context(credential_kind, credential)
+        try:
+            self.assertTrue(str(root).startswith(
+                str(Path.home() / ".bcs-e2e" / "runner-")))
+            self.assertEqual(environment["PATH"].split(":")[0], "/opt/custom/bin")
+            self.assertEqual(environment["DOCKER_HOST"],
+                              "unix:///tmp/fake-docker.sock")
+            self.assertEqual(Path(environment["HOME"]), root / "home")
+            self.assertEqual(Path(environment["BOT_DATA_DIR"]), root / "bot")
+            self.assertEqual((root / "home").stat().st_mode & 0o777, 0o777)
+            self.assertEqual((root / "home" / ".bcs").stat().st_mode & 0o777, 0o777)
+            self.assertTrue((root / "home" / ".bcs-mktmp").is_dir())
+            self.assertEqual((root / "bot").stat().st_mode & 0o777, 0o777)
+            self.assertEqual((root / "bot" / ".bcs" / "session.json")
+                             .stat().st_mode & 0o777, 0o666)
+            self.assertEqual(json.loads(context.read_text()),
+                             {"token": TOKEN, "bot_uuid": DRIVER,
+                              "api_base_url": "http://127.0.0.1:21000"})
+        finally:
+            __import__("shutil").rmtree(root, ignore_errors=True)
+
+    def test_sweep_removes_only_abandoned_launcher_roots(self):
+        base = WorkspaceCliRunner._LAUNCHER_ROOT_BASE
+        base.mkdir(parents=True, exist_ok=True)
+        stale = base / "runner-sweeptest-stale"
+        stale.mkdir(exist_ok=True)
+        (stale / "marker").write_text("abandoned")
+        old = __import__("time").time() - 86400 * 2
+        os.utime(stale, (old, old))
+        fresh = base / "runner-sweeptest-fresh"
+        fresh.mkdir(exist_ok=True)
+        try:
+            WorkspaceCliRunner._sweep_stale_launcher_roots()
+            self.assertFalse(stale.exists())
+            self.assertTrue(fresh.exists())
+        finally:
+            __import__("shutil").rmtree(fresh, ignore_errors=True)
+            __import__("shutil").rmtree(stale, ignore_errors=True)
+
+    def test_nonzero_exit_surfaces_cli_output(self):
+        profile = validate_workspace_cli_profile(profile_value())
+        runner = WorkspaceCliRunner(profile, binary=self.binary,
+                                    binary_sha256=self.digest,
+                                    state_dir=self.state)
+
+        def fake_capture(cmd, **kwargs):
+            return subprocess.CompletedProcess(cmd, 127, b"boom from cli", b"")
+
+        with patch.dict(os.environ, self.env), \
+             patch("bcs_e2e.workspace_cli_runner.capture", side_effect=fake_capture):
+            with self.assertRaises(WorkspaceCliRunnerError) as caught:
+                runner.execute("group.create")
+        self.assertIn("returned nonzero", str(caught.exception))
+        self.assertIn("boom from cli", str(caught.exception))
+
     def test_cookie_gateway_get_command(self):
         result, command, context, _ = self.run_execute("group.get", gateway=True)
         self.assertEqual(command[-6:], ["--json", "--log-level", "error", "get-group",

@@ -117,7 +117,7 @@ class WorkspaceCliRunner:
         self.profile = validator(profile)
         if (not isinstance(state_dir, Path) or not state_dir.is_absolute()
                 or state_dir.is_symlink() or not state_dir.is_dir()):
-            raise WorkspaceCliRunnerError("workspace CLI requires an absolute current Run directory")
+            raise WorkspaceCliRunnerError("workspace CLI requires an absolute existing Run directory")
         require_cli_binary(binary, binary_sha256)
         self.binary = Path(binary).resolve()
         self.binary_sha256 = binary_sha256
@@ -143,6 +143,7 @@ class WorkspaceCliRunner:
         if self.session_file_download.exists():
             raise WorkspaceCliRunnerError("session-file download target already exists")
         self.executed: list[str] = []
+        self._sweep_stale_launcher_roots()
 
     def _credentials(self):
         if self.profile["contract"] == SESSION_CLI_COMPLETE_INVOKE_PROFILE_CONTRACT:
@@ -187,10 +188,11 @@ class WorkspaceCliRunner:
         return "human_cookie", value
 
     def _context(self, credential_kind: str, credential: str):
-        root = self.state_dir / f"workspace-cli-{uuid.uuid4().hex}"
-        root.mkdir(mode=0o700)
+        root = Path.home() / ".bcs-e2e" / f"runner-{uuid.uuid4().hex}"
+        root.mkdir(mode=0o700, parents=True)
         for name in ("home", "bot", "tmp"):
-            (root / name).mkdir(mode=0o700)
+            (root / name).mkdir(mode=0o777)
+            (root / name).chmod(0o777)
         context = root / "bot" / ".bcs" / "session.json"
         data = {
             "token": credential if credential_kind in {
@@ -203,9 +205,18 @@ class WorkspaceCliRunner:
         }
         write(context, data)
         base = str(root)
-        environment = {"PATH": "/usr/bin:/bin", "HOME": base + "/home",
+        path_dirs = []
+        docker_binary = shutil.which("docker")
+        if docker_binary:
+            path_dirs.append(str(Path(docker_binary).resolve().parent))
+        environment = {"PATH": ":".join([*path_dirs, "/usr/bin", "/bin"]),
+                       "HOME": base + "/home",
                        "BOT_DATA_DIR": base + "/bot", "TMPDIR": base + "/tmp",
                        "LANG": "C"}
+        self._widen_launcher_mounts(root)
+        docker_host = os.environ.get("DOCKER_HOST")
+        if docker_host:
+            environment["DOCKER_HOST"] = docker_host
         if credential_kind in {"human_cookie_with_owned_driver_bot_token",
                                "human_cookie_with_owned_bot_tokens"}:
             cookie = os.environ.get(self.profile["auth"]["cookie_env"], "")
@@ -217,6 +228,46 @@ class WorkspaceCliRunner:
             environment["BCS_COOKIE"] = credential
             environment["tc_sdb_nenv"] = "production"
         return root, context, environment
+
+    _LAUNCHER_ROOT_BASE = Path.home() / ".bcs-e2e"
+
+    @classmethod
+    def _sweep_stale_launcher_roots(cls, *, max_age_seconds: float = 86400) -> None:
+        """Remove abandoned simulator-wrapper roots from crashed runs."""
+        try:
+            candidates = sorted(cls._LAUNCHER_ROOT_BASE.glob("runner-*"),
+                                key=lambda item: item.stat().st_mtime)
+        except OSError:
+            return
+        now = time.time()
+        for candidate in candidates:
+            try:
+                if now - candidate.stat().st_mtime < max_age_seconds:
+                    break
+                shutil.rmtree(candidate)
+            except OSError:
+                continue
+
+    @staticmethod
+    def _widen_launcher_mounts(root: Path) -> None:
+        """Make the frozen CLI's bind mounts writable by the simulator uid.
+
+        The reviewed product-CLI distribution for the dual singlebox/preprod
+        runs is the host wrapper pinned by the run receipt: it execs
+        ``docker run --network host`` with the bcs:simulator image (uid 1000
+        inside) and bind-mounts ``$HOME/.bcs`` and ``$BOT_DATA_DIR``.  Colima
+        shares only the workstation ``$HOME`` by default, so the private run
+        root lives under ``~/.bcs-e2e`` and its mounted subtrees are widened
+        for the container uid.  The root itself stays mode 0700 and owned by
+        the workstation user, so the widened subtree stays unreachable for
+        other local users.
+        """
+        for relative in ("home/.bcs", "home/.bcs/logs", "home/.bcs-mktmp",
+                         "bot/.bcs"):
+            target = root / relative
+            target.mkdir(parents=True, exist_ok=True)
+            target.chmod(0o777)
+        (root / "bot" / ".bcs" / "session.json").chmod(0o666)
 
     @staticmethod
     def _cleanup(context: Path, root: Path) -> str:
@@ -369,7 +420,10 @@ class WorkspaceCliRunner:
                 collect_stderr=operation == "session-cli.service.wait",
             )
             if result.returncode != 0 and operation != "session-cli.service.wait":
-                raise WorkspaceCliRunnerError("workspace product CLI returned nonzero")
+                detail = result.stdout.strip().decode("utf-8", "replace")[:500]
+                raise WorkspaceCliRunnerError(
+                    "workspace product CLI returned nonzero: "
+                    + (detail or "<no output>"))
             if (result.returncode != 0
                     and self._parse_service_wait_timeout_output(
                         result.stderr, session_id) is None):
