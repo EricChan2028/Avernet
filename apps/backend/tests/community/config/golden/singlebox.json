@@ -88,7 +88,7 @@
       "teclaw_platform_managed": false
     },
     "bot_knowledge_publication": {
-      "enabled": false
+      "enabled": true
     },
     "bot_manager_sync": {
       "bcs_base_url": "http://127.0.0.1:21000",

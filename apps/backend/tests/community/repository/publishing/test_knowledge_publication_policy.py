@@ -1,4 +1,4 @@
-"""Publication opt-in is independent of the knowledge management API."""
+"""Explicit publication policy and missing-config fallback stay independent of APIs."""
 
 from unittest.mock import MagicMock
 
@@ -52,7 +52,7 @@ def test_invalid_policy_never_silently_opts_in_or_out(monkeypatch, config):
         Injector([ServiceBotModule()]).get(KnowledgePublicationPolicy)
 
 
-def test_publication_default_is_disabled():
+def test_missing_configuration_policy_fallback_is_disabled():
     assert KnowledgePublicationPolicy().enabled is False
 
 

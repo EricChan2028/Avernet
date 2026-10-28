@@ -93,14 +93,13 @@ def test_disabled_integration_retains_native_status_writes(publication):
 
 @pytest.mark.asyncio
 async def test_status_handler_uses_normally_configured_service_and_repository(
-    publication, monkeypatch,
+    publication,
 ):
     from injector import Module, singleton
     from agentclaw.community.api.bot_publish_service import BotPublishServiceProtocol
     from agentclaw.community.core.repository.implementations.publishing.bot_publish import BotPublishRepository
     from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
     from agentclaw.community.di import DeployProfile, build_injector
-    from agentclaw.community.di.modules import service_bot_module
     from agentclaw.community.plugin_api.database import DatabasePlugin
 
     db, _fixture_repo, record = publication
@@ -109,10 +108,6 @@ async def test_status_handler_uses_normally_configured_service_and_repository(
         def configure(self, binder):
             binder.bind(DatabasePlugin, to=db, scope=singleton)
 
-    real_config = service_bot_module.read_user_config
-    monkeypatch.setattr(service_bot_module, 'read_user_config', lambda: {
-        **real_config(), 'bot_knowledge_publication': {'enabled': True},
-    })
     injector = build_injector(profile=DeployProfile.TEST, extra_modules=[DatabaseBoundary()])
     configured = injector.get(BotPublishServiceProtocol)
     repo = injector.get(BotPublishRepositoryProtocol)
@@ -130,3 +125,12 @@ async def test_status_handler_uses_normally_configured_service_and_repository(
     assert response.error_code == 409
     assert 'KNOWLEDGE_OBSERVATION_REQUIRED' in response.message
     assert repo.get_by_id(record.id).ext == online.ext
+    assert online.ext['knowledge_selection_snapshot']['enabled_kb_ids'] == ['B']
+    done = configured.update_publish_status_with_ext(
+        publish_id=record.id, source_status=PublishStatus.ONLINE_PUB,
+        target_status=PublishStatus.SUCCESS, expected_ext=online.ext,
+        ext=online.ext, observed_workflow_id=77,
+    )
+    assert done.status == PublishStatus.SUCCESS
+    assert done.ext['knowledge_selection_result']['status'] == 'applied'
+    assert _online(db) == {'B'}

@@ -65,9 +65,10 @@ module_config:
 
 # 用户自定义配置 - 可以在这里添加任何自定义字段
 user_config:
-  # Publication-only integration; ordinary publishing has no KB schema dependency.
+  # Publication selection is enabled; provision KB/common-config schema before deployment.
+  # Explicit false retains legacy publication behavior without knowledge-table access.
   bot_knowledge_publication:
-    enabled: false
+    enabled: true
 
   app:
     title: "My SOFAPy App"

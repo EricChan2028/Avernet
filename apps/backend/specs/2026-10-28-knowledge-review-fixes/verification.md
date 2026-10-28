@@ -107,3 +107,61 @@ permission-wrapper or corp/pre/prod startup acceptance. Production schema/index
 presence remains an operator prerequisite. No full repository/Singlebox stack,
 remote CI or production acceptance is claimed. No feature enablement, remote push,
 PR comment/vote/merge, deployment, permission escalation or production DDL occurred.
+
+
+## Schema-verified shipped enablement follow-up (2026-10-28)
+
+The user approved enabling this PR after a read-only ODC CLI check of the
+operator-selected database, with no historical backfill. This supersedes the
+prior default-off rollout decision; it does not claim a deployment occurred.
+Internal connection identifiers and authenticated caller details are intentionally
+not included in this public repository.
+
+### Read-only schema evidence
+
+ODC CLI returned success for all four metadata-only commands:
+```sql
+SHOW CREATE TABLE ac_bot_knowledge_binding;
+SHOW CREATE TABLE ac_bot_common_config;
+SHOW CREATE TABLE ac_bot_publish;
+SHOW INDEX FROM ac_bots;
+```
+- Binding: `online_enabled tinyint(1) NOT NULL DEFAULT 0`; signed BIGINT PK,
+  `revision`, Bot/space keys and utf8mb4-bin KB IDs match the portable model.
+  `uk_bot_knowledge_binding(avernet_tenant,env,bot_pk,kb_id)`,
+  `idx_bk_enabled(avernet_tenant,env,bot_pk,space_id,enabled,kb_id)` and
+  `idx_bk_page(avernet_tenant,env,bot_pk,space_id,id)` exist.
+- Common config: `config_value TEXT`, utf8mb4, soft-delete and timestamps exist;
+  `uk_bot_config(bot_id,entity_id,env,config_key)` exists with full key columns.
+- Publish: existing `ext VARCHAR(65535)` and
+  `idx_sbp_e_s(source_bot_pk,env,status)` exist. No added native schema is needed.
+- Source Bot: primary key and `uk_bot_id_entity_id_env` are present.
+
+No application row was read or written, no permission application or DDL was
+submitted, and no migration/backfill or historical repair was performed. These
+checks establish metadata compatibility, not production query plans, runtime
+credential write access, contention, remote provider health or end-to-end success.
+Other deployment databases still require their own schema readiness checks.
+
+### Code and validation
+
+- Shipped `application.yaml` now explicitly enables publication integration.
+  Missing-config/direct-object fallback stays false; explicit false remains
+  supported. All three effective-config goldens now expect true. No business
+  algorithm, ORM, SQL migration, historical UNKNOWN or consumer wiring changed.
+- Before changing the YAML, the real shipped-policy bootstrap and normal
+  configured service/repository witnesses failed their expected-enabled checks.
+- After changing it, the affected integrated suites passed: **2,824 passed,
+  44 warnings, 0 failed, 0 skipped**, 207.23 seconds. The command is the same
+  affected-suite command recorded above.
+- The configured-provider witness was additionally strengthened to prove actual
+  observed successful completion persists the frozen production set, without
+  monkeypatching the policy. Final focused config/DI/status/policy suites:
+  **33 passed**, 18 warnings, 5.57 seconds.
+- Singlebox coverage registration guard: **1 passed**, 0.11 seconds. The
+  historical 66.32% floor is unchanged and is not relabelled as a fresh
+  enabled-stack coverage measurement. No full Singlebox acceptance was run.
+- Ruff and whitespace checks passed. Push must use the normal secret/SAST hook.
+
+No merge, deployment, live config change, permission escalation or production
+DDL is authorized or performed by this follow-up. Remote CI is not established.

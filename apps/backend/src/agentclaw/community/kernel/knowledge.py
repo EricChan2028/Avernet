@@ -61,6 +61,6 @@ class BotKnowledgeScope:
 
 @dataclass(frozen=True)
 class KnowledgePublicationPolicy:
-    """Opt-in publication effects; disabled deployments never access KB tables."""
+    """Publication effects; missing configuration retains the disabled fallback."""
 
     enabled: bool = False

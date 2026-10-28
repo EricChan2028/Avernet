@@ -18,7 +18,8 @@ def test_invalid_policy_fails_container_construction(monkeypatch, block):
         build_injector(profile=DeployProfile.TEST)
 
 
-def test_valid_disabled_policy_keeps_native_publish_handler(monkeypatch):
+@pytest.mark.parametrize("enabled", [False, True])
+def test_valid_policy_keeps_native_publish_handler(monkeypatch, enabled):
     import asyncio
     from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
         PROGRESS_POLL_TASK, PublishTaskLifecycle,
@@ -29,10 +30,10 @@ def test_valid_disabled_policy_keeps_native_publish_handler(monkeypatch):
     real = service_bot_module.read_user_config
     monkeypatch.setattr(
         service_bot_module, "read_user_config",
-        lambda: {**real(), "bot_knowledge_publication": {"enabled": False}},
+        lambda: {**real(), "bot_knowledge_publication": {"enabled": enabled}},
     )
     injector = build_injector(profile=DeployProfile.TEST)
-    assert injector.get(KnowledgePublicationPolicy).enabled is False
+    assert injector.get(KnowledgePublicationPolicy).enabled is enabled
     participants = [item for item in discover_lifecycle_participants(injector)
                     if isinstance(item, PublishTaskLifecycle)]
     assert len(participants) == 1
@@ -66,3 +67,20 @@ def test_real_yaml_and_environment_interpolation_fail_before_lifecycle(
     finally:
         monkeypatch.chdir(original_dir)
         register_config_provider(DeployProfile.TEST)
+
+
+def test_shipped_policy_enables_publication_and_keeps_native_handler():
+    import asyncio
+    from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+        PROGRESS_POLL_TASK, PublishTaskLifecycle,
+    )
+    from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
+    from agentclaw.community.kernel.lifecycle import discover_lifecycle_participants
+
+    injector = build_injector(profile=DeployProfile.TEST)
+    assert injector.get(KnowledgePublicationPolicy).enabled is True
+    participants = [item for item in discover_lifecycle_participants(injector)
+                    if isinstance(item, PublishTaskLifecycle)]
+    assert len(participants) == 1
+    asyncio.run(participants[0].bootstrap())
+    assert injector.get(HandlerRegistry).get(PROGRESS_POLL_TASK) is not None

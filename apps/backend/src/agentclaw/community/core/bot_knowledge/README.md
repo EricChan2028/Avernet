@@ -150,12 +150,13 @@ knowledge state (no draft fallback); native publication/rollback may still finis
 Republishing with a trustworthy snapshot restores an explicit selection.
 No migration is executed at startup or against any running environment here.
 
-### Publication integration opt-in
+### Publication integration configuration
 
-`user_config.bot_knowledge_publication.enabled` is false by default. It controls
-only publication snapshot/promotion/restore effects, not knowledge management
-APIs. Disabled publication never queries the binding table; enabled integration
-requires the additive `online_enabled` column and fails closed on DB errors.
+`user_config.bot_knowledge_publication.enabled` is true in the shipped
+`application.yaml`. It controls only publication snapshot/promotion/restore
+effects, not knowledge management APIs. Deployments may explicitly set false;
+missing configuration retains the false compatibility fallback. Disabled publication
+never queries the binding table; enabled integration requires the additive `online_enabled` column and fails closed on DB errors.
 Do not toggle off in the middle of active publication or restore operations.
 
 ### Short local completion transaction (approved 2026-10-27)
@@ -224,7 +225,8 @@ upload behavior and accesses no knowledge table. See
 
 #### Production enablement gate
 
-Publication integration remains disabled by default. The new summary entry and
+Publication integration is enabled by the shipped configuration. Deployments
+must provision the required schema before deploying it. The new summary entry and
 per-KB changes share the native successful-completion transaction. Clearing uses
 only previous tracked keys; unknown unresolved scopes keep those keys for later
 safe cleanup and never touch a foreign tenant's bindings. Generic configuration
@@ -259,7 +261,7 @@ The legacy `/status` endpoint cannot supply that argument and returns an explici
 Other transitions and disabled integrations retain native behavior. A failed
 build retry retains its frozen generation; a new DRAFT admission captures anew.
 
-The publication opt-in does not disable explicitly requested online API reads.
+The publication switch does not disable explicitly requested online API reads.
 Their summary table prerequisite and rollout cadence must be checked separately.
 Historical publication-history probes in the 2026-10-27 verification are
 superseded by the 2026-10-28 current-summary evidence, not rewritten as old passes.
