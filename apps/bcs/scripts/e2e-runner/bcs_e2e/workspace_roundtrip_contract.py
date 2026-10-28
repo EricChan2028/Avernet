@@ -213,7 +213,6 @@ def _validate_created(data: object, group_id: str, driver: str,
             or not isinstance(group_id, str) or not group_id
             or data.get("driver_bot") != driver
             or data.get("participants") != [driver, member, qa]
-            or data.get("label") != ROUNDTRIP_LABEL
             or not isinstance(data.get("group_kind"), str)
             or not data["group_kind"]
             or data.get("created") is not True):
@@ -277,7 +276,15 @@ def _validate_routing_policy(data: object) -> None:
             "routing policy")
 
 
-def _validate_settings(data: object, group_id: str) -> None:
+def _validate_settings(data: object, record: dict, group_id: str) -> str:
+    # Dev PR #3173 ("retire service session policies and callbacks") removed
+    # Group.service_spec policies station-wide; the reviewed preprod build
+    # answers PATCH /groups/{id}/settings with HTTP 410 and the transport
+    # intentionally drops non-2xx bodies, so the retired form is identified
+    # from the record only. Both forms are accepted on every environment
+    # and the observed form is reported per run.
+    if record.get("http_status") == 410:
+        return "retired_410"
     spec = data.get("service_spec") if isinstance(data, dict) else None
     if (not isinstance(data, dict)
             or data.get("id") != group_id
@@ -287,6 +294,7 @@ def _validate_settings(data: object, group_id: str) -> None:
         raise RunStateError(
             "workspace round trip did not acknowledge the bounded "
             "service settings")
+    return "service_spec_ack"
 
 
 def _validate_message_sent(data: object) -> None:
@@ -300,6 +308,32 @@ def _validate_message_sent(data: object) -> None:
         raise RunStateError(
             "workspace round trip persistent message was not "
             "acknowledged with routing targets")
+
+
+def _validate_live_chat_submission(data: object, group_id: str) -> str:
+    # The station accepts the live chat synchronously while the relay to
+    # connected recipients runs asynchronously; the sync response may
+    # legitimately report delivered=false with an empty projection. Anchor
+    # the obligation on the exact Group and report the observed form:
+    # either the synchronous relay projection (non-empty delivery_results)
+    # or the queued admission projection (non-empty queue deliveries).
+    results = data.get("delivery_results") if isinstance(data, dict) else None
+    if isinstance(results, list) and results:
+        if data.get("group_id") != group_id:
+            raise RunStateError(
+                "workspace round trip live chat delivery reports the wrong "
+                "Group")
+        return "sync_relayed"
+    admission = data.get("queue_admission") if isinstance(data, dict) else None
+    deliveries = (admission.get("deliveries")
+                  if isinstance(admission, dict) else None)
+    if (not isinstance(data, dict)
+            or data.get("group_id") != group_id
+            or not isinstance(deliveries, list) or not deliveries):
+        raise RunStateError(
+            "workspace round trip live chat was not acknowledged with a "
+            "routed delivery or queued admission for the exact Group")
+    return "async_queued"
 
 
 def _validate_message_delivery(data: object, group_id: str) -> None:
@@ -595,13 +629,15 @@ class RemoteWorkspaceRoundtripAdapter:
             group_id=group_id,
             body={"service_spec": {"max_concurrency":
                                     SERVICE_MAX_CONCURRENCY}},
-            expected=(200,))
-        _validate_settings(settings, group_id)
+            expected=(200, 410))
+        settings_form = _validate_settings(settings, settings_record,
+                                           group_id)
         return AdapterCall(
             data={"group_id": group_id, "mode": ROUTING_MODE,
                   "default_bot_final_delivery": ROUTING_DEFAULT_DELIVERY,
                   "max_concurrency": SERVICE_MAX_CONCURRENCY,
-                  "service_status": "ok"},
+                  "service_status": "ok",
+                  "settings_form": settings_form},
             evidence=self._evidence(
                 (policy_record, "driver"), (settings_record, "human"),
                 operation=WORKSPACE_ROUNDTRIP_ROUTING_POLICY_OPERATION,
@@ -624,7 +660,7 @@ class RemoteWorkspaceRoundtripAdapter:
             body={"message": LIVE_CHAT_MESSAGE,
                   "from": self.driver_id},
             expected=(200,))
-        _validate_message_delivery(chat, group_id)
+        chat_form = _validate_live_chat_submission(chat, group_id)
         callback, callback_record = self.human_client.call(
             WORKSPACE_ROUNDTRIP_CALLBACK_OPERATION,
             group_id=group_id,
@@ -646,7 +682,8 @@ class RemoteWorkspaceRoundtripAdapter:
                 "readable")
         return AdapterCall(
             data={"group_id": group_id, "persistent_message": True,
-                  "live_chat": True, "agent_callback": True,
+                  "live_chat": True, "chat_delivery_form": chat_form,
+                  "agent_callback": True,
                   "finalized": True, "not_found_verified": True},
             evidence=self._evidence(
                 (message_record, "human"), (chat_record, "driver"),

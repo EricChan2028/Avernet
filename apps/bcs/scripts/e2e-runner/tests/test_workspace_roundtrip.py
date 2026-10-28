@@ -295,12 +295,14 @@ def standard_responses():
 
 
 class WorkspaceRoundtripTests(unittest.TestCase):
-    def run_case(self, *, preprod=False, deform=None):
+    def run_case(self, *, preprod=False, deform=None, record_deform=None):
         profile = profile_value(preprod=preprod)
         fake_call, _ = standard_responses()
 
         def deformed_call(self_client, operation, **kwargs):
             data, record = fake_call(self_client, operation, **kwargs)
+            if record_deform is not None:
+                record = record_deform(record, operation, kwargs)
             if deform is not None:
                 deform(data, operation, kwargs)
             return data, record
@@ -475,6 +477,53 @@ class WorkspaceRoundtripTests(unittest.TestCase):
         result, _ = self.run_case(deform=deform)
         self.assertEqual(result.status, "BLOCKED")
         self.assertEqual(result.error_type, "RunStateError")
+
+    def test_create_without_label_projection_passes(self):
+        # station create-group 响应不投影 label；label 投影由
+        # detail 读回断言（_detail_participants）覆盖
+        def deform(data, operation, kwargs):
+            if operation == WORKSPACE_ROUNDTRIP_CREATE_OPERATION:
+                data.pop("label", None)
+        result, adapter = self.run_case(deform=deform)
+        self.assertEqual(result.status, "PASS")
+        self.assertEqual(result.completed_count, 3)
+        self.assertEqual(adapter.group_id, GROUP)
+
+    def test_settings_service_spec_retired_410_form_is_accepted(self):
+        # station (dev PR #3173) retired Group service_spec policies and
+        # answers PATCH /groups/{id}/settings with HTTP 410 for every actor;
+        # the transport drops non-2xx bodies, so the form is read from the
+        # record rather than parsed from a payload
+        def rdeform(record, operation, kwargs):
+            if operation == WORKSPACE_ROUNDTRIP_SETTINGS_OPERATION:
+                record["http_status"] = 410
+            return record
+        result, _ = self.run_case(record_deform=rdeform)
+        self.assertEqual(result.status, "PASS")
+        self.assertEqual(result.completed_count, 3)
+        snapshot = result.snapshot()
+        self.assertEqual(
+            snapshot["steps"][1]["data"]["settings_form"], "retired_410")
+
+    def test_live_chat_async_queued_form_is_accepted(self):
+        # the station accepts live chat synchronously and relays to
+        # connected recipients asynchronously; the queued admission form is
+        # accepted while the synchronous projection remains covered by the
+        # baseline mock
+        def deform(data, operation, kwargs):
+            if operation == WORKSPACE_ROUNDTRIP_CHAT_OPERATION:
+                data["delivered"] = False
+                data["delivered_count"] = 0
+                data["delivery_results"] = []
+                data["queue_admission"] = {
+                    "deliveries": [{"delivery_id": "e2e-chat-queued",
+                                    "status": "queued"}]}
+        result, _ = self.run_case(deform=deform)
+        self.assertEqual(result.status, "PASS")
+        self.assertEqual(result.completed_count, 3)
+        snapshot = result.snapshot()
+        self.assertEqual(
+            snapshot["steps"][2]["data"]["chat_delivery_form"], "async_queued")
 
     def test_detail_label_drift_is_blocked(self):
         def deform(data, operation, kwargs):
