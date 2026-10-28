@@ -1,7 +1,7 @@
 # Tasks: Knowledge publication review fixes
 
 - [x] 1. Fail invalid publication configuration at root container construction (AC 1).
-- [ ] 2. Bound source locking and draft-restore binding reads, retain fences (AC 6–7).
+- [x] 2. Bound source locking and draft-restore binding reads, retain fences (AC 6–7).
 - [ ] 3. Budget complete ext and freeze via staged upload + revalidated admission; cover all status write entrances (AC 3–5).
 - [ ] 4. Require observed completion in opted-in shared write path and update callers/compatibility docs (AC 2–3).
 - [ ] 5. Run adjacent suites, architecture/lint, independent review and record evidence (AC 1–8).

@@ -16,7 +16,6 @@ from uuid import uuid4
 from agentclaw.community.core.bot_knowledge.repository.models import (
     BotKnowledgeBindingModel as Binding,
 )
-from agentclaw.community.core.bot_knowledge.repository.store import resolve_bot
 from agentclaw.community.core.bot_knowledge.repository.online_selection import (
     lock_summary, write_summary,
 )
@@ -36,14 +35,13 @@ from agentclaw.community.core.service_bot.repository.models import (
     PublishOperationModel as Operation,
 )
 from agentclaw.community.kernel.knowledge import (
-    BotKnowledgeScope,
     KnowledgeError,
     require_knowledge_id,
 )
 from agentclaw.community.plugin_api.models import BotCommonConfig, BotModel
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.env_utils import get_current_env
-from sqlalchemy import bindparam, func, or_
+from sqlalchemy import bindparam, func, update
 
 SNAPSHOT_KEY = "knowledge_selection_snapshot"
 RESULT_KEY = "knowledge_selection_result"
@@ -63,15 +61,15 @@ def _locked_source(session, publish):
             BotModel.bot_type == "service",
             BotModel.is_delete == 0,
         )
+        .with_for_update()
         .one_or_none()
     )
     if source is None or publish.env != get_current_env():
         raise KnowledgeError("KNOWLEDGE_PUBLISH_SOURCE_MISMATCH")
-    source = resolve_bot(
-        session,
-        BotKnowledgeScope(source.bot_id, source.owner_id, source.env),
-        lock=True,
-    )
+    # Same Bot row lock as binding writers, without a second address-range seek.
+    # SQLite ignores FOR UPDATE, so reserve its writer before refreshing scope.
+    session.execute(update(BotModel).where(BotModel.id == source.id).values(id=source.id))
+    session.refresh(source, with_for_update=True)
     session.refresh(publish, with_for_update=True)
     if (
         source.id != publish.source_bot_pk
@@ -555,15 +553,18 @@ def restore_draft(
     try:
         snapshot = validate_snapshot(previous, source)
         ids = set(snapshot["enabled_kb_ids"])
-        bindings = (
+        enabled = (
             _bindings(session, source)
-            .filter(or_(Binding.enabled.is_(True), Binding.kb_id.in_(ids)))
+            .filter(Binding.enabled.is_(True))
             .with_for_update()
-            .limit(_MAX_SELECTION * 2 + 1)
+            .limit(_MAX_SELECTION + 1)
             .all()
         )
-        if len(bindings) > _MAX_SELECTION * 2:
+        if len(enabled) > _MAX_SELECTION:
             raise KnowledgeError("KNOWLEDGE_LIMIT_EXCEEDED")
+        selected = [row for row in _selected_bindings(session, source, ids)
+                    if row.space_id == source.space_id]
+        bindings = list({row.id: row for row in enabled + selected}.values())
         if not ids.issubset({row.kb_id for row in bindings}):
             raise KnowledgeError("KNOWLEDGE_SNAPSHOT_BINDING_MISSING")
     except KnowledgeError as exc:
