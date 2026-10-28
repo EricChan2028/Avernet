@@ -104,6 +104,7 @@ class FriendCliRunnerTests(unittest.TestCase):
             context = Path(environment["BOT_DATA_DIR"]) / ".bcs" / "session.json"
             context_state["context"] = json.loads(context.read_text())
             context_state["cookie"] = environment.get("BCS_COOKIE")
+            context_state["environment"] = environment
             context_state["cwd"] = kwargs["cwd"]
             raw = json.dumps(output_for(operation)).encode()
             if leak:
@@ -125,6 +126,7 @@ class FriendCliRunnerTests(unittest.TestCase):
         self.assertEqual(context["cookie"], COOKIE)
         self.assertEqual(context["context"], {"token": "", "bot_uuid": MEMBER,
                                                "api_base_url": "https://gateway.example.com"})
+        self.assertEqual(context["environment"]["tc_sdb_nenv"], "production")
         self.assertEqual(result["data"], [])
         evidence = result["evidence"]
         self.assertEqual(evidence["operation"], "friend.requests.before")
@@ -141,6 +143,7 @@ class FriendCliRunnerTests(unittest.TestCase):
         self.assertEqual(context["context"], {"token": DRIVER_TOKEN, "bot_uuid": DRIVER,
                                                "api_base_url": "http://127.0.0.1:21000"})
         self.assertNotIn("BCS_COOKIE", context)
+        self.assertNotIn("tc_sdb_nenv", context["environment"])
         serialized = json.dumps(result, sort_keys=True)
         self.assertNotIn(DRIVER_TOKEN, serialized)
         self.assertFalse(Path(context["cwd"]).exists())

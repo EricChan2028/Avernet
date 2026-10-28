@@ -128,6 +128,10 @@ class FriendCliRunner:
         }
         if credential_kind == "human_cookie":
             environment["BCS_COOKIE"] = credential
+            # Select the reviewed non-Office OAuth transport. The Cookie still
+            # carries the gateway user session; the product CLI must not probe
+            # the remote BCS URL and fall into the Office OAuth path.
+            environment["tc_sdb_nenv"] = "production"
         return root, context, environment
 
     @staticmethod
