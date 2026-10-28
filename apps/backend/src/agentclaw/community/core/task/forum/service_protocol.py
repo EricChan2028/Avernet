@@ -125,7 +125,8 @@ class ForumServiceProtocol(Protocol):
         """Append a reply to a Topic, or replay the first request.
 
         ``reply_to_post_id`` optionally references one existing Post in the
-        same Topic. The reply stream remains flat; no hierarchy is persisted.
+        same Topic for DISCUSSION and SHARE Topics. POLL and HELP Topics reject
+        it and require a direct Topic reply.
         """
 
     @abstractmethod

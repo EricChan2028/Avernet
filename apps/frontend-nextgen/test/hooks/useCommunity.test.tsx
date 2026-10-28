@@ -16,6 +16,8 @@ jest.mock('@/services/community', () => ({
     createTopic: jest.fn(),
     closeTopic: jest.fn(),
     setPostHelpful: jest.fn(),
+    createInteraction: jest.fn(),
+    getInteractionSummaryBatch: jest.fn(),
   },
 }));
 jest.mock('@/hooks/useHumanIdentity', () => ({ useHumanIdentity: jest.fn() }));
@@ -85,6 +87,9 @@ describe('useCommunity', () => {
     mockedService.listTopics.mockResolvedValue({ items: [topic], total: 1 });
     mockedService.listReplies.mockResolvedValue({ items: [reply], total: 1 });
     mockedService.setPostHelpful.mockResolvedValue(undefined);
+    mockedService.createReply.mockResolvedValue('created-reply');
+    mockedService.createInteraction.mockResolvedValue(undefined);
+    mockedService.getInteractionSummaryBatch.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -259,7 +264,7 @@ describe('useCommunity', () => {
     expect(mockedService.closeTopic).not.toHaveBeenCalled();
   });
 
-  test('投票主题详情只读展示，不再通过 Human 触发投票回复', async () => {
+  test('Human 可提交主题回复：投票携带结构化 poll_selection 并刷新回复页', async () => {
     mockedService.getTopic.mockResolvedValue(pollTopic);
     const { result } = renderHook(() => useCommunity());
     await flushDebouncedLoad();
@@ -268,12 +273,31 @@ describe('useCommunity', () => {
     await act(async () => {
       await result.current.openTopic(pollTopic);
     });
-
     expect(mockedService.createReply).not.toHaveBeenCalled();
-    expect(mockedService.listReplies).toHaveBeenCalledWith(pollTopic.id, {
+    mockedService.listReplies.mockClear();
+
+    let succeeded = false;
+    await act(async () => {
+      succeeded = await result.current.createReply({
+        body: '投票选择：方案 A',
+        pollSelection: [0],
+      });
+    });
+
+    expect(succeeded).toBe(true);
+    expect(mockedService.createReply).toHaveBeenCalledWith({
+      topicId: pollTopic.id,
+      body: '投票选择：方案 A',
+      pollSelection: [0],
+      authorId: '900003',
+      authorName: '当前用户',
+    });
+    expect(mockedService.listReplies).toHaveBeenLastCalledWith(pollTopic.id, {
       page: 1,
       pageSize: COMMUNITY_REPLY_PAGE_SIZE,
     });
+    expect(result.current.replySaving).toBe(false);
+    expect(notifySuccess).toHaveBeenCalledWith('回复发布成功');
   });
 
   test('goToReplyPage 切换回帖分页', async () => {

@@ -58,6 +58,8 @@ export function CommunityPage() {
         onSetPostHelpful={community.setPostHelpful}
         replyLoading={community.replyLoading}
         replyError={community.replyError}
+        replySaving={community.replySaving}
+        onSubmitReply={community.createReply}
         replyPage={community.replyPage}
         replyPageCount={community.replyPageCount}
         replyPageSize={COMMUNITY_REPLY_PAGE_SIZE}

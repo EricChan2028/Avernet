@@ -1,4 +1,5 @@
 import { notifyError, notifySuccess } from '@/components/ui/notify';
+import { COMMUNITY_REPLY_PAGE_SIZE } from '@/domain/community/constants';
 import { communityErrorMessage } from '@/domain/community/errors';
 import { enrichOwnership } from '@/domain/community/ownership';
 import {
@@ -8,6 +9,7 @@ import {
 import type {
   CommunityAuthor,
   CommunityTopic,
+  CreateCommunityReplyDraft,
   ForumActorRef,
   ForumTargetRef,
   InteractionSummary,
@@ -22,6 +24,7 @@ import { useCommunityReplies } from './useCommunityReplies';
 
 interface UseCommunityTopicDetailOptions {
   currentUserId: string;
+  currentAuthorName?: string;
   viewer: ForumActorRef;
   interactions: UseCommunityInteractionsResult;
   enrichTopicBotAuthor: (topic: CommunityTopic) => CommunityTopic;
@@ -29,12 +32,14 @@ interface UseCommunityTopicDetailOptions {
 
 export function useCommunityTopicDetail({
   currentUserId,
+  currentAuthorName,
   viewer,
   interactions,
   enrichTopicBotAuthor,
 }: UseCommunityTopicDetailOptions) {
   const store = useCommunityStore();
   const [helpfulPostId, setHelpfulPostId] = useState<string | null>(null);
+  const [replySaving, setReplySaving] = useState(false);
 
   const replies = useCommunityReplies({
     selectedTopic: store.selectedTopic,
@@ -45,6 +50,7 @@ export function useCommunityTopicDetail({
     openFirstReplyPage,
     goToReplyPage: baseGoToReplyPage,
     replyPage,
+    replyTotal,
   } = replies;
 
   const fetchTopicWithViewer = useCallback(async (topicId: string) => {
@@ -141,6 +147,36 @@ export function useCommunityTopicDetail({
     [baseGoToReplyPage, interactions, store.selectedTopic, viewer],
   );
 
+  const createReply = useCallback(
+    async (input: CreateCommunityReplyDraft) => {
+      const topic = store.selectedTopic;
+      if (!topic || !currentUserId) return false;
+      setReplySaving(true);
+      try {
+        await communityService.createReply({
+          ...input,
+          topicId: topic.id,
+          authorId: currentUserId,
+          ...(currentAuthorName ? { authorName: currentAuthorName } : {}),
+        });
+        const nextPage = input.replyToPostId
+          ? replyPage
+          : Math.max(1, Math.ceil((replyTotal + 1) / COMMUNITY_REPLY_PAGE_SIZE));
+        await goToReplyPage(nextPage);
+        notifySuccess('回复发布成功');
+        return true;
+      } catch (error) {
+        notifyError(communityErrorMessage(error, '回复发布失败'), {
+          title: '回复失败',
+        });
+        return false;
+      } finally {
+        setReplySaving(false);
+      }
+    },
+    [currentAuthorName, currentUserId, goToReplyPage, replyPage, replyTotal, store.selectedTopic],
+  );
+
   const getAuthorSummary = useCallback(
     (author: CommunityAuthor): InteractionSummary | undefined =>
       interactions.getSummary({ actor: forumAuthorRef(author) }),
@@ -228,6 +264,8 @@ export function useCommunityTopicDetail({
     ...replies,
     openTopic,
     openTopicById,
+    createReply,
+    replySaving,
     closeDetail,
     setPostHelpful,
     helpfulPostId,

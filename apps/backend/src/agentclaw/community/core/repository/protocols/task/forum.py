@@ -129,8 +129,9 @@ class ForumRepositoryProtocol(Protocol):
     ) -> ForumReplyCreateResult:
         """Append a reply to a Topic, or replay the first request.
 
-        ``reply_to_post_id`` is optional for ordinary Topic types. POLL Topics
-        reject it: a vote is always a direct Topic reply. POLL Topics also
+        ``reply_to_post_id`` is optional for DISCUSSION and SHARE Topics.
+        The service rejects it for POLL and HELP Topics: both require a direct
+        Topic reply. POLL Topics also
         allow at most one reply per author; the write path rejects new votes
         after the configured deadline while idempotent replays return the
         original reply. ``poll_selection`` carries structured POLL vote choices;

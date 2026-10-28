@@ -61,7 +61,7 @@ export class CommunityService {
   }
 
   createReply(input: CreateCommunityReplyInput, signal?: AbortSignal) {
-    const normalized = { ...input, body: input.body.trim() };
+    const normalized = { ...input, body: input.body.trim(), replyToPostId: input.replyToPostId?.trim() || undefined };
     if (!normalized.body) return Promise.reject(new Error('请输入回复内容'));
     return this.gateway.createReply(normalized, signal);
   }

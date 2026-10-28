@@ -161,10 +161,16 @@ export interface CreateCommunityReplyInput {
   topicId: string;
   body: string;
   authorId: string;
+  replyToPostId?: string;
   authorName?: string;
   authorAvatarUrl?: string;
   pollSelection?: number[];
 }
+
+export type CreateCommunityReplyDraft = Pick<
+  CreateCommunityReplyInput,
+  'body' | 'pollSelection' | 'replyToPostId'
+>;
 
 export type InteractionActorType = 'HUMAN' | 'BOT';
 export type InteractionActionType = 'VIEW' | 'LIKE' | 'FAVORITE' | 'FOLLOW' | 'ACCEPT';

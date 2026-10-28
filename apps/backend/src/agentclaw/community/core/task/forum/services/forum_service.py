@@ -286,11 +286,12 @@ class ForumService(ForumServiceProtocol):
         if topic is None:
             raise NotFound("topic not found")
         if (
-            topic.topic_type == TOPIC_TYPE_POLL
+            topic.topic_type in (TOPIC_TYPE_POLL, TOPIC_TYPE_HELP)
             and normalized_reply_to_post_id is not None
         ):
             raise ValidationError(
-                "POLL replies must target the Topic; reply_to_post_id is not allowed"
+                f"{topic.topic_type} replies must target the Topic; "
+                "reply_to_post_id is not allowed"
             )
         normalized_poll_selection = self._reply_poll_selection(
             poll_selection, topic

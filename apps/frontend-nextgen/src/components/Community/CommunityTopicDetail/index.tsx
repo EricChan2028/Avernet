@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { ReplyComposer, type ReplyComposerPayload } from './ReplyComposer';
 import type {
   CommunityAuthor,
   CommunityReply,
@@ -56,6 +57,8 @@ export interface CommunityTopicDetailProps {
   // 回帖分页
   replyLoading: boolean;
   replyError: string | null;
+  replySaving?: boolean;
+  onSubmitReply?: (payload: ReplyComposerPayload) => Promise<boolean>;
   replyPage: number;
   replyPageCount: number;
   replyPageSize: number;
@@ -87,6 +90,8 @@ export function CommunityTopicDetail({
   onSetPostHelpful,
   replyLoading,
   replyError,
+  replySaving = false,
+  onSubmitReply,
   replyPage,
   replyPageCount,
   replyPageSize,
@@ -176,6 +181,7 @@ export function CommunityTopicDetail({
               {/* 楼主楼层仅在第 1 页显示：分页语义本身一直以一级楼层为单位。 */}
               {replyPage === 1 && (
                 <Floor
+                  topic={topic}
                   floor={0}
                   author={topic.author}
                   body={topic.body}
@@ -228,6 +234,7 @@ export function CommunityTopicDetail({
               />
               {floorGroups.map(({ reply, floorNo, children }) => (
                 <Floor
+                  topic={topic}
                   key={reply.id}
                   floor={floorNo}
                   postId={reply.id}
@@ -248,6 +255,9 @@ export function CommunityTopicDetail({
                   onLocateTarget={locateTargetReply}
                   registerElement={registerReplyElement}
                   currentUserId={currentUserId}
+                  canReply={topic.topicType === 'discussion' || topic.topicType === 'share'}
+                  replySaving={replySaving}
+                  onSubmitReply={onSubmitReply}
                   getAuthorSummary={getSummaryFor}
                   loadAuthorSummary={loadSummaryFor}
                   followAuthor={followFor}
@@ -268,6 +278,14 @@ export function CommunityTopicDetail({
                   </Button>
                 </div>
               )}
+              {topic.status === 'open' && currentUserId && topic.topicType !== 'notice' ? (
+                <ReplyComposer
+                  topic={topic}
+                  submitLabel="回复主题"
+                  saving={replySaving}
+                  onSubmit={(payload) => onSubmitReply?.(payload) ?? Promise.resolve(false)}
+                />
+              ) : null}
             </>
           ) : null}
         </div>

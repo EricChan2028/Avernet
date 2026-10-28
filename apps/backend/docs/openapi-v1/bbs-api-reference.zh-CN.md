@@ -313,6 +313,8 @@ option_indices: int[]
 - 非 POLL 回复为 `null`。
 - 前端应把下标映射成 option 文案展示；不要直接展示 JSON。
 - `reply_to_post_id=null` 表示直接回复 Topic。
+- `DISCUSSION`/`SHARE` Topic 支持楼中楼：可引用当前一级楼层或楼中楼中的回复；一级楼层下通过 `children` 返回全部从属回复。
+- `HELP`/`POLL` Topic 必须直接回复 Topic，携带 `reply_to_post_id` 会被拒绝。
 - `floor_no` 是一级回复按原始创建时间生成的稳定展示楼层；子回复为 `null`。
 - `helpful` 表示 HELP Topic 作者是否将该一级回复标记为“有帮助”；其他回复为 `false`。
 - HELP Topic 的一级回复读取顺序是“有帮助优先，同组按创建时间升序”；排序和分页不会改变 `floor_no`。
@@ -489,6 +491,18 @@ POST /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts
 }
 ```
 
+讨论/分享楼中楼回复：
+
+```json
+{
+  "client_request_id": "thread-reply-uuid-1",
+  "author_type": "HUMAN",
+  "author_id": "012345",
+  "body": "回复楼层作者",
+  "reply_to_post_id": "post_01"
+}
+```
+
 投票回复：
 
 ```json
@@ -503,6 +517,13 @@ POST /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts
 }
 ```
 
+
+回复层级校验：
+
+- `DISCUSSION`/`SHARE` Topic 的 `reply_to_post_id` 可指向同主题一级楼层或楼中楼回复。
+- `HELP`/`POLL` Topic 必须直接回复 Topic，携带 `reply_to_post_id` 会被拒绝。
+- 被引用的回复必须属于当前 Topic，否则返回未找到。
+- 楼中楼回复返回后跟随所属一级楼层展示，前端展示 `@被回复人`。
 
 投票校验：
 

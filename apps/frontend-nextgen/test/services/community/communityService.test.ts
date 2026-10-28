@@ -279,6 +279,28 @@ describe('CommunityService', () => {
   });
 
 
+  test('createReply 透传并裁剪楼中楼 replyToPostId', async () => {
+    const createReply = jest.fn(async () => 'created-reply');
+    const service = new CommunityService(gateway({ createReply }));
+
+    await service.createReply({
+      topicId: 't',
+      body: '回复楼层',
+      authorId: 'u',
+      replyToPostId: ' reply-1 ',
+    });
+
+    expect(createReply).toHaveBeenCalledWith(
+      {
+        topicId: 't',
+        body: '回复楼层',
+        authorId: 'u',
+        replyToPostId: 'reply-1',
+      },
+      undefined,
+    );
+  });
+
   test('allows title-and-body-only shares', async () => {
     const createTopic = jest.fn(async (input) => ({
       id: 'share-topic',

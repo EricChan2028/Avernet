@@ -35,6 +35,7 @@ export function useCommunity() {
   });
   const topicDetail = useCommunityTopicDetail({
     currentUserId,
+    currentAuthorName: identity?.displayName,
     viewer: interactionViewer,
     interactions,
     enrichTopicBotAuthor,

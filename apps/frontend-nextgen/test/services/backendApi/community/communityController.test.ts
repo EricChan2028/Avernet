@@ -114,6 +114,26 @@ describe('communityController', () => {
   });
 
 
+  test('楼中楼回复下发 reply_to_post_id', async () => {
+    await createCommunityReply({
+      topicId: 'topic/1',
+      body: '回复楼层成员',
+      authorId: 'u1',
+      replyToPostId: 'post/2',
+    });
+
+    const arg = mockedRequest.mock.calls[0];
+    expect(arg?.[0]).toBe('/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1/posts');
+    expect(arg?.[1].data).toMatchObject({
+      client_request_id: expect.any(String),
+      author_type: 'HUMAN',
+      author_id: 'u1',
+      body: '回复楼层成员',
+      reply_to_post_id: 'post/2',
+    });
+    expect(arg?.[1].data).not.toHaveProperty('poll_selection');
+  });
+
   test('发布主题走 /openapi/v1/collaboration/tasks/bbs/topics，HUMAN 写体含 client_request_id/title/body/author_id + 作者快照 author_display_name/author_avatar_url；结帖 body 含 author_id', async () => {
     // §2.1 + §8 填充规则：HUMAN 发帖时把 displayName/avatarUrl 作为写入快照下发，供列表/详情/楼层回放。
     const input = {
