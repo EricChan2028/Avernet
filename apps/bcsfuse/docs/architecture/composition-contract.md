@@ -232,6 +232,12 @@ have the same query cardinality guard as v2: query/question text is at most 4,09
 characters, filters contain at most 16 fields, and each array value contains at most
 32 items; violations return HTTP 422 before authentication callbacks or business
 execution. These limits do not alter valid v1 responses or ranking behavior.
+V1 filters now share one application-owned contract: only `availability`,
+`runtime_state`, `domains`, `trust_level`, `worker_id` and `profile_key` are
+accepted. Each value is a string or a string array and every value is at most
+256 characters. Unsupported fields, non-string values and oversized values reject
+with HTTP 422 before V2-style projection or core execution. The string-scalar
+form preserves the existing V1 exact-worker filter contract.
 V1 dependency execution failures at the delivery boundary return a stable
 HTTP 503 rather than surfacing provider details: `/api/v1/search` uses
 `SEARCH_UNAVAILABLE`, and `/api/v1/recommend` uses `RECOMMEND_UNAVAILABLE`.

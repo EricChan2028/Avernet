@@ -13,6 +13,7 @@ from typing import Any, Literal, Optional, Union
 from pydantic import BaseModel, Field, model_validator
 
 from app.domain.models.candidate_recommendation import CandidateRecommendationResponse
+from app.domain.services.search_filter_contract import validate_v1_search_filters
 
 
 class BotRecommendationRequest(BaseModel):
@@ -88,14 +89,7 @@ class BotRecommendationRequest(BaseModel):
     @model_validator(mode="after")
     def bounded_filters(self):
         """Bound legacy V1 filters before recommendation business execution."""
-        if self.filters is not None:
-            if len(self.filters) > 16:
-                raise ValueError("filters must contain at most 16 fields")
-            for values in self.filters.values():
-                if isinstance(values, list) and len(values) > 32:
-                    raise ValueError(
-                        "each filter must contain at most 32 values"
-                    )
+        validate_v1_search_filters(self.filters)
         return self
 
     type: Literal["search", "recommend"] = Field(

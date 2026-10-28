@@ -87,7 +87,7 @@ def _reject_execution(monkeypatch):
     )
 
 
-def test_v1_oversized_queries_and_filters_reject_before_execution(monkeypatch):
+def test_v1_search_request_boundaries_reject_before_execution(monkeypatch):
     cases = [
         ("/api/v1/search", {"query": "x" * 4097, "top_k": 1}),
         (
@@ -103,8 +103,20 @@ def test_v1_oversized_queries_and_filters_reject_before_execution(monkeypatch):
             {
                 "query": "支付",
                 "top_k": 1,
-                "filters": {"tags": [f"value{i}" for i in range(33)]},
+                "filters": {"domains": [f"value{i}" for i in range(33)]},
             },
+        ),
+        (
+            "/api/v1/search",
+            {"query": "支付", "top_k": 1, "filters": {"tags": ["value"]}},
+        ),
+        (
+            "/api/v1/search",
+            {"query": "支付", "top_k": 1, "filters": {"domains": [123]}},
+        ),
+        (
+            "/api/v1/search",
+            {"query": "支付", "top_k": 1, "filters": {"domains": ["x" * 257]}},
         ),
         ("/api/v1/recommend", {"question": "x" * 4097, "topK": 1}),
         (
@@ -113,7 +125,19 @@ def test_v1_oversized_queries_and_filters_reject_before_execution(monkeypatch):
         ),
         (
             "/api/v1/recommend",
-            {"question": "支付", "topK": 1, "filters": {"tags": [f"value{i}" for i in range(33)]}},
+            {"question": "支付", "topK": 1, "filters": {"domains": [f"value{i}" for i in range(33)]}},
+        ),
+        (
+            "/api/v1/recommend",
+            {"question": "支付", "topK": 1, "filters": {"tags": ["value"]}},
+        ),
+        (
+            "/api/v1/recommend",
+            {"question": "支付", "topK": 1, "filters": {"domains": [123]}},
+        ),
+        (
+            "/api/v1/recommend",
+            {"question": "支付", "topK": 1, "filters": {"domains": ["x" * 257]}},
         ),
     ]
 
@@ -124,6 +148,24 @@ def test_v1_oversized_queries_and_filters_reject_before_execution(monkeypatch):
             response = client.post(path, json=payload)
             assert response.status_code == 422, (path, response.text)
             assert response.json()["detail"] is not None
+
+
+def test_v1_filter_contract_preserves_exact_worker_string_filters():
+    from app.bootstrap.oss_business_routes import SearchRequestOSS
+    from app.domain.models.bot_recommendation import BotRecommendationRequest
+
+    search_request = SearchRequestOSS(
+        query="worker-1",
+        filters={"worker_id": "acceptance_worker:1"},
+    )
+    recommend_request = BotRecommendationRequest(
+        question="worker-1",
+        filters={"worker_id": "acceptance_worker:1"},
+    )
+
+    assert search_request.filters == recommend_request.filters == {
+        "worker_id": "acceptance_worker:1"
+    }
 
 
 def test_v1_oversized_body_is_rejected_before_admission_and_execution(monkeypatch):
@@ -221,7 +263,7 @@ def test_v1_search_does_not_log_query_text_or_filter_values(monkeypatch, caplog)
     ):
         response = client.post(
             "/api/v1/search",
-            json={"query": "secret-query-text", "filters": {"tags": ["secret-filter-value"]}},
+            json={"query": "secret-query-text", "filters": {"domains": ["secret-filter-value"]}},
         )
 
     assert response.status_code == 503

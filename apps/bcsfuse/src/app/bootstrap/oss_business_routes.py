@@ -34,6 +34,10 @@ from fastapi import APIRouter, Request, HTTPException, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, model_validator
 
+from app.domain.services.search_filter_contract import (
+    validate_v1_search_filters,
+)
+
 # Import schemas directly (safe - no import chain)
 from app.adapters.http.schemas.worker_management_schemas import (
     ProfileRequest,
@@ -42,25 +46,6 @@ from app.adapters.http.schemas.worker_management_schemas import (
 
 logger = logging.getLogger(__name__)
 
-# Request models
-MAX_V1_FILTER_FIELDS = 16
-MAX_V1_FILTER_VALUES_PER_FIELD = 32
-
-
-def _validate_v1_search_filters(filters):
-    """Bound V1 filter cardinality without changing supported value shapes."""
-    if filters is None:
-        return
-    if len(filters) > MAX_V1_FILTER_FIELDS:
-        raise ValueError(
-            f"filters must contain at most {MAX_V1_FILTER_FIELDS} fields"
-        )
-    for values in filters.values():
-        if isinstance(values, list) and len(values) > MAX_V1_FILTER_VALUES_PER_FIELD:
-            raise ValueError(
-                "each filter must contain at most "
-                f"{MAX_V1_FILTER_VALUES_PER_FIELD} values"
-            )
 
 
 class SearchRequestOSS(BaseModel):
@@ -76,7 +61,7 @@ class SearchRequestOSS(BaseModel):
 
     @model_validator(mode="after")
     def bounded_filters(self):
-        _validate_v1_search_filters(self.filters)
+        validate_v1_search_filters(self.filters)
         return self
 
 
