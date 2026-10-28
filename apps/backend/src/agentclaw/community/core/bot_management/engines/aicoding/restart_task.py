@@ -45,6 +45,7 @@ from .restart_state import (
 )
 
 from .restart_baas import find_rejection
+from ..restart_contract import RestartPreconditionError
 
 logger = get_logger()
 POLL_SECONDS = 3
@@ -61,6 +62,9 @@ def _failure_message(error: Exception, *, fenced: bool) -> str:
     # engine-owned messages cross the persisted/public boundary.
     if fenced:
         return "重启提交结果待确认，请查询实例状态；不会自动重复销毁或创建容器"
+    from .restart_backup import RestartBackupBlocked
+    if isinstance(error, RestartBackupBlocked):
+        return str(error)
     reason = getattr(error, "reason", "")
     if isinstance(error, TimeoutError) or reason == "timeout":
         return "重启备份超时，本次重启已终止，旧容器未销毁"
@@ -329,7 +333,7 @@ class AicodingRestartHandler:
                 return Reschedule(POLL_SECONDS)
             message = (
                 "重启提交前准备失败；本次重启已终止，旧容器未执行替换"
-                if execution.verify_backup is not None
+                if execution.verify_backup is not None and not isinstance(error, RestartPreconditionError)
                 else _failure_message(error, fenced=execution.fenced)
             )
             state.fail(message)

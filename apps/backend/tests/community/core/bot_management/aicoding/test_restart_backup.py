@@ -760,3 +760,10 @@ def test_non_baas_provider_retains_backup_attempt_and_binding_guard(engine, stat
         verify()
     runtime_provider.assert_not_called()
     repository.update_by_owner.assert_not_called()
+
+
+@pytest.fixture(autouse=True)
+def nonfastdisk_compatibility_scope(monkeypatch):
+    """Legacy backup/fence tests; real detection and strict policy have their own suite."""
+    from agentclaw.community.core.bot_management.engines.aicoding import restart_backup
+    monkeypatch.setattr(restart_backup, "_detect_fastdisk", lambda *args, **kwargs: False)
