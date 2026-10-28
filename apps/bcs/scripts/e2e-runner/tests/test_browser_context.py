@@ -58,6 +58,23 @@ class BrowserContextTests(unittest.TestCase):
         profile = self.profile(); profile['auth']['header_env'] = {'Authorization': 'TEST_BEARER'}
         with self.assertRaises(ConfigError): validate(profile)
 
+    def test_explicit_unauthenticated_gateway_context_sends_no_credential_header(self):
+        profile = self.profile()
+        profile['auth'] = {'principal_signing_key_env': 'BCS_E2E_UNAUTHENTICATED'}
+        self.assertEqual(browser_headers(profile), {
+            'Origin': profile['browser_origin'],
+            'Referer': profile['browser_origin'] + '/',
+        })
+        with patch('bcs_e2e.transport.build_opener') as opener:
+            opener.return_value.open.return_value = helpers.Reply(helpers.envelope({}))
+            read = ReadClient(profile); result = read.read('environment.read')
+        request = opener.return_value.open.call_args.args[0]
+        self.assertEqual(request.get_header('Origin'), profile['browser_origin'])
+        self.assertEqual(request.get_header('Referer'), profile['browser_origin'] + '/')
+        self.assertIsNone(request.get_header('Cookie'))
+        self.assertIsNone(request.get_header('Authorization'))
+        self.assertNotIn('TEST_BEARER', str(result.evidence))
+
     def test_identity_request_carries_cookie_and_browser_context_only_to_api_origin(self):
         profile = self.profile()
         with patch.dict(os.environ, {'BCS_E2E_HUMAN_COOKIE': 'test-token'}), \
