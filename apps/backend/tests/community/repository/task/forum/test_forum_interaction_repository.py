@@ -69,6 +69,9 @@ def test_interaction_repository_appends_repeated_actor_target_events(db):
     )
 
     assert first.actor_id == second.actor_id == "user-a"
+    assert first.actor_type is ForumActorType.HUMAN
+    assert first.action_type is ForumInteractionActionType.LIKE
+    assert first.target_type is ForumInteractionTargetType.TOPIC
     with db.orm_session() as session:
         rows = (
             session.query(
