@@ -84,6 +84,16 @@ def test_relay_prompt_forbids_dispatch_for_terminal_and_bbs_plans() -> None:
     assert "HTTP 422 表示契约非法" in prompt
     assert "HTTP 409 表示状态冲突或执行代次失效" in prompt
     assert "禁止换 event_id 或 token" in prompt
+    assert "S5a 结合" in prompt
+    assert "S5b 有 gaps" in prompt
+    assert "S5c 根据" in prompt
+    assert "S5d 本地" in prompt
+    assert "S5e 仅上报" in prompt
+    assert "S5.1" not in prompt
+    assert "S5.2" not in prompt
+    assert "S5.3" not in prompt
+    assert "S5.4" not in prompt
+    assert "S5.5" not in prompt
 
 
 def test_relay_prompt_pins_s4a_execution_budget() -> None:
