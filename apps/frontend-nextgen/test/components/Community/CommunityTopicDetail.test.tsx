@@ -73,7 +73,7 @@ describe('CommunityTopicDetail', () => {
     expect(props.onBack).toHaveBeenCalledTimes(1);
   });
 
-  test('一级回复和楼中楼回复都可独立点赞', async () => {
+  test('回复展示汇总互动量，并用红色图标表示当前用户状态', async () => {
     const user = userEvent.setup();
     const child: CommunityReply = {
       ...replies[0],
@@ -89,66 +89,127 @@ describe('CommunityTopicDetail', () => {
       author: { type: 'human', id: 'human-floor', displayName: 'ClawMind' },
       childReplies: [child],
     };
+    const targetSummary = (postId: string, likeCount: number, favoriteCount: number) => ({
+      scope: 'TARGET' as const,
+      target: { targetType: 'POST' as const, id: postId },
+      viewCount: 0,
+      likeCount,
+      favoriteCount,
+      followCount: 0,
+      acceptCount: 0,
+      topicCount: 0,
+      replyCount: 0,
+      acceptedReplyCount: 0,
+      replyParticipantCount: 0,
+      helpfulReplyCount: 0,
+    });
+    const viewerSummary = (postId: string, likeCount: number, favoriteCount: number) => ({
+      scope: 'ACTOR_TARGET' as const,
+      actor: { actorType: 'HUMAN' as const, id: 'human-current' },
+      target: { targetType: 'POST' as const, id: postId },
+      viewCount: 0,
+      likeCount,
+      favoriteCount,
+      followCount: 0,
+      acceptCount: 0,
+      topicCount: 0,
+      replyCount: 0,
+      acceptedReplyCount: 0,
+      replyParticipantCount: 0,
+      helpfulReplyCount: 0,
+    });
     const onLikeReply = jest.fn();
+    const onFavoriteReply = jest.fn();
     renderDetail({
+      currentUserId: 'human-current',
       replies: [floor],
-      getReplySummary: (postId) => ({
-        scope: 'TARGET',
-        target: { targetType: 'POST', id: postId },
-        viewCount: 0,
-        likeCount: postId === 'child-reply' ? 5 : 3,
-        favoriteCount: 0,
-        followCount: 0,
-        acceptCount: 0,
-        topicCount: 0,
-        replyCount: 0,
-        acceptedReplyCount: 0,
-        replyParticipantCount: 0,
-        helpfulReplyCount: 0,
-      }),
+      getReplySummary: (postId) =>
+        postId === 'child-reply'
+          ? targetSummary(postId, 5, 2)
+          : targetSummary(postId, 3, 4),
+      getReplyViewerSummary: (postId) =>
+        postId === 'child-reply'
+          ? viewerSummary(postId, 0, 1)
+          : viewerSummary(postId, 1, 0),
       replyLikePending: (postId) => postId === 'child-reply',
       onLikeReply,
+      onFavoriteReply,
     });
 
     const floorArticle = screen.getByText('一级回复正文').closest('article');
     expect(floorArticle).not.toBeNull();
-    const floorLikeButton = within(floorArticle as HTMLElement).getAllByRole('button', { name: '点赞回复' })[0];
+    const floorLikeButton = within(floorArticle as HTMLElement).getAllByRole('button', {
+      name: '点赞回复',
+    })[0];
     expect(floorLikeButton).toHaveTextContent('3');
-    await user.click(floorLikeButton);
+    expect(floorLikeButton).toHaveClass('text-destructive');
+    expect(floorLikeButton).toHaveAttribute('aria-pressed', 'true');
+    expect(floorLikeButton.querySelector('svg')).toHaveClass('fill-current');
+
+    const floorFavoriteButton = within(floorArticle as HTMLElement).getAllByRole('button', {
+      name: '收藏回复',
+    })[0];
+    expect(floorFavoriteButton).toHaveTextContent('4');
+    expect(floorFavoriteButton).toHaveClass('text-muted-foreground');
+    expect(floorFavoriteButton).toHaveAttribute('aria-pressed', 'false');
+    await user.click(floorFavoriteButton);
+    expect(onFavoriteReply).toHaveBeenCalledWith('floor-reply');
 
     const childArticle = screen.getByText('楼中楼正文').closest('article');
     expect(childArticle).not.toBeNull();
-    const childLikeButton = within(childArticle as HTMLElement).getByRole('button', { name: '点赞回复' });
+    const childLikeButton = within(childArticle as HTMLElement).getByRole('button', {
+      name: '点赞回复',
+    });
     expect(childLikeButton).toBeDisabled();
     expect(childLikeButton).toHaveTextContent('5');
+    expect(childLikeButton).toHaveClass('text-muted-foreground');
 
-    expect(onLikeReply).toHaveBeenCalledTimes(1);
-    expect(onLikeReply).toHaveBeenCalledWith('floor-reply');
+    const childFavoriteButton = within(childArticle as HTMLElement).getByRole('button', {
+      name: '收藏回复',
+    });
+    expect(childFavoriteButton).toHaveTextContent('2');
+    expect(childFavoriteButton).toHaveClass('text-destructive');
+    expect(childFavoriteButton).toHaveAttribute('aria-pressed', 'true');
+    expect(childFavoriteButton.querySelector('svg')).toHaveClass('fill-current');
+    expect(onLikeReply).not.toHaveBeenCalled();
   });
 
   test('主帖互动操作与发表时间同排且无横向分隔线', () => {
     const onLike = jest.fn();
     const onFavorite = jest.fn();
     const onEditTopic = jest.fn();
-    const interactionSummary = {
-      scope: 'ACTOR_TARGET' as const,
-      actor: { actorType: 'HUMAN' as const, id: 'human-current' },
-      target: { targetType: 'TOPIC' as const, id: topic.id },
-      viewCount: 12,
-      likeCount: 3,
-      favoriteCount: 2,
+    const baseStats = {
+      viewCount: 0,
+      likeCount: 0,
+      favoriteCount: 0,
       followCount: 0,
       acceptCount: 0,
-      topicCount: 1,
+      topicCount: 0,
       replyCount: 0,
       acceptedReplyCount: 0,
       replyParticipantCount: 0,
       helpfulReplyCount: 0,
     };
+    const targetSummary = {
+      ...baseStats,
+      scope: 'TARGET' as const,
+      target: { targetType: 'TOPIC' as const, id: topic.id },
+      viewCount: 12,
+      likeCount: 10,
+      favoriteCount: 6,
+    };
+    const viewerSummary = {
+      ...baseStats,
+      scope: 'ACTOR_TARGET' as const,
+      actor: { actorType: 'HUMAN' as const, id: 'human-current' },
+      target: { targetType: 'TOPIC' as const, id: topic.id },
+      likeCount: 1,
+      favoriteCount: 1,
+    };
     renderDetail({
       currentUserId: 'human-current',
-      targetSummary: interactionSummary,
-      viewerTopicSummary: interactionSummary,
+      targetSummary,
+      viewerTopicSummary: viewerSummary,
       likePending: false,
       favoritePending: false,
       onLike,
@@ -163,15 +224,15 @@ describe('CommunityTopicDetail', () => {
     expect(within(interactionBar).getByText('发表于：时间未知')).toBeInTheDocument();
 
     const actionButtons = within(interactionBar).getAllByRole('button');
-    expect(actionButtons.map((button) => button.textContent)).toEqual(['3', '2', '编辑']);
+    expect(actionButtons.map((button) => button.textContent)).toEqual(['10', '6', '编辑']);
     const likeButton = actionButtons[0];
     expect(likeButton).toHaveClass('flex', 'items-center', 'gap-1', 'text-xs', 'text-destructive');
-    expect(likeButton).toHaveTextContent('3');
+    expect(likeButton).toHaveTextContent('10');
     expect(likeButton.querySelector('svg')).toHaveClass('fill-current');
 
     const favoriteButton = within(interactionBar).getByRole('button', { name: '收藏主题' });
-    expect(favoriteButton).toHaveClass('flex', 'items-center', 'gap-1', 'text-xs', 'text-warning');
-    expect(favoriteButton).toHaveTextContent('2');
+    expect(favoriteButton).toHaveClass('flex', 'items-center', 'gap-1', 'text-xs', 'text-destructive');
+    expect(favoriteButton).toHaveTextContent('6');
     expect(favoriteButton).toHaveAttribute('aria-pressed', 'true');
     expect(favoriteButton.querySelector('svg')).toHaveClass('fill-current');
     expect(within(interactionBar).getByLabelText('浏览 12 次')).toHaveTextContent('12');

@@ -57,7 +57,7 @@ export function ActivityList({ items, loading, error, onRetry, onOpenTopic }: Ac
             key={`${item.actor.actorType}:${item.actor.id}:${item.activityType}:${item.target.targetType}:${item.target.id}`}
             variant="ghost"
             className="block h-auto w-full rounded-none border-b border-border/60 px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-muted"
-            onClick={() => onOpenTopic(item.topicId)}
+            onClick={() => item.topicId && onOpenTopic(item.topicId)}
           >
             <span className="block w-full">
               <span className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_150px]">

@@ -1,8 +1,9 @@
 import { Button } from '@/components/ui/Button';
 import type { CommunityReply, InteractionSummary } from '@/domain/community/types';
-import { Heart, MessageSquare } from 'lucide-react';
+import { Heart, MessageSquare, Star } from 'lucide-react';
 import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
 import { formatDateTime, type ReplyElementRegistrar } from './model';
+import { cn } from '@/utils/cn';
 
 interface ThreadReplyProps {
   reply: CommunityReply;
@@ -17,8 +18,13 @@ interface ThreadReplyProps {
   authorFollowLoading?: (author: CommunityReply['author']) => boolean;
   canReply?: boolean;
   likeCount?: number;
+  favoriteCount?: number;
+  liked?: boolean;
+  favorited?: boolean;
   likePending?: boolean;
+  favoritePending?: boolean;
   onLike?: (postId: string) => void;
+  onFavorite?: (postId: string) => void;
   onReply?: (target: { postId: string; authorName: string }) => void;
 }
 
@@ -35,8 +41,13 @@ export function ThreadReply({
   authorFollowLoading,
   canReply = false,
   likeCount = 0,
+  favoriteCount = 0,
+  liked = false,
+  favorited = false,
   likePending = false,
+  favoritePending = false,
   onLike,
+  onFavorite,
   onReply,
 }: ThreadReplyProps) {
   return (
@@ -90,11 +101,31 @@ export function ThreadReply({
               type="button"
               disabled={likePending}
               aria-label="点赞回复"
+              aria-pressed={liked}
               onClick={() => onLike(reply.id)}
-              className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              className={cn(
+                'flex items-center gap-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+                liked ? 'text-destructive' : 'text-muted-foreground hover:text-foreground',
+              )}
             >
-              <Heart className="size-3.5" aria-hidden />
+              <Heart className={cn('size-3.5', liked && 'fill-current')} aria-hidden />
               {likeCount}
+            </button>
+          ) : null}
+          {onFavorite ? (
+            <button
+              type="button"
+              disabled={favoritePending}
+              aria-label="收藏回复"
+              aria-pressed={favorited}
+              onClick={() => onFavorite(reply.id)}
+              className={cn(
+                'flex items-center gap-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+                favorited ? 'text-destructive' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <Star className={cn('size-3.5', favorited && 'fill-current')} aria-hidden />
+              {favoriteCount}
             </button>
           ) : null}
         </div>

@@ -52,8 +52,11 @@ export interface CommunityTopicDetailProps {
   onLike?: (target: ForumTargetRef) => void;
   onFavorite?: (target: ForumTargetRef) => void;
   getReplySummary?: (postId: string) => InteractionSummary | undefined;
+  getReplyViewerSummary?: (postId: string) => InteractionSummary | undefined;
   replyLikePending?: (postId: string) => boolean;
+  replyFavoritePending?: (postId: string) => boolean;
   onLikeReply?: (postId: string) => void;
+  onFavoriteReply?: (postId: string) => void;
   onCloseTopic: () => Promise<boolean>;
   onEditTopic: () => void;
   onDeleteTopic: () => Promise<boolean>;
@@ -90,8 +93,11 @@ export function CommunityTopicDetail({
   onLike,
   onFavorite,
   getReplySummary,
+  getReplyViewerSummary,
   replyLikePending,
+  replyFavoritePending,
   onLikeReply,
+  onFavoriteReply,
   onCloseTopic,
   onEditTopic,
   onDeleteTopic,
@@ -252,8 +258,11 @@ export function CommunityTopicDetail({
                   canToggleHelpful={topic.topicType === 'help' && topic.isMine}
                   helpfulLoading={helpfulPostId === reply.id}
                   getReplyLikeSummary={getReplySummary}
+                  getReplyViewerSummary={getReplyViewerSummary}
                   replyLikePending={isReplyLikePending}
+                  replyFavoritePending={replyFavoritePending}
                   onLike={onLikeReply}
+                  onFavoriteReply={onFavoriteReply}
                   onToggleHelpful={() => {
                     void onSetPostHelpful(reply.id, !reply.helpful);
                   }}

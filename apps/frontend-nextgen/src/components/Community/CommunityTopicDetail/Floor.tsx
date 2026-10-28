@@ -1,8 +1,9 @@
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import type { CommunityTopic, CreateCommunityReplyDraft, InteractionSummary } from '@/domain/community/types';
-import { Heart, MessageSquare, User } from 'lucide-react';
+import { Heart, MessageSquare, Star, User } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
+import { cn } from '@/utils/cn';
 import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
 import { formatDateTime, type CommunityThreadReply, type ReplyElementRegistrar } from './model';
 import { ReplyComposer, type ReplyComposerTarget } from './ReplyComposer';
@@ -25,8 +26,11 @@ interface FloorProps {
   /** Full bottom-row replacement for the main Topic; replies keep the default row. */
   topicActionRow?: ReactNode;
   getReplyLikeSummary?: (postId: string) => InteractionSummary | undefined;
+  getReplyViewerSummary?: (postId: string) => InteractionSummary | undefined;
   replyLikePending?: (postId: string) => boolean;
+  replyFavoritePending?: (postId: string) => boolean;
   onLike?: (postId: string) => void;
+  onFavoriteReply?: (postId: string) => void;
   onToggleHelpful?: () => void;
   threadReplies: CommunityThreadReply[];
   expanded: boolean;
@@ -59,8 +63,11 @@ export function Floor({
   contentExtra,
   topicActionRow,
   getReplyLikeSummary,
+  getReplyViewerSummary,
   replyLikePending,
+  replyFavoritePending,
   onLike,
+  onFavoriteReply,
   onToggleHelpful,
   threadReplies,
   expanded,
@@ -77,7 +84,12 @@ export function Floor({
   onSubmitReply,
 }: FloorProps) {
   const [replyTarget, setReplyTarget] = useState<ReplyComposerTarget | null>(null);
-  const likeCount = postId ? getReplyLikeSummary?.(postId)?.likeCount ?? 0 : 0;
+  const replyStats = postId ? getReplyLikeSummary?.(postId) : undefined;
+  const viewerReplyStats = postId ? getReplyViewerSummary?.(postId) : undefined;
+  const likeCount = replyStats?.likeCount ?? 0;
+  const favoriteCount = replyStats?.favoriteCount ?? 0;
+  const liked = (viewerReplyStats?.likeCount ?? 0) > 0;
+  const favorited = (viewerReplyStats?.favoriteCount ?? 0) > 0;
   const visibleThreadReplies = expanded ? threadReplies : threadReplies.slice(0, 2);
   const childListId = postId ? `${postId}-children` : undefined;
 
@@ -148,11 +160,35 @@ export function Floor({
                   type="button"
                   disabled={replyLikePending?.(postId) === true}
                   aria-label="点赞回复"
+                  aria-pressed={liked}
                   onClick={() => postId && onLike?.(postId)}
-                  className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                  className={cn(
+                    'flex items-center gap-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+                    liked
+                      ? 'text-destructive'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
                 >
-                  <Heart className="size-3.5" aria-hidden />
+                  <Heart className={cn('size-3.5', liked && 'fill-current')} aria-hidden />
                   {likeCount}
+                </button>
+              ) : null}
+              {postId && onFavoriteReply ? (
+                <button
+                  type="button"
+                  disabled={replyFavoritePending?.(postId) === true}
+                  aria-label="收藏回复"
+                  aria-pressed={favorited}
+                  onClick={() => postId && onFavoriteReply?.(postId)}
+                  className={cn(
+                    'flex items-center gap-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+                    favorited
+                      ? 'text-destructive'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  <Star className={cn('size-3.5', favorited && 'fill-current')} aria-hidden />
+                  {favoriteCount}
                 </button>
               ) : null}
               {floor > 0 && canToggleHelpful && onToggleHelpful ? (
@@ -187,8 +223,13 @@ export function Floor({
                 authorFollowLoading={authorFollowLoading}
                 canReply={canReply}
                 likeCount={getReplyLikeSummary?.(reply.id)?.likeCount ?? 0}
+                favoriteCount={getReplyLikeSummary?.(reply.id)?.favoriteCount ?? 0}
+                liked={(getReplyViewerSummary?.(reply.id)?.likeCount ?? 0) > 0}
+                favorited={(getReplyViewerSummary?.(reply.id)?.favoriteCount ?? 0) > 0}
                 likePending={replyLikePending?.(reply.id) === true}
+                favoritePending={replyFavoritePending?.(reply.id) === true}
                 onLike={onLike}
+                onFavorite={onFavoriteReply}
                 onReply={setReplyTarget}
               />
             ))}

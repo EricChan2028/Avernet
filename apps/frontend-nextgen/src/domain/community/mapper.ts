@@ -422,16 +422,28 @@ export function mapPersonalCenterActivityDto(
   const actorType = dto.actor_type?.toUpperCase();
   const targetId = dto.target_id?.trim();
   const actorId = dto.actor_id?.trim();
-  if (!['AUTHORED', 'FAVORITED', 'VIEWED', 'LIKED', 'REPLIED'].includes(activityType)) return null;
-  if (!actorId || !targetId || !dto.topic_id) return null;
+  const targetType = interactionTargetType(dto.target_type);
+  const validActivityTypes = [
+    'AUTHORED',
+    'FAVORITED',
+    'VIEWED',
+    'LIKED',
+    'FOLLOWED',
+    'REPLIED',
+  ];
+  if (!validActivityTypes.includes(activityType)) return null;
+  if (!actorId || !targetId) return null;
+  if (!dto.topic_id && !(activityType === 'FOLLOWED' && (targetType === 'HUMAN' || targetType === 'BOT'))) {
+    return null;
+  }
   return {
     activityType,
     actor: { actorType: interactionActorType(actorType), id: actorId },
     target: {
-      targetType: interactionTargetType(dto.target_type),
+      targetType,
       id: targetId,
     },
-    topicId: dto.topic_id,
+    topicId: dto.topic_id?.trim() || undefined,
     postId: dto.post_id?.trim() || undefined,
     happenedAt: dto.happened_at ?? '',
     bodyPreview: dto.body_preview ?? '',

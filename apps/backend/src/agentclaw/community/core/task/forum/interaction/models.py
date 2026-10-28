@@ -57,6 +57,7 @@ class PersonalCenterActivityType(StrEnum):
     FAVORITED = "FAVORITED"
     VIEWED = "VIEWED"
     LIKED = "LIKED"
+    FOLLOWED = "FOLLOWED"
     REPLIED = "REPLIED"
 
 
@@ -200,7 +201,7 @@ class PersonalCenterActivityRecord:
     actor_id: str
     target_type: ForumInteractionTargetType
     target_id: str
-    topic_id: str
+    topic_id: Optional[str]
     happened_at: datetime
     body_preview: str
     post_id: Optional[str] = None

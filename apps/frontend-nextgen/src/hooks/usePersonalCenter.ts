@@ -1,6 +1,7 @@
 import { PERSONAL_CENTER_PAGE_SIZE } from '@/domain/community/constants';
 import { communityErrorMessage } from '@/domain/community/errors';
-import type { PersonalCenterActivityPage, PersonalCenterActivityType } from '@/domain/community/types';
+import { notifyError } from '@/components/ui/notify';
+import type { PersonalCenterActivity, PersonalCenterActivityPage, PersonalCenterActivityType } from '@/domain/community/types';
 import { EMPTY_ACTIVITY_PAGE, type UsePersonalCenterResult } from './personalCenterModel';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { communityService } from '@/services/community';
@@ -60,6 +61,38 @@ export function usePersonalCenter(): UsePersonalCenterResult {
     setReloadNonce((nonce) => nonce + 1);
   }, []);
 
+  const unfollow = useCallback(
+    async (activity: PersonalCenterActivity) => {
+      if (!ownerUserId) {
+        notifyError('缺少当前用户身份，无法取消关注', { title: '互动失败' });
+        return;
+      }
+      try {
+        await communityService.createInteraction({
+          actor: { actorType: 'HUMAN', id: ownerUserId },
+          actionType: 'FOLLOW',
+          target: activity.target,
+          active: -1,
+        });
+        setActivityPage((current) => ({
+          ...current,
+          items: current.items.filter(
+            (item) =>
+              item.target.targetType !== activity.target.targetType ||
+              item.target.id !== activity.target.id,
+          ),
+        }));
+        if (activityType === 'FOLLOWED') setPage(1);
+        reload();
+      } catch (error) {
+        notifyError(communityErrorMessage(error, '取消关注失败，请稍后重试'), {
+          title: '互动失败',
+        });
+      }
+    },
+    [activityType, ownerUserId, reload],
+  );
+
   return {
     ownerUserId,
     activityType,
@@ -71,5 +104,6 @@ export function usePersonalCenter(): UsePersonalCenterResult {
     setActivityType,
     goToPage,
     reload,
+    unfollow,
   };
 }

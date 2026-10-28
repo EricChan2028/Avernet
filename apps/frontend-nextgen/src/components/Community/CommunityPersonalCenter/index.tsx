@@ -3,9 +3,10 @@ import { Pagination } from '@/components/ui/Pagination';
 import { Segmented } from '@/components/ui/Segmented';
 import type { PersonalCenterActivityType } from '@/domain/community/types';
 import { usePersonalCenter } from '@/hooks/usePersonalCenter';
-import { ArrowLeft, FileText, Heart, History, MessageSquare, Star } from 'lucide-react';
+import { ArrowLeft, FileText, Heart, History, MessageSquare, Star, UserRoundPlus } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { ActivityList } from './ActivityList';
+import { FollowList } from './FollowList';
 import { personalCenterActivityOptions } from './model';
 
 const activityOptions: Array<{
@@ -19,6 +20,7 @@ const activityOptions: Array<{
       REPLIED: <MessageSquare className="size-3.5" aria-hidden />,
       FAVORITED: <Star className="size-3.5" aria-hidden />,
       LIKED: <Heart className="size-3.5" aria-hidden />,
+      FOLLOWED: <UserRoundPlus className="size-3.5" aria-hidden />,
       VIEWED: <History className="size-3.5" aria-hidden />,
     } as const;
     return { ...option, icon: icons[option.value] };
@@ -54,13 +56,24 @@ export function CommunityPersonalCenter({
           />
 
           <div className="mt-4">
-            <ActivityList
-              items={center.activityPage.items}
-              loading={center.loading}
-              error={center.error}
-              onRetry={center.reload}
-              onOpenTopic={onOpenTopic}
-            />
+            {center.activityType === 'FOLLOWED' ? (
+              <FollowList
+                items={center.activityPage.items}
+                loading={center.loading}
+                error={center.error}
+                onRetry={center.reload}
+                onUnfollow={center.unfollow}
+                onOpenTopic={onOpenTopic}
+              />
+            ) : (
+              <ActivityList
+                items={center.activityPage.items}
+                loading={center.loading}
+                error={center.error}
+                onRetry={center.reload}
+                onOpenTopic={onOpenTopic}
+              />
+            )}
           </div>
 
           <div className="mt-4">

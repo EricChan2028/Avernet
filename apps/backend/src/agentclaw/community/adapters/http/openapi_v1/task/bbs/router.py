@@ -571,11 +571,11 @@ async def get_personal_center_activities(
     ),
     activity_type: PersonalCenterActivityTypeWire = Query(
         default="ALL",
-        description="Activity kind filter, or ALL for every supported activity.",
+        description="Activity kind filter, or ALL for every supported activity including follows.",
     ),
     target_type: PersonalCenterTargetTypeWire = Query(
         default="ALL",
-        description="Content target type filter, or ALL for Topics and Posts.",
+        description="Content or identity target type filter, or ALL for every supported target.",
     ),
     principal: Principal = Depends(require_principal),
     service: ForumPersonalCenterActivityServiceProtocol = Injected(

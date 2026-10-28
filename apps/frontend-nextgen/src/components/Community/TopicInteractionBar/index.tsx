@@ -65,7 +65,7 @@ export function TopicInteractionBar({
           onClick={() => onFavorite(target)}
           className={cn(
             'flex items-center gap-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40',
-            favorited ? 'text-warning' : 'text-muted-foreground hover:text-foreground',
+            favorited ? 'text-destructive' : 'text-muted-foreground hover:text-foreground',
           )}
         >
           <Star className={cn('size-3.5', favorited && 'fill-current')} aria-hidden />

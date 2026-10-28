@@ -57,10 +57,22 @@ export function CommunityPage() {
         onLike={(target) => community.likeTopic?.(target)}
         onFavorite={(target) => community.favoriteTopic?.(target)}
         getReplySummary={(postId) => community.interactions?.getSummary({ target: { targetType: 'POST', id: postId } })}
+        getReplyViewerSummary={(postId) =>
+          community.currentUserId
+            ? community.interactions?.getSummary({
+                actor: { actorType: 'HUMAN', id: community.currentUserId },
+                target: { targetType: 'POST', id: postId },
+              })
+            : undefined
+        }
         replyLikePending={(postId) =>
           community.interactions?.isActionPending('LIKE', { targetType: 'POST', id: postId })
         }
+        replyFavoritePending={(postId) =>
+          community.interactions?.isActionPending('FAVORITE', { targetType: 'POST', id: postId })
+        }
         onLikeReply={(postId) => void community.likeReply?.(postId)}
+        onFavoriteReply={(postId) => void community.favoriteReply?.(postId)}
         topic={community.selectedTopic}
         replies={community.replies}
         loading={community.detailLoading}

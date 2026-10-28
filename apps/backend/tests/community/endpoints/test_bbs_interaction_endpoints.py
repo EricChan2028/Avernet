@@ -161,6 +161,35 @@ def _seed_personal_center(world):
     )
 
 
+def _followed_activity_page() -> PersonalCenterActivityPage:
+    return PersonalCenterActivityPage(
+        total=1,
+        items=(
+            PersonalCenterActivityRecord(
+                activity_type=PersonalCenterActivityType.FOLLOWED,
+                actor_type=ForumActorType.HUMAN,
+                actor_id=_CALLER,
+                target_type=ForumInteractionTargetType.HUMAN,
+                target_id="user-b",
+                topic_id=None,
+                happened_at=_NOW,
+                body_preview="User B",
+            ),
+        ),
+    )
+
+
+def _seed_personal_center_followed(world):
+    def get_personal_center_activities(self, *_args, **_kwargs):
+        return _followed_activity_page()
+
+    bind_overrides(
+        world,
+        ForumPersonalCenterActivityServiceProtocol,
+        {"get_personal_center_activities": get_personal_center_activities},
+    )
+
+
 def _seed_helpful(world):
     def set_post_helpful(self, **_kwargs):
         return ForumPostRecord(
@@ -345,7 +374,7 @@ def public_get_personal_center_activities_ok():
         query_params={
             "owner_user_id": _CALLER,
             "activity_type": "LIKED",
-            "target_type": "HUMAN",
+            "target_type": "NOPE",
             "page": 1,
             "page_size": 20,
         },
@@ -353,8 +382,32 @@ def public_get_personal_center_activities_ok():
     seed=_boot_verifier,
     expect=ExpectError(status=422),
 )
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/collaboration/tasks/bbs/personal-center/activities",
+    scenario="followed_activities",
+    input=CaseInput(
+        headers={PRINCIPAL_HEADER: _principal()},
+        query_params={
+            "owner_user_id": _CALLER,
+            "activity_type": "FOLLOWED",
+            "target_type": "HUMAN",
+            "page": 1,
+            "page_size": 20,
+        },
+    ),
+    seed=lambda world: (
+        _boot_verifier(world),
+        _seed_personal_center_followed(world),
+    ),
+    expect=ExpectSuccess(status=200),
+)
+def public_get_personal_center_followed_activities_ok():
+    """Serialize one identity follow without requiring a Topic context."""
 def public_get_personal_center_activities_invalid_target_filter():
-    """Reject identity targets outside the Personal Center content filter."""
+    """Reject target values outside the Personal Center schema."""
 
 
 @endpoint_test(
@@ -513,13 +566,33 @@ def internal_get_personal_center_activities_ok():
         query_params={
             "owner_user_id": _CALLER,
             "activity_type": "LIKED",
-            "target_type": "BOT",
+            "target_type": "NOPE",
             "page": 1,
             "page_size": 20,
         }
     ),
     expect=ExpectError(status=422),
 )
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/v1/collaboration/tasks/bbs/personal-center/activities",
+    scenario="followed_activities",
+    input=CaseInput(
+        query_params={
+            "owner_user_id": _CALLER,
+            "activity_type": "FOLLOWED",
+            "target_type": "HUMAN",
+            "page": 1,
+            "page_size": 20,
+        }
+    ),
+    seed=_seed_personal_center_followed,
+    expect=ExpectSuccess(status=200),
+)
+def internal_get_personal_center_followed_activities_ok():
+    """Mirror identity-follow serialization without a Topic context."""
 def internal_get_personal_center_activities_invalid_target_filter():
     """Mirror the Personal Center target filter schema validation."""
 

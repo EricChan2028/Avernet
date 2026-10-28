@@ -31,8 +31,9 @@ _ACTIVITY_ORDER = {
     PersonalCenterActivityType.VIEWED: 0,
     PersonalCenterActivityType.FAVORITED: 1,
     PersonalCenterActivityType.LIKED: 2,
-    PersonalCenterActivityType.REPLIED: 3,
-    PersonalCenterActivityType.AUTHORED: 4,
+    PersonalCenterActivityType.FOLLOWED: 3,
+    PersonalCenterActivityType.REPLIED: 4,
+    PersonalCenterActivityType.AUTHORED: 5,
 }
 
 _TOPIC_ACTIVITY_TYPES = frozenset(
@@ -42,6 +43,7 @@ _TOPIC_ACTIVITY_TYPES = frozenset(
     }
 )
 _LIKED_ACTIVITY_TYPES = (PersonalCenterActivityType.LIKED,)
+_FOLLOWED_ACTIVITY_TYPES = (PersonalCenterActivityType.FOLLOWED,)
 
 
 def _actor_pairs(actors: tuple[ForumActorRef, ...]) -> tuple[tuple[str, str], ...]:
@@ -190,6 +192,78 @@ def _liked_post_query(
     )
 
 
+def _followed_identity_query(
+    db,
+    *,
+    actors: tuple[ForumActorRef, ...],
+    target_type: ForumInteractionTargetType | None,
+):
+    latest_rows = _latest_active_interaction_rows(
+        db,
+        tuple_(
+            ForumInteractionModel.actor_type, ForumInteractionModel.actor_id
+        ).in_(_actor_pairs(actors)),
+        ForumInteractionModel.action_type == ForumInteractionActionType.FOLLOW,
+        (
+            ForumInteractionModel.target_type == target_type
+            if target_type is not None
+            else ForumInteractionModel.target_type.in_(
+                (
+                    ForumInteractionTargetType.HUMAN,
+                    ForumInteractionTargetType.BOT,
+                )
+            )
+        ),
+    )
+    deduped = (
+        latest_rows.with_entities(
+            ForumInteractionModel.actor_type.label("actor_type"),
+            ForumInteractionModel.actor_id.label("actor_id"),
+            ForumInteractionModel.target_type.label("target_type"),
+            ForumInteractionModel.target_id.label("target_id"),
+            func.max(ForumInteractionModel.gmt_create).label("happened_at"),
+            func.max(ForumInteractionModel.id).label("source_id"),
+        )
+        .group_by(
+            ForumInteractionModel.actor_type,
+            ForumInteractionModel.actor_id,
+            ForumInteractionModel.target_type,
+            ForumInteractionModel.target_id,
+        )
+        .subquery()
+    )
+    display_name_subquery = (
+        db.query(ForumTopicModel.author_display_name)
+        .filter(
+            ForumTopicModel.author_type == deduped.c.target_type,
+            ForumTopicModel.author_id == deduped.c.target_id,
+            ForumTopicModel.env == get_current_env(),
+            ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
+        )
+        .order_by(ForumTopicModel.id.desc())
+        .limit(1)
+        .correlate(deduped)
+        .scalar_subquery()
+    )
+    return db.query(
+        literal(PersonalCenterActivityType.FOLLOWED.value).label("activity_type"),
+        deduped.c.actor_type.label("actor_type"),
+        deduped.c.actor_id.label("actor_id"),
+        deduped.c.target_type.label("target_type"),
+        deduped.c.target_id.label("target_id"),
+        null().label("topic_id"),
+        null().label("post_id"),
+        deduped.c.happened_at.label("happened_at"),
+        func.coalesce(display_name_subquery, deduped.c.target_id).label(
+            "body_preview"
+        ),
+        literal(_ACTIVITY_ORDER[PersonalCenterActivityType.FOLLOWED]).label(
+            "source_order"
+        ),
+        deduped.c.source_id.label("source_id"),
+    ).select_from(deduped)
+
+
 def _authored_query(
     db,
     *,
@@ -291,18 +365,25 @@ class ForumPersonalCenterActivityRepository(
         ):
             if target_type is not None:
                 return PersonalCenterActivityPage(total=0, items=())
+        if activity_type in _FOLLOWED_ACTIVITY_TYPES:
+            if target_type not in (
+                None,
+                ForumInteractionTargetType.HUMAN,
+                ForumInteractionTargetType.BOT,
+            ):
+                return PersonalCenterActivityPage(total=0, items=())
 
         with self._db.orm_session() as db:
             selected: list = []
             if (
                 activity_type is PersonalCenterActivityType.AUTHORED
                 or activity_type is PersonalCenterActivityType.ALL
-            ):
+            ) and target_type in (None, ForumInteractionTargetType.TOPIC):
                 selected.append(_authored_query(db, actors=actors))
             if (
                 activity_type in _TOPIC_ACTIVITY_TYPES
                 or activity_type is PersonalCenterActivityType.ALL
-            ):
+            ) and target_type in (None, ForumInteractionTargetType.TOPIC):
                 if activity_type is PersonalCenterActivityType.ALL:
                     selected.append(
                         _selected_topic_query(
@@ -332,10 +413,25 @@ class ForumPersonalCenterActivityRepository(
                         )
                     )
             if (
+                activity_type in _FOLLOWED_ACTIVITY_TYPES
+                or activity_type is PersonalCenterActivityType.ALL
+            ) and target_type in (
+                None,
+                ForumInteractionTargetType.HUMAN,
+                ForumInteractionTargetType.BOT,
+            ):
+                selected.append(
+                    _followed_identity_query(
+                        db,
+                        actors=actors,
+                        target_type=target_type,
+                    )
+                )
+            if (
                 activity_type in _LIKED_ACTIVITY_TYPES
                 or activity_type is PersonalCenterActivityType.ALL
             ):
-                if target_type is not ForumInteractionTargetType.POST:
+                if target_type in (None, ForumInteractionTargetType.TOPIC):
                     selected.append(
                         _selected_topic_query(
                             db,
@@ -344,15 +440,15 @@ class ForumPersonalCenterActivityRepository(
                             actors=actors,
                         )
                     )
-                if target_type is not ForumInteractionTargetType.TOPIC:
+                if target_type in (None, ForumInteractionTargetType.POST):
                     selected.append(_liked_post_query(db, actors=actors))
             if (
                 activity_type is PersonalCenterActivityType.REPLIED
                 or activity_type is PersonalCenterActivityType.ALL
             ):
-                if target_type is not ForumInteractionTargetType.POST:
+                if target_type in (None, ForumInteractionTargetType.TOPIC):
                     selected.append(_replied_query(db, actors=actors, direct=True))
-                if target_type is not ForumInteractionTargetType.TOPIC:
+                if target_type in (None, ForumInteractionTargetType.POST):
                     selected.append(_replied_query(db, actors=actors, direct=False))
 
             combined_query = selected[0]

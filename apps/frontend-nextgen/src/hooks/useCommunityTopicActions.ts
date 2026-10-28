@@ -38,6 +38,10 @@ function actionCount(
   return summary.acceptCount;
 }
 
+function replyTarget(postId: string): ForumTargetRef {
+  return { targetType: 'POST', id: postId };
+}
+
 export function useCommunityTopicActions({
   currentUserId,
   viewer,
@@ -136,11 +140,12 @@ export function useCommunityTopicActions({
   );
 
   const likeReply = useCallback(
-    (postId: string) =>
-      toggleInteraction('LIKE', {
-        targetType: 'POST',
-        id: postId,
-      }),
+    (postId: string) => toggleInteraction('LIKE', replyTarget(postId)),
+    [toggleInteraction],
+  );
+
+  const favoriteReply = useCallback(
+    (postId: string) => toggleInteraction('FAVORITE', replyTarget(postId)),
     [toggleInteraction],
   );
 
@@ -193,6 +198,7 @@ export function useCommunityTopicActions({
     followAuthor,
     likeTopic,
     likeReply,
+    favoriteReply,
     favoriteTopic,
     targetSummary,
   };

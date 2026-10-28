@@ -170,14 +170,15 @@ export type InteractionActiveDelta = 1 | -1;
 export type InteractionTargetType = 'TOPIC' | 'POST' | 'HUMAN' | 'BOT';
 export type InteractionSummaryScope = 'ACTOR' | 'TARGET' | 'ACTOR_TARGET';
 export type PersonalCenterActorScope = 'HUMAN' | 'BOT' | 'ALL';
-/** Personal Center exposes only the five concrete activity tabs; ALL is a backend-only aggregate. */
+/** Personal Center exposes only the concrete activity tabs; ALL is a backend-only aggregate. */
 export type PersonalCenterActivityType =
   | 'AUTHORED'
   | 'FAVORITED'
   | 'VIEWED'
   | 'LIKED'
+  | 'FOLLOWED'
   | 'REPLIED';
-export type PersonalCenterTargetFilter = 'ALL' | 'TOPIC' | 'POST';
+export type PersonalCenterTargetFilter = 'ALL' | 'TOPIC' | 'POST' | 'HUMAN' | 'BOT';
 
 export interface ForumActorRef {
   actorType: InteractionActorType;
@@ -224,7 +225,8 @@ export interface PersonalCenterActivity {
   activityType: PersonalCenterActivityType;
   actor: ForumActorRef;
   target: ForumTargetRef;
-  topicId: string;
+  /** Topic context is absent when the activity target is a HUMAN or BOT identity. */
+  topicId?: string;
   postId?: string;
   happenedAt: string;
   bodyPreview: string;
