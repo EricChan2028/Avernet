@@ -125,7 +125,12 @@ pub(super) fn web_ws_dispatch_state(
         // (store-less compositions) keeps lease commands answering an
         // explicit error, never a fake lease.
         speaking_leases: state.speaking_leases.clone(),
-        lease_idle_timeout_ms: 60_000,
+        // §15.99 server-wide idle window ([speaking_lease]
+        // idle_timeout_ms): granted at every acquire/preempt and required
+        // again at message submission (the message-flow fence reads the
+        // same config value). A store-less composition keeps the value
+        // inert — lease commands answer an explicit error anyway.
+        lease_idle_timeout_ms: state.config.speaking_lease.idle_timeout_ms,
     })
 }
 
