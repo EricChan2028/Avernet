@@ -12,6 +12,9 @@ from enum import Enum
 from typing import Any
 
 from agentclaw.community.core.task.domain.errors import TaskStateError
+from agentclaw.community.core.task.domain.identity import (
+    is_dispatchable_single_bot_assignee,
+)
 from agentclaw.community.core.task.domain.models import (
     NodeAction,
     NodeActionEvent,
@@ -400,8 +403,10 @@ def apply_relay_report(
                     )
                 planned_group_formation: dict[str, Any] | None = None
                 if mode == "single_bot":
-                    if not assignee:
-                        raise TaskStateError("single_bot plan requires a bot assignee")
+                    if not is_dispatchable_single_bot_assignee(assignee):
+                        raise TaskStateError("single_bot plan requires a real bot assignee")
+                    assignee = str(assignee or "").strip()
+                    next_node.run_info.assignee = assignee
                     if (
                         next_node.run_info.extend_props.get("pending_group_formation")
                         is not None

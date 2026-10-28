@@ -1321,7 +1321,7 @@ def select_executor(
 
 服务端下发的 S5d 允许执行模态白名单来自任务创建时冻结的 `runtime_profile.allowed_run_modes`。Bot 只能从白名单内选择 `run_mode`；`MISS` 仅在 `bbs` 被允许时转 BBS。若候选不足且 `bbs` 被禁用，S5.4 不伪造 HIT，必须转为规划失败：`event=None`、`task_acceptance_result=None`、`failure_reason=bbs_disabled_and_no_candidate`。
 
-S5.4 不新增或复用 `SearchResult` 作为协议对象；Skill 的本地决策直接填充同一个未落图 `TaskNode.run_info`，随后随 `PLAN_RESULT` 一次上报。S5.2 已将 `task_gaps` 编入下一棒规格，S5.4 不重复接收缺口列表。Relay 首版的候选接口只返回 Bot，故 S5.4 **不支持 `HIT_GROUP`**；若本地决策意外产生该枚举，显式拒绝并重新决策，不把未经检索的 Group ID 写入图谱。`HIT_MULTI_BOTS` 仅允许可确定唯一 manager/master Bot 的 `manager_worker` 组群，Backend 创建成功后填写最终 Group ID；不满足条件的 chat/state_machine 组群不进入首版 Relay。白名单允许时，`MISS` 必须显式为 `run_mode=bbs` 并带原因，不能仅凭 `assignee=None` 推断；白名单禁用 BBS 时按上述规划失败分支处理。用户在发起时显式选择已有 Group 属于首棒目标解析，不受 S5.4 限制。
+S5.4 不新增或复用 `SearchResult` 作为协议对象；Skill 的本地决策直接填充同一个未落图 `TaskNode.run_info`，随后随 `PLAN_RESULT` 一次上报。对于 `run_mode=single_bot`，该值必须是 S5D 实际选中或根据任务目标冻结的真实 Bot ID；Backend 拒绝空白值和决策占位符（如 `NOT_DECIDED`）。S5.2 已将 `task_gaps` 编入下一棒规格，S5.4 不重复接收缺口列表。Relay 首版的候选接口只返回 Bot，故 S5.4 **不支持 `HIT_GROUP`**；若本地决策意外产生该枚举，显式拒绝并重新决策，不把未经检索的 Group ID 写入图谱。`HIT_MULTI_BOTS` 仅允许可确定唯一 manager/master Bot 的 `manager_worker` 组群，Backend 创建成功后填写最终 Group ID；不满足条件的 chat/state_machine 组群不进入首版 Relay。白名单允许时，`MISS` 必须显式为 `run_mode=bbs` 并带原因，不能仅凭 `assignee=None` 推断；白名单禁用 BBS 时按上述规划失败分支处理。用户在发起时显式选择已有 Group 属于首棒目标解析，不受 S5.4 限制。
 
 ### 9.5 S5.5：统一上报规划节点
 

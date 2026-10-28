@@ -9,7 +9,10 @@ import time
 import uuid
 from typing import Any
 
-from agentclaw.community.core.task.domain.identity import compose_bot_identity
+from agentclaw.community.core.task.domain.identity import (
+    compose_bot_identity,
+    is_dispatchable_single_bot_assignee,
+)
 from agentclaw.community.core.task.domain.models import (
     TaskCallbackData,
     TaskNode,
@@ -246,6 +249,10 @@ class TaskExecutor(TaskExecutorOwnerMixin, TaskExecutorRelayMixin, TaskExecutorB
         已由 dispatcher 写入 ``run_info.extend_props.unauthorized_bots``(dashboard 暴露)。"""
         assignee = node.run_info.assignee
         assignee_owner_id = node.run_info.extend_props.get("assignee_owner_id")
+        if not is_dispatchable_single_bot_assignee(assignee):
+            raise TaskStateError(
+                "single_bot dispatch requires a real bot assignee"
+            )
         openapi_bot_id = compose_bot_identity(assignee, assignee_owner_id)
         loop_task_id = f"{node.task_id}::{node.node_id}"
         skill_report = self._node_skill_report_enabled(node)
@@ -384,7 +391,7 @@ class TaskExecutor(TaskExecutorOwnerMixin, TaskExecutorRelayMixin, TaskExecutorB
         gf.extend_props["owner_user_id"] = task_owner_id
 
         logger.info(
-            "[task][task-executor] singlebot_2_group 建群前 task=%s node=%s driver=%s collab=chat task_owner=%s",
+            "[task][task-executor] singlebot_2_group 建群前 task=%s node=%s driver=%s collab=manager_worker task_owner=%s",
             node.task_id, node.node_id, openapi_bot_id, task_owner_id,
         )
 
