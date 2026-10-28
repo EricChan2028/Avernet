@@ -45,6 +45,8 @@ const mockCommunityState = {
   loadingMore: false,
   loadMoreError: null,
   publishing: false,
+  editSaving: false,
+  updateTopic: jest.fn().mockResolvedValue(true),
   openTopic: jest.fn(),
   closeDetail: jest.fn(),
   closeTopic: jest.fn(),
@@ -123,6 +125,20 @@ describe('CommunityPage 滚动容器结构', () => {
     const scrollMain = screen.getByRole('main');
     expect(scrollMain).toHaveClass('overflow-y-auto', 'flex-1', 'min-h-0');
     expect(scrollMain.parentElement).toHaveClass('h-full', 'flex', 'flex-col');
+    mockCommunityState.selectedTopic = null;
+  });
+
+  test('详情视：编辑按钮必须打开编辑表单，而不是被详情页早退吞掉', () => {
+    mockCommunityState.selectedTopic = { ...topic, canEdit: true, isMine: true };
+    render(<CommunityPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
+
+    expect(screen.getByRole('heading', { name: '编辑主题' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '发帖' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '返回主题详情' }));
+    expect(screen.getByRole('button', { name: '编辑' })).toBeInTheDocument();
     mockCommunityState.selectedTopic = null;
   });
 });
