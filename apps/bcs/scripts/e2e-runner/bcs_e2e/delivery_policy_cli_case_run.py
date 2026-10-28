@@ -181,8 +181,11 @@ def delivery_policy_adaptability() -> dict:
         "remote_validation": "NOT_RUN",
         "grants_release_credit": False,
         "blocker": (
-            "Mock-verified Singlebox and preprod product-HTTP contexts; "
-            "live effect admission remains a separate gate."
+            "Singlebox and preprod product-HTTP live admissions PASS "
+            "(preprod proof dp-live-preprod-r2: 10/10, driver denial probes "
+            "reach the BCS application-layer 403 through the ACE edge on the "
+            "declared trio posture); remote_release_validation and the OB "
+            "physical environment binding remain separate gates."
         ),
     }
 
