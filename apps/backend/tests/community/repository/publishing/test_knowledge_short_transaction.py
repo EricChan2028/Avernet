@@ -5,6 +5,7 @@ import json
 from contextlib import contextmanager
 
 import pytest
+from tests.community.core.bot_knowledge.summary_fixtures import seed_online
 from sqlalchemy import event
 
 from agentclaw.community.core.service_bot.repository.models import (
@@ -41,6 +42,7 @@ def finish(repo, online):
 @pytest.mark.parametrize("change", ["missing_binding", "owner", "corrupt", "missing"])
 def test_knowledge_business_states_are_unknown_not_native_failures(publication, change):
     db, repo, record = publication
+    seed_online(db, record, ['A'])
     online = _start_online(repo, record)
     with db.orm_session() as session:
         session.query(Binding).filter_by(kb_id="A").update({"online_enabled": True})
@@ -288,7 +290,7 @@ def test_mutable_snapshot_and_completion_reads_are_current_locking_reads(publica
         sql
         for sql in reads
         if "FROM ac_bot_knowledge_binding" in sql
-        or ("FROM ac_bot_publish" in sql and "JSON_EXTRACT" in sql)
+        or "FROM ac_bot_common_config" in sql
     ]
     assert mutable_reads
     assert all("FOR UPDATE" in sql for sql in mutable_reads)

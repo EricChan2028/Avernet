@@ -4,10 +4,11 @@ from __future__ import annotations
 
 
 from injector import inject
-from sqlalchemy import JSON, and_, func, literal, select, type_coerce, update
+from sqlalchemy import literal, select, update
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
+from agentclaw.community.core.bot_knowledge.repository.online_selection import read_selection
 from agentclaw.community.core.bot_knowledge.repository.models import (
     BotKnowledgeBindingModel as Binding,
 )
@@ -158,32 +159,6 @@ def require_editable(session, bot: BotModel, *, lock: bool = False) -> None:
         raise KnowledgeError("BOT_DRAFT_REQUIRED", 403)
 
 
-def _online_selection_known(session, bot):
-    """Read the last OBSERVED completion, not mutable native status/version.
-
-    Rollback admission and redraft must not activate or erase an old result.
-    The scalar is in the same statement as flags, with no separate read race.
-    """
-    from agentclaw.community.core.service_bot.repository.models import BotPublishModel
-
-    result = type_coerce(BotPublishModel.ext, JSON)["knowledge_selection_result"]
-    state = result["status"].as_string()
-    deployment_id = result["deployment_id"].as_integer()
-    result_owner = result["owner_id"].as_string()
-    owner_matches = func.coalesce(result_owner, bot.entity_id) == bot.owner_id
-    # Order the Bot's timeline FIRST. Filtering historical results by Owner
-    # before ordering could resurrect an older result after A -> B -> A handoff.
-    current = session.query(and_(state == "applied", owner_matches)).filter(
-        BotPublishModel.source_bot_pk == bot.id,
-        BotPublishModel.env == bot.env,
-        BotPublishModel.owner_id == bot.entity_id,
-        state.in_(("applied", "unknown")),
-    ).order_by(
-        func.coalesce(deployment_id, 0).desc(), BotPublishModel.id.desc(),
-    ).limit(1).scalar_subquery()
-    return func.coalesce(current, True)
-
-
 class BotKnowledgeRepository:
     @inject
     def __init__(self, db: DatabasePlugin) -> None:
@@ -306,11 +281,15 @@ class BotKnowledgeRepository:
                 if selection_stage == "online" and bot.bot_type == "service"
                 else Binding.enabled
             )
-            known = (
-                _online_selection_known(session, bot)
+            selection = (
+                read_selection(session, bot)
                 if selection_stage == "online" and bot.bot_type == "service"
-                else literal(True)
+                else None
             )
+            if selection is not None and not selection.ids:
+                return ()
+            known = selection.unchanged(session) if selection is not None else literal(True)
+            ids_filter = Binding.kb_id.in_(selection.ids) if selection is not None else literal(True)
             rows = (
                 session.query(Binding.kb_id)
                 .filter(
@@ -318,6 +297,7 @@ class BotKnowledgeRepository:
                     Binding.bot_pk == bot.id,
                     Binding.space_id == bot.space_id,
                     enabled_column.is_(True),
+                    ids_filter,
                     known,
                 )
                 .order_by(Binding.kb_id)
@@ -341,11 +321,12 @@ class BotKnowledgeRepository:
         with self.db.orm_session() as session:
             bot = resolve_bot(session, scope)
             require_editor(session, bot, actor_id)
-            known = (
-                _online_selection_known(session, bot)
+            selection = (
+                read_selection(session, bot)
                 if selection_stage == "online" and bot.bot_type == "service"
-                else literal(True)
+                else None
             )
+            known = selection.unchanged(session) if selection is not None else literal(True)
             rows = (
                 session.query(Binding, known.label("selection_known"))
                 .filter(
@@ -362,7 +343,7 @@ class BotKnowledgeRepository:
             items = []
             for row, selection_known in page:
                 item = binding_view(row, bot, selection_stage)
-                if not selection_known:
+                if not selection_known or (selection is not None and row.kb_id not in selection.ids):
                     item["enabled"] = False
                 items.append(item)
             result = {

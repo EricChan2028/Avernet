@@ -8,7 +8,7 @@ native status rule or legacy HTTP transition change.
   and editor revisions in ac_bot_knowledge_binding.
 - Store current result, actual observed workflow watermark, native source scope,
   current Owner/tenant/space and <=100 selected/materialized IDs in one reserved
-  common-config entry. Its unique key uses the source Bot PK, business Bot ID,
+  common-config entry. Its unique key uses the source Bot PK plus an immutable-entity digest, business Bot ID,
   environment and a reserved knowledge key; global immutable source PK isolates
   tenants even when a legacy callback cannot resolve the guarded Bot. Validate
   tenant/space/current Owner on reads. Unresolved callbacks may only record UNKNOWN

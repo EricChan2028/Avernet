@@ -1,6 +1,7 @@
 """Draft/verification and production selections are independent."""
 
 import pytest
+from tests.community.core.bot_knowledge.summary_fixtures import current_row, seed_summary
 from agentclaw.community.core.bot_knowledge.repository.models import (
     BotKnowledgeBindingModel as Binding,
 )
@@ -48,6 +49,10 @@ def seed_service(db):
                 ),
             ]
         )
+
+        session.flush()
+        seed_summary(session, session.get(BotModel, 1),
+                     session.query(BotPublishModel).one(), ["a"], workflow=100)
 
 
 def test_service_stage_reads_are_independent(knowledge):
@@ -240,6 +245,11 @@ def test_unknown_completion_is_denied_in_the_same_statement_as_online_flags(know
                 "status": "unknown", "reason": "KNOWLEDGE_SNAPSHOT_MISSING",
             }}),
         })
+    with db.orm_session() as session:
+        row = current_row(session)
+        value = json.loads(row.config_value)
+        value.update(status="unknown", enabled_kb_ids=[])
+        row.config_value = json.dumps(value)
     statements = []
     engine = db.factory.kw["bind"]
 
@@ -254,18 +264,18 @@ def test_unknown_completion_is_denied_in_the_same_statement_as_online_flags(know
         event.remove(engine, "before_cursor_execute", record)
     assert not any(item["enabled"] for item in result["items"])
     assert repo.list_enabled_current(scope) == ("b",)
-    # The extra safety predicate is a scalar subquery, not N+1 or a separate
-    # gate SELECT that could race with reading stale production flags.
+    # UNKNOWN exits the enabled-ID path early. The page still returns its
+    # ordinary bounded rows, with a constant false selection gate.
     flag_reads = [sql for sql in statements if "FROM ac_bot_knowledge_binding" in sql]
-    assert len(flag_reads) == 2
-    assert all("ac_bot_publish" in sql and "JSON_EXTRACT" in sql for sql in flag_reads)
+    assert len(flag_reads) == 1
+    assert all("ac_bot_publish" not in sql and "JSON_EXTRACT" not in sql for sql in statements)
 
 
 @pytest.mark.parametrize("payload,denied", [
     ({"knowledge_selection_result": {"status": "applied"},
       "config_artifact": {"metadata": {"knowledge_selection_result": {"status": "unknown"}}}}, False),
     ({"knowledge-selection-result": {"status": "unknown"}}, False),
-    ({"knowledge_selection_result": {"reason": "legacy", "status": "unknown"}}, True),
+    ({"status": "unknown", "reason": "legacy"}, True),
 ])
 def test_only_structured_top_level_unknown_denies_online_selection(knowledge, payload, denied):
     import json
@@ -276,6 +286,11 @@ def test_only_structured_top_level_unknown_denies_online_selection(knowledge, pa
         session.query(BotPublishModel).update({
             "status": "success", "ext": json.dumps(payload, separators=(",", ":")),
         })
+    with db.orm_session() as session:
+        row = current_row(session)
+        value = json.loads(row.config_value)
+        value.update(payload)
+        row.config_value = json.dumps(value, separators=(",", ":"))
     assert repo.list_enabled(scope, selection_stage="online") == (() if denied else ("a",))
     result = service.list_bindings(scope=scope, actor_id="owner", selection_stage="online")
     flags = {item["kb_id"]: item["enabled"] for item in result["items"]}
@@ -302,5 +317,10 @@ def test_owner_handoff_back_does_not_resurrect_older_completion(knowledge, lates
                 "status": latest_state, "deployment_id": 200, "owner_id": "other",
             }}),
         ))
+    with db.orm_session() as session:
+        row = current_row(session)
+        value = json.loads(row.config_value)
+        value.update(owner_id="other", deployment_id=200, status=latest_state)
+        row.config_value = json.dumps(value)
     # Current Owner A must not select A's old100 over actual latest B200.
     assert repo.list_enabled(scope, selection_stage="online") == ()

@@ -445,3 +445,8 @@ ledger and attempt/deadline checks remain authoritative. Business-unknown histor
 is recorded in existing ext instead of rejecting native advancement; SQL errors
 roll back the local write unit. Opted-in artifact PUT is staged before added
 locks; default-off preserves the native path. See `core/bot_knowledge/README.md`.
+
+Knowledge online completion uses the existing common-config unique key for its
+current result/watermark and bounded previous ID set. Version snapshots/results
+still live in publication.ext. No historical-result scan, unbounded binding
+clear, new table/index or independent config Session participates in completion.

@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from typing import Literal
 
 
+# Reserved durable result: generic configuration editors must not mutate it.
+KNOWLEDGE_ONLINE_CONFIG_KEY = "knowledge_online_selection"
+
+
 KnowledgeSelectionStage = Literal["draft", "online"]
 
 

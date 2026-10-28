@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 
 import pytest
+from tests.community.core.bot_knowledge.summary_fixtures import seed_online
 from agentclaw.community.core.bot_knowledge.repository.models import (
     BotKnowledgeBindingModel as Binding,
 )
@@ -96,6 +97,7 @@ def test_online_binding_failure_rolls_back_status_and_selection_and_can_retry(
     autocommit_publication,
 ):
     db, repo, record = autocommit_publication
+    seed_online(db, record, ['A'])
     building = repo.update_status(
         record.id, PublishStatus.BUILDING, PublishStatus.DRAFT
     )

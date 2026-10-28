@@ -113,3 +113,36 @@ def test_batch_upsert_then_get_config_per_key(service):
     assert service.get_config(**{**SCOPE, "bot_id": "b2"}) == {"storage_type": "upfs"}
     total, _ = service.list_records(env="pre")
     assert total == 2
+
+
+@pytest.mark.parametrize("method", ["set_config", "create_record", "upsert_record", "batch_upsert_records"])
+def test_generic_writers_cannot_replace_publication_summary(service, method):
+    from agentclaw.community.kernel.knowledge import KNOWLEDGE_ONLINE_CONFIG_KEY
+
+    scope = {**SCOPE, "config_key": KNOWLEDGE_ONLINE_CONFIG_KEY}
+    with pytest.raises(ValueError, match="managed by publication"):
+        if method == "batch_upsert_records":
+            service.batch_upsert_records(env=scope["env"], records=[
+                BotCommonConfigEntry(bot_id=scope["bot_id"], entity_id=scope["entity_id"],
+                                     config_key=scope["config_key"], value={}),
+            ])
+        else:
+            getattr(service, method)(**scope, value={})
+    assert service.list_records()[0] == 0
+
+
+@pytest.mark.parametrize("method", ["update_record", "delete_record"])
+def test_generic_record_mutators_cannot_change_publication_summary(service, method):
+    from agentclaw.community.kernel.knowledge import KNOWLEDGE_ONLINE_CONFIG_KEY
+
+    # Seed via persistence, as the publication transaction does (not generic service).
+    config_id = service._repo.create_record(
+        **{**SCOPE, "config_key": KNOWLEDGE_ONLINE_CONFIG_KEY}, config_value='{"protected":true}',
+    )
+    args = dict(config_id=config_id)
+    if method == "update_record":
+        args["value"] = {}
+    with pytest.raises(ValueError, match="managed by publication"):
+        getattr(service, method)(**args)
+    row = service.get_record_by_id(config_id=config_id)
+    assert row is not None and json.loads(row.config_value) == {"protected": True}

@@ -172,14 +172,31 @@ source identity checks still apply. Missing or invalid historical snapshots and
 removed bindings produce UNKNOWN, never a later draft selection or an implicit
 inheritance of previous production flags. Flags are changed only under a
 trustworthy current source/Owner scope; unresolved scopes never revoke a new
-Owner's selection. The online reader denies the latest observed UNKNOWN result
-in the same SQL statement that reads flags, even if source resolution failed.
-Results carry the actual native workflow ID observed at successful completion,
-are retained across capture/redraft, and are selected by workflow ID rather than
-mutable publication status/version. Thus rollback admission cannot activate old
-UNKNOWN state. A normal service read adds one scoped scalar subquery, not
-per-binding queries.
-Personal and draft reads do not query publication state.
+Owner's selection. Version snapshots/results stay in publication.ext; the
+reserved `knowledge_online_selection` entry in existing `ac_bot_common_config`
+holds the current observed result, actual workflow watermark and at most 100
+current/previous materialized KB IDs. It is not editable via generic config APIs.
+The unique key uses the business Bot ID, environment, and a source-PK namespace
+with a SHA-256 representation of the immutable entity identity. Native entity
+IDs are never truncated into the config table's narrower field. A source PK is
+globally unique and is the tenant authority even for unresolved legacy callbacks;
+payload tenant, current Owner and space must match the guarded source on reads.
+Owner handoff does not create a second watermark or resurrect an older result.
+
+Online reads load this one row by its existing unique key, then query only its
+bounded KB IDs. The flags SQL rechecks the exact current summary value, so a
+concurrent change fails closed rather than combining two completion results.
+MySQL compares the summary bytes, not a case-insensitive TEXT collation. Pages
+use the same fence and mask flags not in the current ID set. No publication
+history or JSON-workflow ordering is involved. Personal/draft reads don't query
+publication summaries.
+
+Missing/corrupt summaries are UNKNOWN on reads, not an implicit permission to
+use old flags. No history/backfill scan is hidden in request or completion paths.
+A trusted successful republication initializes an absent summary. Pre-summary
+physical flags without a tracked ID may remain in the binding table, but are
+not effective: service online readers require both summary membership and the
+flag. This is deliberately fail-closed rather than an unbounded cleanup UPDATE.
 
 The ONLINE_PUB → SUCCESS status/ext CAS and binding flag replacement use ONE
 real transaction/Session. SQL/connection/commit errors propagate and roll back
@@ -208,23 +225,27 @@ earlier stage verification counts are historical, not this refactor's result.
 
 #### Production enablement gate
 
-The feature remains disabled by default. The owner/source/env-scoped completion
-subqueries inspect that Bot's publication history and may sort observed workflow
-IDs; their CPU/scan cost can grow with that history even though statement count
-and selected bindings are bounded. Before opting in on a deployed database,
-inspect its actual existing indexes, history distribution and exact query plans,
-and measure representative completion/read latency and lock waits. Fresh SQLite
-indexes and passing unit tests are not this evidence. This refactor does not
-apply the separately deferred publication index DDL or authorize enablement.
+Publication integration remains disabled by default. The new summary entry and
+per-KB changes share the native successful-completion transaction. Clearing uses
+only previous tracked keys; unknown unresolved scopes keep those keys for later
+safe cleanup and never touch a foreign tenant's bindings. Generic configuration
+methods which open their own Session are not used inside completion.
+
+The existing common-config table and its unique key must exist before deploying
+online consumers or enabling integration. Code presence/fresh SQLite schema is
+not proof of deployed schema or MySQL/OceanBase locking/performance. No new DDL,
+startup provisioning, production operation or enablement is performed here.
+The growing-history/disabled-binding regression records bounded local work;
+production plans, contention and latency remain separate rollout evidence.
 
 #### Native identity and completion proof compatibility
 
 Native `ac_bot_publish.owner_id` is the immutable resource `entity_id`; it is not
 rewritten on current-Owner handoff. Knowledge snapshots independently capture
 `source_entity_id` and current `owner_id`. Completion results record the locked
-current Owner. Reads first choose the Bot's latest observed workflow result,
-then check Owner compatibility; filtering history by current Owner first would
-resurrect an older result after A → B → A handoff. Native resource identity,
+current Owner. The current summary is keyed by immutable resource identity, then validated
+against the current Owner; Owner-specific history selection is never used and
+cannot resurrect an older result after A → B → A handoff. Native resource identity,
 status, queue and deployment behavior are unchanged.
 
 The real success observer forwards its `baas_publish_id` through a backward-
@@ -235,7 +256,7 @@ restart marker. The argument is not a new DB field and does not rewrite native
 release/restart handles. Only legacy direct repository callers may omit it when
 the release slot already identifies the observed workflow.
 
-The publication opt-in alone does not disable the history predicate for online
-API reads. Measure online-consumer read cadence and cost separately before its
-rollout; the local query-plan evidence records the remaining history-linear
-work explicitly rather than claiming constant-time production access.
+The publication opt-in does not disable explicitly requested online API reads.
+Their summary table prerequisite and rollout cadence must be checked separately.
+Historical publication-history probes in the 2026-10-27 verification are
+superseded by the 2026-10-28 current-summary evidence, not rewritten as old passes.

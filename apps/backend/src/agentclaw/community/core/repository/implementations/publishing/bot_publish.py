@@ -667,7 +667,7 @@ class BotPublishRepository(
                     return None
             ext = self._protect_knowledge_ext(db, publish_id, ext)
             if online is not None:
-                ext[knowledge_selection.RESULT_KEY] = online[2]
+                ext[knowledge_selection.RESULT_KEY] = online.outcome
             ext_json, pending = self._offload.prepare(ext, publish_id, env)
             self._validate_knowledge_ext(ext_json)
             query = db.query(self.Model).filter(
@@ -689,7 +689,7 @@ class BotPublishRepository(
             if affected > 0:
                 self._upload_native(pending)
                 if online is not None:
-                    knowledge_selection.replace_online(db, *online[:2])
+                    knowledge_selection.replace_online(db, online)
         if affected == 0:
             return None
         return self.get_by_id(publish_id)

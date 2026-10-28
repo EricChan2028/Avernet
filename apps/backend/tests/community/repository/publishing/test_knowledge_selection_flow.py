@@ -1,6 +1,7 @@
 """Real flow callbacks and artifact CAS preserve the admitted knowledge generation."""
 
 import pytest
+from tests.community.core.bot_knowledge.summary_fixtures import seed_online
 from agentclaw.community.core.repository.implementations.publishing.bot_publish import (
     BotPublishRepository,
 )
@@ -32,6 +33,7 @@ async def test_real_service_process_freezes_and_observed_online_success_promotes
     from agentclaw.community.core.service_bot.types import PublishStage
 
     db, repo, record = publication
+    seed_online(db, record, ['A'])
     flow, queue = _real_flow(repo)
     result = await flow.process(record.id, "owner")
     assert result.status == PublishStatus.BUILDING

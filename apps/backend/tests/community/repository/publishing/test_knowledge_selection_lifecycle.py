@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from unittest.mock import MagicMock
 
 import pytest
+from tests.community.core.bot_knowledge.summary_fixtures import seed_online
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.bot_knowledge.repository.models import (
     BotKnowledgeBindingModel as Binding,
@@ -136,6 +137,7 @@ def test_only_successful_online_cas_replaces_production_from_frozen_selection(
     publication,
 ):
     db, repo, record = publication
+    seed_online(db, record, ['A'])
     online = _start_online(repo, record)
     with db.orm_session() as session:
         session.query(Binding).filter(Binding.kb_id == "A").update(
@@ -252,6 +254,7 @@ def test_missing_snapshot_completes_native_success_but_clears_old_online(
     publication,
 ):
     db, repo, record = publication
+    seed_online(db, record, ['A'])
     online = repo.update_status_with_ext(
         record.id,
         PublishStatus.ONLINE_PUB,
@@ -277,6 +280,7 @@ def test_missing_snapshot_completes_native_success_but_clears_old_online(
 
 def test_empty_snapshot_is_valid_and_clears_production(publication):
     db, repo, record = publication
+    seed_online(db, record, ['A', 'B'])
     with db.orm_session() as session:
         session.query(Binding).update(
             {Binding.online_enabled: True, Binding.enabled: False}
@@ -537,6 +541,7 @@ def test_unconfigured_legacy_source_does_not_break_plain_publish_or_restore(
 
 def test_failed_online_outcome_keeps_previous_production_selection(publication):
     db, repo, record = publication
+    seed_online(db, record, ['A'])
     online = _start_online(repo, record)
     with db.orm_session() as session:
         session.query(Binding).filter(Binding.kb_id == "A").update(

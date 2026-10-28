@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import json
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from uuid import uuid4
 
@@ -16,6 +17,9 @@ from agentclaw.community.core.bot_knowledge.repository.models import (
     BotKnowledgeBindingModel as Binding,
 )
 from agentclaw.community.core.bot_knowledge.repository.store import resolve_bot
+from agentclaw.community.core.bot_knowledge.repository.online_selection import (
+    lock_summary, write_summary,
+)
 from agentclaw.community.core.service_bot.repository.config_artifact_offload import (
     ARTIFACT_KEY,
     ARTIFACT_OSS_MARKER,
@@ -36,10 +40,10 @@ from agentclaw.community.kernel.knowledge import (
     KnowledgeError,
     require_knowledge_id,
 )
-from agentclaw.community.plugin_api.models import BotModel
+from agentclaw.community.plugin_api.models import BotCommonConfig, BotModel
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.env_utils import get_current_env
-from sqlalchemy import JSON, func, or_, type_coerce
+from sqlalchemy import func, or_
 
 SNAPSHOT_KEY = "knowledge_selection_snapshot"
 RESULT_KEY = "knowledge_selection_result"
@@ -258,31 +262,14 @@ def merge_protected_ext(stored, incoming):
     return result
 
 
-def _newer_observed_completion(session, publish, workflow_id):
-    """Native monotonic workflow IDs also order completions across UUID replacement.
-
-    Bot locking serializes these knowledge writes. A CURRENT read sees a newer
-    completion committed while we waited, without scanning/locking op history.
-    Native operation/attempt/release gates themselves remain unchanged.
-    """
-    if type(workflow_id) is not int:
-        return False  # legacy local completion without workflow metadata
-    result = type_coerce(Publish.ext, JSON)[RESULT_KEY]
-    result_id = result["deployment_id"].as_integer()
-    return (
-        session.query(Publish.id)
-        .filter(
-            Publish.source_bot_pk == publish.source_bot_pk,
-            Publish.env == publish.env,
-            Publish.owner_id == publish.owner_id,
-            result["status"].as_string().in_(("applied", "unknown")),
-            Publish.id != publish.id,
-            result_id > workflow_id,
-        )
-        .with_for_update()
-        .first()
-        is not None
-    )
+@dataclass(frozen=True)
+class OnlineChange:
+    publish: Publish
+    source: BotModel | None
+    snapshot: dict | None
+    outcome: dict
+    summary_row: BotCommonConfig | None
+    previous: dict | None
 
 
 def prepare_online(session, publish_id, expected_json, observed_workflow_id=None):
@@ -334,34 +321,47 @@ def prepare_online(session, publish_id, expected_json, observed_workflow_id=None
     # Scope the effect to the locked current Owner; snapshot validation already
     # prevents cross-Owner grants, and newer observed results fence late work.
     result_owner = source.owner_id if source is not None else None
-    if source is not None and _newer_observed_completion(
-        session,
-        publish,
-        workflow_id,
-    ):
+    summary_row, previous = lock_summary(session, publish)
+    if previous is not None and type(workflow_id) is int and previous["deployment_id"] > workflow_id:
         return None
+    if summary_row is not None and previous is None:
+        snapshot = None
+        outcome = _unknown(KnowledgeError("KNOWLEDGE_CURRENT_SUMMARY_INVALID"))
     outcome["deployment_id"] = workflow_id if type(workflow_id) is int else 0
     outcome["owner_id"] = result_owner
-    return source, snapshot, outcome
+    return OnlineChange(publish, source, snapshot, outcome, summary_row, previous)
 
 
-def replace_online(session, source, snapshot):
-    """Same Session as the winning native CAS; unknown never inherits old flags."""
-    if source is None:
-        # Never revoke a new Owner/tenant's flags using only a historical PK.
-        # The observed UNKNOWN result denies the original scope on reads.
-        return
-    query = _bindings(session, source)
-    ids = snapshot["enabled_kb_ids"] if snapshot is not None else []
-    query.filter(Binding.online_enabled.is_(True), Binding.kb_id.not_in(ids)).update(
-        {Binding.online_enabled: False},
-        synchronize_session=False,
-    )
-    if ids:
-        query.filter(Binding.online_enabled.is_(False), Binding.kb_id.in_(ids)).update(
-            {Binding.online_enabled: True},
-            synchronize_session=False,
+def replace_online(session, change):
+    """Point updates of bounded IDs + current result in the winning CAS Session."""
+    source, snapshot = change.source, change.snapshot
+    ids = set(snapshot["enabled_kb_ids"]) if snapshot is not None else set()
+    materialized = change.previous.get("materialized") if change.previous else None
+    if source is not None:
+        # The recorded previous physical scope survives UNKNOWN and space moves.
+        # Never clear a different tenant based on untrusted historical metadata.
+        if materialized is not None and materialized["avernet_tenant"] == source.avernet_tenant:
+            old_ids = set(materialized["kb_ids"])
+            removed = old_ids - ids if materialized["space_id"] == source.space_id else old_ids
+            if removed:
+                session.query(Binding).filter(
+                    Binding.bot_pk == source.id, Binding.env == source.env,
+                    Binding.avernet_tenant == source.avernet_tenant,
+                    Binding.space_id == materialized["space_id"],
+                    Binding.kb_id.in_(sorted(removed)), Binding.online_enabled.is_(True),
+                ).update({Binding.online_enabled: False}, synchronize_session=False)
+        if ids:
+            _bindings(session, source).filter(
+                Binding.kb_id.in_(sorted(ids)), Binding.online_enabled.is_(False),
+            ).update({Binding.online_enabled: True}, synchronize_session=False)
+        materialized = dict(
+            avernet_tenant=source.avernet_tenant, space_id=source.space_id,
+            kb_ids=sorted(ids),
         )
+    write_summary(
+        session, change.summary_row, publish=change.publish, source=source,
+        outcome=change.outcome, ids=ids, materialized=materialized,
+    )
 
 
 def _locked_restore_operation(
