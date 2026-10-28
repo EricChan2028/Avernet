@@ -22,6 +22,7 @@ from agentclaw.community.core.task.forum.interaction.models import (
     ForumSummaryScope,
     ForumTargetRef,
 )
+from agentclaw.community.core.task.forum.interaction.time_utils import storage_now
 from agentclaw.community.core.task.forum.repository.models import (
     ForumInteractionModel,
     ForumPostModel,
@@ -53,6 +54,7 @@ def _events(repo, *, actor_type="HUMAN", actor_id="user-a", active=True):
 def test_interaction_repository_upserts_repeated_actor_target_state(db):
     repo = ForumInteractionRepository(db)
 
+    before = storage_now()
     first = repo.insert_interaction(
         actor_type="HUMAN",
         actor_id="user-a",
@@ -61,6 +63,7 @@ def test_interaction_repository_upserts_repeated_actor_target_state(db):
         target_id="topic-1",
         active=True,
     )
+    between = storage_now()
     second = repo.insert_interaction(
         actor_type="HUMAN",
         actor_id="user-a",
@@ -69,9 +72,15 @@ def test_interaction_repository_upserts_repeated_actor_target_state(db):
         target_id="topic-1",
         active=False,
     )
+    after = storage_now()
 
     assert first.active is True
     assert second.active is False
+    assert before <= first.created_at <= between
+    assert first.created_at == first.updated_at
+    assert second.created_at == first.created_at
+    assert between <= second.updated_at <= after
+    assert second.updated_at >= first.updated_at
     with db.orm_session() as session:
         rows = session.query(
             ForumInteractionModel.action_type,

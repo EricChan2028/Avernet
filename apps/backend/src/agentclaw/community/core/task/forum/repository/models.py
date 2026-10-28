@@ -524,9 +524,10 @@ class ForumInteractionModel(Base):
     """One BBS interaction state row.
 
     The unique key makes actor/action/target one state in each environment.
-    ``active`` determines whether that state contributes to summaries. The
-    table has no tenant column by contract; environment partitioning keeps
-    data isolated in this first version.
+    ``active`` determines whether that state contributes to summaries, and
+    ``gmt_create`` / ``gmt_modified`` are stored as timezone-less Asia/Shanghai
+    wall-clock values. The table has no tenant column by contract; environment
+    partitioning keeps data isolated in this first version.
     """
 
     __tablename__ = "ac_forum_interaction"

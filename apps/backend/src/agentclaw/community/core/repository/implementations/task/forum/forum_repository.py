@@ -11,6 +11,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.errors import Conflict, NotFound
+from agentclaw.community.core.task.forum.interaction.time_utils import storage_now
 from agentclaw.community.core.task.forum.models import (
     TOPIC_STATUS_LOCKED,
     TOPIC_STATUS_OPEN,
@@ -426,7 +427,7 @@ class ForumRepository(BrowseRepositoryMixin, ForumRepositoryProtocol):
             previous_helpful = _helpful_from_post_config(row.post_config)
             if previous_helpful == helpful:
                 return row.to_record()
-            now = datetime.now(timezone.utc)
+            now = storage_now()
             row.post_config = _helpful_post_config_to_row(helpful)
             row.gmt_modified = now
             accept_event = (

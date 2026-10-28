@@ -28,4 +28,4 @@ internal_dependencies:
 
 ### Change impact
 
-Callers notice changes to interaction matrix validation, the active/inactive action-state semantics, summary scope semantics, batch limits, and personal-center actor-set rules. Delivery adapters depend only on the Service API Protocols; persistence behavior is independently implemented through repository contracts. The storage unique key is scoped to the current environment and keeps one row per actor/action/target so subsequent writes update the active state instead of appending duplicates.
+Callers notice changes to interaction matrix validation, the active/inactive action-state semantics, summary scope semantics, batch limits, and personal-center actor-set rules. Delivery adapters depend only on the Service API Protocols; persistence behavior is independently implemented through repository contracts. The storage unique key is scoped to the current environment and keeps one row per actor/action/target so subsequent writes update the active state instead of appending duplicates. `gmt_create`/`gmt_modified` are persisted as timezone-less Asia/Shanghai wall-clock values.

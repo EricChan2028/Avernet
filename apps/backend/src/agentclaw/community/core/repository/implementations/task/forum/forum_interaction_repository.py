@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timezone
 
 from injector import inject
 from sqlalchemy import and_, func, or_, tuple_
@@ -24,6 +23,7 @@ from agentclaw.community.core.task.forum.interaction.models import (
     ForumStatsRecord,
     ForumTargetRef,
 )
+from agentclaw.community.core.task.forum.interaction.time_utils import storage_now
 from agentclaw.community.core.task.forum.repository.models import (
     ForumInteractionModel,
     ForumPostModel,
@@ -132,7 +132,7 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
         storage correctness only: both arms use the same unique key and update
         the same ``active`` state.
         """
-        now = datetime.now(timezone.utc)
+        now = storage_now()
         env = get_current_env()
         values = {
             "actor_type": actor_type,
