@@ -51,6 +51,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.file_count_runtime
   - agentclaw.community.core.base
   - agentclaw.community.kernel.build_ignore
+  - agentclaw.community.kernel.knowledge    # deterministic draft-restore knowledge guards terminate the attempt instead of retrying
   - agentclaw.community.core.repository.protocols.identity
   - agentclaw.community.core.user_list
   - agentclaw.community.core.repository.protocols.build_ignore

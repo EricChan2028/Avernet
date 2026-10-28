@@ -2,7 +2,9 @@
 
 ## Approach
 在知识 repository 内集中摘要编解码、作用域与唯一键查询。发布完成调用该组件，
-不依赖会独立提交的通用配置 repository。沿用 Bot -> publication -> config -> binding 锁顺序。
+不依赖会独立提交的通用配置 repository。Bot 锁先行是全局序列化点；各路径其余锁
+按固定顺序获取且无反向重入：完成路径 Bot -> binding -> publication -> config，
+恢复路径 Bot -> operation -> publication -> binding。
 
 ## Data Model Changes
 None. 只使用已有列和唯一索引；不执行 DDL。

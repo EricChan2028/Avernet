@@ -15,9 +15,6 @@ from agentclaw.community.core.service_bot.repository.models import (
 from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
     PublishProgressPollHandler,
 )
-from agentclaw.community.core.service_bot.services.publish_exceptions import (
-    PublishNotFoundError,
-)
 from agentclaw.community.core.spaces.repository.models import SpaceModel
 from agentclaw.community.kernel.knowledge import BotKnowledgeScope
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
@@ -231,10 +228,40 @@ def test_late_callback_across_uuid_or_owner_replacement_cannot_touch_new_flags(
         )
     poll(repo, current.id)
     assert selected(db, owner) == ("A",)
-    with pytest.raises(PublishNotFoundError):
-        poll(repo, old.id)  # observed200 fences late100 even after Owner/UUID change
+    poll(repo, old.id)  # observed200 fences late100 even after Owner/UUID change
+    late = repo.get_by_id(old.id)
+    # The late native ledger completes; only its knowledge result stays fenced.
+    assert late.status == PublishStatus.SUCCESS
+    result = late.ext["knowledge_selection_result"]
+    assert result["status"] == "unknown"
+    assert result["deployment_id"] == 100
     assert _online(db) == {"A"}
     assert selected(db, owner) == ("A",)
+
+
+def test_unorderable_observed_workflow_completes_with_unknown_without_effects(
+    publication,
+):
+    db, repo, record = publication
+    space(db)
+    with db.orm_session() as session:
+        session.query(Binding).update({"enabled": False})
+        session.query(Binding).filter_by(kb_id="A").update({"enabled": True})
+    current = deploying(repo, record, 200)
+    finished = repo.compare_and_set_status_with_ext(
+        publish_id=current.id,
+        source_status=PublishStatus.ONLINE_PUB,
+        target_status=PublishStatus.SUCCESS,
+        expected_ext=current.ext,
+        ext=dict(current.ext),
+        observed_workflow_id="not-an-int",
+    )
+    assert finished.status == PublishStatus.SUCCESS
+    result = finished.ext["knowledge_selection_result"]
+    # Unorderable observed workflow: explicit unknown, zero knowledge effects.
+    assert result["status"] == "unknown"
+    assert result["deployment_id"] == 0
+    assert selected(db) == ()
 
 
 @pytest.mark.parametrize("stale_marker", [False, True])
@@ -329,7 +356,10 @@ def test_native_stable_entity_owner_survives_current_owner_handoff(publication):
         repo.get_by_id(current.id).ext["knowledge_selection_result"]["owner_id"]
         == "new-owner"
     )
-    with pytest.raises(PublishNotFoundError):
-        poll(repo, old.id)
+    poll(repo, old.id)
+    late = repo.get_by_id(old.id)
+    # The late native ledger completes; the winning deployment keeps its flags.
+    assert late.status == PublishStatus.SUCCESS
+    assert late.ext["knowledge_selection_result"]["status"] == "unknown"
     assert _online(db) == {"A"}
     assert selected(db, "new-owner") == ("A",)

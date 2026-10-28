@@ -48,7 +48,6 @@ from sqlalchemy import bindparam, func, or_
 SNAPSHOT_KEY = "knowledge_selection_snapshot"
 RESULT_KEY = "knowledge_selection_result"
 _RESTORE_KEY = "knowledge_selection_restore"
-_ROLLBACK_BASE_KEY = "knowledge_selection_rollback_base"
 _MAX_SELECTION = 100
 _MAX_EXT_BYTES = 65535
 
@@ -96,10 +95,11 @@ def _bindings(session, bot):
 
 
 def _selected_bindings(session, bot, ids):
-    """Seek the existing unique KB key before checking mutable space/flags.
+    """Lock the bounded KB rows through the existing unique-key prefix.
 
-    Including space/enabled in this SELECT lets SQLite pick idx_bk_enabled's
-    broad prefix for 100 IDs. These fields are validated on the locked rows.
+    Space and enabled are validated on the returned locked rows, not in the
+    seek predicate, so the plan stays on (bot_pk, env, tenant, kb_id) for
+    up to 100 IDs.
     """
     if not ids:
         return []
@@ -178,6 +178,14 @@ def _unknown(exc):
     return {"status": "unknown", "reason": str(exc)}
 
 
+def _superseded_outcome(code, workflow_id, result_owner):
+    """No knowledge effects; the native ledger still completes with a record."""
+    outcome = _unknown(KnowledgeError(code))
+    outcome["deployment_id"] = workflow_id if type(workflow_id) is int else 0
+    outcome["owner_id"] = result_owner
+    return outcome
+
+
 def _snapshot_scope(publish, source):
     return {
         "schema_version": 1,
@@ -227,7 +235,6 @@ def freeze_build(session, publish_id):
     if publish is None or publish.status != PublishStatus.DRAFT:
         return False
     ext = _ext(publish)
-    ext.pop(_ROLLBACK_BASE_KEY, None)
     generation = uuid4().hex
     source = None
     try:
@@ -235,7 +242,6 @@ def freeze_build(session, publish_id):
         if publish.status != PublishStatus.DRAFT:
             return False
         ext = _ext(publish)
-        ext.pop(_ROLLBACK_BASE_KEY, None)
         ids = [
             r[0]
             for r in _bindings(session, source)
@@ -261,13 +267,18 @@ def freeze_build(session, publish_id):
         if publish.status != PublishStatus.DRAFT:
             return False
         ext = _ext(publish)
-        ext.pop(_ROLLBACK_BASE_KEY, None)
         ext[SNAPSHOT_KEY] = {
             **(_snapshot_scope(publish, source) if source is not None else {}),
             "generation": generation,
             **_unknown(exc),
         }
-        encoded = encode_ext(ext)
+        try:
+            encoded = encode_ext(ext)
+        except KnowledgeError as overflow:
+            # Even the bounded UNKNOWN snapshot cannot fit the remaining ext
+            # budget. This is a deterministic terminal failure; surface the
+            # stable size code instead of leaking an unmanaged in-except error.
+            raise KnowledgeError("KNOWLEDGE_PUBLISH_EXT_TOO_LARGE") from overflow
     publish.ext = encoded
     publish.status = PublishStatus.BUILDING
     publish.gmt_modified = func.now()
@@ -288,7 +299,7 @@ def protected_ext(session, publish_id, incoming):
 
 def merge_protected_ext(stored, incoming):
     result = copy.deepcopy(incoming)
-    for key in (SNAPSHOT_KEY, RESULT_KEY, _RESTORE_KEY, _ROLLBACK_BASE_KEY):
+    for key in (SNAPSHOT_KEY, RESULT_KEY, _RESTORE_KEY):
         if key in result and result[key] != stored.get(key):
             raise KnowledgeError("KNOWLEDGE_SNAPSHOT_READ_ONLY")
         if key in stored:
@@ -304,6 +315,7 @@ class OnlineChange:
     outcome: dict
     summary_row: BotCommonConfig | None
     previous: dict | None
+    superseded: bool = False
 
 
 def prepare_online(session, publish_id, expected_json, observed_workflow_id=None):
@@ -345,9 +357,30 @@ def prepare_online(session, publish_id, expected_json, observed_workflow_id=None
     # Scope the effect to the locked current Owner; snapshot validation already
     # prevents cross-Owner grants, and newer observed results fence late work.
     result_owner = source.owner_id if source is not None else None
+    if workflow_id is not None and type(workflow_id) is not int:
+        # An unorderable observed workflow cannot fence against the recorded
+        # watermark. Fail closed: complete the native ledger with an explicit
+        # unknown outcome; the recorded current result stays untouched.
+        return OnlineChange(
+            publish, None, None,
+            _superseded_outcome(
+                "KNOWLEDGE_OBSERVED_WORKFLOW_INVALID", workflow_id, result_owner,
+            ),
+            None, None, superseded=True,
+        )
     summary_row, previous = lock_summary(session, publish)
     if previous is not None and type(workflow_id) is int and previous["deployment_id"] > workflow_id:
-        return None
+        # A newer observed deployment already recorded the current result and
+        # owns the materialized selection. Complete the native ledger with an
+        # explicit late/unknown outcome instead of stalling in ONLINE_PUB;
+        # the newer summary and its flags stay authoritative.
+        return OnlineChange(
+            publish, None, None,
+            _superseded_outcome(
+                "KNOWLEDGE_SUPERSEDED_BY_NEWER_DEPLOYMENT", workflow_id, result_owner,
+            ),
+            None, None, superseded=True,
+        )
     if summary_row is not None and previous is None:
         snapshot = None
         outcome = _unknown(KnowledgeError("KNOWLEDGE_CURRENT_SUMMARY_INVALID"))
@@ -358,6 +391,12 @@ def prepare_online(session, publish_id, expected_json, observed_workflow_id=None
 
 def replace_online(session, change):
     """Point updates of bounded IDs + current result in the winning CAS Session."""
+    if change.superseded:
+        # A newer observed deployment owns the current result and the
+        # materialized selection. The late or unorderable completion recorded
+        # its protected ext outcome through the CAS; touching flags or the
+        # summary here would revert the winning deployment.
+        return
     source, snapshot = change.source, change.snapshot
     ids = set(snapshot["enabled_kb_ids"]) if snapshot is not None else set()
     materialized = change.previous.get("materialized") if change.previous else None

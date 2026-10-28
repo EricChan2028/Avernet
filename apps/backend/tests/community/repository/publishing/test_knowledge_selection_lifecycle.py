@@ -759,8 +759,14 @@ def test_late_rollback_success_cannot_overwrite_republished_newer_version(public
     deployed(second.id, 100)
     second = finish(second)
     assert _online(db) == {"A"}
-    assert finish(rollback) is None
-    assert repo.get_by_id(first.id).status == PublishStatus.ONLINE_PUB
+    late = finish(rollback)
+    # The late rollback completes its native ledger; only its knowledge result
+    # is fenced and the republished newer version keeps its flags.
+    assert late is not None
+    assert late.status == PublishStatus.SUCCESS
+    result = late.ext["knowledge_selection_result"]
+    assert result["status"] == "unknown"
+    assert result["deployment_id"] == 99
     assert _online(db) == {"A"}
 
 

@@ -25,6 +25,7 @@ from agentclaw.community.core.service_bot.services.publish_flow.operation_runner
     to_baas_request_id,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
+from agentclaw.community.kernel.knowledge import KnowledgeError
 from agentclaw.community.log import get_logger
 
 
@@ -285,6 +286,12 @@ class DraftRestoreOpsMixin:
                         )
             elif not restored:
                 raise PublishFlowServiceError("Knowledge draft selection restore rejected")
+        except KnowledgeError as exc:
+            # Deterministic guards (identity, ledger state, deadline) never
+            # recover on retry; fail the attempt so the durable ledger keeps
+            # the terminal error instead of spinning until the deadline.
+            self._publish_operation_repo.fail(operation_id, str(exc))
+            raise PublishFlowServiceError(str(exc)) from exc
         except Exception as exc:
             raise DraftRestoreRetryableError(str(exc)) from exc
 

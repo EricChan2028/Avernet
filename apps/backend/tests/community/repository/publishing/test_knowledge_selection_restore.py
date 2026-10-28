@@ -14,6 +14,7 @@ from agentclaw.community.core.service_bot.repository.models import (
 )
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     DraftRestoreRetryableError,
+    PublishFlowServiceError,
 )
 
 from tests.community.repository.publishing.test_knowledge_selection_lifecycle import (
@@ -135,12 +136,14 @@ async def test_failed_during_device_restore_does_not_overwrite_later_draft_edit(
         return {"status": "success", "restore_type": "local"}
 
     case.behavior.restore_draft = delayed_device_result
-    with pytest.raises(DraftRestoreRetryableError):
+    with pytest.raises(PublishFlowServiceError) as excinfo:
         await case.flow.execute_restore_draft(
             draft_publish_id=case.draft.id,
             operation_id=case.operation.id,
             operator="owner",
         )
+    # Terminal ledger states fail the attempt instead of spinning as retryable.
+    assert not isinstance(excinfo.value, DraftRestoreRetryableError)
     assert _selection(case) == edited
     operation = case.ledger.get_by_id(case.operation.id)
     assert operation.state == "failed"
@@ -438,15 +441,17 @@ async def test_expired_while_device_waits_has_no_completion_side_effects(restore
 
     case.behavior.restore_draft = delayed_device_result
     with pytest.raises(
-        DraftRestoreRetryableError, match="KNOWLEDGE_RESTORE_OPERATION_EXPIRED"
-    ):
+        PublishFlowServiceError, match="KNOWLEDGE_RESTORE_OPERATION_EXPIRED"
+    ) as excinfo:
         await case.flow.execute_restore_draft(
             draft_publish_id=case.draft.id,
             operation_id=case.operation.id,
             operator="owner",
         )
+    # A deterministic deadline failure terminates the attempt immediately.
+    assert not isinstance(excinfo.value, DraftRestoreRetryableError)
     assert _selection(case) == before
-    assert case.ledger.get_by_id(case.operation.id).state == "pending"
+    assert case.ledger.get_by_id(case.operation.id).state == "failed"
     assert case.ledger.get_by_id(case.operation.id).result is None
     assert not case.repo.get_by_id(case.draft.id).ext
 
