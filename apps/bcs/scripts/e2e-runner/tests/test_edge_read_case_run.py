@@ -124,12 +124,16 @@ def base_profile(case_key: str) -> dict:
             },
         }
     elif case_key == "friend-requests":
-        value["auth"]["header_env"] = {"Authorization": "BCS_E2E_DRIVER_BOT_TOKEN"}
+        preprod = value["environment"].get("tier") == "preprod"
+        value["auth"]["header_env"] = (
+            {"Cookie": "BCS_E2E_HUMAN_COOKIE"} if preprod
+            else {"Authorization": "BCS_E2E_DRIVER_BOT_TOKEN"})
         value["edge_case_bindings"] = {
             "friend_requests.read": {
                 "method": "GET",
                 "path": "/openapi/v1/collaboration/friend-connections/requests",
-                "api_face": "public-v1", "auth": "authenticated_bot",
+                "api_face": "public-v1",
+                "auth": "human_cookie" if preprod else "authenticated_bot",
                 "response": "public-envelope", "traceparent": "disabled",
                 "caller_actor_id": "driver-bot",
             },
@@ -160,8 +164,10 @@ def profile_value(case_key: str, *, preprod: bool = False) -> dict:
                                  database="agentclawdb",
                                  environment_binding_confirmed=True)
         value["policy"]["fixture_pool"] = "owned-edge-command-preprod-pool"
-        if case_key == "friend-connections":
+        if case_key in {"friend-connections", "friend-requests"}:
             value["auth"]["header_env"] = {"Cookie": "BCS_E2E_HUMAN_COOKIE"}
+        if case_key == "friend-requests":
+            value["edge_case_bindings"]["friend_requests.read"]["auth"] = "human_cookie"
     return value
 
 
@@ -279,7 +285,7 @@ class EdgeReadCaseRunTests(unittest.TestCase):
     def test_preprod_friend_read_reports_cookie_kind_without_cookie_value(self):
         report, _, _, _ = self.invoke("friend-requests", preprod=True)
         self.assertEqual(report["status"], "PASS")
-        self.assertEqual(report["credential_kind"], "owned_local_bot_token")
+        self.assertEqual(report["credential_kind"], "human_cookie")
         self.assertEqual(report["environment"]["tier"], "preprod")
         self.assertEqual(report["environment"]["entrypoint_kind"], "gateway")
         self.assertNotIn("BCS_E2E_HUMAN_COOKIE", json.dumps(report, sort_keys=True))

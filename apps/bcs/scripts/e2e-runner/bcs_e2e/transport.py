@@ -155,7 +155,14 @@ class ReadClient:
             if direction not in {"received", "sent", "all"}:
                 raise ObservationError("unsupported friend-request direction")
             binding = require_edge_case_binding(self.profile, "friend_requests.read")
-            path = binding["path"] + "?direction=" + direction
+            if self.profile["environment"]["tier"] == "preprod":
+                path = (binding["path"]
+                        + "?actor_type=bot&actor_id="
+                        + binding["caller_actor_id"]
+                        + "&direction=" + direction
+                        + "&page=1&page_size=20")
+            else:
+                path = binding["path"] + "?direction=" + direction
         elif operation in {"friend.decision.member_requests.read",
                            "friend.decision.driver_requests.read",
                            "friend.decision.driver_connections.read"}:
@@ -266,10 +273,11 @@ class ReadClient:
         else:
             auth_headers = self.local_auth.headers(self.profile) if self.local_auth is not None else self.headers
         human_cookie_read = operation in _HUMAN_COOKIE_ONLY_READS
-        if operation == "edge.friend_connections.read" and binding["auth"] == "human_cookie":
-            # Station Gateway admission happens through the browser context;
-            # actor_id remains the exact dedicated-driver filter. Do not send
-            # a Bot Authorization bearer to this public read route.
+        if (operation in {"edge.friend_requests.read", "edge.friend_connections.read"}
+                and binding["auth"] == "human_cookie"):
+            # Station Gateway admission happens through the browser context; the
+            # exact actor query remains the dedicated-driver scope. Do not send
+            # a Bot Authorization bearer to these public read routes.
             human_cookie_read = True
         if human_cookie_read:
             auth_headers = {header: value for header, value in auth_headers.items()

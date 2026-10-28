@@ -84,12 +84,16 @@ def preprod_connections_profile():
 
 
 def enable_friend_requests_binding(value, driver='bot-driver'):
-    value['auth']['header_env']['Authorization'] = 'BCS_E2E_DRIVER_BOT_TOKEN'
+    auth = 'human_cookie' if value['environment']['tier'] == 'preprod' else 'authenticated_bot'
+    if auth == 'authenticated_bot':
+        value['auth']['header_env']['Authorization'] = 'BCS_E2E_DRIVER_BOT_TOKEN'
+    else:
+        value['auth']['header_env'].setdefault('Cookie', 'BCS_E2E_HUMAN_COOKIE')
     value['edge_case_bindings'] = {'friend_requests.read': {
         'method': 'GET',
         'path': PATH,
         'api_face': 'public-v1',
-        'auth': 'authenticated_bot',
+        'auth': auth,
         'response': 'public-envelope',
         'traceparent': 'disabled',
         'caller_actor_id': driver,
@@ -136,10 +140,12 @@ class RemoteEdgeReadProfileTests(unittest.TestCase):
                 self.assertEqual(binding['method'], 'GET')
                 self.assertEqual(binding['path'], PATH)
                 self.assertEqual(binding['api_face'], 'public-v1')
-                self.assertEqual(binding['auth'], 'authenticated_bot')
+                expected_auth = "human_cookie" if name == "preprod.example.json" else "authenticated_bot"
+                self.assertEqual(binding["auth"], expected_auth)
                 self.assertEqual(binding['response'], 'public-envelope')
                 self.assertEqual(binding['caller_actor_id'], result['actors']['driver']['bot_id'])
-                self.assertIn('Authorization', result['auth']['header_env'])
+                expected_header = "Cookie" if name == "preprod.example.json" else "Authorization"
+                self.assertIn(expected_header, result["auth"]["header_env"])
                 factory.return_value.open.assert_not_called()
 
     def test_binding_rejects_invented_paths_fields_callers_and_cookie_fallback(self):
@@ -350,6 +356,32 @@ class RemoteEdgeReadAdapterTests(unittest.TestCase):
         self.assertEqual(evidence['identity_kind'], 'human_cookie')
         self.assertNotIn(TOKEN, json.dumps(evidence, sort_keys=True))
         self.assertNotIn(COOKIE, json.dumps(evidence, sort_keys=True))
+
+    def test_preprod_friend_requests_send_cookie_and_exact_actor_query_not_token(self):
+        records = []
+        with patch.dict(os.environ, {'BCS_E2E_DRIVER_BOT_TOKEN': TOKEN,
+                                      'BCS_E2E_HUMAN_COOKIE': COOKIE}), \
+             patch('bcs_e2e.transport.build_opener') as factory:
+            def open(request, timeout=None):
+                records.append(request)
+                return Reply(envelope(friend_data(0)))
+            factory.return_value.open.side_effect = open
+            client = ReadClient(preprod_profile())
+            observation = client.read('edge.friend_requests.read', direction='received')
+        request = records[0]
+        expected = (PATH
+                    + '?actor_type=bot&actor_id=bot-driver&direction=received'
+                    + '&page=1&page_size=20')
+        self.assertEqual(request.full_url.split('https://gateway.example.com', 1)[1], expected)
+        self.assertEqual(request.headers.get('Cookie'), COOKIE)
+        self.assertNotIn('Authorization', request.headers)
+        evidence = observation.evidence
+        self.assertEqual(evidence['credentials_sent'], True)
+        self.assertEqual(evidence['authorization_sent'], False)
+        self.assertEqual(evidence['identity_kind'], 'human_cookie')
+        serialized = json.dumps(evidence, sort_keys=True)
+        self.assertNotIn(TOKEN, serialized)
+        self.assertNotIn(COOKIE, serialized)
 
     def test_preprod_gateway_profiles_admit_the_public_edge_alias_slices(self):
         for case_id, profile_value in ((FRIEND_REQUESTS_PUBLIC_CASE_ID, preprod_profile()),
