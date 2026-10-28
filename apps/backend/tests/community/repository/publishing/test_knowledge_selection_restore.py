@@ -35,6 +35,7 @@ def restore_case(request):
         target_status=PublishStatus.SUCCESS,
         expected_ext=online.ext,
         ext=online.ext,
+        observed_workflow_id=((online.ext or {}).get("publish") or {}).get("online", 77),
     )
     draft = repo.insert(
         dict(

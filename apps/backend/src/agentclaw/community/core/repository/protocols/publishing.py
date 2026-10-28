@@ -408,7 +408,9 @@ class BotPublishRepositoryProtocol(Protocol):
         """CAS both snapshots; online observers pass the workflow actually queried.
 
         The optional ID is completion evidence, not another stored native field.
-        Legacy callers may omit it when ext.publish.online is the observed ID.
+        When knowledge publication is enabled, SUCCESS requires an explicit ID.
+        Generic/legacy writers cannot infer observation from stored ext. Other
+        transitions and disabled integrations may omit it.
         """
         ...
 

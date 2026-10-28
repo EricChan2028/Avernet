@@ -103,7 +103,7 @@ class ConfigArtifactOffloader:
         inline = json.dumps(base, ensure_ascii=False)
         # The artifact shares TEXT with snapshots and other native metadata.
         # Retain headroom for subsequent progress/result fields as before.
-        if size <= ARTIFACT_OSS_THRESHOLD_BYTES and len(inline.encode("utf-8")) <= ARTIFACT_OSS_THRESHOLD_BYTES:
+        if size <= ARTIFACT_OSS_THRESHOLD_BYTES and len(inline.encode("utf-8")) <= 65535:
             return inline, None
         del base[ARTIFACT_KEY]
         digest = hashlib.sha1(artifact_json.encode("utf-8")).hexdigest()[:12]

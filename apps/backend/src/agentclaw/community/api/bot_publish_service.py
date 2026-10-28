@@ -6,7 +6,12 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class BotPublishServiceProtocol(Protocol):
-    """Service API for bot-publish record management."""
+    """Service API for bot-publish record management.
+
+    Opted-in knowledge completion requires observed_workflow_id from a backend
+    deployment observer. Generic status callers cannot synthesize SUCCESS;
+    DRAFT -> BUILDING freezes the working selection on every write entrance.
+    """
 
     def create_first_publish_for_bot(self, *args: Any, **kwargs: Any) -> Any: ...
 

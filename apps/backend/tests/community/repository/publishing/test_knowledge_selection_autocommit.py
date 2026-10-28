@@ -131,6 +131,7 @@ def test_online_binding_failure_rolls_back_status_and_selection_and_can_retry(
                 target_status=PublishStatus.SUCCESS,
                 expected_ext=online.ext,
                 ext=online.ext,
+                observed_workflow_id=((online.ext or {}).get("publish") or {}).get("online", 77),
             )
     finally:
         event.remove(db.engine, "before_cursor_execute", fail_second_binding_update)
@@ -146,6 +147,7 @@ def test_online_binding_failure_rolls_back_status_and_selection_and_can_retry(
         target_status=PublishStatus.SUCCESS,
         expected_ext=online.ext,
         ext=online.ext,
+        observed_workflow_id=((online.ext or {}).get("publish") or {}).get("online", 77),
     )
     assert succeeded.status == PublishStatus.SUCCESS
     assert online_selection(db) == {"B"}
@@ -157,6 +159,7 @@ def test_online_binding_failure_rolls_back_status_and_selection_and_can_retry(
             target_status=PublishStatus.SUCCESS,
             expected_ext=online.ext,
             ext=online.ext,
+            observed_workflow_id=((online.ext or {}).get("publish") or {}).get("online", 77),
         )
         is None
     )
@@ -262,9 +265,11 @@ def test_knowledge_write_boundaries_use_non_autocommit_transaction(
         successor = repo.update_status(
             successor.id, PublishStatus.BUILDING, PublishStatus.DRAFT
         )
-        successor = repo.update_status(
-            successor.id, PublishStatus.SUCCESS, PublishStatus.BUILDING
-        )
+        online = repo.update_status_with_ext(successor.id, PublishStatus.ONLINE_PUB,
+            {**successor.ext, "publish": {"online": 77}}, PublishStatus.BUILDING)
+        successor = repo.compare_and_set_status_with_ext(publish_id=successor.id,
+            source_status=PublishStatus.ONLINE_PUB, target_status=PublishStatus.SUCCESS,
+            expected_ext=online.ext, ext=online.ext, observed_workflow_id=77)
 
     if boundary == "restore":
         operation = OrmPublishOperationRepository(db).insert(

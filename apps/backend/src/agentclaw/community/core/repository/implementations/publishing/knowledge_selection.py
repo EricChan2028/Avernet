@@ -341,11 +341,7 @@ def prepare_online(session, publish_id, expected_json, observed_workflow_id=None
     session.refresh(publish, with_for_update=True)
     if publish.status != PublishStatus.ONLINE_PUB or publish.ext != expected_json:
         return None
-    workflow_id = (
-        observed_workflow_id
-        if observed_workflow_id is not None
-        else (_ext(publish).get("publish") or {}).get("online")
-    )
+    workflow_id = observed_workflow_id
     # Publication.owner_id is the immutable entity address, NOT current Owner.
     # Scope the effect to the locked current Owner; snapshot validation already
     # prevents cross-Owner grants, and newer observed results fence late work.

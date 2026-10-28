@@ -41,9 +41,11 @@ def test_first_new_release_can_roll_back_to_pre_feature_version(
             session.query(Binding).delete()
     built = repo.update_status(current.id, PublishStatus.BUILDING, PublishStatus.DRAFT)
     assert built.ext["knowledge_selection_snapshot"] is not None
-    published = repo.update_status(
-        current.id, PublishStatus.SUCCESS, PublishStatus.BUILDING
-    )
+    online = repo.update_status_with_ext(current.id, PublishStatus.ONLINE_PUB,
+        {**built.ext, "publish": {"online": 77}}, PublishStatus.BUILDING)
+    published = repo.compare_and_set_status_with_ext(publish_id=current.id,
+        source_status=PublishStatus.ONLINE_PUB, target_status=PublishStatus.SUCCESS,
+        expected_ext=online.ext, ext=online.ext, observed_workflow_id=77)
     result = repo.rollback_flip(
         demoted_publish_id=published.id,
         demoted_ext=published.ext,
@@ -59,7 +61,7 @@ def test_first_new_release_can_roll_back_to_pre_feature_version(
     deploying = repo.update_status_with_ext(
         legacy.id,
         PublishStatus.ONLINE_PUB,
-        {**restored.ext, "publish": {"online": 12}},
+        {**restored.ext, "publish": {"online": 88}},
         source_status=PublishStatus.SUCCESS,
     )
     completed = repo.compare_and_set_status_with_ext(
@@ -68,6 +70,7 @@ def test_first_new_release_can_roll_back_to_pre_feature_version(
         target_status=PublishStatus.SUCCESS,
         expected_ext=deploying.ext,
         ext=deploying.ext,
+        observed_workflow_id=((deploying.ext or {}).get("publish") or {}).get("online", 77),
     )
     assert completed.status == PublishStatus.SUCCESS
     assert completed.ext["knowledge_selection_result"]["status"] == "unknown"
@@ -123,6 +126,7 @@ def test_online_success_does_not_reupload_unchanged_oversized_artifact(publicati
         target_status=PublishStatus.SUCCESS,
         expected_ext=online.ext,
         ext={**online.ext, "done": True},
+        observed_workflow_id=((online.ext or {}).get("publish") or {}).get("online", 77),
     )
     assert completed.status == PublishStatus.SUCCESS
     storage.put_object.assert_not_called()
@@ -154,6 +158,7 @@ def test_online_success_still_uploads_changed_oversized_artifact(publication):
         target_status=PublishStatus.SUCCESS,
         expected_ext=online.ext,
         ext={**online.ext, "config_artifact": {"data": "y" * 62000}},
+        observed_workflow_id=((online.ext or {}).get("publish") or {}).get("online", 77),
     )
     assert completed.status == PublishStatus.SUCCESS
     assert storage.put_object.call_count == 1
@@ -186,6 +191,7 @@ def test_online_changed_artifact_upload_failure_does_not_commit(publication):
             target_status=PublishStatus.SUCCESS,
             expected_ext=online.ext,
             ext={**online.ext, "config_artifact": {"data": "y" * 62000}},
+            observed_workflow_id=((online.ext or {}).get("publish") or {}).get("online", 77),
         )
     assert repo.get_by_id(current.id).status == PublishStatus.ONLINE_PUB
     with db.orm_session() as session:

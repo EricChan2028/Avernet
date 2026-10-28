@@ -153,6 +153,7 @@ def test_only_successful_online_cas_replaces_production_from_frozen_selection(
         target_status=PublishStatus.SUCCESS,
         expected_ext=online.ext,
         ext={**online.ext, "done": True},
+        observed_workflow_id=((online.ext or {}).get("publish") or {}).get("online", 77),
     )
     assert result.status == PublishStatus.SUCCESS
     assert _online(db) == {"B"}
@@ -163,6 +164,7 @@ def test_only_successful_online_cas_replaces_production_from_frozen_selection(
             target_status=PublishStatus.SUCCESS,
             expected_ext=online.ext,
             ext=online.ext,
+            observed_workflow_id=((online.ext or {}).get("publish") or {}).get("online", 77),
         )
         is None
     )
@@ -178,6 +180,7 @@ def test_explicit_draft_restore_restores_only_draft_and_is_replay_safe(publicati
         target_status=PublishStatus.SUCCESS,
         expected_ext=previous.ext,
         ext=previous.ext,
+        observed_workflow_id=((previous.ext or {}).get("publish") or {}).get("online", 77),
     )
     draft = repo.insert(
         dict(
@@ -271,6 +274,7 @@ def test_missing_snapshot_completes_native_success_but_clears_old_online(
         target_status=PublishStatus.SUCCESS,
         expected_ext=online.ext,
         ext=online.ext,
+        observed_workflow_id=((online.ext or {}).get("publish") or {}).get("online", 77),
     )
     assert completed.status == PublishStatus.SUCCESS
     assert completed.ext["knowledge_selection_result"] == {
@@ -293,6 +297,7 @@ def test_empty_snapshot_is_valid_and_clears_production(publication):
         target_status=PublishStatus.SUCCESS,
         expected_ext=online.ext,
         ext=online.ext,
+        observed_workflow_id=((online.ext or {}).get("publish") or {}).get("online", 77),
     )
     assert _online(db) == set()
 
@@ -333,6 +338,7 @@ def test_source_scope_change_never_promotes_same_named_bot(publication, change):
         target_status=PublishStatus.SUCCESS,
         expected_ext=online.ext,
         ext=online.ext,
+        observed_workflow_id=((online.ext or {}).get("publish") or {}).get("online", 77),
     )
     assert completed.status == PublishStatus.SUCCESS
     assert completed.ext["knowledge_selection_result"]["status"] == "unknown"
@@ -360,6 +366,7 @@ def test_legacy_ext_updates_cannot_drop_snapshot_and_stale_outcome_does_not_prom
             target_status=PublishStatus.SUCCESS,
             expected_ext=online.ext,
             ext=online.ext,
+            observed_workflow_id=((online.ext or {}).get("publish") or {}).get("online", 77),
         )
         is None
     )
@@ -395,6 +402,7 @@ def test_failed_build_retry_keeps_snapshot_but_redraft_refreezes_new_generation(
             target_status=PublishStatus.SUCCESS,
             expected_ext=failed.ext,
             ext=failed.ext,
+            observed_workflow_id=((failed.ext or {}).get("publish") or {}).get("online", 77),
         )
         is None
     )
@@ -410,6 +418,7 @@ def test_rollback_flip_does_not_promote_until_target_deployment_succeeds(publica
         target_status=PublishStatus.SUCCESS,
         expected_ext=target.ext,
         ext=target.ext,
+        observed_workflow_id=((target.ext or {}).get("publish") or {}).get("online", 77),
     )
     second = repo.insert(
         dict(
@@ -439,6 +448,7 @@ def test_rollback_flip_does_not_promote_until_target_deployment_succeeds(publica
         target_status=PublishStatus.SUCCESS,
         expected_ext=current.ext,
         ext=current.ext,
+        observed_workflow_id=((current.ext or {}).get("publish") or {}).get("online", 77),
     )
     target = repo.update_status(first.id, PublishStatus.UPGRADED, PublishStatus.SUCCESS)
     assert _online(db) == {"A"}
@@ -466,6 +476,7 @@ def test_rollback_flip_does_not_promote_until_target_deployment_succeeds(publica
         target_status=PublishStatus.SUCCESS,
         expected_ext=target.ext,
         ext=target.ext,
+        observed_workflow_id=((target.ext or {}).get("publish") or {}).get("online", 77),
     )
     assert _online(db) == {"B"}
 
@@ -492,6 +503,7 @@ def test_unconfigured_legacy_source_does_not_break_plain_publish_or_restore(
             target_status=PublishStatus.SUCCESS,
             expected_ext=legacy.ext,
             ext=legacy.ext,
+            observed_workflow_id=((legacy.ext or {}).get("publish") or {}).get("online", 77),
         ).status
         == PublishStatus.SUCCESS
     )
@@ -705,6 +717,7 @@ def test_late_rollback_success_cannot_overwrite_republished_newer_version(public
             target_status=PublishStatus.SUCCESS,
             expected_ext=record.ext,
             ext=record.ext,
+            observed_workflow_id=((record.ext or {}).get("publish") or {}).get("online", 77),
         )
 
     first = finish(_start_online(repo, first))

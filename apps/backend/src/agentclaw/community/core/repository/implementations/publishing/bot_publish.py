@@ -40,7 +40,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from injector import inject
 
-from agentclaw.community.kernel.knowledge import KnowledgePublicationPolicy
+from agentclaw.community.kernel.knowledge import KnowledgeError, KnowledgePublicationPolicy
 from sqlalchemy import func
 
 from agentclaw.community.core.models.skill import Skill
@@ -84,6 +84,11 @@ class BotPublishRepository(
         # Offloads an oversized config_artifact out of the ext TEXT column.
         self._offload = offload
         self._knowledge_policy = knowledge_policy
+
+    def _require_observation(self, target_status, observed_workflow_id=None):
+        if (self._knowledge_policy.enabled and target_status == PublishStatus.SUCCESS
+                and observed_workflow_id is None):
+            raise KnowledgeError("KNOWLEDGE_OBSERVATION_REQUIRED")
 
     @contextmanager
     def _publication_session(self, publish_id=None):
@@ -538,6 +543,7 @@ class BotPublishRepository(
         target_status: str,
         source_status: Optional[str] = None,
     ) -> Optional[BotPublishRecord]:
+        self._require_observation(target_status)
         if (self._knowledge_policy.enabled and target_status == PublishStatus.BUILDING
                 and source_status in (None, PublishStatus.DRAFT)):
             frozen = knowledge_build.freeze_build(self._publication_session, self._offload, publish_id)
@@ -566,6 +572,7 @@ class BotPublishRepository(
         ext: Dict[str, Any],
         source_status: Optional[str] = None,
     ) -> Optional[BotPublishRecord]:
+        self._require_observation(target_status)
         if (self._knowledge_policy.enabled and target_status == PublishStatus.BUILDING
                 and source_status in (None, PublishStatus.DRAFT)):
             frozen = knowledge_build.freeze_build(
@@ -649,6 +656,7 @@ class BotPublishRepository(
         observed_workflow_id: int | None = None,
     ) -> Optional[BotPublishRecord]:
         """CAS status and the exact serialized ext snapshot in one UPDATE."""
+        self._require_observation(target_status, observed_workflow_id)
         env = get_current_env()
         expected_json, _ = self._offload.prepare(expected_ext, publish_id, env)
         if (self._knowledge_policy.enabled and target_status == PublishStatus.BUILDING
@@ -714,6 +722,7 @@ class BotPublishRepository(
         env: str,
     ) -> Optional[BotPublishRecord]:
         """Fence Offline against the moment an Artifact becomes replayable."""
+        self._require_observation(target_status)
         expected_json, _ = self._offload.prepare(expected_ext, publish_id, env)
         uuids = tuple(sorted(set(center_skill_uuids)))
         if not self._stage_artifact(

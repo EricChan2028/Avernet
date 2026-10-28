@@ -252,8 +252,12 @@ compatible optional `observed_workflow_id` CAS argument. This is required for
 retry/restart completion: the ledger-preferred workflow actually observed may
 be different from the old `ext.publish.online` or a missing/stale best-effort
 restart marker. The argument is not a new DB field and does not rewrite native
-release/restart handles. Only legacy direct repository callers may omit it when
-the release slot already identifies the observed workflow.
+release/restart handles. When publication integration is enabled, successful
+status writes require explicit observation; stored release slots are not proof.
+The legacy `/status` endpoint cannot supply that argument and returns an explicit
+`KNOWLEDGE_OBSERVATION_REQUIRED` conflict rather than synthesizing SUCCESS.
+Other transitions and disabled integrations retain native behavior. A failed
+build retry retains its frozen generation; a new DRAFT admission captures anew.
 
 The publication opt-in does not disable explicitly requested online API reads.
 Their summary table prerequisite and rollout cadence must be checked separately.
@@ -275,3 +279,24 @@ Applied summaries encode the selected IDs once; decoding reconstructs the equal
 materialized set. UNKNOWN can retain an explicit previous materialized set, but
 its current set is empty. This preserves 100 valid 128-character multibyte IDs
 inside existing TEXT capacity without adding columns or reducing the ID limit.
+
+#### Review fixes: admission, capacity and lock bounds (2026-10-28)
+
+Every allowed DRAFT → BUILDING status/ext writer freezes through the same boundary,
+including the legacy status endpoint. Invalid publication policy is resolved at
+root container construction, before lifecycle discovery can swallow its failure.
+
+The artifact offloader checks the complete inline ext TEXT budget, not just the
+artifact size; the native 60-KiB artifact threshold remains compatible. If a
+freeze needs a new object, it captures a candidate under the shared Bot lock,
+releases locks for the immutable PUT, then reacquires and recaptures with the same
+generation. Only matching native ext, selection and scope may commit BUILDING.
+Contention retries are bounded to three; upload failure commits no admission.
+Delete/PUT races retain prefix cleanup. The ordinary no-PUT path stays one short
+transaction. Later writers include protected metadata in pre-lock offload decisions.
+
+Source locking uses the immutable PK with tenant/env/native-identity validation
+and the existing SQLite writer reservation. Draft restore separates the indexed
+enabled-set seek (at most 101) from the full unique-key snapshot seek (at most
+100), rather than OR-scanning accumulated disabled bindings. SQLite VM evidence
+is local only; deployed MySQL/OceanBase plans and contention remain unverified.

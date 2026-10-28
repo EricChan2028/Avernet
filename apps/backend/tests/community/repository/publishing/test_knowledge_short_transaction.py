@@ -36,6 +36,7 @@ def finish(repo, online):
         target_status=PublishStatus.SUCCESS,
         expected_ext=online.ext,
         ext=copy.deepcopy(online.ext),
+        observed_workflow_id=((online.ext or {}).get("publish") or {}).get("online", 77),
     )
 
 
@@ -146,6 +147,8 @@ def test_changed_artifact_put_happens_before_any_explicit_transaction(
                 **args, center_skill_uuids=(), env="dev"
             )
         else:
+            if method == "online_cas":
+                args["observed_workflow_id"] = record.ext["publish"]["online"]
             result = repo.compare_and_set_status_with_ext(**args)
     assert result.ext["config_artifact"] == ext["config_artifact"]
     storage.put_object.assert_called_once()
