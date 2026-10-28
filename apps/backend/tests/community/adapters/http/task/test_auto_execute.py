@@ -146,7 +146,7 @@ class TestAutoExecute:
         assert len(bot_port.send_calls) == 1
         assert len(service.requests) == 1
         assert service.requests[0].execution_config["main_session_id"] == "auto-session-1"
-        assert service.requests[0].execution_config["lifecycle_stage"] == "draft"
+        assert service.requests[0].execution_config["lifecycle_stage"] == "online"
         assert service.requests[0].owner_bot_id == "bot-1"
         assert service.requests[0].owner_user_id == "owner-1"
         assert service.node_updates[-1] == {
@@ -162,7 +162,7 @@ class TestAutoExecute:
             "auto": True,
             "session_id": "auto-session-1",
             "sender_options": {"from": "owner-1"},
-            "bot_options": {"lifecycle_stage": "draft"},
+            "bot_options": {"lifecycle_stage": "online"},
         }
         # The hidden Relay root instruction is appended as a comment wrapper,
         # and ">-->" inside the payload is zero-width-protected.
