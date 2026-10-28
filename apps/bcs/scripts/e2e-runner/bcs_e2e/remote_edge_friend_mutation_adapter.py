@@ -411,6 +411,12 @@ class RemoteEdgeFriendMutationAdapter:
         if no_edge_admission.get("allowed") is not False or no_edge_admission.get("reason") != "no_edge":
             raise RunStateError("protected no-edge station admission differs from the contract")
         human_actor = "human_" + self.human_user_id
+        # Local-twin parity and live bcs-pre matrix: the owning human on a
+        # protected no-edge member is no_edge as well - visibility grants
+        # never apply to a protected target for any actor.
+        human_no_edge = self._admission(bot_id=member, actor_id=human_actor, requests=requests)
+        if human_no_edge.get("allowed") is not False or human_no_edge.get("reason") != "no_edge":
+            raise RunStateError("protected human no-edge station admission differs from the contract")
         # Live bcs-pre matrix: public_default only holds for a public target; a
         # protected member stays no_edge even for the owning human. Flip the
         # member public for this read-only branch, then restore protected.
@@ -470,7 +476,15 @@ class RemoteEdgeFriendMutationAdapter:
         if connected_data.get("status") != "approved" or connected_data.get("request_ids") != []:
             raise RunStateError("connected friend create was not idempotently approved")
 
-        edge_admission = self._admission(bot_id=member, actor_id=human_actor, requests=requests)
+        # Live bcs-pre precedence matrix (public target holding a mutual edge):
+        # an edge-party Bot actor resolves edge_grant/ok, while the owning
+        # human holds no bot-bot edge row and resolves public_default -
+        # station visibility precedence applies to non-party actors. Record
+        # the human observation and assert the edge-party Bot branch.
+        human_public_edge = self._admission(bot_id=member, actor_id=human_actor, requests=requests)
+        if human_public_edge.get("allowed") is not True or human_public_edge.get("reason") != "public_default":
+            raise RunStateError("human non-party public admission precedence differs from the live contract")
+        edge_admission = self._admission(bot_id=member, actor_id=self.driver_actor_id, requests=requests)
         if edge_admission.get("allowed") is not True or edge_admission.get("reason") != "ok" or edge_admission.get("source") != "edge_grant":
             raise RunStateError("edge-grant station admission differs from the contract")
 
@@ -484,7 +498,10 @@ class RemoteEdgeFriendMutationAdapter:
             "private_create_defect": private_defect,
             "admission_branches": {
                 "unknown_bot": "bot_not_found", "protected_no_edge": "no_edge",
-                "human_public_default": "public_default", "human_edge_grant": "ok",
+                "protected_no_edge_human": "no_edge",
+                "human_public_default": "public_default",
+                "human_public_with_edge": "public_default",
+                "bot_party_edge": "edge_grant/ok",
             },
         }
         evidence = requests + [self_record, unknown_record, unknown_decision_record, first_record, duplicate_record, sent_record, decision_record]

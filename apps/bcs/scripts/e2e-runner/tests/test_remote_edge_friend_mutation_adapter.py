@@ -241,11 +241,14 @@ class Harness:
             bot_id, actor = kwargs["bot_id"], kwargs["actor_id"]
             if bot_id == UNKNOWN:
                 return {"allowed": False, "reason_code": "bot_not_found"}, record
-            requester = DRIVER if actor.startswith("human_") else actor
-            if (requester, bot_id) in self.edges:
-                return {"allowed": True, "reason": "ok", "source": "edge_grant"}, record
             if actor.startswith("human_"):
-                return {"allowed": True, "reason": "public_default"}, record
+                # Live precedence: a non-party human owns no bot-bot edge row,
+                # so visibility alone decides (public_default vs no_edge).
+                if self.current_visibility == "public":
+                    return {"allowed": True, "reason": "public_default"}, record
+                return {"allowed": False, "reason": "no_edge"}, record
+            if (actor, bot_id) in self.edges:
+                return {"allowed": True, "reason": "ok", "source": "edge_grant"}, record
             return {"allowed": False, "reason": "no_edge"}, record
         if operation == "station.discover.collaborate.read":
             if self.current_visibility == "private":
@@ -429,6 +432,10 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(result.data["unknown_bot"]["code"], 40400)
         self.assertEqual(result.data["private_create_defect"]["code"], 50000)
         self.assertEqual(result.data["admission_branches"]["protected_no_edge"], "no_edge")
+        self.assertEqual(result.data["admission_branches"]["protected_no_edge_human"], "no_edge")
+        self.assertEqual(result.data["admission_branches"]["human_public_default"], "public_default")
+        self.assertEqual(result.data["admission_branches"]["human_public_with_edge"], "public_default")
+        self.assertEqual(result.data["admission_branches"]["bot_party_edge"], "edge_grant/ok")
 
     def test_connect_private_and_discover_branches(self):
         result, adapter, harness = self.run_method("run_connect_private_discover")
