@@ -283,3 +283,61 @@ class TestAutoExecute:
         assert bot_port.send_calls[0]["metadata"]["bot_options"] == {
             "lifecycle_stage": "stable"
         }
+
+
+class TestExecutionConfigRuntimeProfile:
+    def test_execute_passes_runtime_profile_to_task_service(self):
+        service = _StubService()
+        bot_port = _StubBotPort()
+        client = _client(service, bot_port)
+
+        response = client.post(
+            "/api/v1/collaboration/tasks/execute",
+            json=_body(
+                runtime_profile={
+                    "allowed_run_modes": ["single_bot", "coop_group"]
+                }
+            ),
+        )
+
+        assert response.status_code == 200, response.text
+        assert service.requests[0].execution_config["runtime_profile"] == {
+            "allowed_run_modes": ["single_bot", "coop_group"]
+        }
+        assert bot_port.send_calls == []
+
+    def test_execute_omitted_runtime_profile_is_not_injected(self):
+        service = _StubService()
+        bot_port = _StubBotPort()
+        client = _client(service, bot_port)
+
+        response = client.post(
+            "/api/v1/collaboration/tasks/execute",
+            json=_body(),
+        )
+
+        assert response.status_code == 200, response.text
+        assert service.requests[0].execution_config.get("runtime_profile") is None
+        assert bot_port.send_calls == []
+
+    def test_auto_execute_passes_runtime_profile_to_task_service(self):
+        service = _StubService()
+        bot_port = _StubBotPort()
+        client = _client(service, bot_port)
+
+        response = client.post(
+            "/api/v1/collaboration/tasks/auto_execute",
+            json=_body(
+                main_session_id="auto-session-1",
+                runtime_profile={
+                    "allowed_run_modes": ["single_bot", "coop_group"]
+                },
+            ),
+        )
+
+        assert response.status_code == 200, response.text
+        assert service.requests[0].execution_config["runtime_profile"] == {
+            "allowed_run_modes": ["single_bot", "coop_group"]
+        }
+        assert service.requests[0].execution_config["main_session_id"] == "auto-session-1"
+        assert len(bot_port.send_calls) == 1

@@ -165,6 +165,16 @@ async def benchmark_execute_task_internal(
         extend_props["benchmark_send"] = "ok"
 
     execution_config = dict(task_request.execution_config)
+    runtime_profile = execution_config.get("runtime_profile")
+    profile = runtime_profile if isinstance(runtime_profile, dict) else {}
+    if not profile.get("allowed_run_modes") and not execution_config.get(
+        "allowed_run_modes"
+    ):
+        profile = {
+            **profile,
+            "allowed_run_modes": ["single_bot", "coop_group"],
+        }
+        execution_config["runtime_profile"] = profile
     execution_config["main_session_id"] = session_id
     if not a2a:
         # Both benchmark messages target the draft runtime binding. Persist that

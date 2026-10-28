@@ -25,6 +25,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskReportEventType,
     TaskReportResult,
     TaskReportStatus,
+    TaskRuntimeProfile,
 )
 from agentclaw.community.core.task.task_context.task_graph_support import (
     _relay_graph_output,
@@ -390,11 +391,9 @@ def apply_relay_report(
                 mode = next_node.run_info.run_mode
                 assignee = next_node.run_info.assignee
                 config = graph.extend_props.get("execution_config") or {}
-                allowed = (graph.extend_props.get("runtime_profile") or {}).get(
-                    "allowed_run_modes"
-                ) or ["single_bot", "coop_group", "bbs"]
+                allowed = TaskRuntimeProfile.run_modes_from_graph(graph)
                 if mode not in allowed:
-                    raise TaskStateError("planned run mode is not allowed")
+                    raise TaskStateError(f"planned run mode is not allowed: {mode}")
                 if mode == "coop_group" and config.get("intake_session_id"):
                     raise TaskStateError(
                         "Group relay handoff is not supported in the first release"

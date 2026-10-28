@@ -9,10 +9,16 @@ from typing import Any
 def format_relay_execution_instruction(
     *, task_id: str, node_id: str, relay_token: str, backend_url: str,
     objective: str, instruction: str, acceptances: list[dict[str, Any]],
+    allowed_run_modes: list[str] | None = None,
 ) -> str:
     """Give the Bot its current run generation, never a Bot session credential."""
     report_path = "/api/v1/collaboration/tasks/callback/report"
     context_path = f"/api/v1/collaboration/tasks/{task_id}/nodes/{node_id}/context"
+    modes = [
+        str(mode).strip()
+        for mode in (allowed_run_modes or ["single_bot", "coop_group", "bbs"])
+        if str(mode).strip()
+    ] or ["single_bot", "coop_group", "bbs"]
     return "\n".join([
         "[task-execute]",
         "S0 路由锁：本指令是 Backend 下发的分布式接力执行入口，必须由 task-loop Skill 承接；"
@@ -26,6 +32,9 @@ def format_relay_execution_instruction(
         f"本节点目标：{objective}",
         f"本节点指令：{instruction}",
         f"本节点验收：{json.dumps(acceptances, ensure_ascii=False)}",
+        f"S5d后继允许执行模态={json.dumps(modes, ensure_ascii=False)}；"
+        "只能从该列表中选择下一棒 run_mode，未列出的模态一律禁止；"
+        "无可用候选且列表内模式都不可执行时，按规划失败上报，不得绕过该白名单。",
         "所有任务 HTTP 请求必须通过 task-loop Skill 的 scripts/relay_http.py 调用。"
         "该工具使用本指令中由服务端配置注入的 backend_url 访问生产内网白名单保护的"
         " /api/v1 接口；每次调用必须传 --backend-url；不读取或发送 BCS session token。"
@@ -88,13 +97,15 @@ def format_relay_execution_instruction(
         "S5.3 根据 gaps 与下一棒 TaskSpec 搜索候选，POST /api/v1/collaboration/tasks/search，"
         "stdin JSON 必须是 {query,task_id,node_id,relay_token}；"
         "422 是请求契约错误，不是 candidates=[]，禁止由此跳过 S5c。"
-        "S5.4 本地选择 HIT_SINGLE、HIT_MULTI_BOTS 或 MISS。"
+        "S5.4 本地只能在 S5d后继允许执行模态白名单内选择 HIT_SINGLE、HIT_MULTI_BOTS 或 MISS。"
         "HIT_SINGLE 填 run_info.run_mode=single_bot 和 run_info.assignee=bot_id；"
         "HIT_MULTI_BOTS 填 run_mode=coop_group、assignee=null，并在"
         " run_info.extend_props.pending_group_formation 携带 manager_worker 的"
         " bot_ids、group_name、members_info 与 extend_props.manager_bot_id，"
-        "不得传已有 group_id；MISS 填 run_mode=bbs、assignee=null，"
-        "并把原因写入 run_info.failure_reason。"
+        "不得传已有 group_id；当 bbs 在白名单内时，MISS 才可填 run_mode=bbs、"
+        "assignee=null，并把原因写入 run_info.failure_reason。bbs 不在白名单内时，"
+        "MISS 必须转为规划失败：event=null、task_acceptance_result=null，"
+        "并把 bbs_disabled_and_no_candidate 写入顶层 failure_reason。"
         "S5.5 仅上报一次 PLAN_RESULT，三种分支恰好命中一个："
         "收口时 event=null 且提供通过的 task_acceptance_result；"
         "有后继时 event 为未落图 TaskNode"

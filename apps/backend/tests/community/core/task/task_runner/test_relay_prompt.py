@@ -237,3 +237,37 @@ def test_relay_delivery_prompt_uses_required_trace_contract() -> None:
     assert "PLAN_RESULT.trace.steps" in prompt
     assert "禁止 step/status/detail 或下挂 detail 的旧结构" in prompt
     assert "backend_url=https://backend.example" in prompt
+
+
+
+def test_relay_prompt_defaults_to_all_run_modes() -> None:
+    prompt = format_relay_execution_instruction(
+        task_id="task-1",
+        node_id="node-1",
+        relay_token="generation-1",
+        backend_url="https://backend.example",
+        objective="完成任务",
+        instruction="执行并上报",
+        acceptances=[],
+    )
+
+    assert "S5d后继允许执行模态=[\"single_bot\", \"coop_group\", \"bbs\"]" in prompt
+
+
+def test_relay_prompt_injects_allowed_run_modes() -> None:
+    prompt = format_relay_execution_instruction(
+        task_id="task-1",
+        node_id="node-1",
+        relay_token="generation-1",
+        backend_url="https://backend.example",
+        objective="完成任务",
+        instruction="执行并上报",
+        acceptances=[],
+        allowed_run_modes=["single_bot", "coop_group"],
+    )
+
+    assert "S5d后继允许执行模态=[\"single_bot\", \"coop_group\"]" in prompt
+    assert "只能从该列表中选择下一棒 run_mode" in prompt
+    assert "HIT_MULTI_BOTS 或 MISS" in prompt
+    assert "当 bbs 在白名单内时，MISS 才可填 run_mode=bbs" in prompt
+    assert "bbs_disabled_and_no_candidate" in prompt

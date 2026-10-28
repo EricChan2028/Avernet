@@ -146,6 +146,37 @@ def test_report_creates_one_successor_and_projects_replay_receipt() -> None:
     ]
 
 
+def test_report_rejects_bbs_plan_when_runtime_profile_disallows_it() -> None:
+    service = _graph_service()
+    graph = service.query_task_dashboard("task-1")
+    graph.extend_props["runtime_profile"] = {
+        "allowed_run_modes": ["single_bot", "coop_group"]
+    }
+    planned = TaskNode(
+        node_id=None,
+        task_id="task-1",
+        status=None,
+        task_spec=TaskSpec(Context("next", title="next"), Goal("finish remainder", [])),
+        run_info=RuntimeInfo(run_mode="bbs", assignee=None),
+        node_run_graph=None,
+    )
+    command = TaskReportCommand(
+        task_id="task-1",
+        node_id="task-1",
+        event_id="plan-bbs",
+        relay_token="attempt-1",
+        event_type=TaskReportEventType.PLAN_RESULT,
+        event=planned,
+    )
+
+    assert service.apply_relay_report(_execution()).status == (
+        TaskReportStatus.APPLIED
+    )
+
+    with pytest.raises(TaskStateError, match="planned run mode is not allowed: bbs"):
+        service.apply_relay_report(command)
+
+
 def test_report_accepts_latest_skill_fact_after_infra_hung_state() -> None:
     service = _graph_service()
     node = service.query_task_dashboard("task-1").tasks[0]

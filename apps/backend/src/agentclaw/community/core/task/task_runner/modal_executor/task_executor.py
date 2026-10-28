@@ -14,6 +14,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskCallbackData,
     TaskNode,
     TaskNodePatch,
+    TaskRuntimeProfile,
     task_spec_instruction,
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
@@ -374,6 +375,9 @@ class TaskExecutor(TaskExecutorOwnerMixin, TaskExecutorRelayMixin, TaskExecutorB
                 ],
                 "upstream_outputs": ctx.get("sibling_outputs") or {},
                 "relay_token": node.run_info.extend_props.get("relay_token"),
+                "allowed_run_modes": list(
+                    TaskRuntimeProfile.run_modes_from_graph(node.node_run_graph)
+                ),
             },
         )
         task_owner_id = self._resolve_owner_user_id(gf)
@@ -781,6 +785,7 @@ class TaskExecutor(TaskExecutorOwnerMixin, TaskExecutorRelayMixin, TaskExecutorB
                     relay_execution=bool(gf.extend_props.get("relay_execution")),
                     relay_blackboard=gf.extend_props.get("relay_blackboard"),
                     relay_token=gf.extend_props.get("relay_token"),
+                    allowed_run_modes=gf.extend_props.get("allowed_run_modes"),
                 )
             elif str(_task_instruction).lstrip().startswith("# 接自"):
                 # 接力协作群(static_plan):真正的多 bot 协作群 task_instruction 由 engine 从 TaskSpec 业务事实派生,未走
