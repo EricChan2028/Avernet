@@ -26,6 +26,7 @@ import hashlib
 import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from agentclaw.community.core.bot_management.engines.restart_contract import RestartPreconditionError
 from agentclaw.community.core.service_bot.repository.models import (
     PublishOperationKind,
     PublishOperationRecord,
@@ -228,6 +229,11 @@ async def acquire_deploy_workflow(
 
     try:
         op = await runner.acquire_workflow(op, _issue_classified)
+    except RestartPreconditionError as error:
+        # The engine veto is explicitly before submission, not an ambiguous
+        # provider error. Close THIS op, never an unrelated latest workflow.
+        runner.fail_operation(op, str(error))
+        raise
     except TargetBotGoneError:
         runner.abandon_operation(op, bot_gone_reason)
         raise

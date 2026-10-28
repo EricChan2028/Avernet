@@ -17,3 +17,11 @@ class RestartServices:
     template_service: Any
     # Existing BotService instance, reused by the engine-owned restart executor.
     lifecycle: BotService
+
+
+class RestartPreconditionError(RuntimeError):
+    """An engine vetoed restart before mutation; message is safe for users.
+
+    Callers must preserve the old target and expose their existing failure
+    state. This is terminal, unlike an ambiguous provider submission failure.
+    """
