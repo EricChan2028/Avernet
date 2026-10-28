@@ -66,10 +66,24 @@ Worker-ID lookup; the TC adapter retains its existing exact Worker-ID priority.
   its owning application must replay failed writes and manage recovery. It does
   not implement a durable catalog or update scheduler itself.
 
-Use one application process per owned index for this release. Multiple independent
-writers must not share a collection pair: process-local locks do not coordinate
-rebuilds across instances. A shared cluster and multi-worker update ownership need
-a separate design and validation. Server mode alone does not establish capacity.
+Runtime mode adds a shared durable ownership catalog in MySQL
+(`bcsfuse_index_states`). Only the active lease owner may mutate a dense/keyword
+collection pair; graceful shutdown releases the lease and an expired lease permits
+failsafe takeover. The lease owner publishes a revision after each successful
+backend write. Non-owner replicas are read-only and `/ready` reports them stale
+until reconstruction or sync reaches the shared revision. Direct reader rebuild
+and incremental sync calls are rejected before Qdrant; startup uses
+`synchronize_read_view`, which only acknowledges the shared revision and reloads
+the process-local literal snapshot. After startup, the composed readiness check
+also performs this bounded revision sync once when a read-only replica observes
+a newer shared revision; it does not rebuild or mutate Qdrant. State-store
+failure is a 503 rather than a write success or empty 200. Set `BCSFUSE_INDEX_OWNER_ID` to a
+stable pod/application identity, and configure
+`vector.index.stale_after_seconds` (default 60) and
+`vector.index.lease_seconds` (default 120). Local/test modes remain single-store
+and do not claim the state row. Server mode alone still does not establish
+capacity; each layer must continue to use the bounded degradation chain and its
+own durability/HA deployment.
 
 ## Verification
 

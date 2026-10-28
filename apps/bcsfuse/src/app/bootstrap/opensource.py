@@ -30,6 +30,45 @@ def _safe_host(url: str | None) -> str:
         return "<invalid-url>"
 
 
+def _with_literal_fallback(vector_store):
+    """Register a vector store that also maintains the final local snapshot."""
+    from app.application.services.literal_fallback_maintenance import (
+        wrap_vector_store_with_literal_fallback,
+    )
+
+    return wrap_vector_store_with_literal_fallback(vector_store)
+
+
+def _config_int(config: object, key: str, default: int) -> int:
+    """Read an optional composition setting while retaining typed defaults."""
+    method = getattr(config, "get_int", None)
+    if method is not None:
+        return int(method(key, default))
+    try:
+        return int(config.get(key, default))  # type: ignore[attr-defined]
+    except AttributeError:
+        return default
+
+
+def _config_float(config: object, key: str, default: float) -> float:
+    method = getattr(config, "get_float", None)
+    if method is not None:
+        return float(method(key, default))
+    try:
+        return float(config.get(key, default))  # type: ignore[attr-defined]
+    except AttributeError:
+        return default
+
+
+def _index_owner_id() -> str:
+    import socket
+
+    owner_id = os.getenv("BCSFUSE_INDEX_OWNER_ID")
+    if owner_id:
+        return owner_id
+    return f"{socket.gethostname()}:{os.getpid()}"
+
+
 def register_runtime_service_providers(
     registry: "ProviderRegistry", config: "YamlEnvConfigProvider"
 ) -> None:
@@ -84,19 +123,42 @@ def register_runtime_service_providers(
         else "NO",
     )
 
-    registry.register(
-        "embedding_provider",
-        RealEmbeddingProvider(
-            settings=EmbeddingSettings(
-                base_url=embedding_base_url,
-                auth_token=os.getenv("EMBEDDING_AUTH_TOKEN")
-                or config.get("embedding.auth_token"),
-                model=embedding_model,
-                dimension=embedding_dimension,
-            )
+    from app.infra.public.embedding.cached_embedding_provider import (
+        CachedEmbeddingProvider,
+    )
+    from app.infra.public.embedding.circuit_breaker_provider import (
+        CircuitBreakerEmbeddingProvider,
+    )
+
+    backend_embedding_provider = RealEmbeddingProvider(
+        settings=EmbeddingSettings(
+            base_url=embedding_base_url,
+            auth_token=os.getenv("EMBEDDING_AUTH_TOKEN")
+            or config.get("embedding.auth_token"),
+            model=embedding_model,
+            dimension=embedding_dimension,
+        )
+    )
+    circuit_embedding_provider = CircuitBreakerEmbeddingProvider(
+        backend_embedding_provider,
+        failure_threshold=_config_int(
+            config, "embedding.circuit.failure_threshold", 3
+        ),
+        recovery_timeout_seconds=_config_float(
+            config, "embedding.circuit.recovery_seconds", 10.0
         ),
     )
-    registry.register("reranker_provider", HttpReranker())
+    registry.register(
+        "embedding_provider",
+        CachedEmbeddingProvider(
+            circuit_embedding_provider,
+            max_entries=_config_int(config, "embedding.cache.max_entries", 10000),
+            ttl_seconds=_config_float(config, "embedding.cache.ttl_seconds", 300.0),
+        ),
+    )
+    from app.infra.public.reranker.http_reranker import get_reranker
+
+    registry.register("reranker_provider", get_reranker())
     registry.register(
         "llm_provider",
         AnthropicCompatibleProvider(
@@ -258,6 +320,28 @@ def _build_runtime_providers(registry: "ProviderRegistry", config: "YamlEnvConfi
         mysql_password=os.getenv("MYSQL_PASSWORD", ""),
         mysql_database=os.getenv("MYSQL_DATABASE", "bcsfuse"),
     )
+    from app.application.services.index_state_vector_store import (
+        wrap_vector_store_with_index_state,
+    )
+    from app.infra.public.stores.mysql_index_state_store import MySQLIndexStateStore
+
+    collection_name = config.get("vector.qdrant.collection", "bcsfuse_profiles")
+    stale_after_seconds = config.get_float(
+        "vector.index.stale_after_seconds", 60.0
+    )
+    lease_seconds = max(
+        stale_after_seconds + 1.0,
+        config.get_float("vector.index.lease_seconds", 120.0),
+    )
+    vector_store = wrap_vector_store_with_index_state(
+        vector_store,
+        store=MySQLIndexStateStore(connection_pool=mysql_pool),
+        owner_id=_index_owner_id(),
+        collection_pair=f"{collection_name}:dense+keyword",
+        stale_after_seconds=stale_after_seconds,
+        lease_seconds=lease_seconds,
+    )
+    vector_store = _with_literal_fallback(vector_store)
     registry.register("vector_store", vector_store)
 
     # Rebuild only after startup dependencies initialize. A failed rebuild
@@ -333,6 +417,7 @@ def _build_dev_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPro
         qdrant_path=os.getenv("QDRANT_LOCAL_PATH") or config.get("vector.qdrant.path"),
         auto_load=False,
     )
+    vector_store = _with_literal_fallback(vector_store)
     registry.register("vector_store", vector_store)
     from app.providers.public.vector_index_startup_provider import VectorIndexStartupProvider
     registry.register("startup_provider", VectorIndexStartupProvider(
@@ -386,7 +471,27 @@ def _build_dev_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPro
         dimension=embedding_dimension,
     )
     if embedding_settings.is_configured():
-        embedding_provider = RealEmbeddingProvider(settings=embedding_settings)
+        from app.infra.public.embedding.cached_embedding_provider import (
+            CachedEmbeddingProvider,
+        )
+
+        from app.infra.public.embedding.circuit_breaker_provider import (
+            CircuitBreakerEmbeddingProvider,
+        )
+
+        embedding_provider = CachedEmbeddingProvider(
+            CircuitBreakerEmbeddingProvider(
+                RealEmbeddingProvider(settings=embedding_settings),
+                failure_threshold=_config_int(
+                    config, "embedding.circuit.failure_threshold", 3
+                ),
+                recovery_timeout_seconds=_config_float(
+                    config, "embedding.circuit.recovery_seconds", 10.0
+                ),
+            ),
+            max_entries=_config_int(config, "embedding.cache.max_entries", 10000),
+            ttl_seconds=_config_float(config, "embedding.cache.ttl_seconds", 300.0),
+        )
         registry.register("embedding_provider", embedding_provider)
     else:
         missing = embedding_settings.missing_config()
@@ -400,7 +505,9 @@ def _build_dev_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPro
         registry.register("embedding_provider", embedding_provider)
 
     # HTTP reranker
-    reranker_provider = HttpReranker()
+    from app.infra.reranker import get_circuit_breaker_reranker
+
+    reranker_provider = get_circuit_breaker_reranker()
     registry.register("reranker_provider", reranker_provider)
 
     # Anthropic-compatible LLM provider (HTTP) — fallback to FakeLLMProvider if not configured
@@ -500,6 +607,7 @@ def _build_dev_smoke_providers(registry: "ProviderRegistry", config: "YamlEnvCon
         qdrant_path=os.getenv("QDRANT_LOCAL_PATH") or config.get("vector.qdrant.path"),
         auto_load=False,
     )
+    vector_store = _with_literal_fallback(vector_store)
     registry.register("vector_store", vector_store)
     from app.providers.public.vector_index_startup_provider import VectorIndexStartupProvider
     registry.register("startup_provider", VectorIndexStartupProvider(
@@ -555,6 +663,7 @@ def _build_test_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPr
 
     # InMemory vector store
     vector_store = InMemoryVectorStore(dimension=config.get_int("embedding.dimension", 4096))
+    vector_store = _with_literal_fallback(vector_store)
     registry.register("vector_store", vector_store)
 
     # Fake embedding provider

@@ -27,8 +27,21 @@ class ContractAuthProvider:
         return self.current_user is not None
 
 
-def build_request(auth_provider: ContractAuthProvider):
+class Config:
+    def __init__(self, trust_gateway: bool) -> None:
+        self.trust_gateway = trust_gateway
+
+    def get_bool(self, key: str, default: bool = False) -> bool:
+        assert key == "auth.trust_gateway"
+        return self.trust_gateway
+
+
+def build_request(
+    auth_provider: ContractAuthProvider,
+    config: Config | None = None,
+):
     registry = ProviderRegistry()
+    registry.register("config", config or Config(False))
     registry.register("auth", auth_provider)
     context = ApplicationContext(
         mode="test",
@@ -40,37 +53,58 @@ def build_request(auth_provider: ContractAuthProvider):
     )
 
 
-def test_disabled_when_env_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("BCSFUSE_TRUST_GATEWAY", raising=False)
-    assert _trust_gateway_enabled() is False
+def test_gateway_trust_is_disabled_by_composed_config() -> None:
+    assert _trust_gateway_enabled(Config(False)) is False
 
 
-def test_enabled_when_env_true(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("BCSFUSE_TRUST_GATEWAY", "true")
-    assert _trust_gateway_enabled() is True
+def test_gateway_trust_is_enabled_by_composed_config() -> None:
+    assert _trust_gateway_enabled(Config(True)) is True
 
 
-def test_disabled_for_other_values(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("BCSFUSE_TRUST_GATEWAY", "0")
-    assert _trust_gateway_enabled() is False
-
-
-def test_auth_guard_accepts_provider_implementing_published_contract(
+def test_route_gateway_trust_cannot_be_enabled_by_raw_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("BCSFUSE_TRUST_GATEWAY", raising=False)
+    monkeypatch.setenv("BCSFUSE_TRUST_GATEWAY", "true")
+    request = build_request(ContractAuthProvider(None), Config(False))
+
+    with pytest.raises(HTTPException) as exc_info:
+        require_oss_auth(request)
+
+    assert exc_info.value.status_code == 401
+
+
+def test_auth_guard_accepts_provider_implementing_published_contract() -> None:
     request = build_request(ContractAuthProvider({"user_id": "contract-user"}))
 
     require_oss_auth(request)
 
 
-def test_auth_guard_rejects_missing_current_user(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("BCSFUSE_TRUST_GATEWAY", raising=False)
+def test_auth_guard_rejects_missing_current_user() -> None:
     request = build_request(ContractAuthProvider(None))
 
     with pytest.raises(HTTPException) as exc_info:
         require_oss_auth(request)
 
     assert exc_info.value.status_code == 401
+
+
+def test_gateway_env_override_is_loaded_by_config_provider(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from app.infra.public.config.yaml_env_config_provider import (
+        YamlEnvConfigProvider,
+    )
+
+    yaml_path = tmp_path / "application-test.yaml"
+    yaml_path.write_text("auth:\n  trust_gateway: false\n", encoding="utf-8")
+    monkeypatch.setenv("BCSFUSE_TRUST_GATEWAY", "true")
+
+    config = YamlEnvConfigProvider(config_path=str(yaml_path))
+
+    assert config.get_bool("auth.trust_gateway", False) is True
+
+
+def test_composed_gateway_trust_value_skips_local_bearer_validation() -> None:
+    request = build_request(ContractAuthProvider(None), Config(True))
+
+    require_oss_auth(request)

@@ -264,7 +264,9 @@ def _create_thin_wrapper_routes(router: APIRouter):
 
         try:
             # Generate embedding
-            logger.info(f"[Search OSS] Generating embedding for query: {search_req.query[:50]}...")
+            logger.info(
+                "[Search OSS] Generating embedding for query_length=%d", len(search_req.query)
+            )
             query_embedding = embedding_provider.embed(search_req.query)
             logger.info(f"[Search OSS] Query embedding dimension: {len(query_embedding) if query_embedding else 0}")
 

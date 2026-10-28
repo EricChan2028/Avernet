@@ -481,8 +481,12 @@ def test_actual_http_adapter_propagates_failure_but_zero_is_a_valid_model_score(
             return {"scores": [0.0] * 6} if mode == "zero" else {}
 
     monkeypatch.setattr(requests, "post", lambda *args, **kwargs: Response())
+    # Keep the injected adapter aligned with the request model so this test
+    # exercises the actual HTTP adapter directly instead of the model-override
+    # factory and its deliberately process-local circuit state.
+    actual_adapter = HttpReranker(model="controlled")
     service, _ = service_for(store, tmp_path)
-    service._reranker_service = FragmentRerankerService(reranker=HttpReranker())
+    service._reranker_service = FragmentRerankerService(reranker=actual_adapter)
     baseline, _ = run(service, False)
     results, config = run(service, True)
     if mode == "zero":

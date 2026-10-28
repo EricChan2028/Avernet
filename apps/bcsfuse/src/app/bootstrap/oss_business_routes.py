@@ -32,7 +32,7 @@ import logging
 from datetime import datetime
 from fastapi import APIRouter, Request, HTTPException, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # Import schemas directly (safe - no import chain)
 from app.adapters.http.schemas.worker_management_schemas import (
@@ -43,13 +43,41 @@ from app.adapters.http.schemas.worker_management_schemas import (
 logger = logging.getLogger(__name__)
 
 # Request models
+MAX_V1_FILTER_FIELDS = 16
+MAX_V1_FILTER_VALUES_PER_FIELD = 32
+
+
+def _validate_v1_search_filters(filters):
+    """Bound V1 filter cardinality without changing supported value shapes."""
+    if filters is None:
+        return
+    if len(filters) > MAX_V1_FILTER_FIELDS:
+        raise ValueError(
+            f"filters must contain at most {MAX_V1_FILTER_FIELDS} fields"
+        )
+    for values in filters.values():
+        if isinstance(values, list) and len(values) > MAX_V1_FILTER_VALUES_PER_FIELD:
+            raise ValueError(
+                "each filter must contain at most "
+                f"{MAX_V1_FILTER_VALUES_PER_FIELD} values"
+            )
+
+
 class SearchRequestOSS(BaseModel):
     """Search request (OSS wrapper)"""
-    query: str = Field(..., min_length=1, description="Search query")
+
+    query: str = Field(
+        ..., min_length=1, max_length=4096, description="Search query"
+    )
     top_k: int = Field(default=10, ge=1, le=50, description="Number of results")
     mode: str = Field(default="auto", description="Search mode")
     min_score: float = Field(default=0.0, ge=0.0, le=1.0, description="Minimum score threshold")
     filters: Optional[dict] = Field(default=None, description="Search filters")
+
+    @model_validator(mode="after")
+    def bounded_filters(self):
+        _validate_v1_search_filters(self.filters)
+        return self
 
 
 class WorkerCreateRequestOSS(BaseModel):
@@ -338,21 +366,23 @@ def _check_provider_availability(request: Request) -> dict:
     }
 
 
-def _trust_gateway_enabled() -> bool:
-    """True when bcsfuse sits behind the Avernet gateway and trusts its auth.
+def _trust_gateway_enabled(config: Any) -> bool:
+    """Read the gateway-trust deployment decision from composed configuration.
 
-    The gateway authenticates the caller (route_security user:required) and
-    forwards the request; bcsfuse then skips its own shared-Bearer check.
-    D2 lightest: bcsfuse does NOT verify X-Avernet-Principal.
+    The gateway authenticates the caller and forwards the request; when this
+    explicit composition value is true, bcsfuse skips its own shared-Bearer
+    check. Route code never reads the environment directly, so a stray
+    ``BCSFUSE_TRUST_GATEWAY`` value cannot silently bypass composed auth.
 
-    Scope: this bypass is GLOBAL — when the flag is on, EVERY protected bcsfuse
-    route guarded by require_oss_auth skips the shared-Bearer check, not only the
-    endpoints exposed via the gateway. Operational precondition: when this flag is
-    enabled, bcsfuse MUST be reachable ONLY through the gateway (not dual-homed on
-    a debug/singlebox/direct port); otherwise all those routes become
-    unauthenticated. Match is case-insensitive against the literal "true".
+    Scope: this bypass is GLOBAL — when the value is true, every protected
+    bcsfuse route guarded by require_oss_auth skips the shared-Bearer check.
+    Operational precondition: BCSFuse must then be reachable only through the
+    gateway, not through a debug, singlebox, or direct port.
     """
-    return os.environ.get("BCSFUSE_TRUST_GATEWAY", "").lower() == "true"
+    get_bool = getattr(config, "get_bool", None)
+    if get_bool is None:
+        return False
+    return bool(get_bool("auth.trust_gateway", False))
 
 
 def require_oss_auth(request: Request) -> None:
@@ -368,11 +398,11 @@ def require_oss_auth(request: Request) -> None:
     Raises:
         HTTPException: 401 if authentication fails.
     """
-    if _trust_gateway_enabled():
-        return
-
     # Get auth provider from registry (NOT global)
     registry = _get_provider_registry(request)
+    if _trust_gateway_enabled(registry.get("config")):
+        return
+
     auth_provider = registry.get("auth")
 
     if auth_provider is None:
@@ -1411,11 +1441,15 @@ def include_oss_business_routes(app) -> None:
 
         try:
             logger.info(
-                "[Search OSS] Query: %s, top_k: %s",
-                search_req.query, search_req.top_k,
+                "[Search OSS] Request query_length=%s, top_k=%s",
+                len(search_req.query), search_req.top_k,
             )
 
             # --- Obtain services via fusion_dependencies ---
+            from app.adapters.http.search_threadpool import (
+                run_search_in_threadpool,
+            )
+
             from app.adapters.http.dependencies.fusion_dependencies import (
                 _get_vector_match_service,
                 _get_embedding_generator,
@@ -1434,7 +1468,9 @@ def include_oss_business_routes(app) -> None:
                 )
 
             # --- Generate query embedding ---
-            query_embedding = embedding_gen.embed(search_req.query)
+            query_embedding = await run_search_in_threadpool(
+                embedding_gen.embed, search_req.query
+            )
             logger.info(
                 "[Search OSS] Embedding generated, dimension=%d",
                 len(query_embedding) if query_embedding else 0,
@@ -1453,8 +1489,8 @@ def include_oss_business_routes(app) -> None:
                 merged_filters["runtime_state"] = ["online"]
 
             logger.info(
-                "[Search OSS] filters: user=%s, merged=%s",
-                user_filters, merged_filters,
+                "[Search OSS] merged_filter_fields=%s",
+                sorted(merged_filters),
             )
 
             # --- Build runtime_config (aligned with internal) ---
@@ -1464,7 +1500,8 @@ def include_oss_business_routes(app) -> None:
                 runtime_config["reranker_model"] = reranker_model
 
             # --- Execute match via service (fragment-aware) ---
-            results = match_service.match(
+            results = await run_search_in_threadpool(
+                match_service.match,
                 query_embedding=query_embedding,
                 top_k=search_req.top_k,
                 query=search_req.query,
@@ -1532,9 +1569,12 @@ def include_oss_business_routes(app) -> None:
         except Exception as e:
             logger.error("[Search OSS] Search failed: %s", e, exc_info=True)
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail={"code": "SEARCH_ERROR", "message": str(e)},
-            )
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "code": "SEARCH_UNAVAILABLE",
+                    "message": "search service unavailable",
+                },
+            ) from e
 
 # ========================================
     # Include routers in app

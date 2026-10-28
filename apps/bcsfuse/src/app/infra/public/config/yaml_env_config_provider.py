@@ -47,11 +47,18 @@ class YamlEnvConfigProvider:
             "LLM_AUTH_TOKEN": ["llm", "auth_token"],
             "LLM_FAST_MODEL": ["llm", "fast_model"],
             "LLM_REASONING_MODEL": ["llm", "reasoning_model"],
+            "BCSFUSE_TRUST_GATEWAY": ["auth", "trust_gateway"],
             "LLM_ENABLED": ["llm", "enabled"],
             "EMBEDDING_BASE_URL": ["embedding", "base_url"],
             "EMBEDDING_AUTH_TOKEN": ["embedding", "auth_token"],
             "EMBEDDING_MODEL": ["embedding", "model"],
             "EMBEDDING_DIMENSION": ["embedding", "dimension"],
+            "EMBEDDING_CIRCUIT_FAILURE_THRESHOLD": [
+                "embedding", "circuit", "failure_threshold",
+            ],
+            "EMBEDDING_CIRCUIT_RECOVERY_SECONDS": [
+                "embedding", "circuit", "recovery_seconds",
+            ],
             "RERANKER_BASE_URL": ["reranker", "base_url"],
             "RERANKER_API_KEY": ["reranker", "api_key"],
             "RERANKER_MODEL": ["reranker", "model"],

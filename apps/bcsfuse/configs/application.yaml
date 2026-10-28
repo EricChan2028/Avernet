@@ -44,6 +44,10 @@ auth:
   provider: simple_token
   token_env: BCSFUSE_AUTH_TOKEN
   required_for_business_routes: true
+  # Gateway deployment is the only composition that may skip the local Bearer
+  # check. Default is fail closed; operators enable it explicitly only when
+  # BCSFuse is reachable solely through the authenticated gateway.
+  trust_gateway: false
   # Token MUST be set via BCSFUSE_AUTH_TOKEN env var
   # Example for testing: BCSFUSE_AUTH_TOKEN=test-token
   # Example for dev: BCSFUSE_AUTH_TOKEN=dev-smoke-token
@@ -109,6 +113,9 @@ embedding:
   token_env: EMBEDDING_AUTH_TOKEN
   model_env: EMBEDDING_MODEL
   dimension_env: EMBEDDING_DIMENSION
+  circuit:
+    failure_threshold: 3
+    recovery_seconds: 10
   # All embedding service credentials MUST come from env vars
 
 reranker:
@@ -118,6 +125,9 @@ reranker:
   base_url_env: RERANKER_BASE_URL
   token_env: RERANKER_API_KEY
   model_env: RERANKER_MODEL
+  circuit:
+    failure_threshold: 3
+    recovery_seconds: 10
   # All reranker service credentials MUST come from env vars
 
 llm:

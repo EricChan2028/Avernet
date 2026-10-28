@@ -257,8 +257,23 @@ def create_bcsfuse_app(
         lifespan=lifespan,
     )
 
+    from app.bootstrap.search_capacity import (
+        SearchCapacityMiddleware,
+        SearchCapacitySettings,
+    )
     from app.infra.public.observability.trace_middleware import TraceIdMiddleware
 
+    capacity_settings = SearchCapacitySettings.from_context(context)
+    from app.adapters.http.search_threadpool import (
+        configure_search_thread_capacity,
+    )
+
+    configure_search_thread_capacity(capacity_settings.max_inflight)
+    app.add_middleware(
+        SearchCapacityMiddleware,
+        settings=capacity_settings,
+    )
+    app.state.search_capacity_max_inflight = capacity_settings.max_inflight
     app.add_middleware(TraceIdMiddleware)
 
     # Store context in app state

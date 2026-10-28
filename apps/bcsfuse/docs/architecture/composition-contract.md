@@ -198,6 +198,219 @@ remain in effect. Name-only input is limited evidence of task capability: model
 scores are not calibrated probabilities. Contract coverage is in
 `tests/contract/test_reranker_profile_inputs.py`.
 
+### Shared v2 graceful-degradation projection
+
+When the host supplies the shared v2 search router, `TcSearchApplication`
+projects TC's retrieval diagnostics into the neutral response contract. Valid
+hybrid results remain `status=ok` with no reasons. A degraded result sets
+`status=degraded` and reports stable reason codes in this order:
+`keyword_unavailable`, `semantic_unavailable`, `literal_fallback`, and
+`rerank_degraded`. A `regex_fallback` score source also reports
+`literal_fallback`. Executed provider failures that bubble out of the candidate
+service remain `SearchUnavailable` / HTTP 503; this projection describes only a
+successful response that actually used a bounded fallback or degraded rerank. It
+does not turn an empty valid result into an outage.
+
+### Search capacity admission and workers
+
+The composed application owns a process-wide, non-queuing search admission pool.
+It is configured through the `config` provider, not route code or raw
+environment access: `search.capacity.max_inflight` (default 64) and
+`search.capacity.retry_after_seconds` (default 1). The pool is shared by
+`/api/v1/search`, `/api/v1/recommend`, `/api/v2/search`, and
+`/api/v2/recommend`. Requests beyond the limit return HTTP 429,
+`Retry-After`, and stable code `SEARCH_CAPACITY_EXCEEDED` before business
+execution consumes embedding, Qdrant, rerank, or durable database capacity.
+This is a per-process admission layer, not a distributed token bucket.
+Search transport also enforces a 64 KiB body-size boundary in the same
+middleware: a POST with `Content-Length` above that value is rejected before
+admission with HTTP 413 and stable code `SEARCH_REQUEST_TOO_LARGE`; when a
+client omits `Content-Length`, the middleware consumes the undeclared body
+under the same 64 KiB bound before JSON parsing. Both paths increment
+`bcsfuse_search_request_too_large_total`. V1 search and recommendation schemas
+have the same query cardinality guard as v2: query/question text is at most 4,096
+characters, filters contain at most 16 fields, and each array value contains at most
+32 items; violations return HTTP 422 before authentication callbacks or business
+execution. These limits do not alter valid v1 responses or ranking behavior.
+V1 dependency execution failures at the delivery boundary return a stable
+HTTP 503 rather than surfacing provider details: `/api/v1/search` uses
+`SEARCH_UNAVAILABLE`, and `/api/v1/recommend` uses `RECOMMEND_UNAVAILABLE`.
+Business-level degradation continues to run inside the candidate service, so
+these errors represent an unavailable core path after declared fallback, not a
+result-set condition.
+
+Admitted V1 search and recommendation delivery calls use a dedicated bounded
+worker pool configured to the same admission value. They do not queue on
+Starlette's default process worker pool once admission accepts them. Readiness
+and other non-search synchronous work remains on the default pool and is thereby
+protected from search saturation. `TcSearchApplication` retains its own permit
+while synchronous work is actually running, including after HTTP cancellation
+or timeout.
+
+Prometheus exposes request count, rejection count, inflight, configured
+capacity and request duration. The labels identify operation, API version and
+HTTP outcome. These metrics describe admission health, not dependency health.
+
+### Search dependency metrics
+
+The public adapters expose the two dependencies that directly determine search
+latency and availability without log mining:
+
+- The durable vector adapter records `bcsfuse_qdrant_search_duration_seconds`
+  and `bcsfuse_qdrant_lock_wait_seconds` for both `dense` and `keyword`
+  operations. The mode label distinguishes local and server compositions.
+  Failures increment `bcsfuse_qdrant_errors_total`; the adapter still raises so
+  the application can execute its declared retrieval fallback or return an
+  error. A metric is never used to convert a provider failure into empty
+  success.
+- The real HTTP reranker records `bcsfuse_rerank_calls_total` and
+  `bcsfuse_rerank_duration_seconds` with `success` or `error` outcomes. Errors
+  remain exceptions, leaving policy-owned fallback to the retrieval service.
+- The real embedding provider records `bcsfuse_embedding_calls_total`,
+  `bcsfuse_embedding_duration_seconds` and, on the final failed call,
+  `bcsfuse_embedding_errors_total`. Empty batches record nothing because they do
+  not contact the model service. Errors remain exceptions, so retrieval can use
+  keyword-only or literal fallback through the declared pipeline.
+- The no-op reranker and fake embedding provider record nothing because they are
+  explicit local implementations rather than external dependency health signals.
+
+These are process-level dependency metrics. Horizontal replicas aggregate them
+in the metrics plane; they do not coordinate requests or replace index owner
+leases.
+
+### Reranker circuit breaker
+
+Runtime and configured dev compositions wrap the HTTP reranker with a
+process-local `CircuitBreakerReranker`. The default is three consecutive
+failures followed by a ten-second open period; deployment overrides are
+`RERANKER_CIRCUIT_FAILURE_THRESHOLD` and
+`RERANKER_CIRCUIT_RECOVERY_SECONDS`. A per-process breaker is retained for each
+resolved model, including request-specific reranker models.
+
+When the circuit is open, a non-empty rerank request fails immediately with
+`RerankCircuitOpenError`. It is never converted into zero scores or a silent
+empty result. The existing `reranker_fail_action` owns the delivery policy:
+`degrade` uses aggregate ranking and marks `rerank_degraded`, while `empty` must
+be selected explicitly by policy. Empty candidate batches bypass both breaker
+and backend. Half-open probes are single-flight. Prometheus exposes
+`bcsfuse_rerank_circuit_open`, `bcsfuse_rerank_circuit_rejected_total`, and
+transition counts by model and state.
+
+### Durable index ownership and replica staleness
+
+Runtime composition fences mutable Qdrant stores with a shared durable
+index-state lease. MySQL owns table `bcsfuse_index_states`; one row represents
+one dense/keyword collection pair and stores the active owner, lease expiry,
+index revision and update time. The owning application identity is supplied by
+composition (`BCSFUSE_INDEX_OWNER_ID` in a pod environment), never a caller.
+A second live replica is read-only and cannot reach Qdrant or the durable
+backend with a write. Another replica may take over only after the prior owner
+releases its lease or the lease expires.
+
+Successful backend writes publish a new `index_version`; failed backend writes
+do not. Readers expose owner, version, lag, stale and read-only state through
+readiness and metrics. Shared state-store failure prevents writes and marks the
+replica not ready rather than returning a false write success or empty success.
+Read replicas clear staleness only after reconstruction or sync reaches the
+shared revision.
+
+A lease owner may execute `rebuild_from_backend` or `sync_incremental`. A
+read-only replica must not: both direct operations raise
+`IndexStateWriteForbidden` before reaching Qdrant or another mutable index; HTTP
+delivery maps this boundary to `INDEX_READ_ONLY`. The composed startup path calls
+`synchronize_read_view` on a read-only replica instead. That path acknowledges
+the shared version, reloads only the process-local literal fallback view from the
+durable/shared read interface, and leaves `read_only=true`; it never issues a
+Qdrant rebuild, upsert, delete or collection mutation. After startup, the
+composed readiness check also uses this bounded revision sync: if a read-only
+replica observes that its acknowledged revision is behind the shared revision,
+it synchronizes once, reloads the local literal view, and returns ready only
+when the revision and backend probes succeed. A subsequent readiness probe for
+the same revision does not repeat the local reload. Revision staleness does not
+imply wall-clock lag staleness; the latter still produces 503.
+
+### Shared v2 result cache
+
+A host that supplies the shared v2 router may enable a bounded final-result
+cache on `TcSearchApplication`. Caching is not automatic: the host must supply
+an `index_version_provider` from the composed vector-store state. Without that
+provider, no result is cached because freshness cannot be established. Defaults
+are 1,000 entries and a 30-second TTL; the host may supply explicit capacity and
+a clock.
+
+The key contains the operation, conservatively normalized query, limit, filters,
+validated extensions, verified subject, the complete allowed-ID scope, and the
+durable `index_version`. It never accepts identity or filters from the request
+body. A cache hit returns before capacity admission, so it does not consume a
+worker, embedding, Qdrant, or rerank slot. Identical concurrent requests share
+one in-flight execution.
+
+Only `status=ok` results are cached. Degraded results, provider failures, and
+executor failures are never cached. An index-version change creates a new key.
+Expired and LRU-removed entries are counted as evictions. This is a process-local
+L1 cache, not a distributed result cache and not a substitute for dependency
+health; metrics are `bcsfuse_search_result_cache_hits_total`,
+`bcsfuse_search_result_cache_misses_total`,
+`bcsfuse_search_result_cache_evictions_total`, and
+`bcsfuse_search_result_cache_entries`.
+
+### Query embedding cache
+
+Runtime and configured dev compositions wrap real embedding with a
+process-local query cache. Configuration comes from composition:
+`embedding.cache.max_entries` (default 10000) and
+`embedding.cache.ttl_seconds` (default 300). The cache key contains the exact
+model, dimension and a conservative normalized query: Unicode NFKC plus
+whitespace collapsing. Case folding and alias rewriting are not performed here.
+The backend receives the original text.
+
+Concurrent identical queries share one in-flight backend call. Entries use LRU
+and TTL capacity, failures are not cached, and index bulk embedding bypasses
+the query cache. Prometheus exposes cache hits, misses, errors, evictions and
+entries by model. This is an L1 process cache only; it is not a distributed
+cache or a global model quota.
+
+### Bounded embedding retries
+
+The real embedding provider no longer uses an unbounded five-second backoff
+chain in the TC composition. Defaults are one retry, 250 ms base backoff, and a
+2,000 ms retry-overhead budget. Composition supplies the same environment-based
+overrides: `EMBEDDING_MAX_RETRIES`,
+`EMBEDDING_RETRY_BACKOFF_SECONDS`, and `EMBEDDING_RETRY_BUDGET_MS`.
+`EMBEDDING_RETRY_BACKOFF_SECONDS` remains seconds and may be fractional.
+
+A `Retry-After` response is honored only when the next retry fits both the
+configured retry count and budget. If the first call already consumed the
+budget, or the provider requests a longer delay, the final error is recorded
+and raised immediately. This budget bounds retry overhead, not the first HTTP
+request; the first request remains bounded by `EMBEDDING_TIMEOUT_MS` and the
+host transport deadline. The pipeline then applies its declared keyword-only
+or literal fallback rather than turning a model failure into empty success.
+
+### Embedding circuit breaker
+
+Runtime and configured dev compositions place a process-local circuit breaker
+between the query cache and the real embedding provider:
+`cache -> circuit breaker -> real provider`. Configuration comes from
+composition with `embedding.circuit.failure_threshold` (default 3) and
+`embedding.circuit.recovery_seconds` (default 10).
+
+Consecutive backend failures open the circuit. Later uncached queries fail fast
+with `EmbeddingCircuitOpenError` instead of consuming the bounded search-worker
+pool until each embedding timeout expires. After the recovery timeout one request
+is admitted as a half-open probe; concurrent probes are rejected until it
+finishes. A successful probe closes the circuit and resets the failure count;
+a failed probe reopens it and restarts the timer. An empty embedding batch
+bypasses both the circuit and backend. Cached query vectors remain available
+while the circuit is open because the cache remains outermost.
+
+The breaker is process-local and intentionally does not coordinate replicas or
+claim distributed model health. It raises rather than returning an empty vector
+or an empty result; keyword/literal fallback and error semantics remain owned by
+the retrieval pipeline. Prometheus exposes:
+`bcsfuse_embedding_circuit_open`, `bcsfuse_embedding_circuit_rejected_total`,
+and transition counts with `from_state` and `to_state` labels.
+
 ## Required providers
 
 Before creating the FastAPI application, the factory requires these registry
@@ -471,6 +684,15 @@ Protected public routes use `AuthProvider.validate_request(request)` from the
 published provider contract. Replacement authentication providers must
 implement the complete contract rather than relying on methods available only
 on the public default implementation.
+
+Gateway authentication is an explicit composition decision read through the
+config provider at `auth.trust_gateway`, with a fail-closed default of
+`false`. `BCSFUSE_TRUST_GATEWAY` may override the YAML value while configuration
+is loaded, but route code must not read the environment directly. Enabling this
+value globally skips the local Bearer validation on every route guarded by
+`require_oss_auth`; such a deployment must expose BCSFuse only through the
+authenticated gateway and never through a direct debug, singlebox, or sidecar
+port.
 
 The readiness endpoint reports the provider mode and readiness status. When
 registry inspection fails, it returns HTTP 503 with the exception type only;

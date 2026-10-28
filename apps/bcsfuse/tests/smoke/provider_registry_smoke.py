@@ -53,7 +53,7 @@ def test_registry_contains_13_provider_keys():
         "reranker_provider",
         "llm_provider",
         "cache_provider",
-        "audit_log_store",
+        "worker_audit_log_store",
         "object_storage_provider",
     ]
 
@@ -85,7 +85,9 @@ def test_test_fallback_provider_types():
 
     # Check types
     assert isinstance(registry.get("worker_registry_store"), InMemoryWorkerRegistryStore)
-    assert isinstance(registry.get("vector_store"), InMemoryVectorStore)
+    vector_store = registry.get("vector_store")
+    assert isinstance(vector_store.backend, InMemoryVectorStore)
+    assert vector_store.literal_fallback_index is not None
     assert isinstance(registry.get("embedding_provider"), FakeEmbeddingProvider)
     assert isinstance(registry.get("reranker_provider"), NoopReranker)
     assert isinstance(registry.get("llm_provider"), FakeLLMProvider)

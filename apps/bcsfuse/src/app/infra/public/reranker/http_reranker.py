@@ -1,20 +1,37 @@
-"""
-HTTP Reranker - OSS Wrapper
+"""Observed public reranker wrapper for the OSS composition."""
 
-Wraps existing HTTP reranker for OSS compatibility.
-"""
-from app.infra.reranker.http_reranker import HttpReranker as _HttpReranker
+from __future__ import annotations
+
+from time import perf_counter
+
+from app.infra.config.search_provider_settings import reranker_options
+from app.infra.public.observability.search_dependency_metrics import (
+    record_rerank_call,
+)
+from search_core.providers.reranker import HttpReranker as SharedHttpReranker
 
 
-class HttpReranker(_HttpReranker):
-    """
-    HTTP Reranker for OSS.
+class HttpReranker(SharedHttpReranker):
+    """HTTP reranker adapter, now exposing dependency metrics."""
 
-    This is a thin wrapper around the existing HTTP reranker
-    to maintain consistent naming and future extensibility.
+    def __init__(self, model=None):
+        super().__init__(**reranker_options(model))
 
-    Supports bge-reranker-v2-m3 and Qwen3-Reranker-4B models.
-    Requires RERANKER_BASE_URL and RERANKER_API_KEY environment variables.
-    """
+    def rerank(self, query: str, candidates: list[dict], top_k: int = 5):
+        started_at = perf_counter()
+        try:
+            result = super().rerank(query, candidates, top_k)
+        except Exception:
+            record_rerank_call("error", perf_counter() - started_at)
+            raise
+        record_rerank_call("success", perf_counter() - started_at)
+        return result
 
-    pass
+
+def get_reranker(model: str | None = None):
+    """Explicit request model wins; omitted model uses the TC process default."""
+    from app.infra.public.reranker.circuit_breaker_reranker import (
+        get_circuit_breaker_reranker,
+    )
+
+    return get_circuit_breaker_reranker(model)

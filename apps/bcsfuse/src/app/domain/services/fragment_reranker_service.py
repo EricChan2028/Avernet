@@ -176,8 +176,8 @@ class FragmentRerankerService:
 
         except Exception as e:
             logger.error("[FragmentReranker] failed: %s", e)
-            # 退化时使用原始聚合分数
-            return self._handle_failure_with_original_scores(request)
+            # 退化时使用原始聚合分数，并保留具体失败边界类型。
+            return self._handle_failure_with_original_scores(request, error=e)
 
     def _single_rerank(
         self,
@@ -477,7 +477,9 @@ class FragmentRerankerService:
 
         return results
 
-    def _handle_failure_with_original_scores(self, request: RerankRequest) -> list[RerankResult]:
+    def _handle_failure_with_original_scores(
+        self, request: RerankRequest, *, error: Exception | None = None
+    ) -> list[RerankResult]:
         """
         处理精排失败
 
@@ -512,7 +514,11 @@ class FragmentRerankerService:
                 final_score=c.aggregated_score,  # 使用原始分数
                 original_score=c.aggregated_score,
                 rank=i + 1,
-                rerank_metadata={"degraded": True, "reason": "rerank_failed"},
+                rerank_metadata={
+                    "degraded": True,
+                    "reason": "rerank_failed",
+                    "error_type": type(error).__name__ if error is not None else None,
+                },
             )
             for i, c in enumerate(sorted_candidates)
         ]

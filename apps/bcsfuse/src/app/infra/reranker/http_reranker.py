@@ -11,5 +11,19 @@ class HttpReranker(SharedHttpReranker):
 
 
 def get_reranker(model: str | None = None):
-    """Explicit request model wins; omitted model uses the TC process default."""
-    return HttpReranker(model=model)
+    """Return the process-local circuit-breaker reranker.
+
+    Explicit request model wins; omitted model uses the TC process default.
+    This keeps runtime model overrides on the same fail-fast path as the
+    composition root instead of silently bypassing the breaker.
+    """
+    from app.infra.public.reranker.circuit_breaker_reranker import (
+        get_circuit_breaker_reranker as get_breaker,
+    )
+
+    return get_breaker(model)
+
+
+def get_circuit_breaker_reranker(model: str | None = None):
+    """Compatibility alias for explicit breaker construction."""
+    return get_reranker(model)

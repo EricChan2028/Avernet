@@ -162,6 +162,7 @@ class TestDevSmokeProviderRegistryE2E:
         context = build_application_context(mode="dev_smoke")
         vector_store = context.registry.require("vector_store")
         try:
-            assert isinstance(vector_store, QdrantSQLiteVectorStore)
+            assert isinstance(vector_store.backend, QdrantSQLiteVectorStore)
+            assert vector_store.literal_fallback_index is not None
         finally:
             vector_store.close()

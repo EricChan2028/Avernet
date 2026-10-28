@@ -16,6 +16,10 @@ Reranker 模块
     )
 """
 
-from app.infra.reranker.http_reranker import HttpReranker, get_reranker
+from app.infra.reranker.http_reranker import (
+    HttpReranker,
+    get_circuit_breaker_reranker,
+    get_reranker,
+)
 
-__all__ = ["HttpReranker", "get_reranker"]
+__all__ = ["HttpReranker", "get_circuit_breaker_reranker", "get_reranker"]

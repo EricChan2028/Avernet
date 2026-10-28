@@ -21,8 +21,10 @@ from tests.unit.bootstrap.test_app_factory import build_context
 
 
 class Candidates:
-    def __init__(self):
+    def __init__(self, metadata: dict | None = None):
         self.calls = []
+        self.metadata = metadata or {}
+
 
     def recommend(self, **kwargs):
         self.calls.append(kwargs)
@@ -39,11 +41,84 @@ class Candidates:
             ],
             total_candidates=1,
             selected_candidates=1,
+            metadata=self.metadata,
         )
 
 
 async def authenticate(request: Request):
     return VerifiedIdentity("caller", frozenset({"bot:owner:profile"}))
+
+
+def test_v2_reports_graceful_semantic_degradation_from_tc_metadata():
+    metadata = {
+        "semantic_unavailable": True,
+        "keyword_unavailable": False,
+        "score_source": "hybrid_rrf",
+        "literal_fallback_used": False,
+        "rerank_degraded": False,
+    }
+    candidates = Candidates(metadata=metadata)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        service = TcSearchApplication(candidates, executor=executor)
+        result = asyncio.run(
+            service.execute(
+                SearchCommand("助手", 5, "search"),
+                VerifiedIdentity("caller", None),
+            )
+        )
+
+    assert result.status == "degraded"
+    assert result.reasons == ("semantic_unavailable",)
+
+
+def test_v2_reports_literal_and_rerank_degradation_from_tc_metadata():
+    metadata = {
+        "semantic_unavailable": True,
+        "keyword_unavailable": True,
+        "score_source": "regex_fallback",
+        "literal_fallback_used": True,
+        "rerank_degraded": True,
+    }
+    candidates = Candidates(metadata=metadata)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        service = TcSearchApplication(candidates, executor=executor)
+        result = asyncio.run(
+            service.execute(
+                SearchCommand("星河 数据分析", 5, "recommend"),
+                VerifiedIdentity("caller", None),
+            )
+        )
+
+    assert result.status == "degraded"
+    assert result.reasons == (
+        "keyword_unavailable",
+        "semantic_unavailable",
+        "literal_fallback",
+        "rerank_degraded",
+    )
+
+
+def test_v2_keeps_normal_hybrid_result_healthy():
+    metadata = {
+        "semantic_unavailable": False,
+        "keyword_unavailable": False,
+        "score_source": "hybrid_rrf",
+        "keyword_search_used": True,
+        "literal_fallback_used": False,
+        "rerank_degraded": False,
+    }
+    candidates = Candidates(metadata=metadata)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        service = TcSearchApplication(candidates, executor=executor)
+        result = asyncio.run(
+            service.execute(
+                SearchCommand("数据分析助手", 5, "search"),
+                VerifiedIdentity("caller", None),
+            )
+        )
+
+    assert result.status == "ok"
+    assert result.reasons == ()
 
 
 def test_optional_common_routes_preserve_tc_identity_and_v1_surface(monkeypatch):
@@ -143,3 +218,27 @@ def test_rerank_option_disables_or_inherits_host_configuration(enabled):
         assert "reranker_model" not in config
     else:
         assert config["reranker_model"] is None
+
+
+def test_v2_http_body_exposes_tc_degradation(monkeypatch):
+    monkeypatch.setenv("ENABLE_PROFILE_EMBEDDING_INDEX", "false")
+    candidates = Candidates(
+        metadata={
+            "semantic_unavailable": True,
+            "keyword_unavailable": False,
+            "score_source": "hybrid_rrf",
+            "literal_fallback_used": False,
+            "rerank_degraded": False,
+        }
+    )
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        service = TcSearchApplication(candidates, executor=executor)
+        context, _ = build_context()
+        router = create_search_router(service, authenticate)
+        with TestClient(create_bcsfuse_app(context, search_router=router)) as client:
+            response = client.post("/api/v2/search", json={"query": "助手"})
+            assert response.status_code == 200
+            body = response.json()
+            assert body["status"] == "degraded"
+            assert body["reasons"] == ["semantic_unavailable"]
+            assert body["items"][0]["id"] == "bot:owner:profile"

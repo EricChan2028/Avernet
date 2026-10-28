@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.domain.models.candidate_recommendation import CandidateRecommendationResponse
 
@@ -34,6 +34,7 @@ class BotRecommendationRequest(BaseModel):
 
     question: str = Field(
         min_length=1,
+        max_length=4096,
         description="用户的问题/任务描述,系统根据此内容匹配最合适的 bot",
     )
 
@@ -83,6 +84,19 @@ class BotRecommendationRequest(BaseModel):
         default=None,
         description="元数据过滤条件，默认只搜索 protected 和 public 的 profile",
     )
+
+    @model_validator(mode="after")
+    def bounded_filters(self):
+        """Bound legacy V1 filters before recommendation business execution."""
+        if self.filters is not None:
+            if len(self.filters) > 16:
+                raise ValueError("filters must contain at most 16 fields")
+            for values in self.filters.values():
+                if isinstance(values, list) and len(values) > 32:
+                    raise ValueError(
+                        "each filter must contain at most 32 values"
+                    )
+        return self
 
     type: Literal["search", "recommend"] = Field(
         default="recommend",

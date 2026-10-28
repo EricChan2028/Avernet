@@ -31,6 +31,9 @@ from app.domain.services.vector_persistence_backend import (
     WorkerScopedVectorPersistenceBackend,
 )
 from app.domain.services.vector_store_adapter import VectorStoreAdapter
+from app.infra.public.observability.search_dependency_metrics import (
+    qdrant_search_metrics,
+)
 from app.infra.public.observability.storage_logging import (
     log_storage_error,
     log_storage_event,
@@ -292,9 +295,12 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         pass them through directly. Do NOT re-wrap them via dict .get() -- the
         results are objects, not dicts.
         """
-        with self._index_lock.read():
-            self._ensure_client()
-            return self._qdrant.search(vector, top_k, filter=filters)
+        with qdrant_search_metrics("dense", self.connection.mode) as call:
+            lock_started_at = time.perf_counter()
+            with self._index_lock.read():
+                call.lock_wait_seconds = time.perf_counter() - lock_started_at
+                self._ensure_client()
+                return self._qdrant.search(vector, top_k, filter=filters)
 
     def batch_search(
         self,
@@ -358,10 +364,13 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         filters: Optional[dict] = None,
     ) -> List[VectorSearchHit]:
         """Search the derived sparse index with filters applied before top-k."""
-        with self._index_lock.read():
-            if not self._keywords_ready:
-                raise RuntimeError("keyword index requires rebuild")
-            return self._keywords.search(query, top_k, filters)
+        with qdrant_search_metrics("keyword", self.connection.mode) as call:
+            lock_started_at = time.perf_counter()
+            with self._index_lock.read():
+                call.lock_wait_seconds = time.perf_counter() - lock_started_at
+                if not self._keywords_ready:
+                    raise RuntimeError("keyword index requires rebuild")
+                return self._keywords.search(query, top_k, filters)
 
     def batch_text_search(
         self,

@@ -105,6 +105,14 @@ auth:
   token: ${BCSFUSE_AUTH_TOKEN}
 ```
 
+### Gateway Trust
+
+`auth.trust_gateway` defaults to `false`. `BCSFUSE_TRUST_GATEWAY` may override
+that value only while configuration is loaded; route code does not read the
+environment directly. Enable the composed value only when BCSFuse is reachable
+solely through the authenticated Avernet gateway, because it globally skips
+BCSFuse's own Bearer validation for protected routes.
+
 ### Test Tokens
 
 - `test-token` - For test mode
@@ -163,6 +171,11 @@ export EMBEDDING_BASE_URL="http://your-embedding-service:19998"
 export EMBEDDING_AUTH_TOKEN="your-embedding-token-here"
 export EMBEDDING_MODEL="text-embedding-3-small"
 export EMBEDDING_DIMENSION="1024"
+export EMBEDDING_MAX_RETRIES="1"
+export EMBEDDING_RETRY_BACKOFF_SECONDS="0.25"
+export EMBEDDING_RETRY_BUDGET_MS="2000"
+# Optional overrides: EMBEDDING_CIRCUIT_FAILURE_THRESHOLD=3 and
+# EMBEDDING_CIRCUIT_RECOVERY_SECONDS=10 fail fast when embedding is down.
 
 # Reranker Provider (optional)
 export RERANKER_BASE_URL="http://your-reranker-service:19998"

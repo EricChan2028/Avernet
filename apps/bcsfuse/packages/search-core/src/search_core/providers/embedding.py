@@ -66,6 +66,7 @@ class RealEmbeddingProvider(EmbeddingProvider):
         base_delay_ms: int = 5000,
         max_delay_ms: int = 60000,
         request_interval_ms: int = 0,
+        retry_budget_ms: int | None = None,
     ):
         """
         初始化 Real Provider
@@ -76,15 +77,26 @@ class RealEmbeddingProvider(EmbeddingProvider):
             base_delay_ms: 基础延迟时间，毫秒（默认 5000ms = 5s，可从环境变量 EMBEDDING_RETRY_BACKOFF_SECONDS 配置）
             max_delay_ms: 最大延迟时间，毫秒（默认 60000ms = 60s）
             request_interval_ms: 兼容参数；内部请求间隔已移除，模型配额由外部限流器管理
+            retry_budget_ms: 可选的重试总开销预算（毫秒）。不满足预算的重试会被跳过。
         """
         self._settings = settings
         self._max_retries = max_retries
         self._base_delay_ms = base_delay_ms
         self._max_delay_ms = max_delay_ms
+        self._retry_budget_ms = retry_budget_ms
         # Keep zero permanently: providers must not serialize callers with sleep.
         self._request_interval_ms = 0
         self._client: Optional[httpx.Client] = None
         self._last_request_time: Optional[float] = None
+
+        if max_retries < 0:
+            raise ValueError("max_retries must not be negative")
+        if base_delay_ms <= 0:
+            raise ValueError("base_delay_ms must be positive")
+        if max_delay_ms <= 0:
+            raise ValueError("max_delay_ms must be positive")
+        if retry_budget_ms is not None and retry_budget_ms <= 0:
+            raise ValueError("retry_budget_ms must be positive when configured")
 
         # 验证配置
         if not settings.is_configured():
@@ -143,7 +155,7 @@ class RealEmbeddingProvider(EmbeddingProvider):
             return []
 
         # 记录开始时间
-        start_time = time.time()
+        start_time = time.monotonic()
 
         last_error = None
 
@@ -152,7 +164,7 @@ class RealEmbeddingProvider(EmbeddingProvider):
                 result = self._call_embedding_api(texts)
 
                 # 计算延迟
-                latency_ms = int((time.time() - start_time) * 1000)
+                latency_ms = int((time.monotonic() - start_time) * 1000)
 
                 # 记录真实调用
                 self._record_success(latency_ms)
@@ -172,42 +184,59 @@ class RealEmbeddingProvider(EmbeddingProvider):
             except EmbeddingAPIError as e:
                 last_error = e
 
-                # 记录错误（仅在最后一次尝试）
-                if attempt == self._max_retries:
-                    self._record_failure(e)
-
-                    # 记录明确的失败日志
-                    logger.error(
-                        f"EMBEDDING_RATE_LIMIT_EXCEEDED: Failed after {self._max_retries + 1} attempts, "
-                        f"status={e.status_code}, model={self._settings.model}, "
-                        f"provider={self._settings.base_url}"
-                    )
-
-                # 判断是否可重试
+                # 记录最终失败；后续仍保持抛错语义。
                 should_retry = self._should_retry(e.status_code, attempt)
 
-                if should_retry:
-                    # 提取响应对象（如果错误中包含）
-                    response = getattr(e, "response", None)
-                    delay = self._calculate_delay(attempt, response)
-
-                    # 如果是 429，记录更明确的日志
-                    if e.status_code == 429:
-                        retry_after_seconds = delay / 1000.0
-                        logger.warning(
-                            f"Embedding API 调用失败 (attempt {attempt + 1}/{self._max_retries + 1}), "
-                            f"status=429 RPM_LIMIT_EXCEEDED, waiting {retry_after_seconds:.1f}s before retry..."
-                        )
-                    else:
-                        logger.warning(
-                            f"Embedding API 调用失败 (attempt {attempt + 1}/{self._max_retries + 1}), "
-                            f"status={e.status_code}, waiting {delay / 1000:.1f}s before retry..."
-                        )
-
-                    time.sleep(delay / 1000.0)
-                else:
-                    # 不可重试或已达到最大重试次数
+                if not should_retry:
+                    logger.error(
+                        "EMBEDDING_PROVIDER_RETRY_FAILED: "
+                        "attempts=%d status=%s model=%s provider=%s",
+                        attempt + 1,
+                        e.status_code,
+                        self._settings.model,
+                        self._settings.base_url,
+                    )
+                    self._record_failure(e)
                     raise
+
+                response = getattr(e, "response", None)
+                delay = self._calculate_delay(attempt, response)
+
+                elapsed_ms = (time.monotonic() - start_time) * 1000
+                retry_fits_budget = True
+                if self._retry_budget_ms is not None:
+                    retry_fits_budget = elapsed_ms + delay <= self._retry_budget_ms
+
+                if not retry_fits_budget:
+                    logger.error(
+                        "EMBEDDING_RETRY_BUDGET_EXCEEDED: "
+                        "attempts=%d elapsed_ms=%.1f delay_ms=%d budget_ms=%s "
+                        "status=%s model=%s provider=%s",
+                        attempt + 1,
+                        elapsed_ms,
+                        delay,
+                        self._retry_budget_ms,
+                        e.status_code,
+                        self._settings.model,
+                        self._settings.base_url,
+                    )
+                    self._record_failure(e)
+                    raise
+
+                # 如果是 429，记录更明确的日志
+                if e.status_code == 429:
+                    retry_after_seconds = delay / 1000.0
+                    logger.warning(
+                        f"Embedding API 调用失败 (attempt {attempt + 1}/{self._max_retries + 1}), "
+                        f"status=429 RPM_LIMIT_EXCEEDED, waiting {retry_after_seconds:.1f}s before retry..."
+                    )
+                else:
+                    logger.warning(
+                        f"Embedding API 调用失败 (attempt {attempt + 1}/{self._max_retries + 1}), "
+                        f"status={e.status_code}, waiting {delay / 1000.0:.1f}s before retry..."
+                    )
+
+                time.sleep(delay / 1000.0)
 
         # 不应该到达这里，但为了类型安全
         raise last_error or EmbeddingAPIError("未知错误")

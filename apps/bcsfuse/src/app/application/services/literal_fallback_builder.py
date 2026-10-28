@@ -7,6 +7,7 @@ from typing import Any
 
 from search_core.plugin_api.vector_point import VectorPoint as CoreVectorPoint
 from search_core.providers.fallback import RegexFallbackIndex
+from search_core.plugin_api.retrieval import RetrievalIndex
 
 from app.domain.services.vector_store_adapter import VectorStoreAdapter
 
@@ -35,12 +36,19 @@ def _text_length(point: Any) -> int:
     ))
 
 
-def build_literal_fallback_index(store: VectorStoreAdapter) -> RegexFallbackIndex | None:
+def build_literal_fallback_index(store: VectorStoreAdapter) -> RetrievalIndex | None:
     """Build one literal point per profile, or return no fallback on snapshot failure.
 
-    A read failure must not produce a silently incomplete snapshot. Returning
-    ``None`` excludes the final fallback instead of fabricating stale coverage.
+    If the composition root provides an incrementally maintained snapshot, return
+    that object so profile updates stay visible. Otherwise, build a read-only
+    snapshot. A read failure must not produce a silently incomplete snapshot.
+    Returning ``None`` excludes the final fallback instead of fabricating stale
+    coverage.
     """
+    maintained = getattr(store, "literal_fallback_index", None)
+    if maintained is not None:
+        return maintained
+
     try:
         point_ids = store.get_vector_ids()
     except Exception as error:

@@ -42,20 +42,21 @@ def test_dev_registry_can_be_built():
 
     # Use temp directory for SQLite
     with tempfile.TemporaryDirectory() as tmpdir:
-        os.environ["WORKER_REGISTRY_SQLITE_DB_PATH"] = os.path.join(tmpdir, "test.db")
-        os.environ["EMBEDDING_BASE_URL"] = "http://localhost:8001"
-        os.environ["EMBEDDING_AUTH_TOKEN"] = "test-token"
-        os.environ["LLM_BASE_URL"] = "http://localhost:8002"
-        os.environ["LLM_AUTH_TOKEN"] = "test-token"
-        os.environ["STARTUP_PROFILE"] = "opensource"
+        try:
+            os.environ["WORKER_REGISTRY_SQLITE_DB_PATH"] = os.path.join(tmpdir, "test.db")
+            os.environ["EMBEDDING_BASE_URL"] = "http://localhost:8001"
+            os.environ["EMBEDDING_AUTH_TOKEN"] = "test-token"
+            os.environ["LLM_BASE_URL"] = "http://localhost:8002"
+            os.environ["LLM_AUTH_TOKEN"] = "test-token"
+            os.environ["STARTUP_PROFILE"] = "opensource"
 
-        from app.bootstrap.opensource import build_opensource_provider_registry
+            from app.bootstrap.opensource import build_opensource_provider_registry
 
-        registry = build_opensource_provider_registry(mode="dev")
-        print("✓ Dev registry built successfully")
-        return True
-
-
+            build_opensource_provider_registry(mode="dev")
+            print("✓ Dev registry built successfully")
+            return True
+        finally:
+            os.environ.pop("WORKER_REGISTRY_SQLITE_DB_PATH", None)
 def test_test_registry_can_be_built():
     """Test that test registry can be built."""
     os.environ["STARTUP_PROFILE"] = "opensource"
@@ -121,29 +122,32 @@ def test_dev_fallback_provider_types():
     import tempfile
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        os.environ["WORKER_REGISTRY_SQLITE_DB_PATH"] = os.path.join(tmpdir, "test.db")
-        os.environ["EMBEDDING_BASE_URL"] = "http://localhost:8001"
-        os.environ["EMBEDDING_AUTH_TOKEN"] = "test-token"
-        os.environ["LLM_BASE_URL"] = "http://localhost:8002"
-        os.environ["LLM_AUTH_TOKEN"] = "test-token"
-        os.environ["STARTUP_PROFILE"] = "opensource"
+        try:
+            os.environ["WORKER_REGISTRY_SQLITE_DB_PATH"] = os.path.join(tmpdir, "test.db")
+            os.environ["EMBEDDING_BASE_URL"] = "http://localhost:8001"
+            os.environ["EMBEDDING_AUTH_TOKEN"] = "test-token"
+            os.environ["LLM_BASE_URL"] = "http://localhost:8002"
+            os.environ["LLM_AUTH_TOKEN"] = "test-token"
+            os.environ["STARTUP_PROFILE"] = "opensource"
 
-        from app.bootstrap.opensource import build_opensource_provider_registry
-        from app.infra.public.stores.sqlite_worker_registry_store import SQLiteWorkerRegistryStore
-        from app.infra.public.vectorstores.qdrant_sqlite_vector_store import QdrantSQLiteVectorStore
-        from app.infra.public.embedding.real_embedding_provider import RealEmbeddingProvider
+            from app.bootstrap.opensource import build_opensource_provider_registry
+            from app.infra.public.stores.sqlite_worker_registry_store import SQLiteWorkerRegistryStore
+            from app.infra.public.vectorstores.qdrant_sqlite_vector_store import QdrantSQLiteVectorStore
+            from app.infra.public.embedding.real_embedding_provider import RealEmbeddingProvider
 
-        registry = build_opensource_provider_registry(mode="dev")
+            registry = build_opensource_provider_registry(mode="dev")
 
-        # Check types
-        assert isinstance(registry.get("worker_registry_store"), SQLiteWorkerRegistryStore)
-        assert isinstance(registry.get("vector_store"), QdrantSQLiteVectorStore)
-        assert isinstance(registry.get("embedding_provider"), RealEmbeddingProvider)
+            # Check types
+            assert isinstance(registry.get("worker_registry_store"), SQLiteWorkerRegistryStore)
+            vector_store = registry.get("vector_store")
+            assert isinstance(vector_store.backend, QdrantSQLiteVectorStore)
+            assert vector_store.literal_fallback_index is not None
+            assert isinstance(registry.get("embedding_provider"), RealEmbeddingProvider)
 
-        print("✓ Dev fallback provider types validated (SQLite, Faiss, Real HTTP)")
-        return True
-
-
+            print("✓ Dev fallback provider types validated (SQLite, Faiss, Real HTTP)")
+            return True
+        finally:
+            os.environ.pop("WORKER_REGISTRY_SQLITE_DB_PATH", None)
 def test_test_fallback_provider_types():
     """Test that test mode uses correct provider types."""
     os.environ["STARTUP_PROFILE"] = "opensource"
@@ -159,7 +163,9 @@ def test_test_fallback_provider_types():
 
     # Check types
     assert isinstance(registry.get("worker_registry_store"), InMemoryWorkerRegistryStore)
-    assert isinstance(registry.get("vector_store"), InMemoryVectorStore)
+    vector_store = registry.get("vector_store")
+    assert isinstance(vector_store.backend, InMemoryVectorStore)
+    assert vector_store.literal_fallback_index is not None
     assert isinstance(registry.get("embedding_provider"), FakeEmbeddingProvider)
     assert isinstance(registry.get("reranker_provider"), NoopReranker)
     assert isinstance(registry.get("llm_provider"), FakeLLMProvider)

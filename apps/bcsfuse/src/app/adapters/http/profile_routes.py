@@ -1030,7 +1030,10 @@ async def search_profiles(request: SearchRequest):
 
     start_time = time.time()
     logger.info("[SEARCH-API] ====== 搜索请求开始 ======")
-    logger.info(f"[SEARCH-API] 查询: '{request.query}', top_k={request.top_k}, mode={request.mode}, min_score={request.min_score}")
+    logger.info(
+        "[SEARCH-API] query_length=%d, top_k=%d, mode=%s, min_score=%.3f",
+        len(request.query), request.top_k, request.mode, request.min_score,
+    )
 
     # 构建运行时配置
     runtime_config = {}

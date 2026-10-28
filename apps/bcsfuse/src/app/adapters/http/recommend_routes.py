@@ -34,7 +34,7 @@ import logging
 import os
 from time import perf_counter
 
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 
 from app.domain.models.bot_recommendation import (
     BotRecommendationRequest,
@@ -298,16 +298,31 @@ async def recommend_bots(
         f"rerank_min_score={rerank_min_score}"
     )
 
-    candidate_response = candidate_service.recommend(
-        question=rewrite_question,
-        mode=RetrievalMode.EXPERT_DIAGNOSIS,  # 兼容场景标记，非切换到旧评分算法
-        participants=None,  # 关键:不传 participants,触发全库推荐
-        max_candidates=request.topK,
-        runtime_config=runtime_config if runtime_config else None,
-        filters=filters,
-        vector_min_score=vector_min_score,  # Phase B: 向量召回阈值
-        rerank_min_score=rerank_min_score,  # Phase B: rerank 后质量阈值
+    from app.adapters.http.search_threadpool import (
+        run_search_in_threadpool,
     )
+
+    try:
+        candidate_response = await run_search_in_threadpool(
+            candidate_service.recommend,
+            question=rewrite_question,
+            mode=RetrievalMode.EXPERT_DIAGNOSIS,  # 兼容场景标记，非切换到旧评分算法
+            participants=None,  # 关键:不传 participants,触发全库推荐
+            max_candidates=request.topK,
+            runtime_config=runtime_config if runtime_config else None,
+            filters=filters,
+            vector_min_score=vector_min_score,  # Phase B: 向量召回阈值
+            rerank_min_score=rerank_min_score,  # Phase B: rerank 后质量阈值
+        )
+    except Exception as error:
+        logger.error("[RECOMMEND] core execution failed: %s", error, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "RECOMMEND_UNAVAILABLE",
+                "message": "recommendation service unavailable",
+            },
+        ) from error
 
     # Phase D: 构建响应 metadata（在创建响应之前）
     metadata = candidate_response.metadata
