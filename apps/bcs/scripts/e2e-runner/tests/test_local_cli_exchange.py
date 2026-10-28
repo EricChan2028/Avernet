@@ -27,6 +27,7 @@ class ExchangeTests(unittest.TestCase):
                 body=self.rfile.read(int(self.headers.get('Content-Length','0')))
                 outer.received.append((self.path,self.headers.get('X-Request-ID'),body))
                 outer.received_auth.append(self.headers.get('Authorization'))
+                outer.received_ingress.append((self.headers.get('Origin'),self.headers.get('Referer')))
                 outer.started.set()
                 self.send_response(201)
                 payload=b'{"success":true,"data":{"id":"new-request"}}'
@@ -41,6 +42,7 @@ class ExchangeTests(unittest.TestCase):
         self.addCleanup(self.stop_server)
         self.case=SimpleNamespace(identities=SimpleNamespace(origin='http://127.0.0.1:'+str(self.server.server_port)),
                                   invalidated=False,_active=lambda:None,_save=lambda:None)
+        self.received_ingress=[]
         self.event={'method':'POST','path':'/friends/request','submitted_request_id':'test-exact-wire'}
 
     def stop_server(self):
@@ -53,6 +55,16 @@ class ExchangeTests(unittest.TestCase):
             if token is not None:
                 headers['Authorization']='Bearer '+token
             conn.request(method,path,body=body,headers=headers)
+            response=conn.getresponse();return response.status,response.read()
+        finally:conn.close()
+
+    def ingress_request(self,exchange,origin='https://teamclaw-pre.alipay.com',
+                        referer='https://teamclaw-pre.alipay.com/'):
+        conn=HTTPConnection('127.0.0.1',exchange.server.server_port,timeout=3)
+        try:
+            headers={'Content-Type':'application/json','Authorization':'Bearer local-test',
+                     'Origin':origin,'Referer':referer}
+            conn.request('POST','/friends/request',body=b'{"to_bot":"pm"}',headers=headers)
             response=conn.getresponse();return response.status,response.read()
         finally:conn.close()
 
@@ -247,6 +259,29 @@ class ExchangeTests(unittest.TestCase):
             self.addCleanup(left.close);self.addCleanup(right.close)
         self.assertEqual(right.recv(1),b'')
         self.assertFalse(exchange.thread.is_alive())
+
+    def test_workstation_ingress_pair_is_forwarded_once(self):
+        with LocalCliExchange(self.case,self.event,token='local-test',body={'to_bot':'pm'}) as exchange:
+            status,_=self.ingress_request(exchange)
+        self.assertEqual(status,201)
+        self.assertEqual(self.received_ingress,
+                         [('https://teamclaw-pre.alipay.com','https://teamclaw-pre.alipay.com/')])
+        self.assertEqual(exchange.attempts,1);self.assertEqual(exchange.forwarded,1)
+        self.assertIsNone(exchange.failure)
+
+    def test_absent_ingress_pair_stays_admitted(self):
+        with LocalCliExchange(self.case,self.event,token='local-test',body={'to_bot':'pm'}) as exchange:
+            status,_=self.request(exchange)
+        self.assertEqual(status,201)
+        self.assertEqual(self.received_ingress,[(None,None)])
+        self.assertEqual(exchange.forwarded,1)
+
+    def test_oversized_ingress_referer_is_refused_before_dispatch(self):
+        with LocalCliExchange(self.case,self.event,token='local-test',body={'to_bot':'pm'}) as exchange:
+            status,_=self.ingress_request(exchange,referer='https://teamclaw-pre.alipay.com/'+'a'*3000)
+        self.assertEqual(status,502)
+        self.assertEqual(exchange.forwarded,0);self.assertIsNotNone(exchange.failure)
+        self.assertEqual(self.received,[])
 
 
 if __name__=='__main__':unittest.main()

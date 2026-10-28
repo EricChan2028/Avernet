@@ -3,7 +3,7 @@
 This is not a mock response server or a remote proxy. A finite admitted CLI
 request is forwarded once to the live owned BCS with its original body and
 authentication. Explicit legacy local fuse and Group-get contracts preserve absent auth;
-it never strips or invents a credential. Only a runner correlation header is added. No route/auth fallback,
+it never strips or invents a credential. Only a runner correlation header and the bounded workstation Origin/Referer ingress pair are forwarded. No route/auth fallback,
 redirect, retry, arbitrary destination, raw log or response persistence exists.
 """
 from __future__ import annotations
@@ -139,6 +139,18 @@ class LocalCliExchange:
                     client = self.headers.get('X-BCS-Client')
                     if client is not None and len(client) <= 128:
                         headers['X-BCS-Client'] = client
+                    # Dual-environment profiles pin the workstation origin and
+                    # the reviewed preprod station ingress honors the browser
+                    # Origin/Referer pair; the owned loopback forwards that same
+                    # finite pair so Singlebox rehearses the exact ingress
+                    # contract. No fallback and no rewriting exists.
+                    for ingress_name in ('Origin', 'Referer'):
+                        ingress = self.headers.get(ingress_name)
+                        if ingress is not None:
+                            if len(ingress) > 2048:
+                                raise LocalCliExchangeError(
+                                    'CLI request ' + ingress_name + ' exceeds the finite contract')
+                            headers[ingress_name] = ingress
                     upstream = HTTPConnection('127.0.0.1', upstream_port, timeout=1)
                     with exchange._io_lock:
                         exchange._upstream = upstream
