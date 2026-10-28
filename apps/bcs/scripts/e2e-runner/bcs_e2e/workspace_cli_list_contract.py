@@ -93,7 +93,9 @@ def _validate_evidence(result: AdapterCall, *, operation: str) -> None:
             or evidence.get("transport") != "PRODUCT_CLI"
             or evidence.get("operation") != operation
             or evidence.get("caller_role") != "driver"
-            or evidence.get("credential_kind") not in {"owned_local_bot_token", "owned_bot_token"}
+            or evidence.get("credential_kind") not in {
+                    "owned_local_bot_token", "owned_bot_token",
+                    "human_cookie_with_owned_driver_bot_token"}
             or evidence.get("fixture_effect") != FIXTURE_EFFECT
             or evidence.get("remote_validation") != "NOT_RUN"
             or evidence.get("grants_release_credit") is not False):

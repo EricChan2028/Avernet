@@ -154,9 +154,12 @@ class WorkspaceCliRunner:
                                          WORKSPACE_CLI_STATUS_PROFILE_CONTRACT}
                 and self.profile["environment"]["tier"] == "preprod"):
             value = os.environ.get(self.profile["auth"]["driver_token_env"], "")
-            if not value:
-                raise WorkspaceCliRunnerError("workspace CLI owned Bot credential is absent")
-            return "owned_bot_token", value
+            cookie = os.environ.get(self.profile["auth"]["cookie_env"], "")
+            if not value or not cookie:
+                raise WorkspaceCliRunnerError(
+                    "workspace CLI owned Bot token and Human Cookie session "
+                    "bundle is absent")
+            return "human_cookie_with_owned_driver_bot_token", value
         if self.profile["environment"]["tier"] == "local":
             value = os.environ.get(self.profile["auth"]["driver_token_env"], "")
             if not value:

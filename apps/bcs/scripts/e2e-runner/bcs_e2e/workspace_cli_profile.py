@@ -311,15 +311,20 @@ def _validate_workspace_cli_profile(raw: object, contract_name: str) -> dict:
     elif (contract_name in {WORKSPACE_CLI_LIST_PROFILE_CONTRACT,
                             WORKSPACE_CLI_STATUS_PROFILE_CONTRACT}
             and environment["tier"] == "preprod"):
-        auth = object_keys(profile["auth"], {"kind", "driver_token_env"}, "auth")
-        if auth["kind"] != "owned-bot-tokens":
+        auth = object_keys(
+            profile["auth"], {"kind", "driver_token_env", "cookie_env"}, "auth")
+        if auth["kind"] != "human-cookie-with-owned-driver-bot-token":
             raise ConfigError(
-                "auth.kind: preprod workspace CLI list/status operate on the "
-                "station legacy product face, where the Group list resolves "
-                "the authenticated Bot actor domain and status/termination "
-                "mandate a Bot principal; an owned driver Bot token is "
-                "required instead of the Human Cookie")
+                "auth.kind: preprod workspace CLI list/status drive the station "
+                "legacy product face, where ACE rejects non-browser "
+                "Bearer-only Bot-token requests (live USER_NOT_LOGIN / "
+                "decisionBy=ACE for both dedicated pool tokens) while the "
+                "Human Cookie alone cannot list Bot-owned Groups or mandate "
+                "status/termination; the reviewed station duo is the Human "
+                "Cookie login session plus the owned driver Bot token "
+                "[ACE-BOT-TOKEN-BEARER]")
         _env_ref(auth["driver_token_env"], "auth.driver_token_env")
+        _env_ref(auth["cookie_env"], "auth.cookie_env")
     elif contract_name == SESSION_FILE_CORE_PROFILE_CONTRACT:
         auth = object_keys(
             profile["auth"], {"kind", "cookie_env", "driver_token_env"}, "auth")

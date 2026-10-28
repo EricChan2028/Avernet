@@ -59,7 +59,8 @@ def profile_value(*, gateway=False):
         },
         "auth": (
             {"kind": "owned-local-bot-tokens", "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN"}
-            if local else {"kind": "owned-bot-tokens",
+            if local else {"kind": "human-cookie-with-owned-driver-bot-token",
+                           "cookie_env": "BCS_E2E_HUMAN_COOKIE",
                            "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN"}
         ),
         "relationships": {
@@ -199,10 +200,11 @@ class WorkspaceCliStatusRunTests(unittest.TestCase):
         self.assertFalse(report["grants_release_credit"])
         self.assertEqual(read(self.state_dir / REPORT_FILE), report)
         self.assertNotIn(LOCAL_TOKEN, json.dumps(report, sort_keys=True))
-    def test_preprod_gateway_case_is_command_invokable_and_reported(self):
+    def test_preprod_gateway_case_reports_the_station_duo_without_the_secret(self):
         report, _, calls = self.invoke_case(gateway=True)
         self.assertEqual(report["status"], "PASS")
-        self.assertEqual(report["credential_kind"], "owned_bot_token")
+        self.assertEqual(report["credential_kind"],
+                         "human_cookie_with_owned_driver_bot_token")
         self.assertEqual(report["environment"]["entrypoint_kind"], "gateway")
         self.assertNotIn(PREPROD_COOKIE, json.dumps(report, sort_keys=True))
         self.assertEqual(calls[-1], "termination.group.read.completed")

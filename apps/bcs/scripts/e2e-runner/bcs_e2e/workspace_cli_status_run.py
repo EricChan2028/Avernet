@@ -112,6 +112,8 @@ def dual_workspace_cli_status_run(
         "grants_release_credit": False,
         "credential_kind": (
             "owned_local_bot_token" if profile["environment"]["tier"] == "local"
+            else "human_cookie_with_owned_driver_bot_token"
+            if profile["auth"]["kind"] == "human-cookie-with-owned-driver-bot-token"
             else "owned_bot_token" if profile["auth"]["kind"] == "owned-bot-tokens"
             else "human_cookie"
         ),

@@ -53,7 +53,8 @@ def profile_value(*, gateway=False, mutate=None):
                    "member": {"bot_id": MEMBER, "owner_id": "owner-1",
                               "dedicated": True, "visibility": "public"}},
         "auth": ({"kind": "owned-local-bot-tokens", "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN"}
-                 if not gateway else {"kind": "owned-bot-tokens",
+                 if not gateway else {"kind": "human-cookie-with-owned-driver-bot-token",
+                                      "cookie_env": "BCS_E2E_HUMAN_COOKIE",
                                       "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN"}),
         "relationships": {"group": "bounded-owned-bots-retained-cli-create-list",
                            "initial_session": "retained", "cleanup": "none",
@@ -164,13 +165,21 @@ class WorkspaceCliListTests(unittest.TestCase):
         with self.assertRaises(ConfigError):
             validate_workspace_cli_list_profile(profile_value(gateway=True, mutate=mutate))
 
-    def test_gateway_owned_bot_token_is_not_evidence(self):
+    def test_gateway_owned_session_cookie_and_bot_token_are_not_evidence(self):
         execution, _, _, contexts = self.run_case(gateway=True)
         self.assertEqual(execution.status, "PASS")
         for context, cookie in contexts:
             self.assertEqual(context["token"], TOKEN)
-            self.assertIsNone(cookie)
+            self.assertEqual(cookie, COOKIE)
         self.assertNotIn(TOKEN, json.dumps(execution.snapshot(), sort_keys=True))
+        self.assertNotIn(COOKIE, json.dumps(execution.snapshot(), sort_keys=True))
+
+    def test_preprod_owned_bot_tokens_only_is_not_admitted_for_list(self):
+        def mutate(value):
+            value["auth"] = {"kind": "owned-bot-tokens",
+                             "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN"}
+        with self.assertRaises(ConfigError):
+            validate_workspace_cli_list_profile(profile_value(gateway=True, mutate=mutate))
 
     def test_nonzero_total_without_exact_group_blocks(self):
         execution, _, _, _ = self.run_case(include_target=False)

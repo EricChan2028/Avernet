@@ -167,7 +167,8 @@ class WorkspaceCliRunnerTests(unittest.TestCase):
                 "member": {"bot_id": MEMBER, "owner_id": "owner-1",
                            "dedicated": True, "visibility": "public"},
             },
-            "auth": {"kind": "owned-bot-tokens",
+            "auth": {"kind": "human-cookie-with-owned-driver-bot-token",
+                     "cookie_env": "BCS_E2E_HUMAN_COOKIE",
                      "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN"},
             "relationships": {"group": "bounded-owned-bots-retained-cli-create-list",
                               "initial_session": "retained", "cleanup": "none",
@@ -179,7 +180,7 @@ class WorkspaceCliRunnerTests(unittest.TestCase):
                     "api_face": "legacy"},
         }
 
-    def test_preprod_owned_bot_token_is_written_to_the_cli_session_file(self):
+    def test_preprod_station_duo_positions_the_owned_bot_token_and_session_cookie(self):
         profile = validate_workspace_cli_list_profile(self.list_profile())
         runner = WorkspaceCliRunner(profile, binary=self.binary,
                                     binary_sha256=self.digest, state_dir=self.state)
@@ -190,30 +191,41 @@ class WorkspaceCliRunnerTests(unittest.TestCase):
             context_path = Path(environment["BOT_DATA_DIR"]) / ".bcs" / "session.json"
             context_state["context"] = json.loads(context_path.read_text())
             context_state["cookie"] = environment.get("BCS_COOKIE")
+            context_state["nenv"] = environment.get("tc_sdb_nenv")
             raw = (f"Group created:\n  ID: {GROUP}\n  Driver: {DRIVER}\n"
                    f"  Participants: {DRIVER},{MEMBER}\n  Session: {SESSION}\n").encode()
             return subprocess.CompletedProcess(cmd, 0, raw, b"")
 
-        with patch.dict(os.environ, {"BCS_E2E_DRIVER_BOT_TOKEN": TOKEN}), \
+        with patch.dict(os.environ, {"BCS_E2E_DRIVER_BOT_TOKEN": TOKEN,
+                                     "BCS_E2E_HUMAN_COOKIE": COOKIE}), \
              patch("bcs_e2e.workspace_cli_runner.capture", side_effect=fake_capture):
             result = runner.execute("list.group.create")
-        self.assertEqual(result["evidence"]["credential_kind"], "owned_bot_token")
+        self.assertEqual(result["evidence"]["credential_kind"],
+                         "human_cookie_with_owned_driver_bot_token")
         self.assertEqual(context_state["context"],
                          {"token": TOKEN, "bot_uuid": DRIVER,
                           "api_base_url": "https://gateway.example.com"})
-        self.assertIsNone(context_state["cookie"])
+        self.assertEqual(context_state["cookie"], COOKIE)
+        self.assertEqual(context_state["nenv"], "production")
         self.assertNotIn(TOKEN, json.dumps(result, sort_keys=True))
+        self.assertNotIn(COOKIE, json.dumps(result, sort_keys=True))
 
-    def test_preprod_owned_bot_token_absence_blocks_before_process(self):
+    def test_preprod_station_duo_absence_blocks_before_process(self):
         profile = validate_workspace_cli_list_profile(self.list_profile())
         runner = WorkspaceCliRunner(profile, binary=self.binary,
                                     binary_sha256=self.digest, state_dir=self.state)
-        with patch.dict(os.environ, {}, clear=True), \
-             patch("bcs_e2e.workspace_cli_runner.capture") as capture:
-            with self.assertRaisesRegex(WorkspaceCliRunnerError,
-                                        "owned Bot credential is absent"):
-                runner.execute("list.group.create")
-        capture.assert_not_called()
+
+        def blocked(env):
+            with patch.dict(os.environ, env, clear=True), \
+                 patch("bcs_e2e.workspace_cli_runner.capture") as capture:
+                with self.assertRaisesRegex(WorkspaceCliRunnerError,
+                                            "session bundle is absent"):
+                    runner.execute("list.group.create")
+                capture.assert_not_called()
+
+        blocked({})
+        blocked({"BCS_E2E_HUMAN_COOKIE": COOKIE})
+        blocked({"BCS_E2E_DRIVER_BOT_TOKEN": TOKEN})
 
     def test_missing_credential_blocks_before_process(self):
         for gateway in (False, True):

@@ -59,7 +59,8 @@ def profile_value(*, gateway=False, mutate=None):
                         "dedicated": True, "visibility": "public"},
         },
         "auth": ({"kind": "owned-local-bot-tokens", "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN"}
-                 if local else {"kind": "owned-bot-tokens",
+                 if local else {"kind": "human-cookie-with-owned-driver-bot-token",
+                                "cookie_env": "BCS_E2E_HUMAN_COOKIE",
                                 "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN"}),
         "relationships": {"group": "bounded-owned-bots-retained-cli-status-termination",
                            "initial_session": "retained", "cleanup": "none",
@@ -247,13 +248,21 @@ class WorkspaceCliStatusTests(unittest.TestCase):
         with self.assertRaises(ConfigError):
             validate_workspace_cli_status_profile(profile_value(gateway=True, mutate=mutate))
 
-    def test_gateway_owned_bot_token_is_not_evidence(self):
+    def test_gateway_owned_session_cookie_and_bot_token_are_not_evidence(self):
         execution, runner, _, contexts = self.run_status_sequence(gateway=True)
         self.assertEqual(execution.status, "PASS")
         for context, cookie in contexts:
             self.assertEqual(context["token"], TOKEN)
-            self.assertIsNone(cookie)
+            self.assertEqual(cookie, COOKIE)
         self.assertNotIn(TOKEN, json.dumps(execution.snapshot(), sort_keys=True))
+        self.assertNotIn(COOKIE, json.dumps(execution.snapshot(), sort_keys=True))
+
+    def test_preprod_owned_bot_tokens_only_is_not_admitted_for_status(self):
+        def mutate(value):
+            value["auth"] = {"kind": "owned-bot-tokens",
+                             "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN"}
+        with self.assertRaises(ConfigError):
+            validate_workspace_cli_status_profile(profile_value(gateway=True, mutate=mutate))
 
     def test_status_slices_stay_one_shot(self):
         profile = validate_workspace_cli_status_profile(profile_value())
@@ -324,7 +333,7 @@ class WorkspaceCliStatusTests(unittest.TestCase):
                      patch("bcs_e2e.workspace_cli_runner.capture") as capture:
                     with self.assertRaisesRegex(
                             WorkspaceCliRunnerError,
-                            "(?:owned Bot credential|Human Cookie) is absent"):
+                            "(?:owned Bot credential|Human Cookie|session bundle) is absent"):
                         runner.execute("status.group.create")
                 capture.assert_not_called()
 

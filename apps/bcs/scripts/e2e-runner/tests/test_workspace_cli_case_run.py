@@ -83,7 +83,8 @@ def profile_value(case_key: str, *, gateway=False) -> dict:
                        "dedicated": True, "visibility": "public"},
         },
         "auth": (
-            {"kind": "owned-bot-tokens",
+            {"kind": "human-cookie-with-owned-driver-bot-token",
+             "cookie_env": "BCS_E2E_HUMAN_COOKIE",
              "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN"}
             if gateway and case_key == "list" else
             {"kind": "human-cookie", "cookie_env": "BCS_E2E_HUMAN_COOKIE"}
@@ -229,11 +230,12 @@ class WorkspaceCliCaseRunTests(unittest.TestCase):
         self.assertEqual(report["environment"]["entrypoint_kind"], "gateway")
         self.assertNotIn(PREPROD_COOKIE, json.dumps(report, sort_keys=True))
 
-    def test_preprod_gateway_list_case_reports_owned_bot_token_kind(self):
+    def test_preprod_gateway_list_case_reports_the_station_duo_kind(self):
         self.state_dir = self.root / "state-preprod-list"
         report, _ = self.invoke_case("list", gateway=True)
         self.assertEqual(report["status"], "PASS")
-        self.assertEqual(report["credential_kind"], "owned_bot_token")
+        self.assertEqual(report["credential_kind"],
+                         "human_cookie_with_owned_driver_bot_token")
         self.assertEqual(report["environment"]["entrypoint_kind"], "gateway")
         self.assertNotIn(LOCAL_TOKEN, json.dumps(report, sort_keys=True))
 
