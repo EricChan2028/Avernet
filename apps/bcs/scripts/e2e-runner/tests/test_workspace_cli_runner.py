@@ -135,12 +135,14 @@ class WorkspaceCliRunnerTests(unittest.TestCase):
             self.assertEqual(environment["PATH"].split(":")[0], "/opt/custom/bin")
             self.assertEqual(environment["DOCKER_HOST"],
                               "unix:///tmp/fake-docker.sock")
-            self.assertEqual(Path(environment["HOME"]), root / "home")
+            self.assertEqual(Path(environment["HOME"]), root / "bot")
             self.assertEqual(Path(environment["BOT_DATA_DIR"]), root / "bot")
-            self.assertEqual((root / "home").stat().st_mode & 0o777, 0o777)
-            self.assertEqual((root / "home" / ".bcs").stat().st_mode & 0o777, 0o777)
+            self.assertTrue((root / "home" / ".bcs").is_dir())
             self.assertTrue((root / "home" / ".bcs-mktmp").is_dir())
             self.assertEqual((root / "bot").stat().st_mode & 0o777, 0o777)
+            self.assertEqual((root / "bot" / ".bcs").stat().st_mode & 0o777, 0o777)
+            self.assertTrue((root / "bot" / ".bcs-mktmp").is_dir())
+            self.assertTrue((root / "bot" / ".bcs" / "logs").is_dir())
             self.assertEqual((root / "bot" / ".bcs" / "session.json")
                              .stat().st_mode & 0o777, 0o666)
             self.assertEqual(json.loads(context.read_text()),

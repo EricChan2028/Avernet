@@ -209,8 +209,12 @@ class WorkspaceCliRunner:
         docker_binary = shutil.which("docker")
         if docker_binary:
             path_dirs.append(str(Path(docker_binary).resolve().parent))
+        # HOME telescopes into BOT_DATA_DIR: the container uid cannot create
+        # $HOME-relative caches on the docker-created home directory, while
+        # BOT_DATA_DIR is bind-mounted writable; the CLI keeps its session
+        # journal and OAuth2 storage there (same layout as its context seed).
         environment = {"PATH": ":".join([*path_dirs, "/usr/bin", "/bin"]),
-                       "HOME": base + "/home",
+                       "HOME": base + "/bot",
                        "BOT_DATA_DIR": base + "/bot", "TMPDIR": base + "/tmp",
                        "LANG": "C"}
         self._widen_launcher_mounts(root)
@@ -263,7 +267,7 @@ class WorkspaceCliRunner:
         other local users.
         """
         for relative in ("home/.bcs", "home/.bcs/logs", "home/.bcs-mktmp",
-                         "bot/.bcs"):
+                         "bot", "bot/.bcs", "bot/.bcs/logs", "bot/.bcs-mktmp"):
             target = root / relative
             target.mkdir(parents=True, exist_ok=True)
             target.chmod(0o777)
