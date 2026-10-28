@@ -657,7 +657,14 @@ impl BcsServer {
             message_flow_builder,
             &config,
             leader_election.clone(),
-            None,
+            // The same caller-capable control plane GroupManagement reads:
+            // presence here arms the per-message speaking-lease fence
+            // (web_send re-resolves over live per-bot caller
+            // configurations), so a lease-less Human send is rejected in
+            // lease_required groups. Without it the fence reads
+            // any_bot_caller_enabled as false (Plain) and never consults
+            // the lease store.
+            Some(provider_control_plane.clone()),
             None,
             Some(lease_store.clone()),
         )
