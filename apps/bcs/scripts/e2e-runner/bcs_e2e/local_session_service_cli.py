@@ -14,6 +14,7 @@ from .session_cli_profile import (
     validate_session_cli_complete_invoke_profile,
     validate_session_cli_lifecycle_profile,
 )
+from .workspace_cli_runner import _invite_url_matches_product_shape
 from .write_transport import WriteClient
 
 
@@ -507,12 +508,14 @@ class RemoteLocalSessionServiceMemberChatAdapter(
                 or len(data["join_url"]) > 8192):
             raise RunStateError(
                 "Session Service member-chat invitation fields are invalid")
-        origin = self.profile["entrypoint"]["origin"].rstrip("/")
-        expected_join_urls = {
-            origin + "/sessions/join/" + data["invite_token"],
-            origin + "/sessions/{session_id}/" + data["invite_token"],
-        }
-        if data["join_url"] not in expected_join_urls:
+        # The reviewed preprod station mints the product frontend invite URL
+        # on the workstation origin (/bcn/chat/invite/sessions/<token>, from
+        # the station session_link_url configuration) instead of a station-API
+        # path; validate the product shape without coupling the API origin,
+        # the same contract the Group-invite face already enforces.
+        tier = self.profile["environment"]["tier"]
+        if not _invite_url_matches_product_shape(
+                data["join_url"], "sessions", data["invite_token"], tier):
             raise RunStateError(
                 "Session Service member-chat invitation URL is not exact")
         return call

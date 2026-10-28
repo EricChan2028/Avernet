@@ -212,10 +212,12 @@ def chat_output():
 
 def invite_output(profile):
     token = "member-chat-token"
-    origin = profile["entrypoint"]["origin"].rstrip("/")
+    scheme = "https" if profile["environment"]["tier"] == "preprod" else "http"
     return {
         "invite_token": token,
-        "join_url": origin + "/sessions/{session_id}/" + token,
+        "join_url": (
+            f"{scheme}://workstation.invalid/bcn/chat/invite/sessions/"
+            + token),
         "expires_at": 20261025000000,
     }
 
