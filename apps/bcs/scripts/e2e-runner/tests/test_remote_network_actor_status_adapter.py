@@ -9,6 +9,7 @@ import subprocess
 import sys
 import unittest
 from unittest.mock import patch
+from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -80,10 +81,13 @@ def envelope(status, bot_id='driver-bot'):
 
 class ActorStatusTests(unittest.TestCase):
     def run_case(self, reads=None, writes=None, profile_value=None):
+        driver_id = ((profile_value or {}).get('actors', {}).get('driver', {}).get('bot_id')
+                     if profile_value is not None else 'driver-bot')
         if reads is None:
-            reads = (envelope('online'), envelope('hidden'), envelope('online'))
+            reads = (envelope('online', driver_id), envelope('hidden', driver_id),
+                     envelope('online', driver_id))
         if writes is None:
-            writes = (envelope('hidden'), envelope('online'))
+            writes = (envelope('hidden', driver_id), envelope('online', driver_id))
         requests = []
         with patch.dict(os.environ, {'BCS_E2E_DRIVER_BOT_TOKEN': TOKEN,
                                      'BCS_E2E_HUMAN_COOKIE': COOKIE}), \
@@ -196,6 +200,20 @@ class ActorStatusTests(unittest.TestCase):
         self.assertEqual(execution.status, 'PASS')
         self.assertTrue(all(request.full_url.startswith('https://teamclawgw.example.com' + PATH)
                            for request in requests))
+
+    def test_gateway_profile_encodes_colon_actor_ids_in_the_bound_path(self):
+        profile = base_profile(gateway=True)
+        driver_id = 'driver-bot:owner-1'
+        encoded_path = '/openapi/v1/collaboration/bots/' + quote(driver_id, safe='')
+        profile['actors']['driver']['bot_id'] = driver_id
+        for operation in ('network_actor_status.read', 'network_actor_status.write'):
+            profile['edge_case_bindings'][operation].update(
+                path=encoded_path, target_actor_id=driver_id)
+        validate(profile)
+        execution, requests = self.run_case(profile_value=profile)
+        self.assertEqual(execution.status, 'PASS')
+        self.assertTrue(all(request.full_url.endswith(encoded_path)
+                            for request in requests))
 
     def test_wrong_state_blocks_without_partial_credit(self):
         cases = {

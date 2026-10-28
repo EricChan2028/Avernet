@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-
 from .case_adapters import AdapterCall
 from .case_executor import CaseExecution, StepOutcome
 from .local_network_contract import PARENT, network_source_binding
+from .route_bindings import actor_status_path
 from .run_state import RunStateError
 
 CASE_ID = 'PUBLIC-NETWORK-ACTOR-STATUS-01'
@@ -123,7 +123,7 @@ def _validate_result(plan: NetworkActorStatusCasePlan, result: AdapterCall) -> N
         raise RunStateError('actor-status evidence is outside the reviewed bounded mutation')
     data = result.data
     target = evidence.get('target_actor_id')
-    expected_path = (plan.requirement.public_path.replace('{driver_actor_id}', target)
+    expected_path = (actor_status_path({'actors': {'driver': {'bot_id': target}}})
                      if isinstance(target, str) and target else None)
     if (not isinstance(data, dict)
             or set(data) != {'target_actor_id', 'before_status', 'hidden_status', 'online_status'}
