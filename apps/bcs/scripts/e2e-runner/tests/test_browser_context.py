@@ -55,8 +55,24 @@ class BrowserContextTests(unittest.TestCase):
             profile = self.profile(); profile['entrypoint']['kind'] = kind
             with self.subTest(kind=kind), self.assertRaises(ConfigError):
                 browser_headers(profile)
-        profile = self.profile(); profile['auth']['header_env'] = {'Authorization': 'TEST_BEARER'}
+        profile = self.profile(); profile['auth']['header_env'] = {'X-Custom': 'TEST_HEADER'}
         with self.assertRaises(ConfigError): validate(profile)
+
+    def test_authenticated_bot_gateway_context_sends_only_bot_authorization(self):
+        profile = self.profile()
+        profile['auth'] = {'header_env': {'Authorization': 'BCS_E2E_DRIVER_BOT_TOKEN'}}
+        self.assertEqual(browser_headers(profile), {
+            'Origin': profile['browser_origin'],
+            'Referer': profile['browser_origin'] + '/',
+        })
+        with patch.dict(os.environ, {'BCS_E2E_DRIVER_BOT_TOKEN': 'test-bot-token'}):
+            read = ReadClient(profile)
+        self.assertEqual(read.headers, {
+            'Origin': profile['browser_origin'],
+            'Referer': profile['browser_origin'] + '/',
+            'Authorization': 'test-bot-token',
+        })
+        self.assertNotIn('test-bot-token', str(read.evidence))
 
     def test_explicit_unauthenticated_gateway_context_sends_no_credential_header(self):
         profile = self.profile()

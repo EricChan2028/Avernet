@@ -288,7 +288,9 @@ def browser_headers(profile: dict) -> dict[str, str]:
         return {}
     value = profile['browser_origin']
     auth = profile.get('auth', {})
-    cookie_gateway = 'Cookie' in auth.get('header_env', {})
+    headers = auth.get('header_env', {})
+    cookie_gateway = 'Cookie' in headers
+    bot_gateway = 'Authorization' in headers
     # The finite Edge admission slices must prove native unauthenticated
     # behavior.  Their browser-origin context is still explicit, but it must
     # never create a credential Authorization/Cookie header into the request.
@@ -296,9 +298,9 @@ def browser_headers(profile: dict) -> dict[str, str]:
         auth == {'principal_signing_key_env': 'BCS_E2E_UNAUTHENTICATED'}
     )
     if (profile['entrypoint']['kind'] != 'gateway'
-            or not (cookie_gateway or unauthenticated_gateway)):
+            or not (cookie_gateway or bot_gateway or unauthenticated_gateway)):
         raise ConfigError(
-            'browser_origin requires a Cookie-authenticated or explicit unauthenticated gateway binding')
+            'browser_origin requires a Cookie-, Bot-token-authenticated, or explicit unauthenticated gateway binding')
     if (not isinstance(value, str) or not value.isascii()
             or any(ord(char) <= 32 or ord(char) == 127 for char in value)):
         raise ConfigError('browser_origin must be an ASCII origin without whitespace or controls')
