@@ -61,8 +61,10 @@ class RemoteNetworkRegisterAdapter:
         except (ConfigError, ValueError) as error:
             raise RunStateError(str(error)) from None
         self.profile = profile
-        self.human_actor = 'human_' + identifier(
-            profile['human']['user_id'], 'register human actor ID')
+        profile_user_id = identifier(
+            profile['human']['user_id'], 'register Human ID')
+        self.human_actor = 'human_' + profile_user_id
+        self.user_id = profile_user_id
         self.read_client = ReadClient(profile)
         self.write_client = WriteClient(profile)
         self._attempted = False
@@ -127,14 +129,30 @@ class RemoteNetworkRegisterAdapter:
             raise RunStateError(
                 'registered Bot read-back transport evidence differs from the fixed '
                 'contract')
-        capabilities = readback_data.get('capabilities')
         created_by = readback_data.get('created_by')
-        owner_actor_id = readback_data.get('owner_actor_id')
-        if (not isinstance(capabilities, dict)
-                or capabilities.get('name') != bot_name
-                or created_by != self.human_actor
-                or readback_data.get('actor_kind') != 'bot'
-                or (owner_actor_id is not None and owner_actor_id != self.human_actor)):
+        legacy_projection = (
+            readback_data.get('bot_uuid') == bot_uuid
+            and readback_data.get('actor_kind') == 'bot'
+            and isinstance(readback_data.get('capabilities'), dict))
+        station_projection = (
+            readback_data.get('bot_id') == bot_uuid
+            and readback_data.get('kind') == 'bot'
+            and isinstance(readback_data.get('name'), str))
+        if legacy_projection:
+            capabilities = readback_data['capabilities']
+            owner_actor_id = readback_data.get('owner_actor_id')
+            exact_owner = (capabilities.get('name') == bot_name
+                           and created_by == self.human_actor
+                           and (owner_actor_id is None
+                                or owner_actor_id == self.human_actor))
+        elif station_projection:
+            # Current OCB station public-v1 projects the Bot domain object with
+            # bot_id/kind/name/created_by; created_by is the creator staff id.
+            exact_owner = (readback_data['name'] == bot_name
+                           and created_by == self.user_id)
+        else:
+            exact_owner = False
+        if not exact_owner:
             raise RunStateError(
                 'registered Bot read-back does not prove Human ownership of the exact '
                 'agent')

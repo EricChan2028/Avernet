@@ -114,10 +114,11 @@ class OpenRecorder:
                  owner_actor_id=None, actor_kind='bot',
                  capabilities_name=None, create_code=20100, create_http=201,
                  create_data=None, token=None,
-                 expected_create_token=None):
+                 expected_create_token=None, station_readback=False):
         self.requests = []
         self.expires_at = expires_at
-        self.created_by = HUMAN_ACTOR if created_by is None else created_by
+        self.created_by = ((HUMAN if station_readback else HUMAN_ACTOR)
+                            if created_by is None else created_by)
         self.owner_actor_id = (HUMAN_ACTOR if owner_actor_id is None
                                else owner_actor_id)
         self.actor_kind = actor_kind
@@ -129,6 +130,7 @@ class OpenRecorder:
         self.expected_create_token = (self.token
                                        if expected_create_token is None
                                        else expected_create_token)
+        self.station_readback = station_readback
         self.registered_name = ''
         self.registered_uuid = ''
 
@@ -169,6 +171,15 @@ class OpenRecorder:
                 raise AssertionError('read-back before registration')
             name = (self.capabilities_name if self.capabilities_name is not None
                     else self.registered_name)
+            if self.station_readback:
+                return envelope(request, {
+                    'bot_id': BOT_UUID,
+                    'name': name,
+                    'kind': self.actor_kind,
+                    'created_by': self.created_by,
+                    'status': 'online', 'visibility': 'protected',
+                    'env': 'pre',
+                })
             return envelope(request, {
                 'bot_uuid': BOT_UUID,
                 'capabilities': {'name': name,
@@ -413,6 +424,19 @@ class RemoteNetworkRegisterFlowTests(unittest.TestCase):
             create_request.full_url.split('https://teamclawgw.example.com', 1)[1],
             NETWORK_REGISTER_CREATE_PATH + '?token=' + REGISTER_TOKEN
             + '&bot-name=' + recorder.registered_name)
+
+    def test_current_station_public_v1_bot_projection_is_accepted(self):
+        recorder = OpenRecorder(station_readback=True)
+        execution, _ = self.run_case(recorder=recorder)
+        self.assertEqual(execution.status, 'PASS')
+        self.assertEqual(execution.completed_count, 1)
+        self.assertTrue(execution.steps[0].data['owner_readback'])
+
+    def test_current_station_public_v1_owner_mismatch_is_blocked(self):
+        recorder = OpenRecorder(station_readback=True, created_by='39465')
+        execution, _ = self.run_case(recorder=recorder)
+        self.assertEqual(execution.status, 'BLOCKED')
+        self.assertFalse(execution.steps[0].data)
 
     def test_execution_evidence_exposes_no_credential(self):
         execution, _ = self.run_case()
