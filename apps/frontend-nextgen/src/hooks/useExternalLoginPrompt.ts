@@ -33,11 +33,14 @@ export function useExternalLoginPrompt(): UseExternalLoginPromptResult {
     if (!shouldPrompt) setDismissed(false);
   }, [shouldPrompt]);
 
-  // 登录态探活成功后，业务请求晚到的 401/登录信号不能再覆盖当前已认证视图。
-  // 弹窗只在认证探活确实判定 unauthenticated 时展示，避免 OAuth 回流后 stale prompt 复现。
+  // dismissed 与认证状态对称翻转（P2 回归修复）：
+  // - authenticated（探活成功/新一轮登录）→ dismissed=true，防止 OAuth 回流后 stale prompt 复现；
+  //   晚到的旧请求 401 由 requestPrompt 的认证代次防线在信号口忽略，不靠这里压制。
+  // - unauthenticated（会话过期被 401 信号/探活刷新）→ dismissed=false，过期后的重新登录
+  //   提示不再被过期前的旧"已认证"快照锁死（此前用户操作无结果且无提示）。
   useEffect(() => {
-    if (auth.status !== 'authenticated') return;
-    setDismissed(true);
+    if (auth.status === 'authenticated') setDismissed(true);
+    else if (auth.status === 'unauthenticated') setDismissed(false);
   }, [auth.status]);
 
   const onDismiss = useCallback(() => setDismissed(true), []);
