@@ -639,7 +639,7 @@ def validate_workspace_incident_core_bindings(
         },
         WORKSPACE_GROUP_PARTICIPANT_MODE_OPERATION: {
             "method": "PUT",
-            "path": "/groups/{group_id}/participants/{qa_actor_id}",
+            "path": "/groups/{group_id}/participants/{qa_actor_id}/mode",
         },
         WORKSPACE_GROUP_INCIDENT_DELETE_OPERATION: {
             "method": "DELETE",

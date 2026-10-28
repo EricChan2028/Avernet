@@ -92,7 +92,7 @@ def profile_value(*, preprod=False, mutate=None):
                 "response": "legacy-json", "traceparent": "disabled"},
             WORKSPACE_GROUP_PARTICIPANT_MODE_OPERATION: {
                 "method": "PUT",
-                "path": "/groups/{group_id}/participants/{qa_actor_id}",
+                "path": "/groups/{group_id}/participants/{qa_actor_id}/mode",
                 "api_face": "legacy", "auth": "case_owned_driver",
                 "response": "legacy-json", "traceparent": "disabled"},
             WORKSPACE_GROUP_INCIDENT_DELETE_OPERATION: {
@@ -117,7 +117,7 @@ LEGACY_PATHS = {
     WORKSPACE_GROUP_CREATE_OPERATION: "/groups",
     WORKSPACE_GROUP_DETAIL_OPERATION: "/groups/{group_id}",
     WORKSPACE_GROUP_PARTICIPANT_MODE_OPERATION:
-        "/groups/{group_id}/participants/{qa_actor_id}",
+        "/groups/{group_id}/participants/{qa_actor_id}/mode",
     WORKSPACE_GROUP_INCIDENT_DELETE_OPERATION:
         "/groups/{group_id}?bot_id={driver_actor_id}",
 }
