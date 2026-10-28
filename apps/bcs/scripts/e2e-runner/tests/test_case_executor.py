@@ -80,6 +80,26 @@ class CaseExecutorTests(unittest.TestCase):
         self.assertEqual([step['method'] for step in snapshot['steps']], list(ADAPTER_METHOD_NAMES))
 
 
+    def test_a_structured_service_gap_reaches_the_blocked_receipt(self):
+        gap = {'gap': 'PREPROD_SERVICE_SCOPE_GAP', 'singlebox_closure': True,
+               'method': ADAPTER_METHOD_NAMES[0]}
+
+        class GapAdapter(FakeAdapter):
+            def _run(self, name):
+                error = RunStateError('PREPROD_SERVICE_SCOPE_GAP')
+                error.gap = gap
+                raise error
+
+        execution = execute_slow_judge_case(GapAdapter())
+        self.assertEqual(execution.status, 'BLOCKED')
+        self.assertEqual(execution.error_type, 'RunStateError')
+        self.assertEqual(execution.steps[0].error_gap, gap)
+        self.assertIsNone(execution.steps[1].error_gap)
+        snapshot = execution.snapshot()
+        self.assertEqual(snapshot['steps'][0]['error_gap'], gap)
+        self.assertIsNone(snapshot['steps'][1]['error_gap'])
+
+
 class FakeFixedLoopAdapter:
     def __init__(self, fail_method: str | None = None):
         self.fail_method = fail_method

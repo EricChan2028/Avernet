@@ -29,6 +29,7 @@ class StepOutcome:
     data: object
     evidence: dict
     error_type: str | None
+    error_gap: object = None
 
     def validate(self) -> None:
         if (self.status not in {'PASS', 'NOT_RUN'}
@@ -80,6 +81,7 @@ class CaseExecution:
                     'data': step.data,
                     'evidence': step.evidence,
                     'error_type': step.error_type,
+                    'error_gap': step.error_gap,
                 }
                 for step in self.steps
             ],
@@ -118,7 +120,8 @@ def execute_case(plan: CaseRewritePlan, adapter: object) -> CaseExecution:
                 step = StepOutcome(requirement_id=requirement.requirement_id,
                                    method=method_name, status='NOT_RUN',
                                    data=None, evidence={},
-                                   error_type=error_type)
+                                   error_type=error_type,
+                                   error_gap=getattr(error, "gap", None))
         steps.append(step)
 
     execution = CaseExecution(
