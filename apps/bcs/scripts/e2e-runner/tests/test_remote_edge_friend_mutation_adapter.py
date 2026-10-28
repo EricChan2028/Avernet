@@ -444,6 +444,23 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(result.data["admission_branches"]["human_public_with_edge"], "public_default")
         self.assertEqual(result.data["admission_branches"]["bot_party_edge"], "edge_grant/ok")
 
+    def test_drift_text_tolerates_every_live_message_placement(self):
+        live_role = {"http_status": 400, "code": "invalid_operation",
+                     "message": "Invalid operation on request unknown: role_requires_organization_code",
+                     "data": None}
+        live_org = {"http_status": 403, "code": "forbidden",
+                    "error": "organization discovery requires a bot caller", "data": None}
+        twin_role = {"http_status": 400, "code": "invalid_operation",
+                     "message": "role", "data": {"params": {"message": "role_requires_organization_code"}}}
+        self.assertIn("role_requires_organization_code",
+                      RemoteEdgeFriendMutationAdapter._drift_text(live_role))
+        self.assertIn("organization discovery requires a bot caller",
+                      RemoteEdgeFriendMutationAdapter._drift_text(live_org))
+        self.assertIn("role_requires_organization_code",
+                      RemoteEdgeFriendMutationAdapter._drift_text(twin_role))
+        self.assertEqual(RemoteEdgeFriendMutationAdapter._drift_text(
+            {"http_status": 400, "code": "invalid_operation", "message": "x", "data": None}), "x")
+
     def test_connect_private_and_discover_branches(self):
         result, adapter, harness = self.run_method("run_connect_private_discover")
         methods = [name for name, _ in harness.writes]

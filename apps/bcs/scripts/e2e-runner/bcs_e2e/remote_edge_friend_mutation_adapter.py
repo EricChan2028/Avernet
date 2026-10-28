@@ -281,6 +281,32 @@ class RemoteEdgeFriendMutationAdapter:
             raise RunStateError("friend-mutation error response is not an object")
         return {"http_status": record.get("http_status"), "code": data.get("code"), "message": data.get("message"), "data": data.get("data")}
 
+    @staticmethod
+    def _drift_text(error: dict) -> str:
+        # Live bcs-pre station negative diagnostics place the reviewed token
+        # on body-level message/error or, depending on the route, params
+        # message/reason; the local twin carries it under data. The obligation
+        # pins HTTP status, error code and token presence - never the wire
+        # placement of the token - so the matcher reads every placement.
+        parts: list[str] = []
+        data = error.get("data")
+        if isinstance(data, dict):
+            for key in ("message", "error"):
+                value = data.get(key)
+                if isinstance(value, str):
+                    parts.append(value)
+            params = data.get("params")
+            if isinstance(params, dict):
+                for key in ("message", "reason"):
+                    value = params.get(key)
+                    if isinstance(value, str):
+                        parts.append(value)
+        for key in ("message", "error"):
+            value = error.get(key)
+            if isinstance(value, str):
+                parts.append(value)
+        return " | ".join(parts)
+
     def _service_gap(self, method: str) -> RunStateError:
         error = RunStateError("PREPROD_SERVICE_SCOPE_GAP: " + _PREPROD_BLOCKED_METHODS[method])
         error.gap = {"gap": "PREPROD_SERVICE_SCOPE_GAP", "singlebox_closure": True, "method": method}
@@ -556,12 +582,14 @@ class RemoteEdgeFriendMutationAdapter:
         role_data, role_record = self._read(self.station_reader, "station.discover.role_no_org.read", fail_open=True)
         role_error = self._error_projection(role_data, role_record)
         role_drift = {"defect": "PD-DISCOVER-BRANCH-DRIFT", **role_error}
-        if role_error["http_status"] != 400 or role_error["code"] != "invalid_operation" or role_error["data"].get("params", {}).get("message") != "role_requires_organization_code":
+        if (role_error["http_status"] != 400 or role_error["code"] != "invalid_operation"
+                or "role_requires_organization_code" not in self._drift_text(role_error)):
             raise RunStateError("station role discovery drift differs from the observed contract")
         org_data, org_record = self._read(self.station_reader, "station.discover.org_no_requester.read", fail_open=True)
         org_error = self._error_projection(org_data, org_record)
         org_drift = {"defect": "PD-DISCOVER-BRANCH-DRIFT", **org_error}
-        if org_error["http_status"] != 403 or org_error["code"] != "forbidden" or org_error["data"].get("error") != "organization discovery requires a bot caller":
+        if (org_error["http_status"] != 403 or org_error["code"] != "forbidden"
+                or "organization discovery requires a bot caller" not in self._drift_text(org_error)):
             raise RunStateError("station organization discovery differs from the observed contract")
         gateway_discover_data, gateway_discover_record = self._read(self.reader, "friend.mutation.discover_denied.read", target_actor_id=member, fail_open=True)
         gateway_error = self._error_projection(gateway_discover_data, gateway_discover_record)

@@ -413,9 +413,12 @@ class ReadClient:
                     if envelope:
                         if type(body.get("code")) is not int:
                             raise ObservationError("public fail-open envelope is invalid")
+                        # A reviewed negative gateway diagnostic must carry
+                        # the code; its data projection is optional (the live
+                        # 401 human-discovery gap projects null data).
                         data = body.get("data")
-                        if not isinstance(data, dict):
-                            raise ObservationError("public fail-open data must be an object")
+                        if data is not None and not isinstance(data, dict):
+                            raise ObservationError("public fail-open data must be an object when present")
                         response_id = body.get("request_id")
                         if isinstance(response_id, str) and response_id:
                             if not record_response_id(record, response_id, source="ENVELOPE",
@@ -426,7 +429,7 @@ class ReadClient:
                             "message": body.get("message", ""),
                             "data": data,
                         }
-                        error_code = data.get("error_code")
+                        error_code = data.get("error_code") if isinstance(data, dict) else None
                         if isinstance(error_code, str) and error_code:
                             projected["error"] = error_code
                         body = projected

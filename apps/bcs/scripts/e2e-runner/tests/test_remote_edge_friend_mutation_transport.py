@@ -417,6 +417,20 @@ class FriendMutationReadTransportTests(unittest.TestCase):
 
         with patch.dict(os.environ, {"BCS_E2E_HUMAN_COOKIE": COOKIE}), \
                 patch("bcs_e2e.transport.build_opener") as factory:
+            # Live gateway 401 human-discovery gap: envelope code present,
+            # data projection null. The reviewed negative diagnostic is
+            # admitted without forcing an object data payload.
+            factory.return_value.open.return_value = envelope(
+                None, code=401000, http=401, message="bot only")
+            observation = ReadClient(gateway_profile()).read(
+                "friend.mutation.discover_denied.read", target_actor_id=MEMBER,
+                fail_open=True)
+        self.assertEqual(observation.data, {"code": 401000,
+                                            "message": "bot only",
+                                            "data": None})
+
+        with patch.dict(os.environ, {"BCS_E2E_HUMAN_COOKIE": COOKIE}), \
+                patch("bcs_e2e.transport.build_opener") as factory:
             factory.return_value.open.return_value = envelope({"items": []}, http=401)
             with self.assertRaises(ObservationError):
                 ReadClient(gateway_profile()).read(
