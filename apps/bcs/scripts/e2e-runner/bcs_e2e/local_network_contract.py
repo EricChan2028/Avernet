@@ -923,18 +923,32 @@ def _validate_platform_asset_result(plan: NetworkPlatformAssetCasePlan,
             or not isinstance(data.get('user_id'), str) or not data['user_id']):
         raise RunStateError('platform asset result does not satisfy the reviewed slice')
     records = evidence.get('requests')
+    station_identity = len(records) == 4
     if (evidence.get('fixture_effect') != 'NONE'
-            or not isinstance(records, list) or len(records) != 3
-            or [row.get('operation') for row in records] != [
-                'environment.read', 'identity.read', 'network.platform_asset.read']
+            or not isinstance(records, list)
+            or not station_identity and len(records) != 3
+            or any(row.get('http_status') != 200 for row in records)
             or records[0].get('path') != plan.requirement.manifest_path
-            or records[1].get('path') != plan.requirement.identity_path
-            or records[2].get('path') != data['panel_asset_url']
-            or any(row.get('http_status') != 200 for row in records)):
+            or records[-1].get('path') != data['panel_asset_url']):
         raise RunStateError('platform asset evidence is outside the reviewed transport contract')
-    if (records[0].get('credentials_sent') is not True
-            or records[1].get('credentials_sent') is not True
-            or records[2].get('credentials_sent') is not False
+    if station_identity:
+        human_actor_path = ('/openapi/v1/collaboration/bots/human_'
+                            + data['user_id'])
+        valid_reads = ([row.get('operation') for row in records] == [
+                'environment.read', 'identity.actor.read', 'identity.read',
+                'network.platform_asset.read']
+            and records[1].get('path') == human_actor_path
+            and records[2].get('path') == human_actor_path
+                + '/candidates?offset=0&limit=1')
+    else:
+        valid_reads = ([row.get('operation') for row in records] == [
+                'environment.read', 'identity.read', 'network.platform_asset.read']
+            and records[1].get('path') == plan.requirement.identity_path)
+    if not valid_reads:
+        raise RunStateError('platform asset evidence is outside the reviewed transport contract')
+    expected_credentials = ([True, True, True, False] if station_identity
+                            else [True, True, False])
+    if ([row.get('credentials_sent') for row in records] != expected_credentials
             or any(row.get('authorization_sent') for row in records)):
         raise RunStateError('platform slice requires Human Cookie JSON reads and an unauthenticated asset')
     if any(row.get('method') != 'GET' for row in records):

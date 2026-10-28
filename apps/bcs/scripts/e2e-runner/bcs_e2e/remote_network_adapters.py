@@ -32,7 +32,7 @@ from .local_network_contract import (
     execute_network_bots_query_case,
     execute_network_platform_asset_case,
 )
-from .identity_binding import resolve_identity_binding
+from .identity_binding import HUMAN_VIEW, human_actor_path, identity_request, resolve_identity_binding
 from .profile import ConfigError
 from .route_bindings import require_edge_case_binding
 from .run_state import RunStateError
@@ -579,10 +579,12 @@ class RemoteNetworkPlatformAssetAdapter:
         except (ConfigError, ValueError) as error:
             raise RunStateError(str(error)) from None
         identity_binding = resolve_identity_binding(profile)
-        if (identity_binding.get("method") != "GET"
-                or identity_binding.get("path") != "/openapi/v1/auth/user"
-                or identity_binding.get("response") != "public-envelope"):
-            raise RunStateError("platform identity requires the exact public-v1 authenticated Human read")
+        expected_identity = (HUMAN_VIEW if environment.get("tier") == "preprod"
+                             else {"method": "GET", "path": "/openapi/v1/auth/user",
+                                   "response": "public-envelope"})
+        if identity_binding != expected_identity:
+            raise RunStateError(
+                "platform identity requires the environment's exact authenticated Human view")
         self.case_id = NETWORK_PLATFORM_ASSET_CASE_ID
         self.profile = profile
         self.expected_env = environment["expected_bcs_env"]
@@ -594,8 +596,13 @@ class RemoteNetworkPlatformAssetAdapter:
         identity_observation = self.client.read("identity.read")
         manifest_body, identity_body = manifest_observation.data, identity_observation.data
         records = list(self.client.evidence)
-        if (records[0].get("path") != "/api/v1/collaboration/manifest"
-                or records[1].get("path") != "/openapi/v1/auth/user"):
+        if records[0].get("path") != "/api/v1/collaboration/manifest":
+            raise RunStateError("platform identity discovery differs from the reviewed station face")
+        if self.profile["environment"]["tier"] == "preprod":
+            expected_paths = [human_actor_path(self.profile), identity_request(self.profile)["path"]]
+            if [row.get("path") for row in records[1:3]] != expected_paths:
+                raise RunStateError("platform identity discovery differs from the reviewed station face")
+        elif records[1].get("path") != "/openapi/v1/auth/user":
             raise RunStateError("platform identity discovery differs from the reviewed station face")
         bundles = manifest_body.get("bundles")
         if (manifest_body.get("schema_version") != 1
@@ -605,9 +612,12 @@ class RemoteNetworkPlatformAssetAdapter:
                 or bundles[0].get("name") != self.binding["asset_name"]
                 or bundles[0].get("url") != self.binding["path"]):
             raise RunStateError("platform manifest does not expose the exact reviewed panel bundle")
-        if (identity_body.get("user_id") != self.expected_user_id
-                or not isinstance(identity_body.get("provider"), str) or not identity_body["provider"]):
+        if identity_body.get("user_id") != self.expected_user_id:
             raise RunStateError("platform identity does not resolve the exact configured Human")
+        if (self.profile["environment"]["tier"] != "preprod"
+                and (not isinstance(identity_body.get("provider"), str)
+                     or not identity_body["provider"])):
+            raise RunStateError("platform identity does not expose its authentication provider")
         asset_observation = self.client.read_platform_asset(self.binding["path"])
         asset = asset_observation.data
         records.append(asset_observation.evidence)

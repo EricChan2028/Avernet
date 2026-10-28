@@ -71,7 +71,7 @@ class Observation:
     evidence: dict
 
 
-_HUMAN_COOKIE_ONLY_READS = {"environment.read", "identity.read",
+_HUMAN_COOKIE_ONLY_READS = {"environment.read", "identity.read", "identity.actor.read",
                             "network.bot_mine.read", "network.actor_list.read",
                             "network.actor_search.read", "network.bots_paged.read",
                             "network.actor_status.read",

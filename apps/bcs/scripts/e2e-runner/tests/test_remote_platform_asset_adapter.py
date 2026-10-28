@@ -22,6 +22,7 @@ from bcs_e2e.local_network_contract import (
     network_platform_asset_case_plan,
 )
 from bcs_e2e.profile import ConfigError, validate
+from bcs_e2e.identity_binding import HUMAN_VIEW
 from bcs_e2e.run_state import RunStateError
 from bcs_e2e.transport import ObservationError, ReadClient
 
@@ -51,6 +52,7 @@ def platform_profile(*, absolute=False):
     }}
     if absolute:
         value['entrypoint'].update(kind='gateway', origin='https://teamclawgw.example.com')
+        value['identity_binding'] = dict(HUMAN_VIEW)
         value['environment'].update(tier='preprod', expected_bcs_env='pre', id='pre-profile',
                                   lifecycle='remote-attach', deployment='managed',
                                   provider='internal')
@@ -205,20 +207,50 @@ class PlatformAssetTests(unittest.TestCase):
         self.assertNotIn(COOKIE, serialized)
         self.assertNotIn(ASSET_BYTES.decode(), serialized)
 
-    def test_the_gateway_case_uses_the_same_station_slice_contract(self):
+    def test_the_gateway_case_uses_the_station_human_view_and_bound_asset(self):
+        manifest = self.envelope({
+            'schema_version': 1, 'env': 'pre',
+            'bundles': [{'name': 'bcsPanel', 'url': PLATFORM_ASSET_URL}],
+        })
+        actor = self.envelope({
+            'bot_id': 'human_owner-1', 'kind': 'human',
+            'created_by': 'owner-1', 'env': 'pre',
+        })
+        candidate_page = self.envelope({'items': [], 'total': 0,
+                                         'offset': 0, 'limit': 1})
         execution, requests = self.run_platform_case(
-            self.platform_responses(env='pre', asset_url=PLATFORM_ASSET_URL),
+            [Reply(manifest), Reply(actor), Reply(candidate_page),
+             self.asset_reply()],
             platform_profile(absolute=True))
         self.assertEqual(execution.status, 'PASS')
-        self.assertEqual(len(requests), 3)
-        self.assertEqual(requests[0].full_url,
-                         'https://teamclawgw.example.com' + NETWORK_PLATFORM_ASSET_MANIFEST_PATH)
-        self.assertEqual(requests[1].full_url,
-                         'https://teamclawgw.example.com' + NETWORK_PLATFORM_ASSET_IDENTITY_PATH)
-        self.assertEqual(requests[2].full_url, PLATFORM_ASSET_URL)
-        self.assertEqual(execution.snapshot()['steps'][0]['data']['env'], 'pre')
-        self.assertEqual(execution.snapshot()['steps'][0]['data']['panel_asset_url'],
+        self.assertEqual(len(requests), 4)
+        self.assertEqual([request.method for request in requests], ['GET'] * 4)
+        expected = [
+            'https://teamclawgw.example.com' + NETWORK_PLATFORM_ASSET_MANIFEST_PATH,
+            'https://teamclawgw.example.com/openapi/v1/collaboration/bots/human_owner-1',
+            'https://teamclawgw.example.com/openapi/v1/collaboration/bots/human_owner-1/candidates?offset=0&limit=1',
+            PLATFORM_ASSET_URL,
+        ]
+        self.assertEqual([request.full_url for request in requests], expected)
+        for request in requests[:3]:
+            headers = {name.lower(): value for name, value in request.header_items()}
+            self.assertNotIn('authorization', headers)
+            self.assertIn(COOKIE, headers.values())
+        asset_headers = {name.lower(): value for name, value in requests[3].header_items()}
+        self.assertNotIn('authorization', asset_headers)
+        self.assertNotIn('cookie', asset_headers)
+        snapshot = execution.snapshot()
+        self.assertEqual(snapshot['steps'][0]['data']['env'], 'pre')
+        self.assertEqual(snapshot['steps'][0]['data']['panel_asset_url'],
                          PLATFORM_ASSET_URL)
+        self.assertEqual(snapshot['steps'][0]['data']['user_id'], 'owner-1')
+        self.assertEqual([row['operation'] for row in
+                         snapshot['steps'][0]['evidence']['requests']],
+                         ['environment.read', 'identity.actor.read',
+                          'identity.read', 'network.platform_asset.read'])
+        self.assertEqual([row['credentials_sent'] for row in
+                         snapshot['steps'][0]['evidence']['requests'][:3]],
+                         [True, True, True])
 
     def test_invalid_platform_results_block_without_partial_credit(self):
         cases = {
@@ -256,11 +288,7 @@ class PlatformAssetTests(unittest.TestCase):
         missing_binding = platform_profile()
         missing_binding['edge_case_bindings'].pop('network_platform_asset.read')
         wrong_identity = platform_profile(absolute=True)
-        wrong_identity['identity_binding'] = {
-            'method': 'GET',
-            'path': '/openapi/v1/collaboration/bots/{human_actor_id}/candidates?offset=0&limit=1',
-            'response': 'authorized-human-view',
-        }
+        wrong_identity['environment']['tier'] = 'local'
         for value in (wrong_face, wrong_manifest, missing_binding, wrong_identity):
             with self.subTest(value=value['entrypoint'].get('api_face')), \
                  patch('bcs_e2e.transport.build_opener') as factory:
