@@ -95,7 +95,10 @@ def disk_digest() -> str:
     # adapter into its own focused module and adds one independent extras
     # mixin, so the allowance grows by two more focused files.
     # The enforced count keeps runner.py alongside the focused modules.
-    if len(paths) > 309:
+    # The dual-environment Edge friend-mutation remote slice adds its focused
+    # remote Adapter and command Run lifecycle modules, so the focused-module
+    # allowance grows by exactly those two files.
+    if len(paths) > 311:
         raise ValueError('executor artifact exceeds its source-file budget')
     digest = hashlib.sha256()
     for path in paths:

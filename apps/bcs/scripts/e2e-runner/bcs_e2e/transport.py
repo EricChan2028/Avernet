@@ -14,7 +14,7 @@ from urllib.parse import quote, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, ProxyHandler, HTTPSHandler, build_opener
 
 from .correlation import record_response_id
-from .profile import ConfigError, browser_headers, origin, unique_keys
+from .profile import ConfigError, browser_headers, identifier, origin, unique_keys
 from .route_bindings import require_edge_case_binding
 from .identity_binding import (identity_request, pilot_execution_blocker, project_authorized_human_view,
                                HUMAN_VIEW, resolve_identity_binding, human_actor_path, require_human_actor)
@@ -58,7 +58,8 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
-_EDGE_ADMISSION_READS = {"edge.admission.human_actor.read", "edge.admission.actor_kind.read"}
+_EDGE_ADMISSION_READS = {"edge.admission.human_actor.read", "edge.admission.actor_kind.read",
+                         "station.admission.read"}
 
 
 _WEBHOOK_PRINCIPAL_READS = {"webhook.subscription.list", "webhook.subscription.read",
@@ -87,7 +88,31 @@ _HUMAN_COOKIE_ONLY_READS = {"environment.read", "identity.read", "identity.actor
                             "friend.decision.driver_requests.read",
                             "friend.decision.driver_connections.read",
                             "friend.public.driver_connections.read",
+                            "friend.mutation.requests_sent.read",
+                            "friend.mutation.requests_received.read",
+                            "friend.mutation.requests_all.read",
+                            "friend.mutation.connections.read",
+                            "friend.mutation.bot_detail.read",
+                            "friend.mutation.discover_denied.read", "station.register_token.read",
+                            "station.bot_detail.read", "station.discover.collaborate.read",
+                            "station.discover.role_no_org.read",
+                            "station.discover.org_no_requester.read",
                             "register.token.read", "register.bot.readback"}
+
+_MUTATION_READ_BINDINGS = {
+    "friend.mutation.requests_sent.read": "friend_connection_mutation.requests_sent.read",
+    "friend.mutation.requests_received.read": "friend_connection_mutation.requests_received.read",
+    "friend.mutation.requests_all.read": "friend_connection_mutation.requests_all.read",
+    "friend.mutation.connections.read": "friend_connection_mutation.connections.read",
+    "friend.mutation.bot_detail.read": "friend_connection_mutation.bot_detail.read",
+    "friend.mutation.discover_denied.read": "friend_connection_mutation.discover_denied.read",
+    "station.register_token.read": "friend_connection_mutation.register_token.read",
+    "station.admission.read": "friend_connection_mutation.station_admission.read",
+    "station.discover.collaborate.read": "friend_connection_mutation.station_discover_collaborate.read",
+    "station.discover.role_no_org.read": "friend_connection_mutation.station_discover_role_no_org.read",
+    "station.discover.org_no_requester.read": "friend_connection_mutation.station_discover_org_no_requester.read",
+    "station.bot_detail.read": "friend_connection_mutation.bot_detail.read",
+}
 
 
 class ReadClient:
@@ -110,8 +135,9 @@ class ReadClient:
 
     def read(self, operation: str, bot_id: str = "", *, policy_authority=None,
              direction: str = "", group_id: str = "", run_id: str = "",
-             subscription_id: str = "",
-             delivery_id: str = "") -> Observation:
+             subscription_id: str = "", actor_id: str = "",
+             target_actor_id: str = "", delivery_id: str = "",
+             fail_open: bool = False) -> Observation:
         # No general URL or HTTP method parameter: Preflight cannot call arbitrary endpoints.
         envelope = True
         if operation == "identity.read":
@@ -249,6 +275,24 @@ class ReadClient:
             if not isinstance(bot_id, str) or not bot_id:
                 raise ObservationError("registered Bot readback requires a bound Bot ID")
             path = binding["path"].replace("{bot_uuid}", quote(bot_id, safe=""))
+        elif operation in _MUTATION_READ_BINDINGS:
+            # These are frozen route templates: substitution happens only after
+            # the profile binding has matched the exact literal template.
+            binding = require_edge_case_binding(self.profile, _MUTATION_READ_BINDINGS[operation])
+            path = binding["path"]
+            envelope = binding["response"] == "public-envelope"
+            if "{actor_id}" in path:
+                identifier(actor_id, f"{operation}.actor_id")
+                path = path.replace("{actor_id}", quote(actor_id, safe=""))
+            if "{target_actor_id}" in path:
+                identifier(target_actor_id, f"{operation}.target_actor_id")
+                path = path.replace("{target_actor_id}", quote(target_actor_id, safe=""))
+            if "{bot_uuid}" in path:
+                if operation == "station.admission.read" and target_actor_id:
+                    bound_bot_id = identifier(target_actor_id, f"{operation}.target_actor_id")
+                else:
+                    bound_bot_id = identifier(bot_id, f"{operation}.bot_id")
+                path = path.replace("{bot_uuid}", quote(bound_bot_id, safe=""))
         elif operation in _WEBHOOK_PRINCIPAL_READS:
             # The reviewed public-v1 Event Subscription read core. Every
             # route is declared in the profile's opt-in cross-environment
@@ -321,6 +365,14 @@ class ReadClient:
             })
         if operation == "register.bot.readback":
             record["bound_bot_id"] = bot_id
+        if operation in _MUTATION_READ_BINDINGS:
+            if actor_id:
+                record["bound_actor_id"] = actor_id
+            if target_actor_id:
+                record["bound_target_actor_id"] = target_actor_id
+            if (operation in {"friend.mutation.bot_detail.read", "station.bot_detail.read"}
+                    or (operation == "station.admission.read" and not target_actor_id)):
+                record["bound_bot_id"] = bot_id
         if operation in _WEBHOOK_PRINCIPAL_READS:
             record["principal_sent"] = True
             record["credentials_sent"] = False
@@ -345,7 +397,40 @@ class ReadClient:
                 record["request_id_echoed"] = echoed == request_id
                 record_response_id(record, echoed, source='HEADER', sensitive_values=auth_headers.values())
                 if response.code != 200:
-                    raise ObservationError(f"HTTP {response.code}; no redirect or route fallback attempted")
+                    if (not fail_open or operation not in _MUTATION_READ_BINDINGS
+                            or not 400 <= response.code <= 599):
+                        raise ObservationError(f"HTTP {response.code}; no redirect or route fallback attempted")
+                    # Explicit fail-open is an assertion mode, not general error
+                    # recovery. It admits only the reviewed negative mutation
+                    # reads and returns their bounded JSON diagnostic.
+                    raw = response.read(self.profile["policy"]["max_response_bytes"] + 1)
+                    if len(raw) > self.profile["policy"]["max_response_bytes"]:
+                        raise ObservationError("response exceeds configured size limit")
+                    from .profile import unique_keys as strict_unique_keys
+                    body = json.loads(raw, object_pairs_hook=strict_unique_keys)
+                    if not isinstance(body, dict):
+                        raise ObservationError("fail-open diagnostic must be a JSON object")
+                    if envelope:
+                        if type(body.get("code")) is not int:
+                            raise ObservationError("public fail-open envelope is invalid")
+                        data = body.get("data")
+                        if not isinstance(data, dict):
+                            raise ObservationError("public fail-open data must be an object")
+                        response_id = body.get("request_id")
+                        if isinstance(response_id, str) and response_id:
+                            if not record_response_id(record, response_id, source="ENVELOPE",
+                                                        sensitive_values=auth_headers.values()):
+                                raise ObservationError("public fail-open response request ID is invalid")
+                        projected = {
+                            "code": body["code"],
+                            "message": body.get("message", ""),
+                            "data": data,
+                        }
+                        error_code = data.get("error_code")
+                        if isinstance(error_code, str) and error_code:
+                            projected["error"] = error_code
+                        body = projected
+                    return Observation(body, record)
                 limit = self.profile["policy"]["max_response_bytes"]
                 raw = response.read(limit + 1)
                 if len(raw) > limit:

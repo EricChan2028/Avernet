@@ -126,7 +126,8 @@ def validate(raw: object) -> dict:
     relationships = object_keys(p["relationships"], {"friendship"}, "relationships")
     if relationships["friendship"] not in {
             "unchanged", "bounded-owned-bot-decisions",
-            "bounded-owned-bot-public-acceptance"}:
+            "bounded-owned-bot-public-acceptance",
+            "bounded-owned-bot-mutations"}:
         raise ConfigError("relationships.friendship: unsupported pilot relationship policy")
     h = object_keys(p["human"], {"user_id"}, "human")
     identifier(h["user_id"], "human.user_id")
@@ -210,15 +211,72 @@ def validate(raw: object) -> dict:
             "friend_connection_public_accept.create",
             "friend_connection_public_accept.driver_connections.read",
         }
+        # The dual-environment Edge friend-mutation family splits its reviewed
+        # operations by API face: the Gateway public-v1 face carries the pair
+        # mutations, decisions and vantage reads; the station-direct legacy
+        # face carries the register-onboard, discovery, admission and revoked
+        # legacy routes. Each admitted profile declares exactly its own face's
+        # bindings; the Human Cookie stays the-only credential on the Gateway
+        # face, while the station legacy revoke route is the one reviewed
+        # double-identity exception (Cookie owner plus the owned registered
+        # Bot Bearer that the legacy caller contract derives from).
+        mutation_gateway_operations = {
+            "friend_connection_mutation.create",
+            "friend_connection_mutation.accept",
+            "friend_connection_mutation.reject",
+            "friend_connection_mutation.cancel",
+            "friend_connection_mutation.requests_sent.read",
+            "friend_connection_mutation.requests_received.read",
+            "friend_connection_mutation.requests_all.read",
+            "friend_connection_mutation.connections.read",
+            "friend_connection_mutation.bot_detail.read",
+            "friend_connection_mutation.visibility.write",
+            "friend_connection_mutation.revoke",
+            "friend_connection_mutation.discover_denied.read",
+        }
+        mutation_station_operations = {
+            "friend_connection_mutation.register_token.read",
+            "friend_connection_mutation.register_bot.create",
+            "friend_connection_mutation.legacy_revoke",
+            "friend_connection_mutation.station_admission.read",
+            "friend_connection_mutation.station_discover_collaborate.read",
+            "friend_connection_mutation.station_discover_role_no_org.read",
+            "friend_connection_mutation.station_discover_org_no_requester.read",
+        }
+        mutation_operations = mutation_gateway_operations | mutation_station_operations
         admitted_operations = {
             "bounded-owned-bot-decisions": decision_operations,
             "bounded-owned-bot-public-acceptance": public_accept_operations,
+            "bounded-owned-bot-mutations": mutation_operations,
         }
         declared = set(p["edge_case_bindings"]) & set().union(*admitted_operations.values())
         mode = relationships["friendship"]
         if mode == "unchanged":
             if declared:
                 raise ConfigError("relationships.friendship: bounded friendship effects are not admitted")
+        elif mode == "bounded-owned-bot-mutations":
+            if not declared <= mutation_operations:
+                raise ConfigError(
+                    "relationships.friendship: edge friend-mutation bindings must stay within the reviewed mutation set")
+            face_expected = (
+                mutation_station_operations if ep["kind"] == "bcs-direct"
+                else mutation_gateway_operations)
+            if declared != face_expected:
+                raise ConfigError(
+                    "relationships.friendship: bounded-owned-bot-mutations requires exactly this face's "
+                    "reviewed mutation bindings")
+            if p["policy"]["exclusive_use_confirmed"] is not True:
+                raise ConfigError("relationships.friendship: bounded friendship effects require exclusive fixture use")
+            if p["auth"] == {"kind": "owned-local"}:
+                raise ConfigError("relationships.friendship: cross-environment friendship effects require a Cookie-bound profile")
+            headers = p["auth"].get("header_env", {})
+            if ep["kind"] == "bcs-direct":
+                if set(headers) != {"Cookie", "Authorization"}:
+                    raise ConfigError(
+                        "relationships.friendship: the station legacy mutation face requires the Human "
+                        "Cookie plus the owned registered-Bot Authorization reference")
+            elif set(headers) != {"Cookie"}:
+                raise ConfigError("relationships.friendship: bounded friendship effects must send only the Human Cookie")
         elif declared != admitted_operations[mode]:
             raise ConfigError("relationships.friendship: exactly this mode's bounded bindings are required")
         else:

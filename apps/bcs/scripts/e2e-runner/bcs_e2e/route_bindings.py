@@ -183,6 +183,94 @@ EVENT_DELIVERY_PATH = (
 EVENT_SUBSCRIPTION_DELETE_PATH = (
     "/openapi/v1/collaboration/event-subscriptions/{subscription_id}"
     "?revision=3")
+FRIEND_MUTATION_CREATE_PATH = (
+    "/openapi/v1/collaboration/friend-connections/requests"
+)
+FRIEND_MUTATION_ACCEPT_PATH = (
+    "/openapi/v1/collaboration/friend-connections/requests/{request_id}/accept"
+)
+FRIEND_MUTATION_REJECT_PATH = (
+    "/openapi/v1/collaboration/friend-connections/requests/{request_id}/reject"
+)
+FRIEND_MUTATION_CANCEL_PATH = (
+    "/openapi/v1/collaboration/friend-connections/requests/{request_id}/cancel"
+)
+FRIEND_MUTATION_REQUESTS_SENT_PATH = (
+    "/openapi/v1/collaboration/friend-connections/requests"
+    "?actor_type=bot&actor_id={actor_id}&direction=sent"
+    "&status=pending&page=1&page_size=20"
+)
+FRIEND_MUTATION_REQUESTS_RECEIVED_PATH = (
+    "/openapi/v1/collaboration/friend-connections/requests"
+    "?actor_type=bot&actor_id={actor_id}&direction=received"
+    "&status=pending&page=1&page_size=20"
+)
+FRIEND_MUTATION_REQUESTS_ALL_PATH = (
+    "/openapi/v1/collaboration/friend-connections/requests"
+    "?actor_type=bot&actor_id={actor_id}&direction=all"
+    "&status=pending&page=1&page_size=20"
+)
+FRIEND_MUTATION_CONNECTIONS_PATH = (
+    "/openapi/v1/collaboration/friend-connections"
+    "?actor_type=bot&actor_id={actor_id}&target_type=bot&page=1&page_size=20"
+)
+FRIEND_MUTATION_BOT_DETAIL_PATH = "/openapi/v1/collaboration/bots/{bot_uuid}"
+FRIEND_MUTATION_DISCOVER_PATH = "/openapi/v1/bots/discover?collaborate_bot={target_actor_id}"
+FRIEND_MUTATION_REVOKE_PATH = (
+    "/openapi/v1/collaboration/friend-connections"
+    "?target_actor_type=bot&target_actor_id={target_actor_id}"
+)
+STATION_REGISTER_TOKEN_PATH = "/register/token"
+STATION_REGISTER_BOT_PATH = "/register?token={register_token}&bot-name={bot_name}"
+STATION_LEGACY_REVOKE_PATH = "/collaboration/friend-connections/{actor}"
+STATION_ADMISSION_PATH = "/bots/{bot_uuid}/admission?actor={actor_id}"
+STATION_DISCOVER_COLLABORATE_PATH = "/bots/discover?collaborate_bot={target_actor_id}"
+STATION_DISCOVER_ROLE_PATH = "/bots/discover?role=contributor"
+STATION_DISCOVER_ORGANIZATION_PATH = "/bots/discover?organization_code=DEMO"
+
+_FRIEND_MUTATION_GATEWAY_OPS = {
+    "friend_connection_mutation.create",
+    "friend_connection_mutation.accept",
+    "friend_connection_mutation.reject",
+    "friend_connection_mutation.cancel",
+    "friend_connection_mutation.requests_sent.read",
+    "friend_connection_mutation.requests_received.read",
+    "friend_connection_mutation.requests_all.read",
+    "friend_connection_mutation.connections.read",
+    "friend_connection_mutation.bot_detail.read",
+    "friend_connection_mutation.visibility.write",
+    "friend_connection_mutation.revoke",
+    "friend_connection_mutation.discover_denied.read",
+}
+_FRIEND_MUTATION_STATION_OPS = {
+    "friend_connection_mutation.register_token.read",
+    "friend_connection_mutation.register_bot.create",
+    "friend_connection_mutation.legacy_revoke",
+    "friend_connection_mutation.station_admission.read",
+    "friend_connection_mutation.station_discover_collaborate.read",
+    "friend_connection_mutation.station_discover_role_no_org.read",
+    "friend_connection_mutation.station_discover_org_no_requester.read",
+}
+_FRIEND_MUTATION_PAIR_OPS = {
+    "friend_connection_mutation.create",
+    "friend_connection_mutation.accept",
+    "friend_connection_mutation.reject",
+    "friend_connection_mutation.cancel",
+}
+_FRIEND_MUTATION_ACTOR_OPS = {
+    "friend_connection_mutation.requests_sent.read",
+    "friend_connection_mutation.requests_received.read",
+    "friend_connection_mutation.requests_all.read",
+    "friend_connection_mutation.connections.read",
+}
+_FRIEND_MUTATION_TARGET_OPS = {
+    "friend_connection_mutation.bot_detail.read",
+    "friend_connection_mutation.visibility.write",
+    "friend_connection_mutation.revoke",
+    "friend_connection_mutation.discover_denied.read",
+    "friend_connection_mutation.legacy_revoke",
+    "friend_connection_mutation.station_discover_collaborate.read",
+}
 
 
 def actor_list_read_path(profile: dict) -> str:
@@ -351,6 +439,25 @@ _EDGE_CASES = {
     "webhook.subscription.deliveries.list": ("GET", EVENT_SUBSCRIPTION_DELIVERIES_PATH, "gateway_principal"),
     "webhook.delivery.read": ("GET", EVENT_DELIVERY_PATH, "gateway_principal"),
     "webhook.subscription.delete": ("DELETE", EVENT_SUBSCRIPTION_DELETE_PATH, "gateway_principal"),
+    "friend_connection_mutation.create": ("POST", FRIEND_MUTATION_CREATE_PATH, "human_cookie"),
+    "friend_connection_mutation.accept": ("POST", FRIEND_MUTATION_ACCEPT_PATH, "human_cookie"),
+    "friend_connection_mutation.reject": ("POST", FRIEND_MUTATION_REJECT_PATH, "human_cookie"),
+    "friend_connection_mutation.cancel": ("POST", FRIEND_MUTATION_CANCEL_PATH, "human_cookie"),
+    "friend_connection_mutation.requests_sent.read": ("GET", FRIEND_MUTATION_REQUESTS_SENT_PATH, "human_cookie"),
+    "friend_connection_mutation.requests_received.read": ("GET", FRIEND_MUTATION_REQUESTS_RECEIVED_PATH, "human_cookie"),
+    "friend_connection_mutation.requests_all.read": ("GET", FRIEND_MUTATION_REQUESTS_ALL_PATH, "human_cookie"),
+    "friend_connection_mutation.connections.read": ("GET", FRIEND_MUTATION_CONNECTIONS_PATH, "human_cookie"),
+    "friend_connection_mutation.bot_detail.read": ("GET", FRIEND_MUTATION_BOT_DETAIL_PATH, "human_cookie"),
+    "friend_connection_mutation.visibility.write": ("PATCH", FRIEND_MUTATION_BOT_DETAIL_PATH, "human_cookie"),
+    "friend_connection_mutation.revoke": ("DELETE", FRIEND_MUTATION_REVOKE_PATH, "human_cookie"),
+    "friend_connection_mutation.discover_denied.read": ("GET", FRIEND_MUTATION_DISCOVER_PATH, "human_cookie"),
+    "friend_connection_mutation.register_token.read": ("GET", STATION_REGISTER_TOKEN_PATH, "human_cookie"),
+    "friend_connection_mutation.register_bot.create": ("POST", STATION_REGISTER_BOT_PATH, "register_token"),
+    "friend_connection_mutation.legacy_revoke": ("DELETE", STATION_LEGACY_REVOKE_PATH, "human_cookie_owned_bot"),
+    "friend_connection_mutation.station_admission.read": ("GET", STATION_ADMISSION_PATH, "unauthenticated"),
+    "friend_connection_mutation.station_discover_collaborate.read": ("GET", STATION_DISCOVER_COLLABORATE_PATH, "human_cookie"),
+    "friend_connection_mutation.station_discover_role_no_org.read": ("GET", STATION_DISCOVER_ROLE_PATH, "human_cookie"),
+    "friend_connection_mutation.station_discover_org_no_requester.read": ("GET", STATION_DISCOVER_ORGANIZATION_PATH, "human_cookie"),
 }
 _EDGE_BINDING_FIELDS = {
     "method", "path", "api_face", "auth", "response", "traceparent",
@@ -363,6 +470,10 @@ _PLATFORM_ASSET_BINDING_FIELDS = _EDGE_BINDING_FIELDS | {"asset_name", "asset_sh
 _FRIEND_CREATE_BINDING_FIELDS = _EDGE_BINDING_FIELDS | {"from_actor_id", "to_actor_id"}
 _FRIEND_READER_BINDING_FIELDS = _EDGE_BINDING_FIELDS | {"actor_id"}
 _FRIEND_DECISION_BINDING_FIELDS = _EDGE_BINDING_FIELDS | {"from_actor_id", "to_actor_id"}
+_FRIEND_MUTATION_PAIR_FIELDS = _EDGE_BINDING_FIELDS | {"from_actor_id", "to_actor_id"}
+_FRIEND_MUTATION_ACTOR_FIELDS = _EDGE_BINDING_FIELDS | {"actor_id"}
+_FRIEND_MUTATION_TARGET_FIELDS = _EDGE_BINDING_FIELDS | {"target_actor_id"}
+_ADMISSION_MUTATION_FIELDS = _EDGE_BINDING_FIELDS | {"target_actor_id", "actor_id"}
 
 
 def _validate_platform_asset_url(value: str) -> None:
@@ -477,10 +588,23 @@ def validate_edge_case_bindings(value: object, profile: dict) -> dict:
         elif operation in {"friend_connection_decision.reject",
                            "friend_connection_decision.accept"}:
             fields = _FRIEND_DECISION_BINDING_FIELDS
+        elif operation in _FRIEND_MUTATION_PAIR_OPS:
+            fields = _FRIEND_MUTATION_PAIR_FIELDS
+        elif operation in _FRIEND_MUTATION_ACTOR_OPS:
+            fields = _FRIEND_MUTATION_ACTOR_FIELDS
+        elif operation in _FRIEND_MUTATION_TARGET_OPS:
+            fields = _FRIEND_MUTATION_TARGET_FIELDS
+        elif operation == "friend_connection_mutation.station_admission.read":
+            fields = _ADMISSION_MUTATION_FIELDS
         else:
             fields = _EDGE_BINDING_FIELDS
         binding = object_keys(value[operation], fields, where)
-        expected_api_face = ("internal-v1"
+        if operation in _FRIEND_MUTATION_GATEWAY_OPS:
+            expected_api_face = "public-v1"
+        elif operation in _FRIEND_MUTATION_STATION_OPS:
+            expected_api_face = "station-legacy"
+        else:
+            expected_api_face = ("internal-v1"
                             if operation.startswith("structured.")
                             or operation in {"network_actor_search.read",
                                               "edge_bot_search_name.read",
@@ -491,12 +615,28 @@ def validate_edge_case_bindings(value: object, profile: dict) -> dict:
                                               "edge_admission_human_actor.read",
                                               "edge_admission_actor_kind.read"}
                             else "public-v1")
-        expected_response = (
-            "javascript-asset" if operation == "network_platform_asset.read"
-            else "admission-json" if operation in {
-                "edge_admission_human_actor.read", "edge_admission_actor_kind.read"}
-            else structured_case_response(profile, operation) or "public-envelope"
-        )
+        if operation in _FRIEND_MUTATION_GATEWAY_OPS:
+            expected_response = "public-envelope"
+        elif operation == "friend_connection_mutation.register_token.read":
+            expected_response = "plain-json"
+        elif operation == "friend_connection_mutation.register_bot.create":
+            expected_response = "station-register-json"
+        elif operation == "friend_connection_mutation.legacy_revoke":
+            expected_response = "station-revoke-json"
+        elif operation == "friend_connection_mutation.station_admission.read":
+            expected_response = "admission-json"
+        elif operation in {
+                "friend_connection_mutation.station_discover_collaborate.read",
+                "friend_connection_mutation.station_discover_role_no_org.read",
+                "friend_connection_mutation.station_discover_org_no_requester.read"}:
+            expected_response = "plain-json"
+        else:
+            expected_response = (
+                "javascript-asset" if operation == "network_platform_asset.read"
+                else "admission-json" if operation in {
+                    "edge_admission_human_actor.read", "edge_admission_actor_kind.read"}
+                else structured_case_response(profile, operation) or "public-envelope"
+            )
         path_matches = (operation == "network_platform_asset.read"
                         or binding["path"] == expected_path)
         if (binding["method"] != method
@@ -545,6 +685,18 @@ def validate_edge_case_bindings(value: object, profile: dict) -> dict:
                     or entrypoint["manifest_face"] != "internal-v1"
                     or not isinstance(auth_headers, dict) or "Cookie" not in auth_headers):
                 raise ConfigError(f"{where}: platform asset requires a Cookie-bound public-v1/internal-v1 profile")
+        elif operation in _FRIEND_MUTATION_GATEWAY_OPS:
+            # Both community Singlebox and the deployed Gateway expose this
+            # public-v1 slice. The station-direct deployment is a separate
+            # profile and must never receive these routes.
+            if entrypoint["kind"] not in {"gateway", "singlebox"} or entrypoint["api_face"] != "public-v1":
+                raise ConfigError(f"{where}: gateway mutation requires a public-v1 Gateway or Singlebox profile")
+        elif operation in _FRIEND_MUTATION_STATION_OPS:
+            # The station still carries the pilot's public-v1 entrypoint face;
+            # its legacy product face is identified by the manifest and the
+            # binding has a separate station-legacy wire-face literal.
+            if entrypoint["kind"] != "bcs-direct" or entrypoint["manifest_face"] != "legacy":
+                raise ConfigError(f"{where}: station mutation requires a legacy station-direct profile")
         elif binding["api_face"] != entrypoint["api_face"]:
             raise ConfigError(f"{where}: API face differs from the entrypoint")
         headers = profile["auth"].get("header_env") if isinstance(profile["auth"], dict) else None
@@ -568,16 +720,28 @@ def validate_edge_case_bindings(value: object, profile: dict) -> dict:
                         "runtime or an operator-provisioned principal signing "
                         "key environment reference")
         elif auth == "register_token":
-            # The minted register token is the sole credential and
-            # travels in the query string; the reviewed create is
-            # deliberately anonymous and must not send a Cookie or an
-            # Authorization header.
-            pass
+            if operation == "friend_connection_mutation.register_bot.create":
+                # The station front door still requires the Human Cookie for
+                # ingress. The register token remains the product credential
+                # and no Bot Authorization bearer may be sent by this slice.
+                if "Cookie" not in headers:
+                    raise ConfigError(f"{where}: station register requires a Cookie reference")
+            # The public register route is deliberately anonymous: its minted
+            # token is the sole product credential, with no Cookie and no Bot
+            # Authorization bearer.
         elif auth == "authenticated_bot":
             if binding["caller_actor_id"] != profile["actors"]["driver"]["bot_id"]:
                 raise ConfigError(f"{where}: caller must be the dedicated driver Bot")
             if "Authorization" not in headers:
                 raise ConfigError(f"{where}: authenticated Bot requires an Authorization reference")
+        elif auth == "human_cookie_owned_bot":
+            if "Cookie" not in headers or "Authorization" not in headers:
+                raise ConfigError(f"{where}: dual-identity route requires Cookie and Authorization references")
+            for header in ("Cookie", "Authorization"):
+                reference = headers[header]
+                if (not isinstance(reference, str)
+                        or not re.fullmatch(r"[A-Z][A-Z0-9_]{2,100}", reference)):
+                    raise ConfigError(f"{where}: dual-identity header environment reference is invalid")
         else:
             if operation == "network_bot_query.read":
                 targets = binding["target_actor_ids"]
@@ -611,6 +775,19 @@ def validate_edge_case_bindings(value: object, profile: dict) -> dict:
             if actor != driver:
                 raise ConfigError(f"{where}: connection read must bind the driver")
             identifier(actor, f"{where}.actor_id")
+        elif operation in _FRIEND_MUTATION_PAIR_OPS:
+            actors = (binding["from_actor_id"], binding["to_actor_id"])
+            if not all(isinstance(actor, str) and actor for actor in actors) or len(set(actors)) != 2:
+                raise ConfigError(f"{where}: pair must contain two distinct nonempty actor IDs")
+            for actor in actors:
+                identifier(actor, f"{where}.actor_id")
+        elif operation in _FRIEND_MUTATION_ACTOR_OPS:
+            identifier(binding["actor_id"], f"{where}.actor_id")
+        elif operation in _FRIEND_MUTATION_TARGET_OPS:
+            identifier(binding["target_actor_id"], f"{where}.target_actor_id")
+        elif operation == "friend_connection_mutation.station_admission.read":
+            identifier(binding["target_actor_id"], f"{where}.target_actor_id")
+            identifier(binding["actor_id"], f"{where}.actor_id")
         elif operation.startswith("friend_connection_decision."):
             driver = profile["actors"]["driver"]["bot_id"]
             member = profile["actors"]["member"]["bot_id"]

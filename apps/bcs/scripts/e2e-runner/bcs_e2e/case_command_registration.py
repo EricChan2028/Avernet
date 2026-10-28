@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .edge_read_case_run import CASE_KEYS as EDGE_CASE_KEYS
 from .network_read_case_run import CASE_KEYS as NETWORK_READ_CASE_KEYS
+from .edge_friend_mutation_case_run import CASE_KEYS as EDGE_FRIEND_MUTATION_CASE_KEYS
 
 
 CASE_COMMANDS = frozenset({
@@ -30,6 +31,7 @@ CASE_COMMANDS = frozenset({
     "dual-network-register-run",
     "dual-network-status-run",
     "dual-friend-run",
+    "dual-edge-friend-mutation-run",
 })
 
 
@@ -223,3 +225,13 @@ def register_case_commands(commands) -> None:
     friend_case.add_argument("--run-id", required=True)
     friend_case.add_argument("--confirm-run-id", required=True)
     friend_case.add_argument("--allow-write", action="store_true")
+    edge_friend_mutation_case = commands.add_parser(
+        "dual-edge-friend-mutation-run",
+        help="Run the reviewed dual Edge friend-mutation case family through preprod Gateway and station bcs-direct")
+    edge_friend_mutation_case.add_argument("--profile", type=Path, required=True)
+    edge_friend_mutation_case.add_argument("--station-profile", type=Path, required=True)
+    edge_friend_mutation_case.add_argument("--case", choices=EDGE_FRIEND_MUTATION_CASE_KEYS, required=True)
+    edge_friend_mutation_case.add_argument("--state-dir", type=Path, required=True)
+    edge_friend_mutation_case.add_argument("--run-id", required=True)
+    edge_friend_mutation_case.add_argument("--confirm-run-id", required=True)
+    edge_friend_mutation_case.add_argument("--allow-write", action="store_true")
