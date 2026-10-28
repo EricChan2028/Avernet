@@ -6,6 +6,32 @@ from .identity_binding import pilot_execution_blocker
 from .transport import ObservationError, ReadClient
 
 
+def discovered_bot(bot: object) -> dict:
+    """Project the gateway public envelope and the station legacy detail form
+    onto one actor view bounded to the reviewed admission keys. The station
+    legacy detail answers bot_uuid/actor_kind and a numeric created_by; the
+    gateway envelope answers bot_id/kind. No other field escapes."""
+    if not isinstance(bot, dict):
+        return {}
+    bot_id = bot.get("bot_id")
+    if bot_id is None:
+        bot_id = bot.get("bot_uuid")
+    kind = bot.get("kind")
+    if kind is None:
+        kind = bot.get("actor_kind")
+    status = bot.get("status")
+    if status is None:
+        status = bot.get("dynamic_status")
+    created_by = bot.get("created_by")
+    return {
+        "bot_id": bot_id,
+        "kind": kind,
+        "created_by": str(created_by) if created_by is not None else None,
+        "env": bot.get("env"),
+        "status": status,
+    }
+
+
 def check(profile: dict, client: ReadClient) -> dict:
     checks = []
 
@@ -32,7 +58,7 @@ def check(profile: dict, client: ReadClient) -> dict:
             record("route.business_adapter", False, blocker)
             return result(profile, checks, client.evidence)
         for role, binding in profile["actors"].items():
-            bot = client.read("bot.read", binding["bot_id"]).data
+            bot = discovered_bot(client.read("bot.read", binding["bot_id"]).data)
             ok = (bot.get("bot_id") == binding["bot_id"] and bot.get("kind") == "bot"
                   and bot.get("created_by") == profile["human"]["user_id"]
                   and bot.get("env") == profile["environment"]["expected_bcs_env"]

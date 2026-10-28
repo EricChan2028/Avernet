@@ -171,7 +171,14 @@ class ReadClient:
             allowed = {a["bot_id"] for a in self.profile["actors"].values()}
             if bot_id not in allowed:
                 raise ObservationError("unbound Bot target refused")
-            path = "/openapi/v1/collaboration/bots/" + quote(bot_id, safe="")
+            if self.profile["entrypoint"]["kind"] == "bcs-direct":
+                # Station legacy face deploys the un-prefixed bot detail route
+                # (live-verified 200 with the reviewed ACE trio); the
+                # public-v1 route resolves through the gateway ACE domain.
+                path = "/bots/" + quote(bot_id, safe="")
+                envelope = False
+            else:
+                path = "/openapi/v1/collaboration/bots/" + quote(bot_id, safe="")
         elif operation in {"edge.admission.human_actor.read", "edge.admission.actor_kind.read"}:
             binding_name = ("edge_admission_human_actor.read"
                              if operation == "edge.admission.human_actor.read"

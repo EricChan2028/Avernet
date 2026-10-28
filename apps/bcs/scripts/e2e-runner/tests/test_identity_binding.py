@@ -13,7 +13,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from bcs_e2e.cli import main, plan
-from bcs_e2e.identity_binding import NATIVE, resolve_identity_binding
+from bcs_e2e.identity_binding import NATIVE, pilot_execution_blocker, resolve_identity_binding
 from bcs_e2e.prepare import prepare_run
 from bcs_e2e.pilot import run_case
 from bcs_e2e.remote_run import remote_run
@@ -78,7 +78,13 @@ class IdentityBindingTests(unittest.TestCase):
         p = self.profile(); before = fingerprint(p)
         del p['identity_binding']
         self.assertNotEqual(fingerprint(p), before)
-        self.assertEqual(resolve_identity_binding(p)['path'], '/openapi/v1/auth/user')
+        # A bcs-direct profile without an explicit binding defaults to the
+        # reviewed station native discovery; the gateway face keeps the V1
+        # default. Neither fingerprint nor stored profile changes.
+        self.assertEqual(resolve_identity_binding(p)['path'], '/auth/user')
+        gateway = helpers.profile()
+        gateway.pop('identity_binding', None)
+        self.assertEqual(resolve_identity_binding(validate(gateway))['path'], '/openapi/v1/auth/user')
         self.assertEqual(resolve_identity_binding(p, owned_local=True), NATIVE)
 
     def test_plan_declares_native_identity_without_changing_business_routes(self):
@@ -215,3 +221,41 @@ class IdentityBindingTests(unittest.TestCase):
         self.assertEqual(report['observer_preflight']['status'], 'NOT_RUN')
         self.assertEqual(client.mock_calls, [])
         self.assertEqual(opener.return_value.open.call_count, 2)
+
+    def test_station_direct_defaults_native_discovery_without_explicit_binding(self):
+        # A bcs-direct profile that never selects a binding keeps the reviewed
+        # station defaults: native /auth/user discovery and no native
+        # business-adapter declaration. The explicit NATIVE opt-in above stays
+        # blocked end-to-end; only the binding-less default is admitted here.
+        p = helpers.profile()
+        p['entrypoint']['kind'] = 'bcs-direct'
+        p.pop('identity_binding', None)
+        p = validate(p)
+        self.assertEqual(resolve_identity_binding(p), NATIVE)
+        self.assertEqual(pilot_execution_blocker(p), '')
+
+    def test_station_direct_reads_native_identity_and_legacy_bot_detail(self):
+        p = helpers.profile()
+        p['entrypoint']['kind'] = 'bcs-direct'
+        p.pop('identity_binding', None)
+        p = validate(p)
+        with patch.dict(os.environ, {'BCS_E2E_HUMAN_COOKIE': 'test-token'}), \
+                patch('bcs_e2e.transport.build_opener') as opener:
+            opener.return_value.open.side_effect = [
+                helpers.Reply({'user_id': 'owner-1'}),
+                helpers.Reply({'actor_kind': 'bot', 'bot_uuid': 'bot-a',
+                               'created_by': 'owner-1', 'env': 'pre', 'status': 'online'}),
+            ]
+            client = ReadClient(p)
+            identity = client.read('identity.read')
+            self.assertEqual(identity.data, {'user_id': 'owner-1'})
+            first_url = opener.return_value.open.call_args_list[0].args[0].full_url
+            self.assertTrue(first_url.endswith('/auth/user'), first_url)
+            bot = client.read('bot.read', 'bot-a')
+            self.assertEqual(bot.data['bot_uuid'], 'bot-a')
+            self.assertEqual(bot.data['actor_kind'], 'bot')
+            second_url = opener.return_value.open.call_args_list[1].args[0].full_url
+            self.assertTrue(second_url.endswith('/bots/bot-a'), second_url)
+            self.assertNotIn('/openapi/v1/collaboration/bots/', second_url)
+            opener.return_value.open.assert_called_once  # network never retried
+            patch.stopall()

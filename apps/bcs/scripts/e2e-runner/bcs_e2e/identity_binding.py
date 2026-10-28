@@ -32,12 +32,21 @@ def resolve_identity_binding(profile: dict, *, owned_local: bool = False) -> dic
     # must be explicitly selected rather than changing historical behavior.
     if owned_local:
         return dict(NATIVE)
+    if profile.get('entrypoint', {}).get('kind') == 'bcs-direct':
+        # Station legacy face: the only reviewed identity discovery route there
+        # is the native /auth/user (live-verified 200 with the Human Cookie);
+        # the public-v1 stub answers "OAuth is not configured" on that face.
+        # Native discovery is never used as business authority.
+        return dict(NATIVE)
     return {'method': 'GET', 'path': '/openapi/v1/auth/user', 'response': 'public-envelope'}
 
 
 # The current pilot uses gateway-principal V1 business contracts. Native Human
 # discovery is not a compatible business adapter. Keep this finite opt-in
 # blocked until a separately tested native operation adapter is implemented.
+# The declaration stays keyed to the EXPLICIT NATIVE binding: a bcs-direct
+# profile without an explicit binding keeps its defaults (native discovery
+# route plus legacy business adapters that bind their own reviewed principals).
 NATIVE_PILOT_BLOCKER = (
     'native direct identity is discovery-only: the current V1 pilot requires '
     'gateway-authenticated business routes; native business/WS adapters are not implemented'
