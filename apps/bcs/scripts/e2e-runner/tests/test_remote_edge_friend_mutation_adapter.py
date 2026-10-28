@@ -41,6 +41,8 @@ STATION_OPERATIONS = (
     "friend_connection_mutation.register_token.read",
     "friend_connection_mutation.register_bot.create",
     "friend_connection_mutation.legacy_revoke",
+    "friend_connection_mutation.station_bot_delete",
+    "friend_connection_mutation.station_bot_read",
     "friend_connection_mutation.station_admission.read",
     "friend_connection_mutation.station_discover_collaborate.read",
     "friend_connection_mutation.station_discover_role_no_org.read",
@@ -65,6 +67,8 @@ def _binding(operation: str, **extra: str) -> dict:
             "friend_connection_mutation.station_discover_org_no_requester.read"}
         else "station-register-json" if operation == "friend_connection_mutation.register_bot.create"
         else "station-revoke-json" if operation == "friend_connection_mutation.legacy_revoke"
+        else "station-bot-delete-json" if operation == "friend_connection_mutation.station_bot_delete"
+        else "station-bot-read-json" if operation == "friend_connection_mutation.station_bot_read"
         else "admission-json"
     )
     return {

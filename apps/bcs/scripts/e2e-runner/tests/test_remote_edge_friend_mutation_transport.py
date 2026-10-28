@@ -36,6 +36,8 @@ _RESPONSES = {
     "friend_connection_mutation.register_token.read": "plain-json",
     "friend_connection_mutation.register_bot.create": "station-register-json",
     "friend_connection_mutation.legacy_revoke": "station-revoke-json",
+    "friend_connection_mutation.station_bot_delete": "station-bot-delete-json",
+    "friend_connection_mutation.station_bot_read": "station-bot-read-json",
     "friend_connection_mutation.station_admission.read": "admission-json",
     "friend_connection_mutation.station_discover_collaborate.read": "plain-json",
     "friend_connection_mutation.station_discover_role_no_org.read": "plain-json",
@@ -69,6 +71,8 @@ _MUTATION_OPS = {
     "friend_connection_mutation.register_token.read",
     "friend_connection_mutation.register_bot.create",
     "friend_connection_mutation.legacy_revoke",
+    "friend_connection_mutation.station_bot_delete",
+    "friend_connection_mutation.station_bot_read",
     "friend_connection_mutation.station_admission.read",
     "friend_connection_mutation.station_discover_collaborate.read",
     "friend_connection_mutation.station_discover_role_no_org.read",
@@ -185,19 +189,23 @@ def envelope(data: dict, *, code: int = 20000, http: int = 200,
 
 
 class FriendMutationBindingTests(unittest.TestCase):
-    def test_all_nineteen_bindings_pass_the_exact_face_contracts(self):
+    def test_all_twenty_one_bindings_pass_the_exact_face_contracts(self):
         gateway = gateway_profile()
         station = station_profile()
         self.assertEqual(set(gateway["edge_case_bindings"]),
                          _MUTATION_OPS - _FRIEND_MUTATION_STATION_OPS)
         self.assertEqual(set(station["edge_case_bindings"]), _FRIEND_MUTATION_STATION_OPS)
-        self.assertEqual(len(gateway["edge_case_bindings"]) + len(station["edge_case_bindings"]), 19)
+        self.assertEqual(len(gateway["edge_case_bindings"]) + len(station["edge_case_bindings"]), 21)
         self.assertEqual(gateway["edge_case_bindings"]["friend_connection_mutation.create"]["auth"],
                          "human_cookie")
         self.assertEqual(station["edge_case_bindings"][
             "friend_connection_mutation.register_bot.create"]["auth"], "register_token")
         self.assertEqual(station["edge_case_bindings"][
             "friend_connection_mutation.legacy_revoke"]["auth"], "human_cookie_owned_bot")
+        self.assertEqual(station["edge_case_bindings"][
+            "friend_connection_mutation.station_bot_delete"]["auth"], "human_cookie_owned_bot")
+        self.assertEqual(station["edge_case_bindings"][
+            "friend_connection_mutation.station_bot_read"]["auth"], "human_cookie_owned_bot")
         self.assertEqual(station["edge_case_bindings"][
             "friend_connection_mutation.station_admission.read"]["auth"], "human_cookie")
         self.assertEqual(station["entrypoint"]["kind"], "bcs-direct")
@@ -370,6 +378,59 @@ class FriendMutationWriteTransportTests(unittest.TestCase):
         self.assertEqual(record["authorization_sent"], True)
         self.assertNotIn(COOKIE, json.dumps(record, sort_keys=True))
         self.assertNotIn(BOT_TOKEN, json.dumps(record, sort_keys=True))
+
+    def test_station_bot_dispose_sends_cookie_bot_authorization_and_origin(self):
+        body = {"left": True, "bot_uuid": BOT_UUID}
+        with patch.dict(os.environ, {"BCS_E2E_HUMAN_COOKIE": COOKIE,
+                                      "BCS_E2E_OWNED_BOT_TOKEN": BOT_TOKEN}), \
+                patch("bcs_e2e.write_transport.build_opener") as factory:
+            factory.return_value.open.return_value = Reply(body)
+            data, record = WriteClient(station_profile()).station_bot_delete(
+                BOT_UUID)
+            request = factory.return_value.open.call_args.args[0]
+        self.assertEqual(request.method, "DELETE")
+        self.assertEqual(request.full_url, ORIGIN + "/bots/" + BOT_UUID)
+        self.assertEqual(request.headers.get("Cookie"), COOKIE)
+        self.assertEqual(request.headers.get("Authorization"), BOT_TOKEN)
+        self.assertEqual(request.headers.get("Origin"), ORIGIN)
+        self.assertEqual(request.headers.get("Referer"), ORIGIN + "/")
+        self.assertEqual(data["left"], True)
+        self.assertEqual(data["bot_uuid"], BOT_UUID)
+        self.assertEqual(record["credentials_sent"], True)
+        self.assertEqual(record["authorization_sent"], True)
+        self.assertNotIn(COOKIE, json.dumps(record, sort_keys=True))
+        self.assertNotIn(BOT_TOKEN, json.dumps(record, sort_keys=True))
+
+    def test_station_bot_readback_requires_the_exact_404_tombstone(self):
+        body = {"code": "bot_not_found", "status": 404}
+        with patch.dict(os.environ, {"BCS_E2E_HUMAN_COOKIE": COOKIE,
+                                      "BCS_E2E_OWNED_BOT_TOKEN": BOT_TOKEN}), \
+                patch("bcs_e2e.write_transport.build_opener") as factory:
+            factory.return_value.open.return_value = Reply(body, code=404)
+            data, record = WriteClient(station_profile()).station_bot_read(
+                BOT_UUID)
+            request = factory.return_value.open.call_args.args[0]
+        self.assertEqual(request.method, "GET")
+        self.assertEqual(request.full_url, ORIGIN + "/bots/" + BOT_UUID)
+        self.assertEqual(record["http_status"], 404)
+        self.assertEqual(data["code"], "bot_not_found")
+
+    def test_station_bot_disposition_drift_fail_closes_without_evidence(self):
+        with patch.dict(os.environ, {"BCS_E2E_HUMAN_COOKIE": COOKIE,
+                                      "BCS_E2E_OWNED_BOT_TOKEN": BOT_TOKEN}), \
+                patch("bcs_e2e.write_transport.build_opener") as factory:
+            factory.return_value.open.return_value = Reply(
+                {"left": False, "bot_uuid": BOT_UUID})
+            with self.assertRaises(WriteTransportError):
+                WriteClient(station_profile()).station_bot_delete(BOT_UUID)
+            factory.return_value.open.return_value = Reply(
+                {"left": True, "bot_uuid": "foreign-bot"})
+            with self.assertRaises(WriteTransportError):
+                WriteClient(station_profile()).station_bot_delete(BOT_UUID)
+            factory.return_value.open.return_value = Reply(
+                {"code": "bot_not_found"}, code=200)
+            with self.assertRaises(WriteTransportError):
+                WriteClient(station_profile()).station_bot_read(BOT_UUID)
 
 
 class FriendMutationReadTransportTests(unittest.TestCase):

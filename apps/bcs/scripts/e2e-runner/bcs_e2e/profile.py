@@ -246,6 +246,8 @@ def validate(raw: object) -> dict:
             "friend_connection_mutation.register_token.read",
             "friend_connection_mutation.register_bot.create",
             "friend_connection_mutation.legacy_revoke",
+            "friend_connection_mutation.station_bot_delete",
+            "friend_connection_mutation.station_bot_read",
             "friend_connection_mutation.station_admission.read",
             "friend_connection_mutation.station_discover_collaborate.read",
             "friend_connection_mutation.station_discover_role_no_org.read",

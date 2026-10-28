@@ -187,6 +187,14 @@ def profile_value(*, preprod=False):
                 "path": "/register?token={register_token}&bot-name={bot_name}",
                 "api_face": "station-legacy", "auth": "register_token",
                 "response": "station-register-json", "traceparent": "disabled"},
+            "friend_connection_mutation.station_bot_delete": {
+                "method": "DELETE", "path": "/bots/{bot_id}",
+                "api_face": "station-legacy", "auth": "human_cookie_owned_bot",
+                "response": "station-bot-delete-json", "traceparent": "disabled"},
+            "friend_connection_mutation.station_bot_read": {
+                "method": "GET", "path": "/bots/{bot_id}",
+                "api_face": "station-legacy", "auth": "human_cookie_owned_bot",
+                "response": "station-bot-read-json", "traceparent": "disabled"},
         }
     return validate_operator_cli_profile(value)
 
@@ -538,7 +546,7 @@ class OperatorCliCaseTests(unittest.TestCase):
 
     # -- scripted case harness ------------------------------------------
     def run_scripted_case(self, *, preprod=True, outputs=None, failures=None,
-                          registry_drift=False, delete_ack=False,
+                          registry_drift=False, delete_ack=False, dispose_drift=False,
                           verify_status=404, register_payload=None,
                           read_token=True, station_methods=True):
         profile = profile_value(preprod=preprod)
@@ -560,13 +568,17 @@ class OperatorCliCaseTests(unittest.TestCase):
 
         def fake_delete(bot_uuid):
             station["delete"] += 1
-            return ({"deleted": True}, http_record(
-                "station.bot.delete", "/bots/" + bot_uuid, 200, "DELETE"))
+            payload = ({"left": False, "bot_uuid": bot_uuid} if dispose_drift
+                       else {"left": True, "bot_uuid": bot_uuid})
+            return (payload, http_record(
+                "friend_connection_mutation.station_bot_delete",
+                "/bots/" + bot_uuid, 200, "DELETE"))
 
         def fake_read(bot_uuid):
             station["read"] += 1
-            return (dict(DRIVER_RECORD), http_record(
-                "station.bot.read", "/bots/" + bot_uuid, 404))
+            return ({"code": "bot_not_found", "status": 404}, http_record(
+                "friend_connection_mutation.station_bot_read",
+                "/bots/" + bot_uuid, 404))
 
         def fake_token_read(self, operation, **kwargs):
             token_reads["count"] += 1
@@ -718,32 +730,26 @@ class OperatorCliCaseTests(unittest.TestCase):
         self.assertEqual(token_reads["count"], 0)
         self.assert_no_placeholder(execution)
 
-    def test_station_disposition_gap_fail_closes_direct_onboard_on_preprod(self):
-        profile = profile_value(preprod=True)
-        runner = ScriptedRunner()
-        calls = []
-        environment = preprod_environment()
-
-        def fake_call(self, operation, **kwargs):
-            calls.append(operation)
-            raise AssertionError("gap-closed case must not touch the station")
-
-        with patch.dict(os.environ, environment), \
-             patch.object(WriteClient, "call", autospec=True,
-                          side_effect=fake_call):
-            adapter = RemoteOperatorCliAdapter(profile, runner)
-            execution = execute_operator_cli_case(adapter)
-        self.assertTrue(adapter.onboarded_bot_clearance_gap)
+    def test_station_dispose_ack_drift_fail_closes_direct_onboard_on_preprod(self):
+        execution, runner, calls, station, token_reads = self.run_scripted_case(
+            dispose_drift=True)
         self.assertEqual(execution.status, "BLOCKED")
         self.assertEqual(execution.completed_count, 7)
-        self.assertEqual(execution.steps[7].status, "NOT_RUN")
-        self.assertEqual(execution.steps[7].error_type, "RunStateError")
-        self.assertIn("station_bot_delete", execution.steps[7].error_gap or "")
-        self.assertIn("station_bot_read", execution.steps[7].error_gap or "")
+        boundary = execution.steps[7]
+        self.assertEqual(boundary.status, "NOT_RUN")
+        self.assertEqual(boundary.error_type, "RunStateError")
+        self.assertIn("did not acknowledge exact disposal", boundary.error_gap or "")
         for step in execution.steps[8:]:
             self.assertEqual(step.status, "NOT_RUN")
             self.assertIsNone(step.error_type)
-        self.assertEqual(calls, [])
+            self.assertEqual(step.evidence, {})
+        self.assertEqual(station["register"], 1)
+        self.assertEqual(station["delete"], 1)
+        self.assertEqual(station["read"], 0)
+        self.assertEqual(token_reads["count"], 1)
+        self.assertEqual(token_reads["operation"],
+                         "station.register_token.read")
+        self.assertEqual([item[0] for item in calls], [])
         self.assert_no_placeholder(execution)
 
     def test_runner_failure_freezes_the_remaining_obligations(self):
@@ -866,14 +872,16 @@ class OperatorCliCaseTests(unittest.TestCase):
         def fake_delete(bot_uuid):
             station["delete"] += 1
             station["deleted_uuid"] = bot_uuid
-            return ({"deleted": True}, http_record(
-                "station.bot.delete", "/bots/" + bot_uuid, 200, "DELETE"))
+            return ({"left": True, "bot_uuid": bot_uuid}, http_record(
+                "friend_connection_mutation.station_bot_delete",
+                "/bots/" + bot_uuid, 200, "DELETE"))
 
         def fake_read(bot_uuid):
             station["read"] += 1
             station["read_uuid"] = bot_uuid
-            return (dict(DRIVER_RECORD), http_record(
-                "station.bot.read", "/bots/" + bot_uuid, 404))
+            return ({"code": "bot_not_found", "status": 404}, http_record(
+                "friend_connection_mutation.station_bot_read",
+                "/bots/" + bot_uuid, 404))
 
         token_reads = {"count": 0}
 

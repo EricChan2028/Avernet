@@ -9,10 +9,13 @@ carries ``remote_validation=NOT_RUN``; the case receipt never grants
 release credit, and the whole slice is mock-only until a live preprod
 run produces its real receipt.
 
-The temporary agent disposition is fail-closed: until the shared write
-transport exposes the reviewed station Bot delete/read pair, the
-direct-onboard obligation blocks before any register leg with an
-explicit gap instead of silently skipping the cleanup proof.
+The temporary agent disposition stays contract-locked: the shared write
+transport exposes the reviewed station Bot delete/read pair on the station
+legacy retire vocabulary, the direct-onboard obligation admits the register
+leg only against that reviewed pair, and the lifecycle closes with an exact
+left acknowledgment plus a 404 read-back. Live Singlebox/preprod effect
+admission and the real station register endpoint remain required before
+any release credit.
 """
 from __future__ import annotations
 
@@ -93,12 +96,13 @@ OPERATOR_CLI_CLI_OBLIGATIONS = (
 
 OPERATOR_CLI_BLOCKER = (
     "Mock-only; the station register-token read, the anonymous register leg "
-    "and the temporary agent disposition stay fail-closed until the shared "
-    "write transport exposes the reviewed station Bot delete/read pair "
-    "(WriteClient.station_bot_delete and WriteClient.station_bot_read), and "
-    "the non-mutating web onboard is proven through the product-CLI list "
-    "projection only. Live Singlebox/preprod effect admission and the real "
-    "station register endpoint are required before any release credit."
+    "and the temporary agent disposition are proven through the reviewed "
+    "write-transport pair (WriteClient.station_bot_delete and "
+    "WriteClient.station_bot_read) with an exact left acknowledgment and a "
+    "404 read-back, and the non-mutating web onboard is proven through the "
+    "product-CLI list projection only. Live Singlebox/preprod effect "
+    "admission and the real station register endpoint are required before "
+    "any release credit."
 )
 
 
@@ -181,9 +185,6 @@ class RemoteOperatorCliAdapter:
         self.cookie_env = auth.get("cookie_env", "")
         self.driver_token_env = auth.get("driver_token_env", "")
         self.transport: WriteClient | None = None
-        self.onboarded_bot_clearance_gap = not (
-            hasattr(WriteClient, "station_bot_delete")
-            and hasattr(WriteClient, "station_bot_read"))
         if self.tier == "preprod":
             try:
                 self.transport = WriteClient(self._station_profile())
@@ -333,9 +334,10 @@ class RemoteOperatorCliAdapter:
         driver token reference for the anonymous register leg only, restores
         the driver token afterwards, onboards through the product CLI with
         the temporary Bot token, and closes the lifecycle with the exact
-        station delete + 404 disposition. The disposition is fail-closed:
-        without the reviewed station Bot delete/read transport pair the step
-        blocks before any register leg and discloses the gap.
+        station delete + 404 disposition. The disposition is contract-locked
+        to the reviewed station Bot delete/read pair: the register leg runs
+        only against that vocabulary and the temporary agent is retired
+        exactly once with an exact left acknowledgment plus a 404 read-back.
         """
         if self.tier == "local":
             error = RunStateError(
@@ -344,15 +346,6 @@ class RemoteOperatorCliAdapter:
                 "local registration to the owned runtime journal")
             error.gap = ("owned-local executor LOCAL-OPERATOR-CLI-01 owns the "
                          "Singlebox direct-onboard proof")
-            raise error
-        if self.onboarded_bot_clearance_gap:
-            error = RunStateError(
-                "operator CLI direct onboard is fail-closed: the shared write "
-                "transport exposes no reviewed station Bot delete/read pair")
-            error.gap = ("transport gap: WriteClient.station_bot_delete and "
-                         "WriteClient.station_bot_read (or an explicit {bot_id} "
-                         "route vocabulary admission) is required before the "
-                         "temporary agent disposition can be proven")
             raise error
         register_reader = ReadClient(self._register_reader_profile())
         observation = register_reader.read("station.register_token.read")
@@ -386,13 +379,22 @@ class RemoteOperatorCliAdapter:
         readback_result = self.runner.execute(
             OPERATOR_CLI_ONBOARD_READBACK, bot_uuid=bot_uuid)
         deleted, delete_record = self.transport.station_bot_delete(bot_uuid)
-        if deleted.get("deleted") is not True or delete_record.get("http_status") != 200:
-            raise RunStateError(
+        if (deleted.get("left") is not True
+                or deleted.get("bot_uuid") != bot_uuid
+                or delete_record.get("http_status") != 200):
+            error = RunStateError(
                 "station temporary Bot delete did not acknowledge exact disposal")
+            error.gap = ("station temporary Bot delete did not acknowledge exact "
+                         "disposal: the left acknowledgment, retiring bot_uuid, "
+                         "and HTTP 200 must match exactly")
+            raise error
         _, read_record = self.transport.station_bot_read(bot_uuid)
         if read_record.get("http_status") != 404:
-            raise RunStateError(
+            error = RunStateError(
                 "deleted temporary Bot did not read back 404")
+            error.gap = ("deleted temporary Bot did not read back 404: "
+                         "the retired Bot tombstone must read back exactly")
+            raise error
         self.secrets = [*self.secrets, register_token, bot_token]
         data = {"bot_id": bot_uuid, "bot_name": temp_name, "registered": True,
                 "onboarded": True, "readback_verified": True,

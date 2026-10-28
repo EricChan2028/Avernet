@@ -431,6 +431,38 @@ class WriteClient:
             raise WriteTransportError("station revoke response is outside its reviewed contract")
         return data, record
 
+    def station_bot_delete(self, bot_uuid: str) -> tuple[dict, dict]:
+        """Retire one runtime-registered temporary station Bot with dual identity."""
+        binding = require_edge_case_binding(
+            self.profile, "friend_connection_mutation.station_bot_delete")
+        bot_uuid = identifier(bot_uuid, "station Bot dispose target")
+        path = binding["path"].replace("{bot_id}", quote(bot_uuid, safe=""))
+        data, record = self._friend_mutation_request(
+            operation="friend_connection_mutation.station_bot_delete",
+            binding_name="friend_connection_mutation.station_bot_delete",
+            path=path, response_mode="station-bot-delete-json",
+        )
+        if (data.get("left") is not True or data.get("bot_uuid") != bot_uuid):
+            raise WriteTransportError(
+                "station Bot dispose response is outside its reviewed contract")
+        return data, record
+
+    def station_bot_read(self, bot_uuid: str) -> tuple[dict, dict]:
+        """Read back one retired station Bot and require the exact 404 tombstone."""
+        binding = require_edge_case_binding(
+            self.profile, "friend_connection_mutation.station_bot_read")
+        bot_uuid = identifier(bot_uuid, "station Bot dispose target")
+        path = binding["path"].replace("{bot_id}", quote(bot_uuid, safe=""))
+        data, record = self._friend_mutation_request(
+            operation="friend_connection_mutation.station_bot_read",
+            binding_name="friend_connection_mutation.station_bot_read",
+            path=path, expected=(404,), response_mode="station-bot-read-json",
+        )
+        if data.get("code") != "bot_not_found":
+            raise WriteTransportError(
+                "station retired Bot read-back differs from its reviewed tombstone")
+        return data, record
+
     def create_friend_connection_request(self, from_actor_id: str,
                                          to_actor_id: str) -> tuple[dict, dict]:
         driver = self.profile["actors"]["driver"]["bot_id"]

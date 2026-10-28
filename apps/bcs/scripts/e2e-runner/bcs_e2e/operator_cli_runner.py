@@ -161,6 +161,22 @@ OPERATOR_CLI_STATION_BINDINGS = {
         "response": "station-register-json",
         "traceparent": "disabled",
     },
+    "friend_connection_mutation.station_bot_delete": {
+        "method": "DELETE",
+        "path": "/bots/{bot_id}",
+        "api_face": "station-legacy",
+        "auth": "human_cookie_owned_bot",
+        "response": "station-bot-delete-json",
+        "traceparent": "disabled",
+    },
+    "friend_connection_mutation.station_bot_read": {
+        "method": "GET",
+        "path": "/bots/{bot_id}",
+        "api_face": "station-legacy",
+        "auth": "human_cookie_owned_bot",
+        "response": "station-bot-read-json",
+        "traceparent": "disabled",
+    },
 }
 
 OPERATOR_CLI_ACTOR_ROLES = ("driver", "member", "eng", "qa", "cs")

@@ -223,6 +223,7 @@ FRIEND_MUTATION_REVOKE_PATH = (
 STATION_REGISTER_TOKEN_PATH = "/register/token"
 STATION_REGISTER_BOT_PATH = "/register?token={register_token}&bot-name={bot_name}"
 STATION_LEGACY_REVOKE_PATH = "/collaboration/friend-connections/{actor}"
+STATION_BOT_DISPOSE_PATH = "/bots/{bot_id}"
 STATION_ADMISSION_PATH = "/bots/{bot_uuid}/admission?actor={actor_id}"
 STATION_DISCOVER_COLLABORATE_PATH = "/bots/discover?collaborate_bot={target_actor_id}"
 STATION_DISCOVER_ROLE_PATH = "/bots/discover?role=contributor"
@@ -246,6 +247,8 @@ _FRIEND_MUTATION_STATION_OPS = {
     "friend_connection_mutation.register_token.read",
     "friend_connection_mutation.register_bot.create",
     "friend_connection_mutation.legacy_revoke",
+    "friend_connection_mutation.station_bot_delete",
+    "friend_connection_mutation.station_bot_read",
     "friend_connection_mutation.station_admission.read",
     "friend_connection_mutation.station_discover_collaborate.read",
     "friend_connection_mutation.station_discover_role_no_org.read",
@@ -454,6 +457,8 @@ _EDGE_CASES = {
     "friend_connection_mutation.register_token.read": ("GET", STATION_REGISTER_TOKEN_PATH, "human_cookie"),
     "friend_connection_mutation.register_bot.create": ("POST", STATION_REGISTER_BOT_PATH, "register_token"),
     "friend_connection_mutation.legacy_revoke": ("DELETE", STATION_LEGACY_REVOKE_PATH, "human_cookie_owned_bot"),
+    "friend_connection_mutation.station_bot_delete": ("DELETE", STATION_BOT_DISPOSE_PATH, "human_cookie_owned_bot"),
+    "friend_connection_mutation.station_bot_read": ("GET", STATION_BOT_DISPOSE_PATH, "human_cookie_owned_bot"),
     "friend_connection_mutation.station_admission.read": ("GET", STATION_ADMISSION_PATH, "human_cookie"),
     "friend_connection_mutation.station_discover_collaborate.read": ("GET", STATION_DISCOVER_COLLABORATE_PATH, "human_cookie"),
     "friend_connection_mutation.station_discover_role_no_org.read": ("GET", STATION_DISCOVER_ROLE_PATH, "human_cookie"),
@@ -623,6 +628,10 @@ def validate_edge_case_bindings(value: object, profile: dict) -> dict:
             expected_response = "station-register-json"
         elif operation == "friend_connection_mutation.legacy_revoke":
             expected_response = "station-revoke-json"
+        elif operation == "friend_connection_mutation.station_bot_delete":
+            expected_response = "station-bot-delete-json"
+        elif operation == "friend_connection_mutation.station_bot_read":
+            expected_response = "station-bot-read-json"
         elif operation == "friend_connection_mutation.station_admission.read":
             expected_response = "admission-json"
         elif operation in {
