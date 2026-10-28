@@ -205,8 +205,8 @@ def operation_tag(arguments):
         return "chat_detach" if "--detach" in arguments else "chat_blocking"
     if arguments == ["list-groups"]:
         return "list_groups"
-    if arguments == ["friend", "list"]:
-        return "friend_list"
+    if head == ("friend", "list"):
+        return "friend_list_json" if "--json" in arguments else "friend_list"
     raise AssertionError("unexpected CLI arguments: " + " ".join(arguments))
 
 
@@ -252,6 +252,9 @@ def output_for(tag, arguments):
                                "total": 1, "has_more": False}).encode(), b"")
     if tag == "friend_list":
         return (0, ("Friends:\n  " + BOT_IDS["eng"] + "\n").encode(), b"")
+    if tag == "friend_list_json":
+        return (0, json.dumps([{"bot_uuid": BOT_IDS["member"], "is_online": True},
+                               {"bot_uuid": BOT_IDS["eng"], "is_online": True}]).encode(), b"")
     raise AssertionError("unexpected CLI tag " + tag)
 
 

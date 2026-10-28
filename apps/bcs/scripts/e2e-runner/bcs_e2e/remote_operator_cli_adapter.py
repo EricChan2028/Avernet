@@ -496,21 +496,47 @@ class RemoteOperatorCliAdapter:
         return self._finish(AdapterCall(data=data, evidence=evidence))
 
     def operator_chat_with_pm(self) -> AdapterCall:
-        """Admit the CEO<->PM pair in-case, then detach a chat handle."""
+        """Admit the CEO<->PM pair in-case, then detach a chat handle.
+
+        A stateful station that already retained this fixture pair answers
+        the request leg idempotently; the runner substitutes the verified
+        ALREADY_ADMITTED projection for a fabricated pending request ID, and
+        this obligation records the accept substitution instead of invoking
+        an accept route that has no pending request to decide.
+        """
         request_result = self.runner.execute(OPERATOR_CLI_FRIEND_REQUEST_CHAT)
-        request_id = request_result["data"].get("request_id")
-        if not isinstance(request_id, str) or not request_id:
+        request_state = request_result["data"]
+        admission = request_state.get("admission", "ACCEPTED")
+        request_id = request_state.get("request_id")
+        if admission == "ALREADY_ADMITTED":
+            if (request_id is not None
+                    or request_state.get("friends_verified") is not True):
+                raise RunStateError(
+                    "operator CLI chat admission substitution is not verified")
+        elif not isinstance(request_id, str) or not request_id:
             raise RunStateError("operator CLI chat admission did not return a request ID")
-        self.runner.execute(OPERATOR_CLI_FRIEND_ACCEPT_CHAT, request_id=request_id)
+        accept_result = self.runner.execute(
+            OPERATOR_CLI_FRIEND_ACCEPT_CHAT, request_id=request_id)
+        accept_invoked = accept_result["data"].get("accept_invoked", True)
         chat_result = self.runner.execute(OPERATOR_CLI_CHAT)
         chat_data = chat_result["data"]
         if (not isinstance(chat_data, dict)
                 or not isinstance(chat_data.get("run_id"), str)
                 or not isinstance(chat_data.get("session_id"), str)):
             raise RunStateError("operator CLI chat handle projection differs")
-        data = {"prerequisite_admission": {
-                    "caller": self.driver_id, "target": self.member_id,
-                    "request_id": request_id, "admission": "ACCEPTED"},
+        prerequisite = {"caller": self.driver_id, "target": self.member_id,
+                        "request_id": request_id, "admission": admission,
+                        "accept_invoked": accept_invoked}
+        commands = [request_result["evidence"]["command_arguments"],
+                    chat_result["evidence"]["command_arguments"]]
+        if accept_invoked:
+            commands.insert(1, ["friend", "accept", "--request-id", request_id])
+        else:
+            prerequisite["friends_verified"] = True
+            prerequisite["substitution"] = (
+                "station retained this case fixture admission; the accept "
+                "route has no pending request to decide")
+        data = {"prerequisite_admission": prerequisite,
                 "run_id": chat_data["run_id"],
                 "session_id": chat_data["session_id"],
                 "detach_fallback": chat_data.get("detach_fallback") is True}
@@ -518,10 +544,7 @@ class RemoteOperatorCliAdapter:
         evidence["cli_operations"] = [
             request_result["evidence"]["operation"],
             "operator_cli.friend_accept_chat", chat_result["evidence"]["operation"]]
-        evidence["operator_cli_commands"] = [
-            request_result["evidence"]["command_arguments"],
-            ["friend", "accept", "--request-id", request_id],
-            chat_result["evidence"]["command_arguments"]]
+        evidence["operator_cli_commands"] = commands
         evidence["case_class"] = "chat"
         evidence["fixture_effect"] = OPERATOR_CLI_EFFECT
         evidence["gaps"] = []
@@ -540,30 +563,52 @@ class RemoteOperatorCliAdapter:
         return self._cli_step([result], "list-groups", dict(data))
 
     def operator_friend_list(self) -> AdapterCall:
-        """Admit the CEO<->ENG pair in-case, then list friends containing ENG."""
+        """Admit the CEO<->ENG pair in-case, then list friends containing ENG.
+
+        The retained-station ALREADY_ADMITTED substitution mirrors the chat
+        admission handling: an already-admitted fixture pair leaves no
+        pending request, so the accept substitution is recorded, not
+        invoked.
+        """
         request_result = self.runner.execute(OPERATOR_CLI_FRIEND_REQUEST_LIST)
-        request_id = request_result["data"].get("request_id")
-        if not isinstance(request_id, str) or not request_id:
+        request_state = request_result["data"]
+        admission = request_state.get("admission", "ACCEPTED")
+        request_id = request_state.get("request_id")
+        if admission == "ALREADY_ADMITTED":
+            if (request_id is not None
+                    or request_state.get("friends_verified") is not True):
+                raise RunStateError(
+                    "operator CLI friend admission substitution is not verified")
+        elif not isinstance(request_id, str) or not request_id:
             raise RunStateError("operator CLI friend admission did not return a request ID")
-        self.runner.execute(OPERATOR_CLI_FRIEND_ACCEPT_LIST, request_id=request_id)
+        accept_result = self.runner.execute(
+            OPERATOR_CLI_FRIEND_ACCEPT_LIST, request_id=request_id)
+        accept_invoked = accept_result["data"].get("accept_invoked", True)
         list_result = self.runner.execute(OPERATOR_CLI_FRIEND_LIST)
         list_data = list_result["data"]
         if (not isinstance(list_data, dict)
                 or list_data.get("friend_list_verified") is not True
                 or list_data.get("target_bot") != self.eng_id):
             raise RunStateError("operator CLI friend list did not contain the ENG fixture Bot")
-        data = {"prerequisite_admission": {
-                    "caller": self.driver_id, "target": self.eng_id,
-                    "request_id": request_id, "admission": "ACCEPTED"},
+        prerequisite = {"caller": self.driver_id, "target": self.eng_id,
+                        "request_id": request_id, "admission": admission,
+                        "accept_invoked": accept_invoked}
+        commands = [request_result["evidence"]["command_arguments"],
+                    list_result["evidence"]["command_arguments"]]
+        if accept_invoked:
+            commands.insert(1, ["friend", "accept", "--request-id", request_id])
+        else:
+            prerequisite["friends_verified"] = True
+            prerequisite["substitution"] = (
+                "station retained this case fixture admission; the accept "
+                "route has no pending request to decide")
+        data = {"prerequisite_admission": prerequisite,
                 "friend_list_verified": True, "target_bot": self.eng_id}
         evidence = dict(request_result["evidence"])
         evidence["cli_operations"] = [
             request_result["evidence"]["operation"],
             "operator_cli.friend_accept_list", list_result["evidence"]["operation"]]
-        evidence["operator_cli_commands"] = [
-            request_result["evidence"]["command_arguments"],
-            ["friend", "accept", "--request-id", request_id],
-            list_result["evidence"]["command_arguments"]]
+        evidence["operator_cli_commands"] = commands
         evidence["case_class"] = "friend-list"
         evidence["fixture_effect"] = OPERATOR_CLI_EFFECT
         evidence["gaps"] = []

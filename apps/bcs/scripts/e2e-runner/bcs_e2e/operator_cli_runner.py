@@ -357,7 +357,16 @@ class OperatorCliRunnerError(RuntimeError):
 
 
 class OperatorCliRunner:
-    """Execute the twenty reviewed operator CLI operations once, in order."""
+    """Execute the twenty reviewed operator CLI operations once, in order.
+
+    Friend-admission legs honor a stateful station's idempotent
+    already-friends answer: when the fixture pair is already admitted
+    station-side (the preprod revoke asymmetry makes those pairs permanent,
+    disclosed separately), the request leg records ALREADY_ADMITTED backed
+    by one bounded live membership read instead of fabricating a pending
+    request ID, and the paired accept leg records its substitution without
+    invoking the accept route. Every other shape stays fail-closed.
+    """
 
     def __init__(self, profile: dict, *, binary: Path, binary_sha256: str,
                  state_dir: Path):
@@ -379,6 +388,8 @@ class OperatorCliRunner:
         self.web_probe: str | None = None
         self.chat_request_id: str | None = None
         self.list_request_id: str | None = None
+        self.chat_admission: str | None = None
+        self.list_admission: str | None = None
         self.executed: list[str] = []
 
     def _credentials(self, role: str, *, onboard_token: str = "") -> tuple[str, str, str]:
@@ -588,6 +599,42 @@ class OperatorCliRunner:
             nested = payload.get("data")
             value = nested.get("id") if isinstance(nested, dict) else None
         return OperatorCliRunner._identifier(value, where)
+
+    @staticmethod
+    def _already_admitted(payload: dict) -> bool:
+        """Match the station's exact idempotent already-friends answer.
+
+        Only the reviewed envelope qualifies: a success carrying the exact
+        "Already friends" message with a null data payload and no request
+        ID. Every other shape keeps the strict request-ID contract.
+        """
+        return (payload.get("success") is True
+                and payload.get("message") == "Already friends"
+                and payload.get("data") is None
+                and "request_id" not in payload)
+
+    def _verify_friend_membership(self, role: str, target: str) -> None:
+        """Back an already-friends answer with one bounded live read.
+
+        The product CLI emits the bounded friend page as a bare JSON array
+        for this verification read; an object page is tolerated as an
+        envelope variant; both shapes must contain the exact pair member.
+        """
+        raw, _, _step, _credential_kind = self._invoke(
+            role, arguments=("friend", "list", "--json"), json_mode=True)
+        try:
+            payload = json.loads(raw.decode("utf-8"),
+                                 object_pairs_hook=unique_keys)
+        except (UnicodeError, json.JSONDecodeError):
+            raise OperatorCliRunnerError(
+                "operator CLI friend list verification did not emit one JSON "
+                "value") from None
+        rows = payload if isinstance(payload, list) else payload.get("items")
+        if (not isinstance(rows, list)
+                or not any(isinstance(row, dict)
+                           and row.get("bot_uuid") == target for row in rows)):
+            raise OperatorCliRunnerError(
+                "already-friends answer is not backed by the live friend list")
 
     def execute(self, operation: str, *, target: str = "", query: str = "",
                 value: str = "public", probe_name: str = "", name: str = "",
@@ -832,27 +879,55 @@ class OperatorCliRunner:
                 json_mode=True)
             elapsed_ms += step
             payload = self._load_json_output(raw, "friend request")
-            accepted = self._request_id(payload, "friend request ID")
+            if self._already_admitted(payload):
+                # A stateful station retains this case's fixture pair (the
+                # preprod friendships are permanent while the disclosed
+                # revoke asymmetry stands). Record the station's exact
+                # idempotent answer, back it with one bounded live
+                # membership read, and never fabricate a pending request ID.
+                self._verify_friend_membership(role, target)
+                accepted = None
+                admission = "ALREADY_ADMITTED"
+            else:
+                accepted = self._request_id(payload, "friend request ID")
+                admission = "ACCEPTED"
             if operation == OPERATOR_CLI_FRIEND_REQUEST_CHAT:
                 self.chat_request_id = accepted
+                self.chat_admission = admission
             else:
                 self.list_request_id = accepted
-            data = {"request_id": accepted, "target_bot": target}
+                self.list_admission = admission
+            data = {"request_id": accepted, "admission": admission,
+                    "friends_verified": admission == "ALREADY_ADMITTED",
+                    "target_bot": target}
             arguments = ("friend", "request", "--bot-uuid", target)
         elif operation in {OPERATOR_CLI_FRIEND_ACCEPT_CHAT,
                            OPERATOR_CLI_FRIEND_ACCEPT_LIST}:
+            chat_leg = operation == OPERATOR_CLI_FRIEND_ACCEPT_CHAT
             accepted = request_id or (
-                self.chat_request_id if operation == OPERATOR_CLI_FRIEND_ACCEPT_CHAT
-                else self.list_request_id)
-            if not isinstance(accepted, str) or not accepted:
-                raise OperatorCliRunnerError(
-                    "operator CLI friend accept requires the exact request ID")
-            raw, _, step, credential_kind = self._invoke(
-                role, arguments=("friend", "accept", "--request-id", accepted),
-                json_mode=False)
-            elapsed_ms += step
-            data = {"request_id": accepted, "accepted": True}
-            arguments = ("friend", "accept", "--request-id", accepted)
+                self.chat_request_id if chat_leg else self.list_request_id)
+            admission = self.chat_admission if chat_leg else self.list_admission
+            if accepted is None and admission == "ALREADY_ADMITTED":
+                # The request leg proved the pair is already admitted
+                # station-side; no pending request exists for the accept
+                # route to decide. Record the substitution; invoke nothing
+                # and fabricate no request ID.
+                credential_kind = ""
+                data = {"request_id": None, "admission": "ALREADY_ADMITTED",
+                        "accept_invoked": False, "accepted": True}
+                arguments = ()
+            else:
+                if not isinstance(accepted, str) or not accepted:
+                    raise OperatorCliRunnerError(
+                        "operator CLI friend accept requires the exact request ID")
+                raw, _, step, credential_kind = self._invoke(
+                    role, arguments=("friend", "accept",
+                                     "--request-id", accepted),
+                    json_mode=False)
+                elapsed_ms += step
+                data = {"request_id": accepted, "admission": "ACCEPTED",
+                        "accept_invoked": True, "accepted": True}
+                arguments = ("friend", "accept", "--request-id", accepted)
         elif operation == OPERATOR_CLI_CHAT:
             detach_arguments = ("chat", "--bot-uuid", self.actor_ids["member"],
                                 "--message", CHAT_MESSAGE, "--detach")
