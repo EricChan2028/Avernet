@@ -243,6 +243,7 @@ def migration_plan() -> dict:
                                                   REQUIREMENTS as CUSTOM_COLLABORATION_REQUIREMENT_IDS,
                                                   SUITE as CUSTOM_COLLABORATION_SUITE,
                                                   custom_collaboration_case_adaptability)
+    from .custom_collaboration_cli_case_run import custom_collaboration_cli_adaptability
     collaboration_team = collaboration_team_source_binding()
     sessions_services = sessions_services_source_binding()
     from .local_direct_chat_contract import direct_chat_source_binding
@@ -556,6 +557,7 @@ def migration_plan() -> dict:
                 collaboration_team_adaptability(),
                 group_context_adaptability(),
                 custom_collaboration_case_adaptability(),
+                custom_collaboration_cli_adaptability(),
                 session_service_parent_adaptability(),
                 local_session_service_lifecycle_adaptability(),
                 local_session_service_member_chat_adaptability(),

@@ -39,6 +39,7 @@ CASE_COMMANDS = frozenset({
     "dual-operator-cli-run",
     "dual-direct-chat-run",
     "dual-delivery-policy-run",
+    "dual-custom-collaboration-run",
 })
 
 
@@ -285,3 +286,13 @@ def register_case_commands(commands) -> None:
     delivery_policy_case.add_argument("--run-id", required=True)
     delivery_policy_case.add_argument("--confirm-run-id", required=True)
     delivery_policy_case.add_argument("--allow-write", action="store_true")
+    custom_collaboration_case = commands.add_parser(
+        "dual-custom-collaboration-run",
+        help="Run the reviewed dual Custom-collaboration product-CLI story through Singlebox or preprod")
+    custom_collaboration_case.add_argument("--profile", type=Path, required=True)
+    custom_collaboration_case.add_argument("--cli-binary", type=Path, required=True)
+    custom_collaboration_case.add_argument("--cli-binary-sha256", required=True)
+    custom_collaboration_case.add_argument("--state-dir", type=Path, required=True)
+    custom_collaboration_case.add_argument("--run-id", required=True)
+    custom_collaboration_case.add_argument("--confirm-run-id", required=True)
+    custom_collaboration_case.add_argument("--allow-write", action="store_true")
