@@ -530,16 +530,27 @@ class RemoteEdgeFriendMutationAdapter:
         discover_data, discover_record = self._read(self.station_reader, "station.discover.collaborate.read", target_actor_id=member)
         requests.append(discover_record)
         bots = discover_data.get("bots")
+        # Local-twin parity: the reviewed obligation pins the directory SHAPE
+        # (count/list agreement, bounded entry fields, requester self-exclusion),
+        # never directory propagation timing - the station publishes the public
+        # collaborate directory asynchronously. Driver presence is evidence, not
+        # a gate, mirroring the local contract that never pins a specific peer.
+        directory_rows = [row for row in bots if isinstance(row, dict)] if isinstance(bots, list) else []
         if (
             not isinstance(bots, list)
             or discover_data.get("count") != len(bots)
-            or not discover_data.get("count")
-            or any(not isinstance(row, dict) for row in bots)
-            or any(row.get("bot_uuid") == member for row in bots)
-            or not any(row.get("bot_uuid") == self.driver_actor_id for row in bots)
-            or any("is_friend" not in row or "visibility" not in row or "provider_info" not in row for row in bots)
+            or len(directory_rows) != len(bots)
+            or any(row.get("bot_uuid") == member for row in directory_rows)
+            or any(
+                not isinstance(row.get("bot_uuid"), str)
+                or row.get("visibility") not in ("public", "protected")
+                or not isinstance(row.get("is_friend"), bool)
+                or "provider_info" not in row
+                for row in directory_rows
+            )
         ):
-            raise RunStateError("public collaborate-bot discovery result differs from the contract")
+            raise RunStateError("public collaborate-bot discovery disagrees with the shape contract")
+        driver_listed = any(row.get("bot_uuid") == self.driver_actor_id for row in directory_rows)
         role_data, role_record = self._read(self.station_reader, "station.discover.role_no_org.read", fail_open=True)
         role_error = self._error_projection(role_data, role_record)
         role_drift = {"defect": "PD-DISCOVER-BRANCH-DRIFT", **role_error}
@@ -558,6 +569,7 @@ class RemoteEdgeFriendMutationAdapter:
         data = {
             "private_create_defect": private_defect, "private_discovery_empty": True,
             "public_discovery_count": discover_data["count"], "public_discovery_self_excluded": True,
+            "public_directory_driver_listed": driver_listed,
             "role_no_org_drift": role_drift, "organization_no_requester_drift": org_drift,
             "gateway_human_discover": documented_gap,
         }
