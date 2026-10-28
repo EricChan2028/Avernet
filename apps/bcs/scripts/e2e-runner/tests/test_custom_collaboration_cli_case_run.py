@@ -603,6 +603,20 @@ class CustomCollaborationLeafRunnerTests(unittest.TestCase):
                 self.assertEqual(list(self.launch_base.glob("runner-*")), [])
                 self.assertNotIn(DRIVER_TOKEN, json.dumps(result, sort_keys=True))
 
+    def test_unauthenticated_remote_leaf_stages_the_direct_network_hint(self):
+        # Live preprod r1: the unauthenticated validation leaf still targets
+        # the gateway origin, and without tc_sdb_nenv the product CLI probes
+        # the gateway, classifies the office login interception, and demands
+        # office OAuth that the public CLI build cannot satisfy.
+        runner = self.fresh(preprod_profile(trio_auth()))
+        with patch.dict(os.environ, SECRETS), self.launcher(stdout=bytes_json({"valid": True, "summary": {"participants": 2, "nodes": 2}})) as capture:
+            runner.execute(VALIDATE_YAML_OPERATION, yaml_path=self.state / cc_run.DEFINITION_FILE)
+        environment = capture.calls[0]["environment"]
+        self.assertEqual(environment.get("tc_sdb_nenv"), "production")
+        self.assertNotIn("BCS_COOKIE", environment)
+        self.assertEqual(capture.staged_session,
+                         {"token": "", "bot_uuid": PREPROD_DRIVER, "api_base_url": "https://bcs-pre.alipay.com"})
+
     def test_missing_credential_env_is_rejected(self):
         rows = ((self.fresh(), {}, "credential is absent"), (self.fresh(preprod_profile(trio_auth())), {DRIVER_TOKEN_ENV: DRIVER_TOKEN}, "bundle"), (self.fresh(preprod_profile(cookie_auth())), {DRIVER_TOKEN_ENV: DRIVER_TOKEN}, "Human Cookie is absent"))
         for runner, env, where in rows:

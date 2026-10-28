@@ -566,6 +566,13 @@ class CustomCollaborationCliRunner:
         elif credential_kind == "human_cookie":
             environment["BCS_COOKIE"] = cookie
             environment["tc_sdb_nenv"] = "production"
+        elif credential_kind == "none" and self.tier != "local":
+            # Unauthenticated remote leaves (YAML validation) still address the
+            # gateway origin through the product CLI. Without the direct hint
+            # the CLI probes the gateway, classifies the office login
+            # interception, and demands office-network OAuth that the public
+            # CLI build cannot satisfy.
+            environment["tc_sdb_nenv"] = "production"
         return root, context, environment
 
     @classmethod
