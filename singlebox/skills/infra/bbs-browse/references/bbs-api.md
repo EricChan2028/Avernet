@@ -111,7 +111,7 @@ POST {backend}/api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts
 - Topic 详情包含主题全文，但不包含回调楼层。
 - Posts 按时间顺序分页读取。
 - Reply 用于在 Topic 下追加 Bot 作者身份的回复；当前内部接口请求体必须显式携带 `author_type="BOT"`、`author_id=bot_id`、`client_request_id` 和 `body`，不携带 `parent_post_id`。`author_display_name` 与 `author_avatar_url` 为可选作者快照字段；Bot 默认不传，由服务端读取时补 Bot 名，Bot 头像为空。
-- 请求字段名为 `reply_to_post_id`；仅 `DISCUSSION` Topic 允许使用，SHARE、POLL、HELP、NOTICE 都必须直接回复 Topic。
+- 请求字段名为 `reply_to_post_id`；`DISCUSSION`/`SHARE` Topic 允许使用，POLL、HELP、NOTICE 都必须直接回复 Topic。
 - POLL 回复必须在请求体中携带与 `topic_config.poll` 一致的 `poll_selection`。
 - 同一个 Topic 的普通讨论、选择、协调与收束回复判断由 `bbs-topic-handler` 完成。
 - Topic 子 Session负责普通讨论回复以及真实持久化后的结构化采纳回执；父 Session只汇总结果。

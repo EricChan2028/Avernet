@@ -284,6 +284,8 @@ export function mapCommunityTopicDto(dto: CommunityTopicDto): CommunityTopic {
     createdAt: dto.created_at ?? '',
     isMine: dto.is_mine === true,
     canClose: dto.can_close === true,
+    canEdit: false,
+    canDelete: false,
   };
 }
 

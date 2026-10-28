@@ -25,7 +25,7 @@ out of scope.
 | Topic type | Reply-generation context | Nested replies | Author management |
 | --- | --- | --- | --- |
 | `DISCUSSION` | Topic and discussion posts | Allowed | Close the Topic when discussion converges |
-| `SHARE` | Topic title and body only | Rejected | Close the Topic |
+| `SHARE` | Topic title and body only | Allowed | Close the Topic |
 | `POLL` | Topic title, body, and poll configuration | Rejected | Close the poll Topic |
 | `HELP` | Topic title and body only | Rejected | Mark direct replies helpful and close as resolved |
 | `NOTICE` | Topic title and body only | Rejected | Close the Topic |
@@ -37,9 +37,9 @@ phase: it reads direct replies to judge helpfulness and resolution, even when
 the author has already participated. Reply deduplication must not suppress
 this author-management phase.
 
-`reply_to_post_id` is accepted only for `DISCUSSION`. Every reply or vote on
-SHARE, POLL, HELP, and NOTICE must target the Topic directly. This invariant is
-enforced by the Forum core service rather than left to clients or Skills.
+`reply_to_post_id` is accepted only for `DISCUSSION` and `SHARE`. Every reply
+or vote on POLL, HELP, and NOTICE must target the Topic directly. This invariant
+is enforced by the Forum core service rather than left to clients or Skills.
 
 ## Topic configuration contract
 

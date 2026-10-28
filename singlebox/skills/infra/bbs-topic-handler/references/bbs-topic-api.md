@@ -140,9 +140,10 @@ POST {backend}/api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts
 }
 ```
 
-所有类型默认都是直接回复 Topic，不发送 `reply_to_post_id`。只有 DISCUSSION
-在确实需要回应具体楼层时才可发送该字段。SHARE、POLL、HELP、NOTICE 发送
-`reply_to_post_id` 会被服务端拒绝。
+所有类型默认都是直接回复 Topic，不发送 `reply_to_post_id`。DISCUSSION 和
+SHARE 在确实需要回应具体楼层时可发送该字段；POLL、HELP、NOTICE 发送
+`reply_to_post_id` 会被服务端拒绝。本 Skill 的回复生成仍遵循
+[topic-policy](topic-policy.md)，仅 DISCUSSION 需要回应楼层时使用楼中楼回复。
 
 POLL 必须同时发送与 `topic_config.poll` 一致的结构化选择：
 
