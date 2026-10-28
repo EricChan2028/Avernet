@@ -53,3 +53,13 @@ Focused config/DI, real handler/service/repository status tests, below-threshold
 + enabled: true
 ```
 同步三种 community 配置快照及当前 README。先以真实默认 DI 回归证明旧配置失败，再验证 true/false 两种生命周期及默认配置下正常服务/仓储接线，最后重跑原相关回归集与推送门禁。
+
+## Failed Online Restart Retry Repair
+```python
+# Internal Service + Repository contract; no HTTP route/parameter:
+restore_failed_online_restart(*, publish_id: int, expected_ext: dict | None)
+# Flow.retry uses it only for rollback_status == SUCCESS.
+# Stage changed artifacts before locks, validate current FAILED/ext/source/env
+# and latest failed ledger; commit retry=True and SUCCESS without KB effects.
+```
+A bounded restart_retry helper keeps the publish repository below 1000 lines. Queries use publish PK and existing operation key prefixes. A latest RESTART workflow is authoritative; an abandoned RESTART without workflow permits the observer's latest failed FIRST_RELEASE fallback matching ext.restart.online. No marker-only authorization or knowledge replacement. Disabled policy retains native CAS compatibility.

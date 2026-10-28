@@ -19,3 +19,6 @@
 
 ## Approved Enablement Amendment (2026-10-28)
 用户批准：通过 ODC CLI 确认指定库结构就绪后，将本 PR 随包配置改为 enabled: true；不回填历史、不修改历史语义、不部署或执行 DDL。此项取代上文“生产开关不变”的原范围限制。显式 false 及缺失配置的兼容 fallback 保留。真实随包配置必须解析为布尔 true，并在正常 DI 中保留发布生命周期处理器。
+
+## Failed Online Restart Retry Amendment
+At repair base c3f841bcd, native failed-online-restart retry must work with/without knowledge and for recreated targets. Restricted recovery must match current FAILED, exact ext, source_status=success, environment and latest failed operation. It adds retry and restores native SUCCESS without mutating snapshots/results/summary/bindings. Generic status/completion gates remain; no HTTP bypass parameter. DB/CAS/ledger failures must precede new restart issuance. No DDL or production operations.

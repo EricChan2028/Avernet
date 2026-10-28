@@ -49,3 +49,7 @@ Focused config/DI, real handler/service/repository status tests, below-threshold
 用户明确要求通过 ODC CLI 只读核对指定数据库，结构就绪后在本 PR 开启发布集成，不处理历史。已用 SHOW CREATE TABLE 核对知识绑定、通用配置、发布表，并用 SHOW INDEX 核对源 Bot 主键/唯一键；知识字段和所需索引均存在。公开文档不记录内部数据库 ARN、域名或调用者信息。
 
 选择：随包 application.yaml 显式 enabled: true；仍允许部署显式设 false，缺失配置/直接构造策略对象的兼容 fallback 保留 false。拒绝仅开启本机配置（不能随 PR 交付）或修改全局策略 fallback（无必要扩大直接构造调用者影响）。不修改数据库、历史 UNKNOWN 语义或消费端。验证现有配置合并/DI 生命周期/发布 HTTP 服务边界及相关完整回归。
+
+## Approved failed-online-restart retry repair (2026-10-28)
+The user approved fixing native FAILED(source_status=success) -> SUCCESS retry recovery and updating this PR. Use a dedicated internal Service/Repository entry, accepting only publish_id and expected_ext. Validate FAILED, exact ext CAS, source_status, environment and the latest failed online restart ledger operation in one transaction. Recreated targets follow the native observer's RESTART-without-workflow / ext.restart.online / FIRST_RELEASE rule. Only add retry and restore native status; do not apply knowledge effects. Keep disabled compatibility.
+Rejected: a generic bypass boolean or loosening all SUCCESS transitions (would reopen legacy status synthesis); a fabricated observed workflow (recovery is not observed completion). Test the real Flow/Service/Repository/ledger with SQLite; double only external observation/new restart issuance. Include empty knowledge, recreation, stale ext/ledger/status, rollback and generic-gate regressions. No schema or live operations.
