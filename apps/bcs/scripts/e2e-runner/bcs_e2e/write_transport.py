@@ -709,6 +709,8 @@ class WriteClient:
                   "submitted_request_id": request_id, "http_status": None,
                   "traceparent_mode": trace_mode,
                   "response_budget_bytes": byte_budget,
+                  "credentials_sent": "Cookie" in auth_headers,
+                  "authorization_sent": "Authorization" in auth_headers,
                   "principal_sent": "X-Avernet-Principal" in auth_headers}
         if traceparent is not None:
             record["submitted_traceparent"] = traceparent

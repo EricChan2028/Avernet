@@ -322,6 +322,19 @@ class AuthorizationSchemeTests(unittest.TestCase):
             client = WriteClient(self._duo_profile())
         self.assertEqual(client.headers["Authorization"], "Bearer owned-token")
 
+    def test_call_record_projects_the_duo_credential_posture(self):
+        body = {"code": 20000, "message": "OK", "request_id": "server-request",
+                "data": {"group_id": "g-1"}}
+        reply = Reply(body, headers={"x-request-id": "client-request"})
+        with patch.dict(os.environ, {"BCS_E2E_DRIVER_BOT_TOKEN": "owned-token",
+                                     "BCS_E2E_COOKIE": "human-cookie"}), \
+                patch("bcs_e2e.write_transport.build_opener") as factory:
+            factory.return_value.open.return_value = reply
+            _, record = WriteClient(self._duo_profile()).call("group.read", group_id="g-1")
+        self.assertTrue(record["credentials_sent"])
+        self.assertTrue(record["authorization_sent"])
+        self.assertNotIn("owned-token", json.dumps(record))
+        self.assertNotIn("human-cookie", json.dumps(record))
 
 if __name__ == "__main__":
     unittest.main()
