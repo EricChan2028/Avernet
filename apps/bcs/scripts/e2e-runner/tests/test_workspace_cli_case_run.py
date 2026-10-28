@@ -132,7 +132,10 @@ def fake_process(argument: object, operation: str) -> subprocess.CompletedProces
         value = {"perspectives": [
             {"bot_uuid": DRIVER, "summary": "driver workspace context"},
             {"bot_uuid": MEMBER, "summary": "member workspace context"},
-        ], "conflicts": [], "recommendation": "Simple fusion for: how to align?"}
+        ], "conflicts": [], "alignment_points": [],
+         "recommendation": "Simple fusion for: how to align?",
+         "key_insights": [], "extra": {"fusion_id": "fus-workspace-cli-01",
+                                        "fusion_mode": "agent"}}
         raw = b"Fusion result:\n" + json.dumps(value).encode()
     elif operation == "member.group.add-member":
         raw = (f"✓ Member added to group:\n  Group: {GROUPS['member']}\n"

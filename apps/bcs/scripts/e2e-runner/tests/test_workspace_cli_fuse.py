@@ -72,14 +72,23 @@ def create_output():
             f"  Participants: {DRIVER},{MEMBER}\n  Session: {SESSION}\n").encode()
 
 
+WARM_PERSPECTIVES = "warm"
+
+
 def fusion_output(*, recommendation="Simple fusion for: how to align?",
-                   perspectives=None, prefix=True):
-    perspectives = perspectives or [
-        {"bot_uuid": DRIVER, "summary": "driver workspace context"},
-        {"bot_uuid": MEMBER, "summary": "member workspace context"},
-    ]
+                   perspectives=WARM_PERSPECTIVES, prefix=True):
+    if perspectives == WARM_PERSPECTIVES:
+        perspectives = [
+            {"bot_uuid": DRIVER, "name": "driver", "emoji": "robot",
+             "summary": "driver workspace context"},
+            {"bot_uuid": MEMBER, "name": "member", "emoji": "robot",
+             "summary": "member workspace context"},
+        ]
     value = {"perspectives": perspectives, "conflicts": [],
-             "recommendation": recommendation}
+             "alignment_points": ["participants agree on delivery"],
+             "recommendation": recommendation,
+             "key_insights": ["shared workspace context"],
+             "extra": {"fusion_id": "fus-workspace-cli-01", "fusion_mode": "agent"}}
     prefix_bytes = b"Fusion result:\n" if prefix else b""
     return prefix_bytes + json.dumps(value).encode()
 
@@ -156,8 +165,18 @@ class WorkspaceCliFuseTests(unittest.TestCase):
         self.assertEqual(snapshot["steps"][0]["data"]["participant_bot_ids"], [DRIVER, MEMBER])
         self.assertEqual(snapshot["steps"][0]["data"]["recommendation"],
                          "Simple fusion for: how to align?")
+        self.assertEqual(snapshot["steps"][0]["data"]["perspectives_count"], 2)
+        self.assertFalse(snapshot["steps"][0]["data"]["cold_context"])
         self.assertEqual(len(snapshot["steps"][0]["evidence"]["requests"]), 2)
         self.assertNotIn(TOKEN, json.dumps(snapshot, sort_keys=True))
+
+    def test_cold_context_empty_perspectives_passes(self):
+        execution, _, _, _ = self.run_case(fusion=fusion_output(perspectives=[]))
+        self.assertEqual(execution.status, "PASS")
+        data = execution.snapshot()["steps"][0]["data"]
+        self.assertEqual(data["perspectives_count"], 0)
+        self.assertTrue(data["cold_context"])
+        self.assertEqual(data["participant_bot_ids"], [])
 
     def test_gateway_cookie_is_not_evidence(self):
         execution, _, _, contexts = self.run_case(gateway=True)
@@ -170,7 +189,15 @@ class WorkspaceCliFuseTests(unittest.TestCase):
     def test_inexact_fusion_result_blocks_without_partial_credit(self):
         cases = {
             "missing-prefix": fusion_output(prefix=False),
-            "wrong-recommendation": fusion_output(recommendation="anything"),
+            "null-recommendation": (b"Fusion result:\n" + json.dumps({
+                "perspectives": [], "conflicts": [], "alignment_points": [],
+                "recommendation": None, "key_insights": [],
+                "extra": {"fusion_id": "fus-x", "fusion_mode": "agent"}}).encode()),
+            "non-string-recommendation": (b"Fusion result:\n" + json.dumps({
+                "perspectives": [], "conflicts": [], "alignment_points": [],
+                "recommendation": 123, "key_insights": [],
+                "extra": {"fusion_id": "fus-x", "fusion_mode": "agent"}}).encode()),
+            "empty-recommendation": fusion_output(recommendation=""),
             "one-perspective": fusion_output(perspectives=[
                 {"bot_uuid": DRIVER, "summary": "only one"}]),
             "wrong-participant": fusion_output(perspectives=[
@@ -181,6 +208,15 @@ class WorkspaceCliFuseTests(unittest.TestCase):
             "same-summary": fusion_output(perspectives=[
                 {"bot_uuid": DRIVER, "summary": "same"},
                 {"bot_uuid": MEMBER, "summary": "same"}]),
+            "unknown-server-key": (b"Fusion result:\n" + json.dumps({
+                "group_id": None, "perspectives": [], "conflicts": [],
+                "alignment_points": [], "recommendation": "r",
+                "key_insights": [], "extra": {"fusion_id": "fus-x",
+                                               "fusion_mode": "agent"},
+                "surprise": 1}).encode()),
+            "missing-extra": (b"Fusion result:\n" + json.dumps({
+                "perspectives": [], "conflicts": [], "alignment_points": [],
+                "recommendation": "r", "key_insights": []}).encode()),
             "arbitrary-json": b"Fusion result:\n{}\n",
         }
         for name, raw in cases.items():

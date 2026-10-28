@@ -112,18 +112,40 @@ def _validate_created(group_id: str, data: object, driver: str, member: str) -> 
 
 
 def _validate_fusion(group_id: str, data: object, driver: str, member: str) -> None:
-    if not isinstance(data, dict) or data.get("group_id") != group_id:
+    # Station fusion response (bcs-protocol FusionResponse plus the adapter
+    # Group binding): exact key set, object arrays for perspectives/conflicts,
+    # string arrays for alignment_points/key_insights, a non-empty
+    # recommendation, and provider extra fusion_id/fusion_mode. A freshly
+    # created Group carries cold participant context, so an empty
+    # perspectives array is an admitted station result, not a failure.
+    if (not isinstance(data, dict)
+            or set(data) != {"group_id", "perspectives", "conflicts",
+                             "alignment_points", "recommendation",
+                             "key_insights", "extra"}
+            or data.get("group_id") != group_id):
         raise RunStateError("workspace CLI fusion output is not bound to the Group")
-    perspectives = data.get("perspectives")
-    summaries = None
-    if isinstance(perspectives, list) and all(isinstance(row, dict) for row in perspectives):
-        summaries = [row.get("summary") for row in perspectives]
-    if (data.get("recommendation") != "Simple fusion for: how to align?"
-            or not isinstance(summaries, list) or len(summaries) != 2
-            or [row.get("bot_uuid") for row in perspectives] != [driver, member]
-            or any(not isinstance(value, str) or not value for value in summaries)
-            or summaries[0] == summaries[1]):
-        raise RunStateError("workspace CLI fusion result is not exact")
+    for key in ("perspectives", "conflicts"):
+        if (not isinstance(data[key], list)
+                or not all(isinstance(row, dict) for row in data[key])):
+            raise RunStateError(f"workspace CLI fusion {key} is not an object array")
+    for key in ("alignment_points", "key_insights"):
+        if (not isinstance(data[key], list)
+                or not all(isinstance(item, str) for item in data[key])):
+            raise RunStateError(f"workspace CLI fusion {key} is not a string array")
+    if (not isinstance(data["recommendation"], str) or not data["recommendation"]):
+        raise RunStateError("workspace CLI fusion recommendation is not an exact non-empty string")
+    extra = data["extra"]
+    if (not isinstance(extra, dict)
+            or not isinstance(extra.get("fusion_id"), str) or not extra["fusion_id"]
+            or not isinstance(extra.get("fusion_mode"), str) or not extra["fusion_mode"]):
+        raise RunStateError("workspace CLI fusion extra differs from the station result")
+    perspectives = data["perspectives"]
+    if perspectives:
+        if ([row.get("bot_uuid") for row in perspectives] != [driver, member]
+                or any(not isinstance(row.get("summary"), str) or not row["summary"]
+                       for row in perspectives)
+                or perspectives[0]["summary"] == perspectives[1]["summary"]):
+            raise RunStateError("workspace CLI fusion warm perspectives are not exact")
 
 
 def execute_workspace_cli_fuse_case(adapter: object) -> CaseExecution:
@@ -154,11 +176,15 @@ def execute_workspace_cli_fuse_case(adapter: object) -> CaseExecution:
     except Exception as error:
         error_type = type(error).__name__
 
+    fusion_perspectives = extracted.get("perspectives") if extracted else None
     data = {
         "group_id": group_id,
         "recommendation": extracted.get("recommendation") if extracted else "",
-        "participant_bot_ids": [row.get("bot_uuid") for row in extracted.get("perspectives", [])]
-                              if isinstance(extracted.get("perspectives"), list) else [],
+        "participant_bot_ids": [row.get("bot_uuid") for row in fusion_perspectives]
+                              if isinstance(fusion_perspectives, list) else [],
+        "perspectives_count": len(fusion_perspectives)
+                              if isinstance(fusion_perspectives, list) else 0,
+        "cold_context": not isinstance(fusion_perspectives, list) or not fusion_perspectives,
         "initial_session_bound": completed == 1,
         "group_retained": completed == 1,
     }
