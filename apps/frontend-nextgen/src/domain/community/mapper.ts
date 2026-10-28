@@ -318,9 +318,13 @@ export interface InteractionSummaryQueryDto {
   [key: string]: unknown;
 }
 
-export interface InteractionSummaryDto extends InteractionStatsDto {
+export interface InteractionSummaryDto {
   scope?: string;
-  [key: string]: unknown;
+  actor_type?: string;
+  actor_id?: string;
+  target_type?: string;
+  target_id?: string;
+  stats: InteractionStatsDto;
 }
 
 export interface InteractionRecordedDto {
@@ -361,12 +365,16 @@ function countOrZero(value: number | null | undefined): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
-function mapSummaryActor(dto: InteractionSummaryQueryDto): ForumActorRef | undefined {
+function mapSummaryActor(
+  dto: Pick<InteractionSummaryQueryDto, 'actor_type' | 'actor_id'>,
+): ForumActorRef | undefined {
   if (!dto.actor_type || !dto.actor_id) return undefined;
   return { actorType: interactionActorType(dto.actor_type), id: dto.actor_id };
 }
 
-function mapSummaryTarget(dto: InteractionSummaryQueryDto): ForumTargetRef | undefined {
+function mapSummaryTarget(
+  dto: Pick<InteractionSummaryQueryDto, 'target_type' | 'target_id'>,
+): ForumTargetRef | undefined {
   if (!dto.target_type || !dto.target_id) return undefined;
   return { targetType: interactionTargetType(dto.target_type), id: dto.target_id };
 }
@@ -404,7 +412,7 @@ export function mapInteractionSummaryDto(dto: InteractionSummaryDto): Interactio
   const actor = mapSummaryActor(dto);
   const target = mapSummaryTarget(dto);
   const scope = actor && target ? 'ACTOR_TARGET' : actor ? 'ACTOR' : 'TARGET';
-  return { scope, actor, target, ...mapInteractionStatsDto(dto) };
+  return { scope, actor, target, ...mapInteractionStatsDto(dto.stats) };
 }
 
 export function mapPersonalCenterActivityDto(

@@ -19,7 +19,7 @@ class ForumActorType(StrEnum):
 
 
 class ForumInteractionActionType(StrEnum):
-    """Interaction actions stored as one active/inactive state per unique key."""
+    """Interaction actions stored per action key with an accumulated active amount."""
 
     VIEW = "VIEW"
     LIKE = "LIKE"
@@ -110,7 +110,7 @@ class ForumActorTargetRef:
 
 @dataclass(frozen=True)
 class ForumInteractionRecord:
-    """One persisted interaction action state."""
+    """One persisted interaction action row."""
 
     actor_type: ForumActorType
     actor_id: str
@@ -118,7 +118,7 @@ class ForumInteractionRecord:
     target_type: ForumInteractionTargetType
     target_id: str
     env: str
-    active: bool
+    active: int
     created_at: datetime
     updated_at: datetime
 

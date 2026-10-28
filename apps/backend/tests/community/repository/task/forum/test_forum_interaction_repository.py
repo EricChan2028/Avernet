@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from agentclaw.community.core.errors import ValidationError
+
 from agentclaw.community.core.repository.implementations.task.forum.forum_repository import (
     ForumRepository,
 )
@@ -37,7 +39,7 @@ class FailingDatabase:
         yield None
 
 
-def _events(repo, *, actor_type="HUMAN", actor_id="user-a", active=True):
+def _events(repo, *, actor_type="HUMAN", actor_id="user-a", active=1):
     def add(action, target_type, target_id):
         repo.insert_interaction(
             actor_type=actor_type,
@@ -61,7 +63,7 @@ def test_interaction_repository_upserts_repeated_actor_target_state(db):
         action_type="LIKE",
         target_type="TOPIC",
         target_id="topic-1",
-        active=True,
+        active=1,
     )
     between = storage_now()
     second = repo.insert_interaction(
@@ -70,12 +72,12 @@ def test_interaction_repository_upserts_repeated_actor_target_state(db):
         action_type="LIKE",
         target_type="TOPIC",
         target_id="topic-1",
-        active=False,
+        active=-1,
     )
     after = storage_now()
 
-    assert first.active is True
-    assert second.active is False
+    assert first.active == 1
+    assert second.active == 0
     assert before <= first.created_at <= between
     assert first.created_at == first.updated_at
     assert second.created_at == first.created_at
@@ -88,7 +90,7 @@ def test_interaction_repository_upserts_repeated_actor_target_state(db):
             ForumInteractionModel.active,
         ).all()
     assert len(rows) == 1
-    assert rows[0] == ("LIKE", "topic-1", False)
+    assert rows[0] == ("LIKE", "topic-1", 0)
 
 
 def test_interaction_summaries_exclude_inactive_state(db):
@@ -101,7 +103,15 @@ def test_interaction_summaries_exclude_inactive_state(db):
         action_type="LIKE",
         target_type="TOPIC",
         target_id="topic-1",
-        active=False,
+        active=1,
+    )
+    repo.insert_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="LIKE",
+        target_type="TOPIC",
+        target_id="topic-1",
+        active=-1,
     )
     assert repo.batch_get_target_summaries((target,))[target].like_count == 0
 
@@ -111,9 +121,63 @@ def test_interaction_summaries_exclude_inactive_state(db):
         action_type="LIKE",
         target_type="TOPIC",
         target_id="topic-1",
-        active=True,
+        active=1,
     )
     assert repo.batch_get_target_summaries((target,))[target].like_count == 1
+
+def test_first_cancel_delta_without_existing_state_is_rejected(db):
+    repo = ForumInteractionRepository(db)
+
+    for invalid_active in (0, True, False, "1"):
+        with pytest.raises(ValidationError, match="active must be 1 or -1"):
+            repo.insert_interaction(
+                actor_type="HUMAN",
+                actor_id="user-a",
+                action_type="LIKE",
+                target_type="TOPIC",
+                target_id="topic-1",
+                active=invalid_active,
+            )
+    with pytest.raises(ValidationError, match="first interaction must"):
+        repo.insert_interaction(
+            actor_type="HUMAN",
+            actor_id="user-a",
+            action_type="LIKE",
+            target_type="TOPIC",
+            target_id="topic-1",
+            active=-1,
+        )
+    with db.orm_session() as session:
+        assert session.query(ForumInteractionModel).count() == 0
+
+
+def test_repeated_view_deltas_accumulate_into_view_count(db):
+    repo = ForumInteractionRepository(db)
+    target = ForumTargetRef(type=ForumInteractionTargetType.TOPIC, id="topic-1")
+    actor = ForumActorRef(type=ForumActorType.HUMAN, id="user-a")
+    pair = ForumActorTargetRef(actor=actor, target=target)
+
+    first = repo.insert_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="VIEW",
+        target_type="TOPIC",
+        target_id="topic-1",
+        active=1,
+    )
+    second = repo.insert_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="VIEW",
+        target_type="TOPIC",
+        target_id="topic-1",
+        active=1,
+    )
+
+    assert first.active == 1
+    assert second.active == 2
+    assert repo.batch_get_target_summaries((target,))[target].view_count == 2
+    assert repo.batch_get_actor_target_summaries((pair,))[pair].view_count == 2
 
 
 def test_summary_dimensions_and_topic_projections_do_not_share_counts(db):
@@ -221,18 +285,25 @@ def test_interaction_ddl_and_orm_contract_define_active_unique_state():
         "src/agentclaw/community/core/task/forum/sql/"
         "2026_10_28_forum_interaction_active_unique.sql"
     )
+    amount_migration_path = Path(
+        "src/agentclaw/community/core/task/forum/sql/"
+        "2026_10_28_forum_interaction_active_unique_amount.sql"
+    )
     ddl = ddl_path.read_text()
     migration = migration_path.read_text()
 
     assert "ac_forum_interaction" in ddl
-    assert "`active`          tinyint(1)   NOT NULL DEFAULT 1" in ddl
+    assert "`active`          int          NOT NULL DEFAULT 1" in ddl
     assert "UNIQUE KEY `uk_forum_interaction_action`" in ddl
     assert (
         "(`env`, `actor_type`, `actor_id`, `action_type`, `target_type`, `target_id`)"
         in ddl
     )
-    assert "`active` tinyint(1) NOT NULL DEFAULT 1" in migration
+    assert "`active` int NOT NULL DEFAULT 1" in migration
     assert "ADD UNIQUE KEY `uk_forum_interaction_action`" in migration
+    assert (
+        "MODIFY COLUMN `active` int NOT NULL DEFAULT 1" in amount_migration_path.read_text()
+    )
     columns = {column.name for column in ForumInteractionModel.__table__.columns}
     assert columns == {
         "id",
@@ -346,5 +417,5 @@ def test_helpful_accept_updates_one_state_row_to_active(db):
         "ACCEPT",
         "POST",
         post.post_id,
-        False,
+        0,
     )

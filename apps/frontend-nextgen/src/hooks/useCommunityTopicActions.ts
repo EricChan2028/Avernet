@@ -6,7 +6,10 @@ import type {
   CommunityAuthor,
   CommunityTopic,
   CreateCommunityReplyDraft,
+  ForumActorRef,
   ForumTargetRef,
+  InteractionActionType,
+  InteractionActiveDelta,
   InteractionSummary,
 } from '@/domain/community/types';
 import { communityService } from '@/services/community';
@@ -15,6 +18,7 @@ import type { UseCommunityInteractionsResult } from './useCommunityInteractions'
 
 interface UseCommunityTopicActionsOptions {
   currentUserId: string;
+  viewer: ForumActorRef;
   currentAuthorName?: string;
   selectedTopic: CommunityTopic | null;
   replyPage: number;
@@ -23,8 +27,20 @@ interface UseCommunityTopicActionsOptions {
   interactions: UseCommunityInteractionsResult;
 }
 
+function actionCount(
+  actionType: InteractionActionType,
+  summary: InteractionSummary | undefined,
+): number {
+  if (!summary) return 0;
+  if (actionType === 'LIKE') return summary.likeCount;
+  if (actionType === 'FAVORITE') return summary.favoriteCount;
+  if (actionType === 'FOLLOW') return summary.followCount;
+  return summary.acceptCount;
+}
+
 export function useCommunityTopicActions({
   currentUserId,
+  viewer,
   currentAuthorName,
   selectedTopic,
   replyPage,
@@ -84,9 +100,25 @@ export function useCommunityTopicActions({
     [interactions],
   );
 
+  const actionActive = useCallback(
+    (actionType: InteractionActionType, target: ForumTargetRef): boolean => {
+      const summary = interactions.getSummary({ actor: viewer, target });
+      return actionCount(actionType, summary) > 0;
+    },
+    [interactions, viewer],
+  );
+
+  const toggleInteraction = useCallback(
+    (actionType: InteractionActionType, target: ForumTargetRef) => {
+      const active: InteractionActiveDelta = actionActive(actionType, target) ? -1 : 1;
+      return interactions.recordInteraction(actionType, target, { active });
+    },
+    [actionActive, interactions],
+  );
+
   const followAuthor = useCallback(
     async (author: CommunityAuthor) => {
-      const success = await interactions.recordInteraction('FOLLOW', {
+      const success = await toggleInteraction('FOLLOW', {
         targetType: author.type === 'bot' ? 'BOT' : 'HUMAN',
         id: author.id,
       });
@@ -95,26 +127,26 @@ export function useCommunityTopicActions({
       }
       return success;
     },
-    [interactions],
+    [interactions, toggleInteraction],
   );
 
   const likeTopic = useCallback(
-    (target: ForumTargetRef) => interactions.recordInteraction('LIKE', target),
-    [interactions],
+    (target: ForumTargetRef) => toggleInteraction('LIKE', target),
+    [toggleInteraction],
   );
 
   const likeReply = useCallback(
     (postId: string) =>
-      interactions.recordInteraction('LIKE', {
+      toggleInteraction('LIKE', {
         targetType: 'POST',
         id: postId,
       }),
-    [interactions],
+    [toggleInteraction],
   );
 
   const favoriteTopic = useCallback(
-    (target: ForumTargetRef) => interactions.recordInteraction('FAVORITE', target),
-    [interactions],
+    (target: ForumTargetRef) => toggleInteraction('FAVORITE', target),
+    [toggleInteraction],
   );
 
   const targetSummary = useCallback(

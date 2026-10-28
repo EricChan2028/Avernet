@@ -2,8 +2,22 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
-import type { CommunityTopic, CommunityTopicType } from '@/domain/community/types';
-import { ChevronDown, CircleHelp, Heart, Lock, MessageCircle, Paperclip, RefreshCw } from 'lucide-react';
+import type {
+  CommunityTopic,
+  CommunityTopicType,
+  InteractionSummary,
+} from '@/domain/community/types';
+import {
+  ChevronDown,
+  CircleHelp,
+  Eye,
+  Heart,
+  Lock,
+  MessageCircle,
+  Paperclip,
+  RefreshCw,
+  Star,
+} from 'lucide-react';
 import type { KeyboardEvent, RefObject } from 'react';
 import { useEffect, useRef } from 'react';
 import { PollTypeIcon } from '../PollTypeIcon';
@@ -56,11 +70,21 @@ export interface CommunityTopicListProps {
   loadMoreError: string | null;
   /** 无限滚动：触发加载下一页。 */
   loadMore: () => void;
+  /** 获取主题的互动总量；仅在命中列表批量 summary 后覆盖旧 likeCount。 */
+  getTopicSummary?: (topic: CommunityTopic) => InteractionSummary | undefined;
   /** 列表滚动容器（main），监听其 scroll 事件；由 CommunityPage 注入。 */
   scrollRootRef: RefObject<HTMLElement | null>;
 }
 
-function TopicRow({ topic, onOpen }: { topic: CommunityTopic; onOpen: (topic: CommunityTopic) => void }) {
+function TopicRow({
+  topic,
+  getTopicSummary,
+  onOpen,
+}: {
+  topic: CommunityTopic;
+  getTopicSummary?: (topic: CommunityTopic) => InteractionSummary | undefined;
+  onOpen: (topic: CommunityTopic) => void;
+}) {
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
@@ -68,8 +92,11 @@ function TopicRow({ topic, onOpen }: { topic: CommunityTopic; onOpen: (topic: Co
   };
 
   // 列表行对齐原型 5 列：主题 / 类型 / 发帖人 / 互动数据 / 最新回复。
+  const summary = getTopicSummary?.(topic);
   const replyCount = typeof topic.replyCount === 'number' ? topic.replyCount : 0;
-  const likeCount = typeof topic.likeCount === 'number' ? topic.likeCount : 0;
+  const viewCount = summary?.viewCount ?? 0;
+  const likeCount = summary?.likeCount ?? (typeof topic.likeCount === 'number' ? topic.likeCount : 0);
+  const favoriteCount = summary?.favoriteCount ?? 0;
   const hasReplies = replyCount > 0;
   const activityAt = hasReplies ? topic.latestActivityAt ?? topic.createdAt : topic.createdAt;
   const activityPrefix = hasReplies ? '最新回复：' : '发帖时间：';
@@ -80,7 +107,7 @@ function TopicRow({ topic, onOpen }: { topic: CommunityTopic; onOpen: (topic: Co
       tabIndex={0}
       onClick={() => onOpen(topic)}
       onKeyDown={handleKeyDown}
-      className="grid grid-cols-[1fr_100px_140px_64px_176px] items-center gap-3 border-b border-border/60 px-4 py-3 outline-none transition-colors last:border-b-0 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+      className="grid grid-cols-[1fr_100px_140px_150px_176px] items-center gap-3 border-b border-border/60 px-4 py-3 outline-none transition-colors last:border-b-0 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
     >
       <div className="min-w-0">
         <div className="flex items-center gap-2">
@@ -119,13 +146,21 @@ function TopicRow({ topic, onOpen }: { topic: CommunityTopic; onOpen: (topic: Co
         <span className="truncate text-xs text-muted-foreground">{topic.author.displayName}</span>
       </div>
       <div className="flex items-center justify-end gap-2 text-xs font-medium text-muted-foreground tabular-nums">
-        <span className="inline-flex items-center gap-1" aria-label={`回复 ${replyCount}`}>
-          <MessageCircle className="size-3.5" aria-hidden />
-          <span aria-hidden>{replyCount}</span>
+        <span className="inline-flex items-center gap-1" aria-label={`浏览 ${viewCount}`}>
+          <Eye className="size-3.5" aria-hidden />
+          <span aria-hidden>{viewCount}</span>
         </span>
         <span className="inline-flex items-center gap-1" aria-label={`点赞 ${likeCount}`}>
           <Heart className="size-3.5" aria-hidden />
           <span aria-hidden>{likeCount}</span>
+        </span>
+        <span className="inline-flex items-center gap-1" aria-label={`收藏 ${favoriteCount}`}>
+          <Star className="size-3.5" aria-hidden />
+          <span aria-hidden>{favoriteCount}</span>
+        </span>
+        <span className="inline-flex items-center gap-1" aria-label={`回复 ${replyCount}`}>
+          <MessageCircle className="size-3.5" aria-hidden />
+          <span aria-hidden>{replyCount}</span>
         </span>
       </div>
       <div className="min-w-0 text-right">
@@ -151,6 +186,7 @@ export function CommunityTopicList({
   loadingMore,
   loadMoreError,
   loadMore,
+  getTopicSummary,
   scrollRootRef,
 }: CommunityTopicListProps) {
   // 同步防抖：scroll 事件密集触发时，只放过一次 loadMore（直到本次加载结束）。
@@ -240,7 +276,12 @@ export function CommunityTopicList({
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card">
       {topics.map((topic) => (
-        <TopicRow key={topic.id} topic={topic} onOpen={onOpen} />
+        <TopicRow
+          key={topic.id}
+          topic={topic}
+          getTopicSummary={getTopicSummary}
+          onOpen={onOpen}
+        />
       ))}
       {loadingMore && (
         <div aria-live="polite" className="py-4 text-center text-xs text-muted-foreground">

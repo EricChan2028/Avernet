@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.task.forum.interaction.models import (
@@ -26,9 +26,9 @@ class ForumInteractionRepositoryProtocol(Protocol):
         action_type: str,
         target_type: str,
         target_id: str,
-        active: bool,
+        active: Literal[1, -1],
     ) -> ForumInteractionRecord:
-        """Upsert one action state in the current environment."""
+        """Apply a validated +1/-1 delta to the latest row for this action key."""
 
     @abstractmethod
     def get_summary(

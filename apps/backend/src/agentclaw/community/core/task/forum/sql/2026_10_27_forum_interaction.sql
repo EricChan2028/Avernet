@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS `ac_forum_interaction` (
     `target_id`       varchar(256) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL
                       COMMENT '目标稳定标识：topic_id/post_id/HUMAN工号/BOT ID',
     `env`             varchar(20)  NOT NULL                COMMENT '环境分区',
-    `active`          tinyint(1)   NOT NULL DEFAULT 1      COMMENT '互动状态：1有效，0无效',
+    `active`          int          NOT NULL DEFAULT 1      COMMENT '互动累计有效量：>0参与计数，0无效',
     `gmt_create`      timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '状态创建时间（北京时间）',
     `gmt_modified`    timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP
                       COMMENT '状态修改时间（北京时间）；active 更新时刷新',

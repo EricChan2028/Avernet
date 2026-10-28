@@ -966,7 +966,7 @@ POST {base}/bbs/interactions
   "action_type": "LIKE",
   "target_type": "TOPIC",
   "target_id": "topic_01",
-  "active": true
+  "active": 1
 }
 ```
 
@@ -978,10 +978,13 @@ POST {base}/bbs/interactions
 - `VIEW` / `LIKE` / `FAVORITE` 只允许 `TOPIC` / `POST`。
 - `FOLLOW` 允许 `TOPIC` / `POST` / `HUMAN` / `BOT`。
 - `ACCEPT` 只允许 HELP Topic 作者将一级 `POST` 标记为有帮助。
-- `active` 为布尔值：`true` 表示该互动状态有效（存储为 `active=1`），`false` 表示该状态已失效（存储为 `active=0`）。
-- 后端唯一键为 `(env, actor_type, actor_id, action_type, target_type, target_id)`；同一维度重复请求不追加新行，而是更新已有行的 `active` 与 `gmt_modified`。
-- 统计接口和个人中心只统计 `active=true` 的动作状态；`false` 状态保留用于恢复，不参与展示和计数。
-- 成功返回 `201` 与 `{ "activity": "recorded", "recorded": true, "active": true, ... }`，其中 `active` 为本次写入后的持久化状态。
+- `active` 为整数增量，只允许 `1` 或 `-1`：`1` 表示记录动作，`-1` 表示取消点赞、收藏或关注。
+- 首次记录一组 `env + actor + action + target` 时必须传 `active=1`；不存在历史记录时传 `-1` 会被拒绝。
+- 后端唯一键为 `(env, actor_type, actor_id, action_type, target_type, target_id)`；同组请求先查找记录，不存在则插入，存在则更新 `id` 最大的一条。
+- 已有记录的持久化值遵循：写入后持久化 `active = 写入前持久化 active + 本次请求 active`。点赞 / 收藏 / 关注通常在 `0` 与 `1` 之间切换；`VIEW` 可重复传 `1`，因此同一 actor 的浏览量可累计为 `2`、`3` 等。
+- 持久化后的 `active` 为非负整数：`0` 表示无效，`>0` 表示参与统计的有效量。
+- 统计接口和个人中心只统计最新一条记录中 `active > 0` 的动作，并按累计值求和；`active=0` 的状态保留用于恢复，不参与展示和计数。
+- 成功返回 `201` 与 `{ "activity": "recorded", "recorded": true, "active": <persisted_amount>, ... }`，其中 `active` 为本次写入后的累计有效量，不是请求增量。
 
 ### 9.2 单维统计读取
 
@@ -1005,7 +1008,7 @@ Query：
 - 同时传 actor 与 target：返回 `scope=ACTOR_TARGET`。
 - 未知 query 参数会被拒绝。
 
-`stats` 返回 `view_count`、`like_count`、`favorite_count`、`follow_count`、`accept_count`，以及按 scope 生效的内容产出统计。互动计数只包含 `active=true` 的动作状态。
+`stats` 返回 `view_count`、`like_count`、`favorite_count`、`follow_count`、`accept_count`，以及按 scope 生效的内容产出统计。互动计数只包含最新记录中 `active > 0` 的累计有效量。
 
 - actor scope：`topic_count`、`reply_count`、`accepted_reply_count`。
 - Topic target scope：`reply_participant_count`、`helpful_reply_count`。

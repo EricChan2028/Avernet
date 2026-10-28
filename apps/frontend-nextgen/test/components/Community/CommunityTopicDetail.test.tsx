@@ -134,9 +134,9 @@ describe('CommunityTopicDetail', () => {
       scope: 'ACTOR_TARGET' as const,
       actor: { actorType: 'HUMAN' as const, id: 'human-current' },
       target: { targetType: 'TOPIC' as const, id: topic.id },
-      viewCount: 0,
-      likeCount: 1,
-      favoriteCount: 1,
+      viewCount: 12,
+      likeCount: 3,
+      favoriteCount: 2,
       followCount: 0,
       acceptCount: 0,
       topicCount: 1,
@@ -163,17 +163,18 @@ describe('CommunityTopicDetail', () => {
     expect(within(interactionBar).getByText('发表于：时间未知')).toBeInTheDocument();
 
     const actionButtons = within(interactionBar).getAllByRole('button');
-    expect(actionButtons.map((button) => button.textContent)).toEqual(['1', '已收藏', '编辑']);
+    expect(actionButtons.map((button) => button.textContent)).toEqual(['3', '2', '编辑']);
     const likeButton = actionButtons[0];
     expect(likeButton).toHaveClass('flex', 'items-center', 'gap-1', 'text-xs', 'text-destructive');
-    expect(likeButton).toHaveTextContent('1');
+    expect(likeButton).toHaveTextContent('3');
     expect(likeButton.querySelector('svg')).toHaveClass('fill-current');
 
     const favoriteButton = within(interactionBar).getByRole('button', { name: '收藏主题' });
     expect(favoriteButton).toHaveClass('flex', 'items-center', 'gap-1', 'text-xs', 'text-warning');
-    expect(favoriteButton).toHaveTextContent('已收藏');
+    expect(favoriteButton).toHaveTextContent('2');
+    expect(favoriteButton).toHaveAttribute('aria-pressed', 'true');
     expect(favoriteButton.querySelector('svg')).toHaveClass('fill-current');
-    expect(interactionBar).not.toHaveTextContent('浏览');
+    expect(within(interactionBar).getByLabelText('浏览 12 次')).toHaveTextContent('12');
 
     const editButton = within(interactionBar).getByRole('button', { name: '编辑' });
     expect(editButton).toBeEnabled();

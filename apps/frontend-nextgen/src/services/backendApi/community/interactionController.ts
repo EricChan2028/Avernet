@@ -19,7 +19,7 @@ export interface InteractionRecordedDto {
   action_type?: string;
   target_type?: string;
   target_id?: string;
-  active?: boolean;
+  active?: number;
   recorded?: boolean;
 }
 

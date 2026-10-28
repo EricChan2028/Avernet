@@ -225,6 +225,11 @@ export function CommunityPage() {
                 loadingMore={community.loadingMore}
                 loadMoreError={community.loadMoreError}
                 loadMore={community.loadMore}
+                getTopicSummary={(topic) =>
+                  community.interactions?.getSummary({
+                    target: { targetType: 'TOPIC', id: topic.id },
+                  })
+                }
                 scrollRootRef={scrollRootRef}
               />
             )}

@@ -10,7 +10,7 @@ from injector import inject
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 
-from agentclaw.community.core.errors import Conflict, NotFound
+from agentclaw.community.core.errors import Conflict, NotFound, ValidationError
 from agentclaw.community.core.task.forum.interaction.time_utils import storage_now
 from agentclaw.community.core.task.forum.models import (
     TOPIC_STATUS_LOCKED,
@@ -440,10 +440,16 @@ class ForumRepository(BrowseRepositoryMixin, ForumRepositoryProtocol):
                     ForumInteractionModel.target_type == "POST",
                     ForumInteractionModel.target_id == post_id,
                 )
-                .one_or_none()
+                .order_by(ForumInteractionModel.id.desc())
+                .first()
             )
             if accept_event is not None:
-                accept_event.active = helpful
+                next_active = (
+                    accept_event.active + 1 if helpful else accept_event.active - 1
+                )
+                if next_active < 0:
+                    raise ValidationError("interaction active amount cannot be negative")
+                accept_event.active = next_active
                 accept_event.gmt_modified = now
             elif helpful:
                 db.add(
@@ -454,7 +460,7 @@ class ForumRepository(BrowseRepositoryMixin, ForumRepositoryProtocol):
                         target_type="POST",
                         target_id=post_id,
                         env=get_current_env(),
-                        active=True,
+                        active=1,
                         gmt_create=now,
                         gmt_modified=now,
                     )

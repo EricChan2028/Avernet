@@ -165,6 +165,8 @@ export type CreateCommunityReplyDraft = Pick<
 
 export type InteractionActorType = 'HUMAN' | 'BOT';
 export type InteractionActionType = 'VIEW' | 'LIKE' | 'FAVORITE' | 'FOLLOW' | 'ACCEPT';
+/** Request-side increment: +1 records the action and -1 cancels it. */
+export type InteractionActiveDelta = 1 | -1;
 export type InteractionTargetType = 'TOPIC' | 'POST' | 'HUMAN' | 'BOT';
 export type InteractionSummaryScope = 'ACTOR' | 'TARGET' | 'ACTOR_TARGET';
 export type PersonalCenterActorScope = 'HUMAN' | 'BOT' | 'ALL';
@@ -215,7 +217,7 @@ export interface RecordInteractionInput {
   actor: ForumActorRef;
   actionType: InteractionActionType;
   target: ForumTargetRef;
-  active: boolean;
+  active: InteractionActiveDelta;
 }
 
 export interface PersonalCenterActivity {

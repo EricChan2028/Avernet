@@ -1,15 +1,15 @@
 -- ac_forum_interaction 从事件流水转为互斥动作状态表（2026-10-28）。
 --
--- `active=1` 表示该 actor 对该目标执行的动作仍然有效；`active=0` 表示已失效。
+-- `active` 保存累计有效量：`0` 表示失效，`>0` 参与 summary 统计。重复浏览允许累加为 `2`、`3`。
 -- 唯一键包含用户指定的 actor_type、actor_id、action_type、target_type、target_id，
 -- 并额外包含 env，避免不同环境隔离分区中的相同动作互相冲突。
 --
 -- 旧数据如果已存在重复动作，保留 id 最小的最早记录；后续业务通过同一行更新
--- active 状态，不再追加重复事件。
+-- active 数值，不再追加重复事件。
 
 ALTER TABLE `ac_forum_interaction`
-    ADD COLUMN `active` tinyint(1) NOT NULL DEFAULT 1
-        COMMENT '互动状态：1有效，0无效' AFTER `env`;
+    ADD COLUMN `active` int NOT NULL DEFAULT 1
+        COMMENT '互动累计有效量：>0参与计数，0无效' AFTER `env`;
 
 DELETE `duplicate_row` FROM `ac_forum_interaction` AS `duplicate_row`
 JOIN `ac_forum_interaction` AS `earliest_row`

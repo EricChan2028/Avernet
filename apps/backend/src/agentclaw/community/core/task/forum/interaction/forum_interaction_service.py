@@ -65,10 +65,10 @@ class ForumInteractionService(ForumInteractionServiceProtocol):
         action_type: str,
         target_type: str,
         target_id: str,
-        active: bool,
+        active: int,
     ) -> ForumInteractionRecord:
         actor = self._normalize_actor(actor_type, actor_id)
-        action_state = self._normalize_active(active)
+        action_delta = self._normalize_active(active)
         action = self._normalize_action(action_type)
         target = self._normalize_target(target_type, target_id)
         if target.type not in INTERACTION_TARGET_MATRIX[action]:
@@ -109,7 +109,7 @@ class ForumInteractionService(ForumInteractionServiceProtocol):
             action_type=action.value,
             target_type=target.type.value,
             target_id=target.id,
-            active=action_state,
+            active=action_delta,
         )
 
     def get_summary(
@@ -216,9 +216,9 @@ class ForumInteractionService(ForumInteractionServiceProtocol):
         return self._normalize_target(query.target_type, query.target_id)
 
     @staticmethod
-    def _normalize_active(value: bool) -> bool:
-        if not isinstance(value, bool):
-            raise ValidationError("active must be a boolean")
+    def _normalize_active(value: int) -> int:
+        if not isinstance(value, int) or isinstance(value, bool) or value not in (1, -1):
+            raise ValidationError("active must be 1 or -1")
         return value
 
     @staticmethod

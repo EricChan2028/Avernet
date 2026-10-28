@@ -89,7 +89,7 @@ def _interaction_record() -> ForumInteractionRecord:
         target_type=ForumInteractionTargetType.TOPIC,
         target_id="topic_endpoint_1",
         env="test",
-        active=True,
+        active=1,
         created_at=_NOW,
         updated_at=_NOW,
     )
@@ -187,7 +187,7 @@ _CREATE_BODY = {
     "action_type": "LIKE",
     "target_type": "TOPIC",
     "target_id": "topic_endpoint_1",
-    "active": True,
+    "active": 1,
 }
 _BATCH_BODY = {
     "items": [
@@ -233,6 +233,21 @@ def public_create_interaction_ok():
 )
 def public_create_interaction_invalid_body():
     """Reject a create request without its complete actor/action/target tuple."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/collaboration/tasks/bbs/interactions",
+    scenario="invalid_active",
+    input=CaseInput(
+        headers={PRINCIPAL_HEADER: _principal()},
+        json_body={**_CREATE_BODY, "active": True},
+    ),
+    seed=_boot_verifier,
+    expect=ExpectError(status=422),
+)
+def public_create_interaction_rejects_boolean_active():
+    """Reject the former boolean active contract; only +1 and -1 are valid."""
 
 
 @endpoint_test(

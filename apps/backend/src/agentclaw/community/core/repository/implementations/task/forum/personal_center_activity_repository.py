@@ -48,6 +48,28 @@ def _actor_pairs(actors: tuple[ForumActorRef, ...]) -> tuple[tuple[str, str], ..
     return tuple((actor.type.value, actor.id) for actor in dict.fromkeys(actors))
 
 
+def _latest_active_interaction_rows(db, *filters):
+    """Return the latest active row for each full interaction action key."""
+    latest_ids = (
+        db.query(func.max(ForumInteractionModel.id).label("id"))
+        .filter(ForumInteractionModel.env == get_current_env(), *filters)
+        .group_by(
+            ForumInteractionModel.env,
+            ForumInteractionModel.actor_type,
+            ForumInteractionModel.actor_id,
+            ForumInteractionModel.action_type,
+            ForumInteractionModel.target_type,
+            ForumInteractionModel.target_id,
+        )
+        .subquery()
+    )
+    return (
+        db.query(ForumInteractionModel)
+        .join(latest_ids, ForumInteractionModel.id == latest_ids.c.id)
+        .filter(ForumInteractionModel.active > 0)
+    )
+
+
 def _selected_topic_query(
     db,
     *,
@@ -55,23 +77,22 @@ def _selected_topic_query(
     action_type: ForumInteractionActionType,
     actors: tuple[ForumActorRef, ...],
 ):
+    latest_rows = _latest_active_interaction_rows(
+        db,
+        tuple_(
+            ForumInteractionModel.actor_type, ForumInteractionModel.actor_id
+        ).in_(_actor_pairs(actors)),
+        ForumInteractionModel.action_type == action_type,
+        ForumInteractionModel.target_type == ForumInteractionTargetType.TOPIC,
+    )
     deduped = (
-        db.query(
+        latest_rows.with_entities(
             ForumInteractionModel.actor_type.label("actor_type"),
             ForumInteractionModel.actor_id.label("actor_id"),
             ForumInteractionModel.target_type.label("target_type"),
             ForumInteractionModel.target_id.label("target_id"),
             func.max(ForumInteractionModel.gmt_create).label("happened_at"),
             func.max(ForumInteractionModel.id).label("source_id"),
-        )
-        .filter(
-            ForumInteractionModel.env == get_current_env(),
-            ForumInteractionModel.active.is_(True),
-            tuple_(
-                ForumInteractionModel.actor_type, ForumInteractionModel.actor_id
-            ).in_(_actor_pairs(actors)),
-            ForumInteractionModel.action_type == action_type,
-            ForumInteractionModel.target_type == ForumInteractionTargetType.TOPIC,
         )
         .group_by(
             ForumInteractionModel.actor_type,
@@ -112,23 +133,22 @@ def _liked_post_query(
     *,
     actors: tuple[ForumActorRef, ...],
 ):
+    latest_rows = _latest_active_interaction_rows(
+        db,
+        tuple_(
+            ForumInteractionModel.actor_type, ForumInteractionModel.actor_id
+        ).in_(_actor_pairs(actors)),
+        ForumInteractionModel.action_type == ForumInteractionActionType.LIKE,
+        ForumInteractionModel.target_type == ForumInteractionTargetType.POST,
+    )
     deduped = (
-        db.query(
+        latest_rows.with_entities(
             ForumInteractionModel.actor_type.label("actor_type"),
             ForumInteractionModel.actor_id.label("actor_id"),
             ForumInteractionModel.target_type.label("target_type"),
             ForumInteractionModel.target_id.label("target_id"),
             func.max(ForumInteractionModel.gmt_create).label("happened_at"),
             func.max(ForumInteractionModel.id).label("source_id"),
-        )
-        .filter(
-            ForumInteractionModel.env == get_current_env(),
-            ForumInteractionModel.active.is_(True),
-            tuple_(
-                ForumInteractionModel.actor_type, ForumInteractionModel.actor_id
-            ).in_(_actor_pairs(actors)),
-            ForumInteractionModel.action_type == ForumInteractionActionType.LIKE,
-            ForumInteractionModel.target_type == ForumInteractionTargetType.POST,
         )
         .group_by(
             ForumInteractionModel.actor_type,

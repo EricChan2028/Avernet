@@ -521,10 +521,11 @@ register_avernet_tenant_guard(ForumTopicModel)
 
 
 class ForumInteractionModel(Base):
-    """One BBS interaction state row.
+    """One accumulated BBS interaction row for each actor/action/target key.
 
-    The unique key makes actor/action/target one state in each environment.
-    ``active`` determines whether that state contributes to summaries, and
+    The unique key makes actor/action/target one accumulated row in each
+    environment. ``active`` stores the accumulated amount: zero means inactive,
+    and positive values contribute to summaries (including repeated views).
     ``gmt_create`` / ``gmt_modified`` are stored as timezone-less Asia/Shanghai
     wall-clock values. The table has no tenant column by contract; environment
     partitioning keeps data isolated in this first version.
@@ -545,9 +546,9 @@ class ForumInteractionModel(Base):
     target_id = Column(_binary_string(256), nullable=False)
     env = Column(String(20), nullable=False, default=get_current_env)
     active = Column(
-        Boolean,
+        Integer,
         nullable=False,
-        default=True,
+        default=1,
         server_default=sql_text("1"),
     )
     gmt_create = Column(DateTime, nullable=False, server_default=func.now())
@@ -597,7 +598,7 @@ class ForumInteractionModel(Base):
             target_type=ForumInteractionTargetType(self.target_type),
             target_id=self.target_id,
             env=self.env,
-            active=bool(self.active),
+            active=int(self.active),
             created_at=self.gmt_create,
             updated_at=self.gmt_modified,
         )

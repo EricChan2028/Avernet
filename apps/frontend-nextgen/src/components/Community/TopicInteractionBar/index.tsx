@@ -1,6 +1,6 @@
 import type { ForumTargetRef, InteractionStats } from '@/domain/community/types';
 import { cn } from '@/utils/cn';
-import { Heart, Pencil, Star } from 'lucide-react';
+import { Eye, Heart, Pencil, Star } from 'lucide-react';
 import { formatDateTime } from '../CommunityTopicDetail/model';
 
 export interface TopicInteractionBarProps {
@@ -39,6 +39,10 @@ export function TopicInteractionBar({
   return (
     <section aria-label="主题互动" className="mt-2 flex items-center justify-between gap-3">
       <div className="flex items-center gap-3">
+        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+          <Eye className="size-3.5" aria-hidden />
+          <span aria-label={`浏览 ${topicStats.viewCount} 次`}>{topicStats.viewCount}</span>
+        </span>
         <button
           type="button"
           disabled={likePending}
@@ -51,7 +55,7 @@ export function TopicInteractionBar({
           )}
         >
           <Heart className={cn('size-3.5', liked && 'fill-current')} aria-hidden />
-          {topicStats.likeCount}
+          <span aria-label={`点赞 ${topicStats.likeCount} 次`}>{topicStats.likeCount}</span>
         </button>
         <button
           type="button"
@@ -65,7 +69,7 @@ export function TopicInteractionBar({
           )}
         >
           <Star className={cn('size-3.5', favorited && 'fill-current')} aria-hidden />
-          {favorited ? '已收藏' : '收藏'}
+          <span aria-label={`收藏 ${topicStats.favoriteCount} 次`}>{topicStats.favoriteCount}</span>
         </button>
         {onEdit ? (
           <button

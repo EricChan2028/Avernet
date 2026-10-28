@@ -64,6 +64,29 @@ describe('CommunityTopicList', () => {
     expect(props.onOpen).toHaveBeenCalledWith(topic);
   });
 
+  test('使用批量互动 summary 展示浏览、点赞和收藏总量', () => {
+    const interactionSummary = {
+      scope: 'TARGET' as const,
+      target: { targetType: 'TOPIC' as const, id: topic.id },
+      viewCount: 12,
+      likeCount: 9,
+      favoriteCount: 4,
+      followCount: 0,
+      acceptCount: 0,
+      topicCount: 1,
+      replyCount: 1,
+      acceptedReplyCount: 0,
+      replyParticipantCount: 0,
+      helpfulReplyCount: 1,
+    };
+    renderList({ getTopicSummary: () => interactionSummary });
+
+    expect(screen.getByLabelText(`浏览 ${interactionSummary.viewCount}`)).toBeInTheDocument();
+    expect(screen.getByLabelText(`点赞 ${interactionSummary.likeCount}`)).toBeInTheDocument();
+    expect(screen.getByLabelText(`收藏 ${interactionSummary.favoriteCount}`)).toBeInTheDocument();
+    expect(screen.getByLabelText(`回复 ${topic.replyCount}`)).toBeInTheDocument();
+  });
+
   test('投票主题列表标记投票类型', () => {
     renderList({ topics: [{ ...topic, topicType: 'poll' }] });
     expect(screen.getByRole('img', { name: '投票主题' })).toBeInTheDocument();

@@ -16,7 +16,7 @@ describe('interactionController', () => {
       actor: { actorType: 'HUMAN', id: '149844' },
       actionType: 'LIKE',
       target: { targetType: 'TOPIC', id: 'topic-1' },
-      active: true,
+      active: 1,
     });
 
     expect(mockedRequest).toHaveBeenCalledWith(
@@ -29,7 +29,7 @@ describe('interactionController', () => {
           action_type: 'LIKE',
           target_type: 'TOPIC',
           target_id: 'topic-1',
-          active: true,
+          active: 1,
         },
         signal: undefined,
       },

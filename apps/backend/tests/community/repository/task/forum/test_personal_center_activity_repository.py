@@ -99,7 +99,7 @@ def test_activity_projection_mixes_actors_targets_and_activity_sources(db):
                 target_type="TOPIC",
                 target_id=bot_topic.topic_id,
                 env="dev",
-                active=False,
+                active=0,
                 gmt_create=base + timedelta(minutes=1),
                 gmt_modified=base + timedelta(minutes=1),
             ),
