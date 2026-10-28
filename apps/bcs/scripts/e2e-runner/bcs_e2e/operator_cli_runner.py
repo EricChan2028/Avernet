@@ -14,7 +14,9 @@ The obligation map is frozen by ``local_operator_cli_contract`` and the
 reviewed ``operator-cli-migration-contract.json``; every execution carries a
 private context whose session state is zeroed and whose directory tree is
 removed before the result is returned, and no credential or token-bearing
-output is ever journaled into evidence.
+output is ever journaled into evidence. Station faces may echo the
+submitted credential inside a successful live response (connect returns
+its bot token); such output is scrubbed in memory before any projection.
 """
 from __future__ import annotations
 
@@ -483,10 +485,13 @@ class OperatorCliRunner:
                 max_output_bytes=self.profile["policy"]["max_response_bytes"],
             )
             raw = result.stdout
+            # A station face may echo the submitted credential inside a
+            # successful live response (connect returns its bot token). The
+            # hygiene invariant stays absolute: scrub the value in memory
+            # before any projection so no receipt or report can journal it.
             for secret in secrets:
-                if secret in raw or secret in result.stderr:
-                    raise OperatorCliRunnerError(
-                        "operator product CLI emitted its credential")
+                if secret:
+                    raw = raw.replace(secret, b"<redacted-credential>")
             exit_code = result.returncode
             if expect_zero and exit_code != 0:
                 raise OperatorCliRunnerError("operator product CLI returned nonzero")

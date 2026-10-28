@@ -266,6 +266,7 @@ class CliScript:
         self.overrides = {}
         self.leak = None
         self.leak_cookie = False
+        self.echo_connect_token = False
         self.nonzero = ()
         self.visibility_queue = []
 
@@ -279,6 +280,9 @@ class CliScript:
              / "session.json").read_text()))
         self.cwds.append(kwargs["cwd"])
         exit_code, stdout, stderr = output_for(tag, arguments)
+        if tag == "connect" and self.echo_connect_token:
+            stdout = json.dumps({"bot_uuid": BOT_IDS["driver"], "is_new": False,
+                                 "token": DRIVER_TOKEN}).encode()
         if tag in self.nonzero:
             exit_code, stdout, stderr = 1, b"", b"forced nonzero\n"
         if tag in self.overrides:
@@ -699,21 +703,64 @@ class OperatorCliCommandTests(OperatorCliHarness):
                                     "not a reviewed operator CLI leaf"):
             runner.execute("operator_cli.nope")
 
-    def test_nonzero_exit_and_credential_leak_block_the_case(self):
+    def test_nonzero_exit_blocks_the_case(self):
         script = CliScript()
         script.nonzero = ("list",)
         with self.assertRaisesRegex(OperatorCliRunnerError, "nonzero"):
             self.run_prefix(OPERATOR_CLI_LIST, script=script)
+
+    def test_leaked_credentials_are_scrubbed_before_projection(self):
         script = CliScript()
         script.leak = "discover"
         script.leak_cookie = True
-        with self.assertRaisesRegex(OperatorCliRunnerError, "credential"):
-            self.run_prefix(OPERATOR_CLI_DISCOVER, preprod=True, script=script)
+        _runner, _script, results, _state = self.run_prefix(
+            OPERATOR_CLI_DISCOVER, preprod=True, script=script)
+        discover = results[OP_INDEX[OPERATOR_CLI_DISCOVER]]
+        self.assertEqual(discover["evidence"]["operation"], OPERATOR_CLI_DISCOVER)
+        self.assertEqual(discover["data"]["bot_uuid"], BOT_IDS["cs"])
+        self.assertEqual(script.tails()[-1],
+                         ["discover", "--query", FIXTURE_NAMES["cs"]])
+
         script = CliScript()
         script.leak = "list"
         script.leak_cookie = False
-        with self.assertRaisesRegex(OperatorCliRunnerError, "credential"):
-            self.run_prefix(OPERATOR_CLI_LIST, script=script)
+        _runner, _script, results, _state = self.run_prefix(
+            OPERATOR_CLI_LIST, script=script)
+        listing = results[OP_INDEX[OPERATOR_CLI_LIST]]
+        self.assertEqual(listing["evidence"]["operation"], OPERATOR_CLI_LIST)
+        self.assertEqual(listing["data"]["fixture_count"], 5)
+
+        serialized = json.dumps(results, sort_keys=True, default=str)
+        for placeholder in (COOKIE, DRIVER_TOKEN, *ROLE_TOKENS.values()):
+            self.assertNotIn(placeholder, serialized)
+
+    def test_connect_credential_echo_projects_without_journaling_the_secret(self):
+        script = CliScript()
+        script.echo_connect_token = True
+        _runner, _script, results, _state = self.run_prefix(
+            OPERATOR_CLI_CONNECT, preprod=True, script=script)
+        connect = results[OP_INDEX[OPERATOR_CLI_CONNECT]]
+        self.assertEqual(connect["evidence"]["operation"], OPERATOR_CLI_CONNECT)
+        self.assertTrue(connect["data"]["token_present"])
+        self.assertEqual(connect["evidence"]["credential_kind"],
+                         "human_cookie_with_owned_driver_bot_token")
+        serialized = json.dumps(results, sort_keys=True, default=str)
+        for placeholder in (COOKIE, DRIVER_TOKEN, ONBOARD_TOKEN, CONNECT_TOKEN,
+                            *ROLE_TOKENS.values()):
+            self.assertNotIn(placeholder, serialized)
+
+    def test_invoke_scrubs_the_echoed_credential_from_raw_output(self):
+        profile = validate_operator_cli_profile(profile_value(preprod=True))
+        script = CliScript()
+        script.echo_connect_token = True
+        runner, _state = make_runner(profile, self.root, script)
+        with patch.dict(os.environ, full_environment(preprod=True)), \
+             patch("bcs_e2e.operator_cli_runner.capture", side_effect=script):
+            raw, _code, _elapsed, _kind = runner._invoke(
+                "driver", arguments=("connect",), json_mode=True)
+        self.assertIn(b"<redacted-credential>", raw)
+        self.assertNotIn(DRIVER_TOKEN.encode(), raw)
+        self.assertNotIn(COOKIE.encode(), raw)
 
     def test_missing_credentials_block_before_any_process_start(self):
         profile = validate_operator_cli_profile(profile_value(preprod=True))
