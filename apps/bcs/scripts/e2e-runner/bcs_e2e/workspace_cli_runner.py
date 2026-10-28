@@ -63,6 +63,22 @@ SESSION_CLI_CREATE_GET_EFFECT = "OWNED_GROUP_SESSIONS_READ_THEN_GENERIC_GROUP_DE
 SESSION_CLI_LIFECYCLE_EFFECT = "OWNED_SESSION_LIFECYCLE_THEN_GENERIC_GROUP_DELETE"
 SESSION_CLI_COMPLETE_INVOKE_EFFECT = (
     "OWNED_SERVICE_SIGNOFF_AND_INVOCATION_THEN_GENERIC_GROUP_DELETE")
+
+
+def _invite_url_matches_product_shape(value: str, target: str,
+                                      token: str, tier: str) -> bool:
+    """Validate the product frontend invite URL shape without coupling API origin."""
+    expected_path = f"/bcn/chat/invite/{target}/{token}"
+    if not value.endswith(expected_path) or "?" in value or "#" in value:
+        return False
+    scheme = "https://" if tier == "preprod" else "http://"
+    prefix = value[:-len(expected_path)]
+    if not prefix.startswith(scheme):
+        return False
+    host = prefix[len(scheme):]
+    return bool(host) and "@" not in host and "/" not in host
+
+
 def _http_evidence(record: dict, profile: dict, *, case_class: str,
                    fixture_effect: str) -> dict:
     evidence = dict(record)
@@ -508,10 +524,10 @@ class RemoteSessionCliGroupInviteAdapter:
                 or not isinstance(data["join_url"], str)
                 or len(data["join_url"]) > 8192):
             raise RunStateError("Session CLI Group invitation fields are invalid")
-        expected_join_url = self.profile["entrypoint"]["origin"].rstrip('/')
-        expected_join_url += "/groups/join/" + data["invite_token"]
-        if data["join_url"] != expected_join_url:
-            raise RunStateError("Session CLI Group invitation URL is not bound to the admitted origin")
+        if not _invite_url_matches_product_shape(
+                data["join_url"], "groups", data["invite_token"],
+                self.profile["environment"]["tier"]):
+            raise RunStateError("Session CLI Group invitation URL differs from the product contract")
         self.invite_token = data["invite_token"]
         evidence = _http_evidence(
             record, self.profile, case_class="invite-mint",
@@ -519,7 +535,7 @@ class RemoteSessionCliGroupInviteAdapter:
         return AdapterCall(
             data={
                 "expires_at": data["expires_at"],
-                "invite_url_origin_matches": True,
+                "invite_url_product_shape_matches": True,
                 "invite_token_present": True,
             },
             evidence=evidence,
@@ -785,10 +801,10 @@ class RemoteSessionCliSessionInviteAdapter:
                 or not isinstance(data["join_url"], str)
                 or len(data["join_url"]) > 8192):
             raise RunStateError("Session CLI Session invitation fields are invalid")
-        expected_join_url = self.profile["entrypoint"]["origin"].rstrip('/')
-        expected_join_url += "/sessions/join/" + data["invite_token"]
-        if data["join_url"] != expected_join_url:
-            raise RunStateError("Session CLI Session invitation URL is not bound to the admitted origin")
+        if not _invite_url_matches_product_shape(
+                data["join_url"], "sessions", data["invite_token"],
+                self.profile["environment"]["tier"]):
+            raise RunStateError("Session CLI Session invitation URL differs from the product contract")
         self.invite_token = ""
         evidence = dict(result["evidence"])
         evidence["case_class"] = "session-invite"
@@ -799,7 +815,7 @@ class RemoteSessionCliSessionInviteAdapter:
             data={
                 "expires_at": data["expires_at"],
                 "invite_token_present": True,
-                "invite_url_origin_matches": True,
+                "invite_url_product_shape_matches": True,
             },
             evidence=evidence,
         )
@@ -885,7 +901,7 @@ def execute_session_cli_session_invite_case(adapter: object) -> CaseExecution:
             "group_id": group_id,
             "session_id": adapter.session_id or "",
             "session_invite_minted": True,
-            "invite_url_origin_matches": True,
+            "invite_url_product_shape_matches": True,
             "group_deleted": True,
             "group_absence_verified": True,
         },

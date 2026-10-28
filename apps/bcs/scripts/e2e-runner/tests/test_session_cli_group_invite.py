@@ -132,7 +132,7 @@ class SessionCliGroupInviteTests(unittest.TestCase):
         if operation == SESSION_CLI_GROUP_INVITE_CREATE_OPERATION:
             return ({"invite_token": INVITE_TOKEN,
                      "expires_at": int(time.time()) + 300,
-                     "join_url": self.origin + "/groups/join/" + INVITE_TOKEN}, {
+                     "join_url": self.invite_origin + "/bcn/chat/invite/groups/" + INVITE_TOKEN}, {
                 "operation": operation, "http_status": 200,
                 "path": "/groups/" + group_id + "/invite-link",
                 "submitted_request_id": "e2e-session-cli-invite"})
@@ -164,6 +164,7 @@ class SessionCliGroupInviteTests(unittest.TestCase):
 
     def run_case(self, *, gateway=False):
         self.origin = "https://gateway.example.com" if gateway else "http://127.0.0.1:21000"
+        self.invite_origin = "https://frontend.example.com" if gateway else "http://127.0.0.1:3000"
         profile = validate_session_cli_create_get_profile(profile_value(gateway=gateway))
         runner = WorkspaceCliRunner(profile, binary=self.binary,
                                      binary_sha256=self.digest, state_dir=self.state)

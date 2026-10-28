@@ -128,8 +128,10 @@ def session_output():
     }).encode()
 
 def invite_output(origin, *, foreign=False, missing=False):
+    if origin == "https://gateway.example.com":
+        origin = "https://frontend.example.com"
     join_url = ("https://foreign.invalid/sessions/join/" + INVITE_TOKEN if foreign else
-                origin + "/sessions/join/" + INVITE_TOKEN)
+                origin + "/bcn/chat/invite/sessions/" + INVITE_TOKEN)
     data = {"expires_at": EXPIRES_AT, "join_url": join_url}
     return json.dumps({"invite_token": INVITE_TOKEN, **data}).encode() if not missing else b"{}"
 

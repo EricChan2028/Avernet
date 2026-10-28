@@ -23,6 +23,7 @@ from .session_cli_profile import (
     validate_session_cli_create_get_profile,
     validate_session_cli_lifecycle_profile,
 )
+from .workspace_cli_runner import _invite_url_matches_product_shape
 from .write_transport import WriteClient
 
 
@@ -169,10 +170,10 @@ class RemoteSessionCliInviteJoinAdapter:
                 or not isinstance(data["join_url"], str)
                 or len(data["join_url"]) > 8192):
             raise RunStateError("Session CLI invite-join invitation fields are invalid")
-        expected_join_url = self.profile["entrypoint"]["origin"].rstrip("/")
-        expected_join_url += "/sessions/join/" + data["invite_token"]
-        if data["join_url"] != expected_join_url:
-            raise RunStateError("Session CLI invite-join URL is not bound to the admitted origin")
+        if not _invite_url_matches_product_shape(
+                data["join_url"], "sessions", data["invite_token"],
+                self.profile["environment"]["tier"]):
+            raise RunStateError("Session CLI invite-join URL differs from the product contract")
         self.invite_token = data["invite_token"]
         evidence = dict(result["evidence"])
         evidence.update({
@@ -183,7 +184,7 @@ class RemoteSessionCliInviteJoinAdapter:
             data={
                 "expires_at": data["expires_at"],
                 "invite_token_present": True,
-                "invite_url_origin_matches": True,
+                "invite_url_product_shape_matches": True,
             },
             evidence=evidence,
         )
