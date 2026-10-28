@@ -19,9 +19,11 @@ def test_invalid_policy_fails_container_construction(monkeypatch, block):
 
 
 def test_valid_disabled_policy_keeps_native_publish_handler(monkeypatch):
+    import asyncio
     from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
-        PublishTaskLifecycle,
+        PROGRESS_POLL_TASK, PublishTaskLifecycle,
     )
+    from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
     from agentclaw.community.kernel.lifecycle import discover_lifecycle_participants
 
     real = service_bot_module.read_user_config
@@ -31,8 +33,11 @@ def test_valid_disabled_policy_keeps_native_publish_handler(monkeypatch):
     )
     injector = build_injector(profile=DeployProfile.TEST)
     assert injector.get(KnowledgePublicationPolicy).enabled is False
-    assert any(isinstance(item, PublishTaskLifecycle)
-               for item in discover_lifecycle_participants(injector))
+    participants = [item for item in discover_lifecycle_participants(injector)
+                    if isinstance(item, PublishTaskLifecycle)]
+    assert len(participants) == 1
+    asyncio.run(participants[0].bootstrap())
+    assert injector.get(HandlerRegistry).get(PROGRESS_POLL_TASK) is not None
 
 
 @pytest.mark.parametrize('yaml_value', ['"false"', '${REVIEW_KNOWLEDGE_ENABLED}'])

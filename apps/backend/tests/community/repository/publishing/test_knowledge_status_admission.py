@@ -89,3 +89,44 @@ def test_disabled_integration_retains_native_status_writes(publication):
     result = repo.update_status(record.id, PublishStatus.SUCCESS, PublishStatus.DRAFT)
     assert result.status == PublishStatus.SUCCESS
     assert 'knowledge_selection_result' not in result.ext
+
+
+@pytest.mark.asyncio
+async def test_status_handler_uses_normally_configured_service_and_repository(
+    publication, monkeypatch,
+):
+    from injector import Module, singleton
+    from agentclaw.community.api.bot_publish_service import BotPublishServiceProtocol
+    from agentclaw.community.core.repository.implementations.publishing.bot_publish import BotPublishRepository
+    from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
+    from agentclaw.community.di import DeployProfile, build_injector
+    from agentclaw.community.di.modules import service_bot_module
+    from agentclaw.community.plugin_api.database import DatabasePlugin
+
+    db, _fixture_repo, record = publication
+
+    class DatabaseBoundary(Module):
+        def configure(self, binder):
+            binder.bind(DatabasePlugin, to=db, scope=singleton)
+
+    real_config = service_bot_module.read_user_config
+    monkeypatch.setattr(service_bot_module, 'read_user_config', lambda: {
+        **real_config(), 'bot_knowledge_publication': {'enabled': True},
+    })
+    injector = build_injector(profile=DeployProfile.TEST, extra_modules=[DatabaseBoundary()])
+    configured = injector.get(BotPublishServiceProtocol)
+    repo = injector.get(BotPublishRepositoryProtocol)
+    assert configured is injector.get(BotPublishService)
+    assert configured._repo is repo
+    assert isinstance(repo, BotPublishRepository)
+    assert repo._knowledge_policy.enabled is True
+    assert repo.get_by_id(record.id) is not None
+    online = _start_online(repo, record)
+    response = await update_publish_status.__wrapped__(publish_id=record.id,
+        request=UpdatePublishStatusRequest(source_status='online_pub', target_status='success',
+            failed_status='online_pub'),
+        user=SimpleNamespace(staffId='owner'), publish_service=configured)
+    assert response.success is False
+    assert response.error_code == 409
+    assert 'KNOWLEDGE_OBSERVATION_REQUIRED' in response.message
+    assert repo.get_by_id(record.id).ext == online.ext
