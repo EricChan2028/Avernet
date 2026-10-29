@@ -246,6 +246,7 @@ from .skills import (
 from .skills import router as skills_router
 from .skill_sets import router as skill_sets_router
 from .skill_sets.skill_center_references import router as skill_center_references_router
+from .service_envs import router as service_envs_router
 from .service_publications import (
     edit_lock_router as service_edit_lock_router,
     router as service_lifecycle_router,
@@ -329,6 +330,7 @@ _OPEN_SUBGROUPS = [
 # Keep it on the user-scoped response surface so the published contract carries
 # the standard 403 response as well as the principal requirement.
 _USER_SCOPED_SUBGROUPS = [
+    service_envs_router,
     skill_readme_router,
 ]
 
