@@ -24,6 +24,13 @@ notes, never silently repaired:
   and session-domain Run-start leaves of the frozen owned-local parent are
   not re-chained on either tier; the difference is pinned in the trial
   projection and disclosed in the case report.
+- Blocked runs project one scrubbed public failure class (receipt keys
+  ``failed_method``/``failure_class`` plus every frozen step's ``error_gap``;
+  live r1-r4 showed all-first-step NOT_RUN blocks whose failing leaf was
+  indistinguishable after credential scrubbing). The projection carries no
+  host, route, payload or credential detail - only the class of the failure
+  that stopped the chain - so intermittent remote conditions stay
+  diagnosable per run without widening the frozen obligations.
 - Every cleanup exit runs under the dedicated driver Bot identity (the
   owned-local parent never mutates through the member Bot), so the preprod
   bundle is the Human Cookie plus the owned driver Bot token.
@@ -39,6 +46,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import re
 
 from .case_adapters import AdapterCall
 from .case_executor import CaseExecution, StepOutcome
@@ -72,6 +80,7 @@ from .custom_collaboration_cli_leaf import (
     TRIAL_RESPOND_GUARD_OPERATION,
     VALIDATE_YAML_OPERATION,
     CustomCollaborationCliRunner,
+    CustomCollaborationCliRunnerError,
     custom_collaboration_cli_credential_kind,
     custom_collaboration_step_credential_kind,
     expected_step_transport,
@@ -124,6 +133,39 @@ def _quote_path_segment(value: str) -> str:
                 "custom collaboration path segment carries a character outside "
                 "the reviewed identifier contract")
     return "".join(quoted)
+
+
+PUBLIC_FAILURE_CLASS_MARKER = "public-failure-class:"
+CLI_FAILURE_CLASS_MARKERS = (
+    ("product CLI returned nonzero", "PRODUCT_CLI_NONZERO_EXIT"),
+    ("product CLI process failed", "PRODUCT_CLI_PROCESS_FAILED"),
+    ("product CLI output is invalid", "PRODUCT_CLI_OUTPUT_INVALID"),
+    ("private context cleanup is unconfirmed", "PRODUCT_CLI_CLEANUP_UNCONFIRMED"),
+    ("credential", "PRODUCT_CLI_CREDENTIALS_ABSENT"),
+    ("bundle (owned driver Bot token plus the Human Cookie) is absent",
+     "PRODUCT_CLI_CREDENTIALS_ABSENT"),
+)
+
+
+def public_failure_class(error: BaseException) -> str:
+    """Project one scrubbed public failure class for a blocked Run.
+
+    Live preprod r1-r4 receipts were all-first-step NOT_RUN blocks whose
+    failing leaf and public failure class were indistinguishable after
+    credential scrubbing.  The projection carries no host, route, payload or
+    credential detail - only the class of the failure that stopped the chain -
+    so intermittent remote conditions remain disclosable per run without
+    widening the frozen obligations."""
+    if isinstance(error, WriteTransportError):
+        return "TRANSPORT_HTTP_ERROR"
+    text = str(error)
+    for marker, name in CLI_FAILURE_CLASS_MARKERS:
+        if marker in text:
+            return name
+    for match in re.finditer(
+            re.escape(PUBLIC_FAILURE_CLASS_MARKER) + r"([A-Z_]+)", text):
+        return match.group(1)
+    return "CASE_CONTRACT_VIOLATION"
 
 
 def custom_collaboration_cli_case_plan() -> dict:
@@ -233,6 +275,8 @@ class RemoteLocalCustomCollaborationAdapter:
         except Exception as error:
             raise RunStateError(
                 f"Custom collaboration product-CLI execution for {operation} failed"
+                f" [{PUBLIC_FAILURE_CLASS_MARKER}"
+                f"{public_failure_class(error)}]"
             ) from error
         if (not isinstance(result, dict) or set(result) != {"data", "evidence"}
                 or not isinstance(result["evidence"], dict)):
@@ -491,20 +535,25 @@ def execute_custom_collaboration_case(adapter: object) -> CaseExecution:
     records: dict[str, dict] = {}
     projections: dict[str, object] = {}
     error_type: str | None = None
+    adapter.failed_method = None
+    adapter.failure_class = None
     try:
         for operation, method_name in CUSTOM_COLLABORATION_CASE_METHODS:
+            adapter.failed_method = method_name
             call = getattr(adapter, method_name)()
             records[method_name] = _require_step_evidence(adapter, call, operation)
             projections[method_name] = call.data
     except Exception as error:
         error_type = type(error).__name__
+        adapter.failure_class = public_failure_class(error)
 
     def step(requirement_id: str, method: str, data: object,
              methods: tuple[str, ...], effect: str) -> StepOutcome:
         if error_type is not None:
             return StepOutcome(requirement_id=requirement_id, method=method,
                                status="NOT_RUN", data=None, evidence={},
-                               error_type=error_type)
+                               error_type=error_type,
+                               error_gap=adapter.failure_class)
         return StepOutcome(
             requirement_id=requirement_id, method=method, status="PASS", data=data,
             evidence={"requests": [dict(records[name]) for name in methods],
@@ -645,6 +694,10 @@ def dual_custom_collaboration_case_run(
                       "completed_count": execution.completed_count,
                       "total_count": execution.total_count,
                       "error_type": execution.error_type},
+        "failed_method": (adapter.failed_method
+                          if execution.error_type is not None else None),
+        "failure_class": (adapter.failure_class
+                          if execution.error_type is not None else None),
         "resource_disposition": CUSTOM_COLLABORATION_CLI_EFFECT,
         "remote_validation": "NOT_RUN", "grants_release_credit": False,
         "credential_kind": custom_collaboration_cli_credential_kind(profile)}

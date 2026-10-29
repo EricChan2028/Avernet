@@ -455,6 +455,24 @@ class CustomCollaborationExecutionTests(unittest.TestCase):
                 for step in execution.steps:
                     self.assertEqual((step.status, step.error_type, step.data, step.evidence), ("NOT_RUN", "RunStateError", None, {}))
 
+    def test_failure_classes_are_projected_onto_blocked_steps(self):
+        # A failing CLI leaf, a cleanup transport failure and a drifted
+        # projection each convert to a distinct scrubbed public class; every
+        # frozen step carries the class in error_gap, replacing the r1-r4
+        # all-first-step-NOT_RUN black box.
+        _, _, execution = self.chain(fail_at=TRIAL_CREATE_GROUP_OPERATION, invalid_at=None)
+        self.assertEqual(execution.error_type, "RunStateError")
+        for step in execution.steps:
+            self.assertEqual(step.error_gap, "CASE_CONTRACT_VIOLATION")
+        FakeWriteClient.failed = True
+        try:
+            _, _, transport = self.chain()
+        finally:
+            FakeWriteClient.failed = False
+        self.assertEqual(transport.error_type, "WriteTransportError")
+        for step in transport.steps:
+            self.assertEqual(step.error_gap, "TRANSPORT_HTTP_ERROR")
+
     def test_base_adapter_family_is_not_dual_admitted(self):
         self.assertTrue(issubclass(DualCustomCollaborationAdapter, RemoteLocalCustomCollaborationAdapter))
         profile = local_profile()
@@ -839,6 +857,28 @@ class CustomCollaborationRunEntryTests(unittest.TestCase):
                 serialized = json.dumps(report, sort_keys=True)
                 self.assertNotIn(HUMAN_COOKIE, serialized)
                 self.assertNotIn(DRIVER_TOKEN, serialized)
+
+    def test_blocked_receipt_projects_public_failure_class_without_secret(self):
+        class NonzeroChainRunner(FakeChainRunner):
+            def __init__(self, profile, **kwargs):
+                super().__init__(profile, **kwargs)
+                self.fail_at = VALIDATE_YAML_OPERATION
+
+            def execute(self, operation, **kwargs):
+                if operation == self.fail_at:
+                    raise CustomCollaborationCliRunnerError(
+                        "custom collaboration product CLI returned nonzero: scrubbed detail")
+                return super().execute(operation, **kwargs)
+
+        report, _ = self.entry(runner=NonzeroChainRunner, real_executor=True)
+        self.assertEqual(report["status"], "BLOCKED")
+        self.assertEqual((report["failed_method"], report["failure_class"]),
+                         ("validate_yaml", "PRODUCT_CLI_NONZERO_EXIT"))
+        for step in report["case"]["steps"]:
+            self.assertEqual(step["error_gap"], "PRODUCT_CLI_NONZERO_EXIT")
+        serialized = json.dumps(report, sort_keys=True)
+        self.assertNotIn("scrubbed detail", serialized)
+        self.assertNotIn(DRIVER_TOKEN, serialized)
 
     def test_blocked_run_writes_sanitized_receipts_and_blocked_report(self):
         class FailingChainRunner(FakeChainRunner):
