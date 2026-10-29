@@ -13,6 +13,7 @@ from ..run_state import RunStateError
 OBLIGATION_CLIENT_ID = 'DRAFT-DELIVERY.client-selected-idempotent-create'
 OBLIGATION_APPEND = 'DRAFT-DELIVERY.immutable-revision-append'
 OBLIGATION_STALE = 'DRAFT-DELIVERY.stale-update-conflict'
+OBLIGATION_READ_TOKEN = 'DRAFT-DELIVERY.read-token-single-revision'
 _UUID = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')
 
 
@@ -119,3 +120,37 @@ def check_stale_update_conflict(evidence: dict) -> None:
         _fail(OBLIGATION_STALE, 'stale update replaced the newer revision')
     if latest.get('content_hash') == stale.get('original_content_hash'):
         _fail(OBLIGATION_STALE, 'stale observation cannot distinguish original and newer content')
+
+
+def check_read_token_single_revision(evidence: dict) -> None:
+    """A historical card stays pinned to one revision and its token is inert."""
+    cards = _mapping(evidence.get('cards'), 'card observations', OBLIGATION_READ_TOKEN)
+    if _integer(cards.get('head_revision'), 'card head revision', OBLIGATION_READ_TOKEN) != 2:
+        _fail(OBLIGATION_READ_TOKEN, 'historical card was not reissued after head advanced to 2')
+    historical = _mapping(cards.get('historical'), 'historical card', OBLIGATION_READ_TOKEN)
+    if historical.get('draft_id') != evidence.get('create', {}).get('draft_id'):
+        _fail(OBLIGATION_READ_TOKEN, 'historical card bound a different draft ID')
+    if _integer(historical.get('revision'), 'historical card revision', OBLIGATION_READ_TOKEN) != 1:
+        _fail(OBLIGATION_READ_TOKEN, 'historical card followed the live head instead of staying on revision 1')
+    if historical.get('read_token_present') is not True:
+        _fail(OBLIGATION_READ_TOKEN, 'compatibility card is missing the deprecated readToken field')
+    if _integer(historical.get('read_token_revision'), 'read token revision',
+                OBLIGATION_READ_TOKEN) != 1:
+        _fail(OBLIGATION_READ_TOKEN, 'readToken is not pinned to the card revision')
+    if historical.get('read_with_token_as_header') is not False:
+        _fail(OBLIGATION_READ_TOKEN, 'readToken was used as an authorization header')
+    read = _mapping(historical.get('read_without_token'), 'read without token',
+                    OBLIGATION_READ_TOKEN)
+    if _integer(read.get('status'), 'read without token status', OBLIGATION_READ_TOKEN) != 200:
+        _fail(OBLIGATION_READ_TOKEN, 'ID plus revision did not authorize the fixed read')
+    if _integer(read.get('revision'), 'read revision', OBLIGATION_READ_TOKEN) != 1:
+        _fail(OBLIGATION_READ_TOKEN, 'read returned a different revision')
+    if _integer(read.get('size_bytes'), 'read size', OBLIGATION_READ_TOKEN) != 2174:
+        _fail(OBLIGATION_READ_TOKEN, 'read returned different source bytes')
+    if read.get('content_hash') != historical.get('content_hash'):
+        _fail(OBLIGATION_READ_TOKEN, 'read content differs from the card-bound revision')
+    other = _mapping(cards.get('other_revision'), 'other revision card', OBLIGATION_READ_TOKEN)
+    if _integer(other.get('revision'), 'other card revision', OBLIGATION_READ_TOKEN) != 2:
+        _fail(OBLIGATION_READ_TOKEN, 'a second card was not bound to revision 2')
+    if other.get('read_token_revision') != 2:
+        _fail(OBLIGATION_READ_TOKEN, 'readToken was reused across revisions')

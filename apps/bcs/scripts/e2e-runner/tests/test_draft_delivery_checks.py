@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT))
 from bcs_e2e.draft_delivery.checks import (DraftDeliveryViolation,
                                            check_client_selected_idempotent_create,
                                            check_immutable_revision_append,
+                                           check_read_token_single_revision,
                                            check_stale_update_conflict)
 from bcs_e2e.run_state import RunStateError
 
@@ -146,6 +147,55 @@ class StaleUpdateConflictTests(unittest.TestCase):
                     value['stale']['latest_after']['content_hash'] = CONTENT_HASH
                 with self.assertRaises(DraftDeliveryViolation):
                     check_stale_update_conflict(value)
+
+
+def read_token_evidence():
+    return {
+        'create': {'draft_id': DRAFT_ID},
+        'cards': {
+            'head_revision': 2,
+            'historical': {
+                'draft_id': DRAFT_ID,
+                'revision': 1,
+                'content_hash': CONTENT_HASH,
+                'read_token_present': True,
+                'read_token_revision': 1,
+                'read_with_token_as_header': False,
+                'read_without_token': {'status': 200, 'revision': 1,
+                                       'size_bytes': 2174, 'content_hash': CONTENT_HASH},
+            },
+            'other_revision': {'revision': 2, 'read_token_revision': 2},
+        },
+    }
+
+
+class ReadTokenSingleRevisionTests(unittest.TestCase):
+    def test_accepts_revision_pinned_inert_token(self):
+        check_read_token_single_revision(read_token_evidence())
+
+    def test_rejects_card_that_follows_head(self):
+        value = read_token_evidence()
+        value['cards']['historical']['revision'] = 2
+        with self.assertRaisesRegex(RunStateError, 'staying on revision 1'):
+            check_read_token_single_revision(value)
+
+    def test_rejects_token_cross_revision_or_authorization_use(self):
+        for mutation in ('token_revision', 'token_header', 'other_revision',
+                         'read_status', 'read_hash'):
+            with self.subTest(mutation=mutation):
+                value = read_token_evidence()
+                if mutation == 'token_revision':
+                    value['cards']['historical']['read_token_revision'] = 2
+                elif mutation == 'token_header':
+                    value['cards']['historical']['read_with_token_as_header'] = True
+                elif mutation == 'other_revision':
+                    value['cards']['other_revision']['read_token_revision'] = 1
+                elif mutation == 'read_status':
+                    value['cards']['historical']['read_without_token']['status'] = 401
+                else:
+                    value['cards']['historical']['read_without_token']['content_hash'] = UPDATED_HASH
+                with self.assertRaises(DraftDeliveryViolation):
+                    check_read_token_single_revision(value)
 
 
 if __name__ == '__main__':
