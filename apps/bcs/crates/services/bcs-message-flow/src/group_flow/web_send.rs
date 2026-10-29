@@ -357,6 +357,45 @@ pub(super) async fn handle_web_send_with_result(
         }
     }
     let caller_deps = if caller_admission_targets.is_empty() { None } else { flow.caller_admission.clone() };
+    // Owner→caller identity relay (spec L62 direction): with the deployment's
+    // allowlist naming a relay-capable middle hop among the routed
+    // participants, the authenticated Human's ingress is captured against
+    // the session's current turn — memory-only, before any ordinary
+    // execution. The middle bot receives nothing here; the later trusted
+    // task-assign edge is the only redeemer. A capture that fails (ledger
+    // saturated with live captures) warns and continues: the message still
+    // runs its ordinary course, and the relay-side stays fail-closed rather
+    // than failing the Human's speech on housekeeping.
+    if let Some(relay) = flow.caller_relay.as_ref() {
+        let routed_hits_allowlist = cmd
+            .mentions
+            .iter()
+            .any(|mention| relay.policy.allow.iter().any(|rule| rule.from_bot == *mention));
+        if routed_hits_allowlist {
+            if let Some(ingress) = cmd.caller_ingress.as_ref() {
+                let capture_session = cmd.session_id.clone().unwrap_or_else(|| cmd.group_id.clone());
+                let capture_turn = cmd
+                    .source_im_message_id
+                    .clone()
+                    .or_else(|| cmd.idempotency_key.clone())
+                    .unwrap_or_else(|| capture_session.clone());
+                let captured = relay.ledger.record(
+                    &bcs_config::resolve_env_str(),
+                    &capture_session,
+                    &capture_turn,
+                    ingress.clone(),
+                    now_ms() as i64,
+                    relay.capture_ttl_ms,
+                );
+                if !captured {
+                    tracing::warn!(
+                        session = %capture_session,
+                        "caller relay capture refused (ledger saturated with live captures); later relays stay closed"
+                    );
+                }
+            }
+        }
+    }
     // P3.2 speaking lease (spec §6.1/§6.3): only Human speech in CALLER
     // groups is fenced — plain groups (no Human member, or no bot with a
     // caller-enabled configuration) never read or write the lease store.

@@ -183,7 +183,63 @@ pub async fn handle_task_dispatch(
             target.run_id = Some(uuid::Uuid::new_v4().to_string());
         }
         let real_run_id = admission.targets.first().and_then(|t| t.run_id.clone());
-        output::admit_queued_dispatch(flow, &group, admission).await?;
+        let committed_row = output::admit_queued_dispatch(flow, &group, admission).await?;
+        // Owner→caller identity relay (spec L62 direction): with the
+        // deployment's allowlist naming this exact (middle, target) edge,
+        // redeem the session's captured human ingress and park it on the
+        // worker's handoff scope — built from the COMMITTED row's own facts
+        // so the runtime's claim reads the identical key. The middle bot
+        // touches no token; budget and TTL are ledger-bound; any refusal
+        // stays fail-closed exactly like relay-disabled deployments (the
+        // row converges IdentityUnavailable later, nothing upgrades it).
+        if let Some(relay) = flow.caller_relay.as_ref() {
+            if cmd.caller_delegation.is_some()
+                && relay.allows_relay_edge(&cmd.driver_bot_id, &target_bot_id)
+            {
+                match (flow.caller_admission.as_ref(), committed_row.as_ref(),
+                       relay.ledger.redeem(&bcs_config::resolve_env_str(), &manager_session_id, now as i64)) {
+                    (Some(deps), Some(row), Some((root_turn, ingress))) => {
+                        let scope = HandoffScope {
+                            env: bcs_config::resolve_env_str(),
+                            session_id: row.session_id.clone(),
+                            group_id: Some(row.group_id.clone()),
+                            source_message_id: row.source_message_id.clone(),
+                            target_bot_id: row.target_bot_id.clone(),
+                        };
+                        let receipt = QueuedAdmissionReceipt::new(
+                            row.delivery_id.clone(), row.state.state_version, now as i64,
+                        );
+                        let parked = match deps.handoff.reserve(&scope, deps.reserve_ttl_ms, now as i64).await {
+                            Ok(()) => deps.handoff.publish(&scope, ingress, receipt).await,
+                            Err(error) => Err(error),
+                        };
+                        match parked {
+                            Ok(()) => tracing::info!(
+                                task = %effective_task_id,
+                                from = %cmd.driver_bot_id,
+                                to = %target_bot_id,
+                                root_turn = %root_turn,
+                                "CALLER_RELAY_PARKED: the session's captured human identity was relayed onto the worker's handoff scope"
+                            ),
+                            Err(error) => tracing::warn!(
+                                task = %effective_task_id,
+                                error = %error,
+                                "CALLER_RELAY_PARK_FAILED: identity did not park; the task stays fail-closed at claim time"
+                            ),
+                        }
+                    }
+                    (Some(_), Some(_), None) => tracing::warn!(
+                        task = %effective_task_id,
+                        "CALLER_RELAY_REFUSED: no live captured identity for this session (expired, unbudgeted or never spoken); the task stays fail-closed"
+                    ),
+                    (None, _, _) => tracing::warn!(
+                        task = %effective_task_id,
+                        "CALLER_RELAY_REFUSED: relay edge allowed but no caller admission seam; the task stays fail-closed"
+                    ),
+                    _ => {}
+                }
+            }
+        }
         // finish_admission bookkeeping already ran inside
         // admit_queued_dispatch; the entry read below stands in for the
         // old acknowledged-row handle (real_run_id carries the shared identity).

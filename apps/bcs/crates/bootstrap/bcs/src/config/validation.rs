@@ -49,6 +49,16 @@ pub(super) fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn s
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
     })?;
+    // Owner→caller relay policy (spec L62 direction): an enabled section
+    // with an empty allowlist aborts startup — the relay trust decision
+    // belongs to deployment policy, and "enabled but allows nothing" is a
+    // footgun rather than a policy.
+    if let Some(identity) = config.caller_identity.as_ref() {
+        bcs_config_api::validate_caller_relay_policy(identity).map_err(|e| {
+            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+                as Box<dyn std::error::Error>
+        })?;
+    }
     config.bot_ws_admission.validate().map_err(|e| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>

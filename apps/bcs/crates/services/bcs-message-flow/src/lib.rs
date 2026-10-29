@@ -6,6 +6,8 @@ pub mod group_history;
 pub mod message_delivery;
 pub mod managed_delivery;
 pub mod caller_lineage;
+pub mod caller_relay;
+pub mod caller_relay_ledger;
 mod caller_delegation;
 pub mod observe_index;
 pub mod observe_sync;

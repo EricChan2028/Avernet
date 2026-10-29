@@ -36,9 +36,50 @@ pub struct CallerIdentityServiceConfig {
     /// Required only for the JWT plugin; internal plugins do not need dummy JWT keys.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jwt: Option<CallerIdentityJwtConfig>,
+    /// Owner→caller identity relay (spec L62 ledger direction): absent = the
+    /// owner middle-hop never carries identity; present = an explicit,
+    /// deployment-owned allowlist. Identity material itself still never
+    /// travels through the middle bot — only BCS-instantiated handoff
+    /// parks ever hold it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relay: Option<CallerRelayConfig>,
     /// Implementation-owned settings. The selected factory must validate their schema.
     #[serde(default)]
     pub options: BTreeMap<String, serde_json::Value>,
+}
+
+/// Owner-root identity relay policy. `allow` is the trust decision, made by
+/// deployment configuration — never by a model at runtime. A human speaking
+/// into a session whose admission path captured the ingress may have that
+/// identity relayed onto an allowed caller target ONLY through the trusted
+/// task-assign edge; the middle bot receives and forwards no token.
+#[derive(Debug, Clone, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CallerRelayConfig {
+    pub enabled: bool,
+    #[serde(default)]
+    pub allow: Vec<CallerRelayRule>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CallerRelayRule {
+    pub from_bot: String,
+    pub to_bot: String,
+}
+
+/// Startup-time fail-closed check: an enabled relay with an empty allowlist
+/// is a configuration error ("enabled but allows nothing" is a footgun, not
+/// a policy); a disabled or absent section always validates.
+pub fn validate_caller_relay_policy(
+    config: &CallerIdentityServiceConfig,
+) -> Result<(), String> {
+    match &config.relay {
+        Some(relay) if relay.enabled && relay.allow.is_empty() => {
+            Err("caller_identity.relay.enabled requires a non-empty allowlist".to_string())
+        }
+        _ => Ok(()),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
@@ -70,6 +111,52 @@ pub struct CallerIdentityTrustedKeyConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relay_section_parses_and_stays_closed_by_default() {
+        // Absent section = relay stays disabled: the Owner middle-hop gains
+        // nothing without an explicit, deployment-owned allowlist.
+        let closed: CallerIdentityServiceConfig =
+            toml::from_str("plugin = 'jwt'\n").unwrap();
+        assert!(closed.relay.is_none());
+        let config: CallerIdentityServiceConfig = toml::from_str(
+            "plugin = 'jwt'\n[relay]\nenabled = false\n\
+             allow = [{ from_bot = 'bot-a', to_bot = 'bot-b' }]",
+        )
+        .unwrap();
+        let relay = config.relay.unwrap();
+        assert!(!relay.enabled);
+        assert_eq!(
+            relay.allow,
+            vec![CallerRelayRule { from_bot: "bot-a".into(), to_bot: "bot-b".into() }]
+        );
+        // Rule is strict too: unknown fields fail.
+        assert!(toml::from_str::<CallerIdentityServiceConfig>(
+            "plugin = 'jwt'\n[relay]\nenabled = true\n\
+             allow = [{ from_bot = 'a', to_bot = 'b', extra = 1 }]",
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn an_enabled_relay_with_an_empty_allowlist_is_a_fail_closed_error() {
+        // enabled=true with an empty allowlist is rejected: policy — never
+        // the model — decides identity relay, and an "enabled but allows
+        // nothing" section must fail closed instead of running as a footgun.
+        let config: CallerIdentityServiceConfig = toml::from_str(
+            "plugin = 'jwt'\n[relay]\nenabled = true\nallow = []",
+        )
+        .unwrap();
+        assert_eq!(
+            validate_caller_relay_policy(&config),
+            Err("caller_identity.relay.enabled requires a non-empty allowlist".to_string())
+        );
+        let disabled: CallerIdentityServiceConfig = toml::from_str(
+            "plugin = 'jwt'\n[relay]\nenabled = false\nallow = []",
+        )
+        .unwrap();
+        assert!(validate_caller_relay_policy(&disabled).is_ok());
+    }
 
     #[test]
     fn external_plugins_need_no_jwt_and_unknown_top_level_fields_fail() {

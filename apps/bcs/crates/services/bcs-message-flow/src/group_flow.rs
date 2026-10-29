@@ -143,6 +143,12 @@ pub struct BcsMessageFlow {
     /// other application services (the collaboration runtime's orchestration
     /// node dispatch + instance registrar). Absent in test/dev compositions.
     pub caller_dispatch_pipeline: Option<Arc<crate::caller_dispatch_pipeline::CallerDispatchPipeline>>,
+    /// Owner→caller identity relay (spec L62 direction, opt-in): the ledger
+    /// captures the session's current human ingress at admission and the
+    /// trusted task-assign edge redeems it onto an allowlisted caller
+    /// target's handoff scope. None of it travels through the middle bot;
+    /// `None` keeps every session fail-closed to today's behavior.
+    pub caller_relay: Option<crate::caller_relay::CallerRelayState>,
     terminal_owner: OnceLock<std::sync::Weak<BcsMessageFlow>>,
     terminal_slots: Arc<tokio::sync::Semaphore>,
     system_queue: Arc<crate::queued_system::QueuedSystemAdmission>,
@@ -200,7 +206,13 @@ impl BcsMessageFlow {
             caller_root_lineage: None,
             caller_observe: None,
             caller_dispatch_pipeline: None,
+            caller_relay: None,
         }
+    }
+
+    pub fn with_caller_relay(mut self, relay: crate::caller_relay::CallerRelayState) -> Self {
+        self.caller_relay = Some(relay);
+        self
     }
 
     pub fn with_execution_cache(mut self, cache: Arc<dyn bcs_cache_api::CachePlugin>) -> Self {

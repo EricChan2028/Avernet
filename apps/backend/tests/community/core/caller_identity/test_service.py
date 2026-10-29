@@ -127,9 +127,9 @@ async def test_cli_caller_updates_full_scope_and_returns_bot_aggregate() -> None
     service, deps = _service(bot=bot)
     deps.repository.replace_draft_cli_call_type.return_value = CliCallTypeMutationResult(
         previous_explicit_call_type=None,
-        revision=1,
+        revision=2,
         bot_call_type=McpCallType.CALLER,
-        caller_config_revision=1,
+        caller_config_revision=7,
     )
     deps.cli_scope_reconciler.current_passport_cli_items.return_value = [
         {"cli_code": "dataphin", "identity_mode": "owner"},
@@ -165,7 +165,7 @@ async def test_cli_caller_updates_full_scope_and_returns_bot_aggregate() -> None
         bot_id="bot-1",
         owner_id="owner-1",
         enabled=True,
-        source_revision=1,
+        source_revision=7,
     )
 
 
@@ -899,6 +899,41 @@ async def test_mcp_update_bcs_sync_failure_raises_without_compensation() -> None
         )
 
     deps.repository.compensate_draft_call_type.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cli_update_bcs_sync_failure_raises_without_compensation() -> None:
+    # BCS 同步失败在 CLI 路径同样整体传播,且绝不触发 CLI 补偿
+    # (_compensate_cli_after_sync_failure 只回滚 Passport scope 失败);
+    # 成功日志也不得出现。
+    service, deps = _service(bot=_bot())
+    deps.repository.replace_draft_cli_call_type.return_value = CliCallTypeMutationResult(
+        previous_explicit_call_type=None,
+        revision=2,
+        bot_call_type=McpCallType.CALLER,
+        caller_config_revision=7,
+    )
+    deps.cli_scope_reconciler.current_passport_cli_items.return_value = [
+        {"cli_code": "dataphin", "identity_mode": "owner"},
+    ]
+    deps.mcp_provider.collect_bot_active_mcps.return_value = []
+    deps.bcs_caller_sync.sync_caller_config.side_effect = CallerBcsSyncError()
+
+    with patch(
+        "agentclaw.community.core.caller_identity.service.logger"
+    ) as logger:
+        with pytest.raises(CallerBcsSyncError):
+            await service.update_cli_call_type(
+                bot_id="bot-1",
+                cli_code="dataphin",
+                call_type=McpCallType.CALLER,
+                actor_id="owner-1",
+                entity_id="entity-1",
+            )
+
+    deps.repository.compensate_draft_cli_call_type.assert_not_called()
+    logged = " ".join(str(call) for call in logger.method_calls)
+    assert "cli_call_type_update_succeeded" not in logged
 
 
 @pytest.mark.asyncio

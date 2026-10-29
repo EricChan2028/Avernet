@@ -71,6 +71,7 @@ mod tests {
         CallerIdentityServiceConfig {
             plugin: "jwt".into(),
             jwt: Some(jwt),
+            relay: None,
             options: Default::default(),
         }
     }
@@ -221,7 +222,7 @@ mod plugin_config_contract {
     #[test]
     fn jwt_configuration_is_required_and_unknown_options_are_rejected() {
         let config = CallerIdentityServiceConfig {
-            plugin: "jwt".into(), jwt: None, options: Default::default(),
+            plugin: "jwt".into(), jwt: None, relay: None, options: Default::default(),
         };
         assert!(assemble_from_section(&config).is_err());
         let mut config = super::tests::base_section();

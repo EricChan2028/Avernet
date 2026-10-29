@@ -29,6 +29,9 @@ struct CallerTermState {
     >,
     observe: Option<Arc<bcs_message_flow::observe_index::ObserveTargetIndex>>,
     lineage: Option<Arc<bcs_message_flow::caller_lineage::RootLineageIndex>>,
+    /// Owner→caller relay captures (spec L62): the session's human ingress
+    /// dies with the master term exactly like parked handoff identities.
+    relay: Option<Arc<bcs_message_flow::caller_relay_ledger::CallerRelayLedger>>,
     /// Review-VI P1: the master-term token this wiring hands to the
     /// dispatch pipeline. run_on_master bumps it at BOTH epoch boundaries —
     /// a new term starts, or this instance demotes — so every detached
@@ -40,13 +43,14 @@ struct CallerTermState {
 
 impl CallerTermState {
     /// Seal the old term at a new master epoch's start. Returns how many
-    /// parked identities, observe references and lineage entries were
-    /// wiped from the previous term.
-    fn seal_for_new_epoch(&self) -> (usize, usize, usize) {
+    /// parked identities, observe references, lineage entries and relay
+    /// captures were wiped from the previous term.
+    fn seal_for_new_epoch(&self) -> (usize, usize, usize, usize) {
         let parked = self.handoff.as_ref().map_or(0, |handoff| handoff.seal_term());
         let observes = self.observe.as_ref().map_or(0, |index| index.seal_term());
         let lineages = self.lineage.as_ref().map_or(0, |index| index.seal_term());
-        (parked, observes, lineages)
+        let relays = self.relay.as_ref().map_or(0, |ledger| ledger.seal_term());
+        (parked, observes, lineages, relays)
     }
 }
 
@@ -238,6 +242,7 @@ pub async fn wire_with_caller_assembly(
         handoff: Some(caller_handoff.clone()),
         observe: None,
         lineage: None,
+        relay: None,
         term: caller_term_token.clone(),
     };
     let mut caller_pipeline = None;
@@ -293,6 +298,24 @@ pub async fn wire_with_caller_assembly(
             caller_term.lineage = Some(index.clone());
             flow = flow.with_caller_derivation(index.clone());
             let pipeline = pipeline.with_root_lineage(index);
+            // Owner→caller relay (spec L62 direction): assembled ONLY when
+            // the deployment opted in via `caller_identity.relay`. The
+            // capture TTL reuses the credential-scale horizon already
+            // computed for handoff reaping (2× the JWT max_ttl, floor
+            // 600s) so a captured identity never outlives the credential
+            // window it would mint. Absent/disabled sections assemble no
+            // relay state at all — every session keeps the fail-closed
+            // Owner-middle-hop behavior.
+            if let Some(relay_config) = config.caller_identity.as_ref().and_then(|identity| identity.relay.clone()) {
+                if relay_config.enabled {
+                    let relay_state = bcs_message_flow::caller_relay::CallerRelayState::new(
+                        relay_config,
+                        identity_reap_horizon_ms,
+                    );
+                    caller_term.relay = Some(relay_state.ledger.clone());
+                    flow = flow.with_caller_relay(relay_state);
+                }
+            }
             // Reply-side observe sync (spec §6.4, L243③): the SAME observe
             // assembly the runtime pipeline uses — the reply commit path
             // on the flow fans a bot's own reply out to its own containers
@@ -397,12 +420,13 @@ async fn run_on_master(
         // references and root lineage are wiped BEFORE the epoch consumes
         // anything, so old-term material fails closed at claim/inject/
         // derive and converges through the existing rescue paths.
-        let (parked, observes, lineages) = caller_term.seal_for_new_epoch();
-        if parked + observes + lineages > 0 {
+        let (parked, observes, lineages, relays) = caller_term.seal_for_new_epoch();
+        if parked + observes + lineages + relays > 0 {
             tracing::warn!(
                 parked,
                 observes,
                 lineages,
+                relays,
                 "caller state of the previous master term sealed (spec §7.5.2)"
             );
         }
