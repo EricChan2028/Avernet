@@ -135,6 +135,7 @@ def dual_structured_templates_case_run(
             "completed_count": execution.completed_count,
             "total_count": execution.total_count,
             "error_type": execution.error_type,
+            "error_detail": execution.error_detail,
         },
         "resource_disposition": RESOURCE_DISPOSITION,
         "remote_validation": "NOT_RUN",

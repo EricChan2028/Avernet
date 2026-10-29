@@ -92,6 +92,14 @@ class CaseExecution:
         }
 
 
+def record_error_detail(error: BaseException) -> str | None:
+    """Cap the first failing exception text for envelope diagnostics."""
+    detail = str(error) or None
+    if detail is not None and len(detail) > 800:
+        detail = detail[:797] + "..."
+    return detail
+
+
 def execute_case(plan: CaseRewritePlan, adapter: object) -> CaseExecution:
     """Run every reviewed obligation of one case plan against an adapter."""
     validate_adapter_contract(adapter, plan)
@@ -122,9 +130,7 @@ def execute_case(plan: CaseRewritePlan, adapter: object) -> CaseExecution:
                 completed += 1
             except Exception as error:
                 error_type = type(error).__name__
-                detail = str(error) or None
-                if detail is not None and len(detail) > 800:
-                    detail = detail[:797] + "..."
+                detail = record_error_detail(error)
                 if first_error_detail is None:
                     first_error_detail = detail
                 step = StepOutcome(requirement_id=requirement.requirement_id,

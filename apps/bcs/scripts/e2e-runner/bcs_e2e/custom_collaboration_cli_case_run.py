@@ -56,7 +56,7 @@ import json
 import re
 
 from .case_adapters import AdapterCall
-from .case_executor import CaseExecution, StepOutcome
+from .case_executor import CaseExecution, StepOutcome, record_error_detail
 from .custom_collaboration_cli_leaf import (
     CUSTOM_COLLABORATION_CASE_METHODS,
     CUSTOM_COLLABORATION_CLI_EFFECT,
@@ -566,6 +566,8 @@ def execute_custom_collaboration_case(adapter: object) -> CaseExecution:
     error_type: str | None = None
     adapter.failed_method = None
     adapter.failure_class = None
+    adapter.failure_detail = None
+    first_error_detail: str | None = None
     try:
         for operation, method_name in CUSTOM_COLLABORATION_CASE_METHODS:
             adapter.failed_method = method_name
@@ -575,6 +577,8 @@ def execute_custom_collaboration_case(adapter: object) -> CaseExecution:
     except Exception as error:
         error_type = type(error).__name__
         adapter.failure_class = public_failure_class(error)
+        adapter.failure_detail = record_error_detail(error)
+        first_error_detail = adapter.failure_detail
 
     def step(requirement_id: str, method: str, data: object,
              methods: tuple[str, ...], effect: str) -> StepOutcome:
@@ -582,7 +586,8 @@ def execute_custom_collaboration_case(adapter: object) -> CaseExecution:
             return StepOutcome(requirement_id=requirement_id, method=method,
                                status="NOT_RUN", data=None, evidence={},
                                error_type=error_type,
-                               error_gap=adapter.failure_class)
+                               error_gap=adapter.failure_class,
+                               error_detail=adapter.failure_detail)
         return StepOutcome(
             requirement_id=requirement_id, method=method, status="PASS", data=data,
             evidence={"requests": [dict(records[name]) for name in methods],
@@ -639,7 +644,8 @@ def execute_custom_collaboration_case(adapter: object) -> CaseExecution:
         case_id=DUAL_CUSTOM_COLLAB_CASE_ID, parent_id=PARENT,
         status="PASS" if error_type is None else "BLOCKED", steps=steps,
         completed_count=3 if error_type is None else 0, total_count=3,
-        error_type=error_type, ready_to_execute=error_type is None)
+        error_type=error_type, error_detail=first_error_detail,
+        ready_to_execute=error_type is None)
     execution.validate()
     return execution
 
@@ -728,7 +734,8 @@ def dual_custom_collaboration_case_run(
         "execution": {"status": execution.status,
                       "completed_count": execution.completed_count,
                       "total_count": execution.total_count,
-                      "error_type": execution.error_type},
+                      "error_type": execution.error_type,
+                      "error_detail": execution.error_detail},
         "failed_method": (adapter.failed_method
                           if execution.error_type is not None else None),
         "failure_class": (adapter.failure_class

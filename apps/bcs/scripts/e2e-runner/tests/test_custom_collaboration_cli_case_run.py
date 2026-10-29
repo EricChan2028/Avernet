@@ -867,7 +867,7 @@ class CustomCollaborationRunEntryTests(unittest.TestCase):
         self.assertEqual((report["status"], report["case_id"], report["parent_id"], report["run_id"], report["credential_kind"], report["remote_validation"], report["grants_release_credit"], report["resource_disposition"], report["cli_binary_sha256"], report["profile_digest"]), ("PASS", DUAL_CUSTOM_COLLAB_CASE_ID, PARENT, RUN_ID, "owned_local_bot_token", "NOT_RUN", False, CUSTOM_COLLABORATION_CLI_EFFECT, self.cli_sha256, fingerprint(profile)))
         self.assertTrue(report["executor_digest"])
         self.assertEqual(report["environment"], {"tier": "local", "id": "custom-collaboration-cli-local", "entrypoint_kind": "singlebox"})
-        self.assertEqual(report["execution"], {"status": "PASS", "completed_count": 1, "total_count": 1, "error_type": None})
+        self.assertEqual(report["execution"], {"status": "PASS", "completed_count": 1, "total_count": 1, "error_type": None, "error_detail": None})
         self.assertEqual((state_dir / cc_run.DEFINITION_FILE).read_text(encoding="utf-8"), DEFINITION_YAML)
         self.assertEqual(read_receipt(state_dir / "custom-collaboration-profile.json"), profile)
         self.assertEqual(read_receipt(state_dir / "custom-collaboration-binding.json"), {"schema_version": cc_run.SCHEMA_VERSION, "contract": "dual-custom-collaboration-case-run-v2", "case_id": DUAL_CUSTOM_COLLAB_CASE_ID, "parent_id": PARENT, "run_id": RUN_ID, "profile_digest": fingerprint(profile), "executor_digest": report["executor_digest"], "cli_binary_sha256": self.cli_sha256, "state_dir": str(state_dir.resolve())})
@@ -918,7 +918,11 @@ class CustomCollaborationRunEntryTests(unittest.TestCase):
 
         report, state_dir = self.entry(runner=FailingChainRunner, real_executor=True)
         self.assertEqual(report["status"], "BLOCKED")
-        self.assertEqual(report["execution"], {"status": "BLOCKED", "completed_count": 0, "total_count": 3, "error_type": "RunStateError"})
+        self.assertEqual(report["execution"], {"status": "BLOCKED", "completed_count": 0, "total_count": 3,
+            "error_type": "RunStateError",
+            "error_detail": ("Custom collaboration product-CLI execution for "
+                             "custom_collaboration_cli.trial_create_group failed "
+                             "[public-failure-class:CASE_CONTRACT_VIOLATION]")})
         self.assertEqual(report["case"]["status"], "BLOCKED")
         self.assertFalse(report["grants_release_credit"])
         self.assertEqual(report["remote_validation"], "NOT_RUN")

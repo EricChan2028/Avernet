@@ -106,6 +106,7 @@ def dual_workspace_cli_status_run(
             "completed_count": execution.completed_count,
             "total_count": execution.total_count,
             "error_type": execution.error_type,
+            "error_detail": execution.error_detail,
         },
         "resource_disposition": "RETAINED_DYNAMIC_GROUPS_AND_INITIAL_SESSIONS",
         "remote_validation": "NOT_RUN",

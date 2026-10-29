@@ -221,6 +221,7 @@ def dual_session_cli_case_run(
             "completed_count": execution.completed_count,
             "total_count": execution.total_count,
             "error_type": execution.error_type,
+            "error_detail": execution.error_detail,
         },
         "resource_disposition": _CASES[case_key]["fixture_effect"],
         "remote_validation": "NOT_RUN",

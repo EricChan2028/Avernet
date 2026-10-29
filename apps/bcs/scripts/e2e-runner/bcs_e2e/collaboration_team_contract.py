@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from .case_adapters import AdapterCall
-from .case_executor import CaseExecution, StepOutcome
+from .case_executor import CaseExecution, StepOutcome, record_error_detail
 from .local_operator_cli_contract import (
     COLLABORATION_TEAM_PARENT,
     COLLABORATION_TEAM_REQUIREMENTS,
@@ -92,6 +92,7 @@ def execute_collaboration_team_case(adapter: object) -> CaseExecution:
     validate_collaboration_team_adapter(adapter)
     steps: list[StepOutcome] = []
     error_type: str | None = None
+    first_error_detail: str | None = None
     completed = 0
     for requirement_id, method_name in zip(plan["requirement_ids"], ADAPTER_METHODS):
         if error_type is not None:
@@ -108,10 +109,13 @@ def execute_collaboration_team_case(adapter: object) -> CaseExecution:
             completed += 1
         except Exception as error:
             error_type = type(error).__name__
+            detail = record_error_detail(error)
+            if first_error_detail is None:
+                first_error_detail = detail
             steps.append(StepOutcome(
                 requirement_id=requirement_id, method=method_name,
                 status="NOT_RUN", data=None, evidence={},
-                error_type=error_type))
+                error_type=error_type, error_detail=detail))
     execution = CaseExecution(
         case_id=CASE_ID,
         parent_id=plan["parent_id"],
@@ -119,7 +123,7 @@ def execute_collaboration_team_case(adapter: object) -> CaseExecution:
         steps=tuple(steps),
         completed_count=completed,
         total_count=len(steps),
-        error_type=error_type,
+        error_type=error_type, error_detail=first_error_detail,
         ready_to_execute=error_type is None,
     )
     execution.validate()
