@@ -119,11 +119,14 @@ def recommendation_response(trace_id: str = "trace-pod-a") -> BotRecommendationR
     )
 
 
-def metric(name: str, operation: str) -> float:
+def metric(name: str, operation: str, *, stage: str | None = None) -> float:
     from prometheus_client import REGISTRY
 
     sample = f"bcsfuse_search_shared_response_cache_{name}_total"
-    value = REGISTRY.get_sample_value(sample, {"operation": operation})
+    labels = {"operation": operation}
+    if stage is not None:
+        labels["stage"] = stage
+    value = REGISTRY.get_sample_value(sample, labels)
     return 0.0 if value is None else float(value)
 
 
@@ -202,7 +205,7 @@ def test_cross_pod_search_hit_is_answered_before_admission() -> None:
     asyncio.run(run())
     assert downstream_pod_a.calls == 1
     assert len(shared_cache.write_keys) == 1
-    assert metric("hits", "search") == 1
+    assert metric("hits", "search", stage="read") == 1
 
 
 def test_poisoned_l2_search_payload_replays_downstream_and_counts_error() -> None:
@@ -236,10 +239,10 @@ def test_poisoned_l2_search_payload_replays_downstream_and_counts_error() -> Non
         assert result.status_code == 200
         assert result.json()["downstream"] is True
 
-    before = metric("errors", "search")
+    before = metric("errors", "search", stage="decode")
     asyncio.run(run())
     assert downstream.calls == 1
-    assert metric("errors", "search") - before == 1
+    assert metric("errors", "search", stage="decode") - before == 1
 
 
 def test_unavailable_l2_search_read_replays_downstream_and_counts_error() -> None:
@@ -263,10 +266,10 @@ def test_unavailable_l2_search_read_replays_downstream_and_counts_error() -> Non
         assert result.status_code == 200
         assert result.json()["downstream"] is True
 
-    before = metric("errors", "search")
+    before = metric("errors", "search", stage="read")
     asyncio.run(run())
     assert downstream.calls == 1
-    assert metric("errors", "search") - before == 1
+    assert metric("errors", "search", stage="read") - before == 1
 
 
 def test_l2_search_payload_is_bound_to_index_version() -> None:
@@ -299,10 +302,10 @@ def test_l2_search_payload_is_bound_to_index_version() -> None:
         assert result.status_code == 200
         assert result.json()["downstream"] is True
 
-    before = metric("misses", "search")
+    before = metric("misses", "search", stage="read")
     asyncio.run(run())
     assert downstream.calls == 1
-    assert metric("misses", "search") - before == 1
+    assert metric("misses", "search", stage="read") - before == 1
 
 
 def test_degraded_search_is_not_published_to_l2() -> None:
@@ -377,7 +380,7 @@ def test_cross_pod_recommendation_hit_rewrites_current_trace_id() -> None:
 
     asyncio.run(run())
     assert fresh_pod_cache.stats["hits"] == 1
-    assert metric("hits", "recommend") == 1
+    assert metric("hits", "recommend", stage="read") == 1
 
 
 def test_recommendation_group_request_bypasses_shared_l2() -> None:
@@ -469,12 +472,12 @@ def test_successful_recommendation_is_published_to_l2() -> None:
         assert result.status_code == 200
         await asyncio.sleep(0.05)
 
-    before = metric("stores", "recommend")
+    before = metric("stores", "recommend", stage="store")
     asyncio.run(run())
     assert downstream.calls == 1
     assert len(shared_cache.write_keys) == 1
     assert shared_cache.write_keys[0][2] == 7
-    assert metric("stores", "recommend") - before == 1
+    assert metric("stores", "recommend", stage="store") - before == 1
 
 
 def test_composition_root_injects_shared_response_cache_into_both_routes() -> None:
@@ -573,10 +576,10 @@ def test_slow_l2_read_times_out_and_replays_downstream() -> None:
         assert result.json()["downstream"] is True
         assert elapsed < 0.2
 
-    errors_before = metric("errors", "search")
+    errors_before = metric("errors", "search", stage="read")
     asyncio.run(run())
     assert downstream.calls == 1
-    assert metric("errors", "search") - errors_before == 1
+    assert metric("errors", "search", stage="read") - errors_before == 1
 
 
 def test_repeated_l1_hits_do_not_republish_to_l2() -> None:
@@ -644,3 +647,176 @@ def test_repeated_l1_hits_do_not_republish_to_l2() -> None:
     asyncio.run(run())
     assert downstream.calls == 1
     assert len(shared_cache.write_keys) == 1
+
+
+def test_l2_stage_metrics_distinguish_read_decode_and_store_errors() -> None:
+    from app.adapters.http.search_response_cache import (
+        SearchResponseCacheMiddleware,
+        build_v1_search_response_cache_key,
+        store_v1_search_response,
+    )
+
+    result_cache = cache()
+    shared_cache = FakeSharedResponseCache(fail_writes=True)
+    key = build_v1_search_response_cache_key(
+        result_cache=result_cache,
+        request=search_request(),
+        index_version=7,
+    )
+    middleware = SearchResponseCacheMiddleware(
+        app=Downstream({"downstream": True}),
+        result_cache=result_cache,
+        require_auth=lambda request: None,
+        shared_response_cache=shared_cache,
+    )
+
+    read_before = metric("errors", "search", stage="read")
+    decode_before = metric("errors", "search", stage="decode")
+    store_before = metric("errors", "search", stage="store")
+    stores_before = metric("stores", "search", stage="store")
+
+    async def run() -> None:
+        poison_cache = FakeSharedResponseCache()
+        poison_cache.values[key] = b"{invalid"
+        poison = SearchResponseCacheMiddleware(
+            app=Downstream({"downstream": True}),
+            result_cache=cache(),
+            require_auth=lambda request: None,
+            shared_response_cache=poison_cache,
+        )
+        await post(poison, url="/api/v1/search", body={"query": "支付 风险", "top_k": 3})
+
+    asyncio.run(run())
+    assert metric("errors", "search", stage="decode") - decode_before == 1
+
+    class SearchStoringRoute:
+        def __init__(self, result_cache: AgentSearchResultCache) -> None:
+            self.calls = 0
+            self.result_cache = result_cache
+
+        async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+            self.calls += 1
+            while True:
+                message = await receive()
+                if message["type"] != "http.request":
+                    continue
+                if not message.get("more_body", False):
+                    break
+            assert (
+                store_v1_search_response(
+                    result_cache=self.result_cache,
+                    request=search_request(),
+                    response=search_response(),
+                    metadata={},
+                )
+                is True
+            )
+            from starlette.responses import JSONResponse
+
+            await JSONResponse(search_response())(scope, receive, send)
+
+    storing_middleware = SearchResponseCacheMiddleware(
+        app=SearchStoringRoute(result_cache),
+        result_cache=result_cache,
+        require_auth=lambda request: None,
+        shared_response_cache=shared_cache,
+    )
+
+    async def run_write() -> None:
+        await post(
+            storing_middleware,
+            url="/api/v1/search",
+            body={"query": " 支付 风险 ", "top_k": 3},
+        )
+        await asyncio.sleep(0.05)
+
+    asyncio.run(run_write())
+    assert metric("errors", "search", stage="read") - read_before == 0
+    assert metric("errors", "search", stage="store") - store_before == 1
+    assert metric("stores", "search", stage="store") - stores_before == 0
+
+
+def test_l2_write_store_false_is_an_error_not_a_success() -> None:
+    from app.adapters.http.shared_response_cache_writer import (
+        BoundedSharedResponseCacheWriter,
+    )
+
+    class FalseStore:
+        values: dict[str, bytes] = {}
+
+        def get(self, key: str, *, index_version: int) -> bytes | None:
+            return None
+
+        def store(
+            self, key: str, payload: bytes, *, index_version: int, ttl_seconds: float
+        ) -> bool:
+            return False
+
+    writer = BoundedSharedResponseCacheWriter(
+        shared_response_cache=FalseStore(),
+        operation="search",
+        ttl_seconds=30.0,
+        timeout_seconds=0.05,
+        queue_size=8,
+        worker_count=1,
+    )
+
+    errors_before = metric("errors", "search", stage="store")
+    stores_before = metric("stores", "search", stage="store")
+
+    async def run() -> None:
+        writer.submit(key="key-false", payload=b"{}", index_version=7)
+        await writer.wait_idle()
+
+    asyncio.run(run())
+    assert metric("errors", "search", stage="store") - errors_before == 1
+    assert metric("stores", "search", stage="store") - stores_before == 0
+
+
+def test_l2_bounded_writer_limits_pending_writes_and_reports_enqueue_errors() -> None:
+    import threading
+
+    from app.adapters.http.shared_response_cache_writer import (
+        BoundedSharedResponseCacheWriter,
+    )
+
+    class BlockingStore:
+        def __init__(self) -> None:
+            self.write_count = 0
+            self.started = threading.Event()
+            self.release = threading.Event()
+
+        def get(self, key: str, *, index_version: int) -> bytes | None:
+            return None
+
+        def store(
+            self, key: str, payload: bytes, *, index_version: int, ttl_seconds: float
+        ) -> bool:
+            self.write_count += 1
+            self.started.set()
+            self.release.wait(1)
+            return True
+
+    store = BlockingStore()
+    writer = BoundedSharedResponseCacheWriter(
+        shared_response_cache=store,
+        operation="search",
+        ttl_seconds=30.0,
+        timeout_seconds=1.0,
+        queue_size=1,
+        worker_count=1,
+    )
+
+    enqueue_before = metric("errors", "search", stage="enqueue")
+
+    async def run() -> None:
+        assert writer.submit(key="running", payload=b"{}", index_version=7)
+        assert await asyncio.to_thread(store.started.wait, 0.5)
+        assert writer.submit(key="queued", payload=b"{}", index_version=7)
+        assert writer.submit(key="dropped", payload=b"{}", index_version=7) is False
+        store.release.set()
+        await writer.wait_idle()
+
+    asyncio.run(run())
+    assert store.write_count == 2
+    assert metric("errors", "search", stage="enqueue") - enqueue_before == 1

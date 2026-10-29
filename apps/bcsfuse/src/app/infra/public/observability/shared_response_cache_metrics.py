@@ -10,9 +10,9 @@ def _metrics() -> dict[str, object]:
     if _SHARED_CACHE_METRICS is not None:
         return _SHARED_CACHE_METRICS
 
-    from prometheus_client import Counter, Gauge
+    from prometheus_client import Counter
 
-    labels = ["operation"]
+    labels = ["operation", "stage"]
     _SHARED_CACHE_METRICS = {
         "hits": Counter(
             "bcsfuse_search_shared_response_cache_hits_total",
@@ -31,24 +31,24 @@ def _metrics() -> dict[str, object]:
         ),
         "errors": Counter(
             "bcsfuse_search_shared_response_cache_errors_total",
-            "Cross-pod L2 response cache read, write, or validation errors",
+            "Cross-pod L2 response cache errors by processing stage",
             labels,
         ),
     }
     return _SHARED_CACHE_METRICS
 
 
-def record_shared_response_cache_hit(operation: str) -> None:
-    _metrics()["hits"].labels(operation=operation).inc()
+def record_shared_response_cache_hit(operation: str, *, stage: str) -> None:
+    _metrics()["hits"].labels(operation=operation, stage=stage).inc()
 
 
-def record_shared_response_cache_miss(operation: str) -> None:
-    _metrics()["misses"].labels(operation=operation).inc()
+def record_shared_response_cache_miss(operation: str, *, stage: str) -> None:
+    _metrics()["misses"].labels(operation=operation, stage=stage).inc()
 
 
-def record_shared_response_cache_store(operation: str) -> None:
-    _metrics()["stores"].labels(operation=operation).inc()
+def record_shared_response_cache_store(operation: str, *, stage: str) -> None:
+    _metrics()["stores"].labels(operation=operation, stage=stage).inc()
 
 
-def record_shared_response_cache_error(operation: str) -> None:
-    _metrics()["errors"].labels(operation=operation).inc()
+def record_shared_response_cache_error(operation: str, *, stage: str) -> None:
+    _metrics()["errors"].labels(operation=operation, stage=stage).inc()

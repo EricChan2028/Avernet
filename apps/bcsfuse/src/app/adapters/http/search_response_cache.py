@@ -17,11 +17,15 @@ from app.application.agent_search_service import default_search_filters
 from app.bootstrap.oss_business_routes import SearchRequestOSS
 from app.bootstrap.search_capacity import MAX_SEARCH_BODY_BYTES, _get_search_metrics
 from app.infra.config.feature_flags import FeatureFlags
+from app.adapters.http.shared_response_cache_writer import (
+    DEFAULT_L2_WRITE_QUEUE_SIZE,
+    DEFAULT_L2_WRITE_WORKERS,
+    BoundedSharedResponseCacheWriter,
+)
 from app.infra.public.observability.shared_response_cache_metrics import (
     record_shared_response_cache_error,
     record_shared_response_cache_hit,
     record_shared_response_cache_miss,
-    record_shared_response_cache_store,
 )
 
 RequireAuth = Callable[[Request], None]
@@ -112,6 +116,8 @@ class SearchResponseCacheMiddleware:
         shared_response_cache: Any | None = None,
         shared_cache_ttl_seconds: float = DEFAULT_L2_TTL_SECONDS,
         shared_cache_timeout_seconds: float = DEFAULT_L2_TIMEOUT_SECONDS,
+        shared_cache_write_queue_size: int = DEFAULT_L2_WRITE_QUEUE_SIZE,
+        shared_cache_write_workers: int = DEFAULT_L2_WRITE_WORKERS,
     ) -> None:
         self.app = app
         self._result_cache = result_cache
@@ -120,8 +126,19 @@ class SearchResponseCacheMiddleware:
         self._shared_response_cache = shared_response_cache
         self._shared_cache_ttl_seconds = shared_cache_ttl_seconds
         self._shared_cache_timeout_seconds = shared_cache_timeout_seconds
+        self._l2_writer = (
+            None
+            if shared_response_cache is None
+            else BoundedSharedResponseCacheWriter(
+                shared_response_cache=shared_response_cache,
+                operation="search",
+                ttl_seconds=shared_cache_ttl_seconds,
+                timeout_seconds=shared_cache_timeout_seconds,
+                queue_size=shared_cache_write_queue_size,
+                worker_count=shared_cache_write_workers,
+            )
+        )
         self._inflight: dict[str, asyncio.Lock] = {}
-        self._background_tasks: set[asyncio.Task[None]] = set()
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if (
@@ -244,6 +261,7 @@ class SearchResponseCacheMiddleware:
         self._result_cache.store(key, shared_payload)
         promoted_payload = self._result_cache.get(key)
         if not isinstance(promoted_payload, bytes):
+            record_shared_response_cache_error("search", stage="promote")
             return None, replay_receive, None, started_at, request
         return (
             Response(promoted_payload, media_type="application/json"),
@@ -266,20 +284,20 @@ class SearchResponseCacheMiddleware:
                 timeout=self._shared_cache_timeout_seconds,
             )
         except Exception:
-            record_shared_response_cache_error("search")
+            record_shared_response_cache_error("search", stage="read")
             return None
         if not isinstance(payload, bytes):
-            record_shared_response_cache_miss("search")
+            record_shared_response_cache_miss("search", stage="read")
             return None
         try:
             parsed = json.loads(payload)
         except (TypeError, ValueError):
-            record_shared_response_cache_error("search")
+            record_shared_response_cache_error("search", stage="decode")
             return None
         if not isinstance(parsed, dict):
-            record_shared_response_cache_error("search")
+            record_shared_response_cache_error("search", stage="decode")
             return None
-        record_shared_response_cache_hit("search")
+        record_shared_response_cache_hit("search", stage="read")
         return payload
 
     def _recording_send(
@@ -311,18 +329,8 @@ class SearchResponseCacheMiddleware:
     def _schedule_l2_publish(
         self, *, request: SearchRequestOSS, key: str, body: bytes
     ) -> None:
-        if self._shared_response_cache is None or body == b"":
+        if self._l2_writer is None or body == b"":
             return
-        task = asyncio.create_task(
-            self._publish_l2_response(request=request, key=key, body=body)
-        )
-        self._background_tasks.add(task)
-        task.add_done_callback(self._background_tasks.discard)
-
-    async def _publish_l2_response(
-        self, *, request: SearchRequestOSS, key: str, body: bytes
-    ) -> None:
-        assert self._shared_response_cache is not None
         index_version = self._result_cache.current_index_version()
         if index_version is None:
             return
@@ -331,22 +339,7 @@ class SearchResponseCacheMiddleware:
         payload = self._result_cache.get_without_metrics(key)
         if not isinstance(payload, bytes):
             return
-        try:
-            stored = await asyncio.wait_for(
-                asyncio.to_thread(
-                    self._shared_response_cache.store,
-                    key,
-                    payload,
-                    index_version=index_version,
-                    ttl_seconds=self._shared_cache_ttl_seconds,
-                ),
-                timeout=self._shared_cache_timeout_seconds,
-            )
-        except Exception:
-            record_shared_response_cache_error("search")
-            return
-        if stored:
-            record_shared_response_cache_store("search")
+        self._l2_writer.submit(key=key, payload=payload, index_version=index_version)
 
     def _coalescing_key(self, request: SearchRequestOSS) -> str | None:
         assert self._result_cache is not None

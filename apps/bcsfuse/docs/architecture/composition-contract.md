@@ -360,14 +360,13 @@ latency and availability without log mining:
   remain exceptions, leaving policy-owned fallback to the retrieval service.
 - Shared L2 response-cache health uses
   `bcsfuse_search_shared_response_cache_hits_total`, `..._misses_total`,
-  `..._stores_total`, and `..._errors_total` with an `operation` label. An error
-  does not change HTTP semantics; the request proceeds through the declared L1
-  miss and downstream admission path.
-- Shared L2 response-cache health uses
-  `bcsfuse_search_shared_response_cache_hits_total`, `..._misses_total`,
-  `..._stores_total`, and `..._errors_total` with an `operation` label. An error
-  does not change HTTP semantics; the request proceeds through the declared L1
-  miss and downstream admission path.
+  `..._stores_total`, and `..._errors_total` with `operation` and `stage`
+  labels. The stage separates L2 `read`, `decode`, `promote`, `enqueue`, and
+  `store`; a full background-write queue or a store returning false is an
+  explicit error, never a success. L2 writes use a bounded per-route writer
+  (default 128 queued writes and 2 workers) and do not wait in the HTTP
+  response path. An error does not change HTTP semantics; the request proceeds
+  through the declared L1 miss and downstream admission path.
 - The real embedding provider records `bcsfuse_embedding_calls_total`,
   `bcsfuse_embedding_duration_seconds` and, on the final failed call,
   `bcsfuse_embedding_errors_total`. Empty batches record nothing because they do

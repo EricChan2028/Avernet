@@ -19,11 +19,15 @@ from app.domain.models.bot_recommendation import (
     BotRecommendationResponse,
 )
 from app.infra.config.feature_flags import FeatureFlags
+from app.adapters.http.shared_response_cache_writer import (
+    DEFAULT_L2_WRITE_QUEUE_SIZE,
+    DEFAULT_L2_WRITE_WORKERS,
+    BoundedSharedResponseCacheWriter,
+)
 from app.infra.public.observability.shared_response_cache_metrics import (
     record_shared_response_cache_error,
     record_shared_response_cache_hit,
     record_shared_response_cache_miss,
-    record_shared_response_cache_store,
 )
 
 RequireAuth = Callable[[Request], None]
@@ -150,6 +154,8 @@ class RecommendationResponseCacheMiddleware:
         shared_response_cache: Any | None = None,
         shared_cache_ttl_seconds: float = DEFAULT_L2_TTL_SECONDS,
         shared_cache_timeout_seconds: float = DEFAULT_L2_TIMEOUT_SECONDS,
+        shared_cache_write_queue_size: int = DEFAULT_L2_WRITE_QUEUE_SIZE,
+        shared_cache_write_workers: int = DEFAULT_L2_WRITE_WORKERS,
     ) -> None:
         self.app = app
         self._result_cache = result_cache
@@ -159,8 +165,19 @@ class RecommendationResponseCacheMiddleware:
         self._shared_response_cache = shared_response_cache
         self._shared_cache_ttl_seconds = shared_cache_ttl_seconds
         self._shared_cache_timeout_seconds = shared_cache_timeout_seconds
+        self._l2_writer = (
+            None
+            if shared_response_cache is None
+            else BoundedSharedResponseCacheWriter(
+                shared_response_cache=shared_response_cache,
+                operation="recommend",
+                ttl_seconds=shared_cache_ttl_seconds,
+                timeout_seconds=shared_cache_timeout_seconds,
+                queue_size=shared_cache_write_queue_size,
+                worker_count=shared_cache_write_workers,
+            )
+        )
         self._inflight: dict[str, asyncio.Lock] = {}
-        self._background_tasks: set[asyncio.Task[None]] = set()
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if (
@@ -283,6 +300,7 @@ class RecommendationResponseCacheMiddleware:
             return None, replay_receive, None, started_at, request
         self._result_cache.store(key, shared_payload)
         if not isinstance(self._result_cache.get(key), bytes):
+            record_shared_response_cache_error("recommend", stage="promote")
             return None, replay_receive, None, started_at, request
         return (
             shared_response,
@@ -296,10 +314,10 @@ class RecommendationResponseCacheMiddleware:
         try:
             deserialized: dict[str, Any] = json.loads(payload)
         except (TypeError, ValueError):
-            record_shared_response_cache_error("recommend")
+            record_shared_response_cache_error("recommend", stage="decode")
             return None
         if not isinstance(deserialized, dict):
-            record_shared_response_cache_error("recommend")
+            record_shared_response_cache_error("recommend", stage="decode")
             return None
         deserialized["trace_id"] = self._trace_id_provider()
         body = json.dumps(
@@ -324,20 +342,20 @@ class RecommendationResponseCacheMiddleware:
                 timeout=self._shared_cache_timeout_seconds,
             )
         except Exception:
-            record_shared_response_cache_error("recommend")
+            record_shared_response_cache_error("recommend", stage="read")
             return None
         if not isinstance(payload, bytes):
-            record_shared_response_cache_miss("recommend")
+            record_shared_response_cache_miss("recommend", stage="read")
             return None
         try:
             parsed = json.loads(payload)
         except (TypeError, ValueError):
-            record_shared_response_cache_error("recommend")
+            record_shared_response_cache_error("recommend", stage="decode")
             return None
         if not isinstance(parsed, dict):
-            record_shared_response_cache_error("recommend")
+            record_shared_response_cache_error("recommend", stage="decode")
             return None
-        record_shared_response_cache_hit("recommend")
+        record_shared_response_cache_hit("recommend", stage="read")
         return payload
 
     def _recording_send(self, *, key: str, send: Send) -> Send:
@@ -364,36 +382,15 @@ class RecommendationResponseCacheMiddleware:
         return recording
 
     def _schedule_l2_publish(self, *, key: str, body: bytes) -> None:
-        if self._shared_response_cache is None or body == b"":
+        if self._l2_writer is None or body == b"":
             return
-        task = asyncio.create_task(self._publish_l2_response(key=key, body=body))
-        self._background_tasks.add(task)
-        task.add_done_callback(self._background_tasks.discard)
-
-    async def _publish_l2_response(self, *, key: str, body: bytes) -> None:
-        assert self._shared_response_cache is not None
         index_version = self._result_cache.current_index_version()
         if index_version is None:
             return
         payload = self._result_cache.get_without_metrics(key)
         if not isinstance(payload, bytes):
             return
-        try:
-            stored = await asyncio.wait_for(
-                asyncio.to_thread(
-                    self._shared_response_cache.store,
-                    key,
-                    payload,
-                    index_version=index_version,
-                    ttl_seconds=self._shared_cache_ttl_seconds,
-                ),
-                timeout=self._shared_cache_timeout_seconds,
-            )
-        except Exception:
-            record_shared_response_cache_error("recommend")
-            return
-        if stored:
-            record_shared_response_cache_store("recommend")
+        self._l2_writer.submit(key=key, payload=payload, index_version=index_version)
 
     def _coalescing_key(self, request: BotRecommendationRequest) -> str | None:
         assert self._result_cache is not None
