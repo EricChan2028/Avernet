@@ -4,7 +4,6 @@ caller 配置快照同步(PATCH /providers/{pid}/bots/{ref}/caller)。
 对应实现: bcn_service.sync_bot_caller_config
 风格: LocalHttpClient + MockSeam——stub 响应、断言调用,未 stub 即抛错。
 """
-from typing import Callable
 from unittest.mock import Mock, patch
 
 import httpx
@@ -124,10 +123,33 @@ class TestSyncCallerConfigTransport:
         "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
         return_value="prod",
     )
+    def test_envelope_failure_raises_with_server_message(self, _mock_env, service, http):
+        http.set_response("patch", _ok_response(200, {
+            "success": False,
+            "error": "bcn down",
+        }))
+
+        with pytest.raises(BcnServiceError, match="bcn down"):
+            _sync(service)
+
+    @patch(
+        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        return_value="prod",
+    )
     def test_stale_raises_bcn_service_error(self, _mock_env, service, http):
         http.set_response("patch", _ok_response(200, {"sync_status": "stale"}))
 
         with pytest.raises(BcnServiceError):
+            _sync(service)
+
+    @patch(
+        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        return_value="prod",
+    )
+    def test_body_missing_sync_status_raises(self, _mock_env, service, http):
+        http.set_response("patch", _ok_response(200, {}))
+
+        with pytest.raises(BcnServiceError, match="unexpected response body"):
             _sync(service)
 
     @patch(
@@ -168,3 +190,31 @@ class TestSyncCallerConfigTransport:
 
         with pytest.raises(BcnServiceError):
             _sync(service)
+
+
+class TestSyncCallerConfigDevRegistrationEnabled:
+    @patch(
+        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        return_value="dev",
+    )
+    def test_dev_with_registration_enabled_fires_sync(self, _mock_env, http):
+        service = BcnService(
+            http_client=http,
+            config=BcnConfig(
+                base_url="http://fake-bcn:21000",
+                provider_id="prv_40354c8a",
+                provider_admin_token="test-bcn-token",
+                provider_registration_enabled=True,
+            ),
+            timeout=5.0,
+        )
+        http.set_response("patch", _ok_response(200, {"sync_status": "applied"}))
+
+        result = service.sync_bot_caller_config(
+            teamclaw_bot_uuid="20260502_1cjjh1ik",
+            owner_workno="100000",
+            enabled=True,
+            source_revision=5,
+        )
+
+        assert result["sync_status"] == "applied"

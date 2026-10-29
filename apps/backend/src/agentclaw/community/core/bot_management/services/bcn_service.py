@@ -682,13 +682,19 @@ class BcnService:
                     raise BcnServiceError(
                         f"BCN caller config sync API error: {error_msg}"
                     )
-                body = body.get("data") or {}
+                body = (
+                    body.get("data") if isinstance(body.get("data"), dict) else {}
+                )
             sync_status = str((body or {}).get("sync_status") or "")
             if sync_status not in ("applied", "unchanged"):
+                hint = (
+                    "stale = BCS holds a higher source_revision"
+                    if sync_status == "stale"
+                    else "unexpected response body"
+                )
                 raise BcnServiceError(
                     f"BCN caller config sync rejected: sync_status={sync_status!r} "
-                    f"(stale = BCS holds a higher source_revision) "
-                    f"provider_bot_ref={provider_bot_ref} "
+                    f"({hint}) provider_bot_ref={provider_bot_ref} "
                     f"source_revision={source_revision}"
                 )
             logger.info(
