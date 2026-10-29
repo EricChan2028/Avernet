@@ -37,6 +37,7 @@ WORKSPACE_GROUP_PATCH_OPERATION = "workspace_group.patch"
 WORKSPACE_GROUP_LIST_OPERATION = "workspace_group.list"
 WORKSPACE_GROUP_MEMBER_ADD_OPERATION = "workspace_group.member.add"
 WORKSPACE_GROUP_MEMBER_REMOVE_OPERATION = "workspace_group.member.remove"
+WORKSPACE_GROUP_DELETE_OPERATION = "workspace_group.delete"
 WORKSPACE_GROUP_LABEL_OPERATION = "workspace_group.label"
 WORKSPACE_GROUP_VISIBILITY_OPERATION = "workspace_group.visibility"
 WORKSPACE_GROUP_PARTICIPANT_MODE_OPERATION = (
@@ -122,9 +123,9 @@ PROFILE_EFFECTS = {
         "participant_mode": "driver-member",
     },
     WORKSPACE_GROUP_LIFECYCLE_PROFILE_CONTRACT: {
-        "group": "bounded-owned-bots-retained-group-lifecycle",
+        "group": "bounded-owned-bots-group-lifecycle-delete",
         "initial_session": "retained",
-        "cleanup": "none",
+        "cleanup": "exact-owned-group-delete-and-not-found",
         "participant_mode": "driver-member",
     },
     WORKSPACE_GROUP_GOVERNANCE_PROFILE_CONTRACT: {
@@ -516,6 +517,10 @@ def validate_workspace_group_lifecycle_bindings(
         WORKSPACE_GROUP_MEMBER_REMOVE_OPERATION: {
             "method": "DELETE",
             "path": "/groups/{group_id}/members/{member_actor_id}",
+        },
+        WORKSPACE_GROUP_DELETE_OPERATION: {
+            "method": "DELETE",
+            "path": "/groups/{group_id}?bot_id={driver_actor_id}",
         },
     }
     if not isinstance(value, dict) or set(value) != set(expected):

@@ -109,7 +109,7 @@
         },
         {
           "id": "WORKSPACE.list",
-          "expectation": "A bounded list contains the exact newly created group, not merely an unrelated nonzero total.",
+          "expectation": "A total-bounded, offset-paged list scan contains the exact newly created owned group, not merely an unrelated nonzero total on the default page.",
           "functions": [
             "test_list_groups"
           ]

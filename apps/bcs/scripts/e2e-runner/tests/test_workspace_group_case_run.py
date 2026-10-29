@@ -20,6 +20,7 @@ from bcs_e2e.profile import ConfigError
 from bcs_e2e.run_state import read
 from bcs_e2e.workspace_cli_profile import (
     WORKSPACE_GROUP_CREATE_OPERATION,
+    WORKSPACE_GROUP_DELETE_OPERATION,
     WORKSPACE_GROUP_DETAIL_OPERATION,
     WORKSPACE_GROUP_LABEL_OPERATION,
     WORKSPACE_GROUP_LIST_OPERATION,
@@ -63,6 +64,9 @@ def lifecycle_bindings() -> dict:
         WORKSPACE_GROUP_MEMBER_REMOVE_OPERATION: route(
             WORKSPACE_GROUP_MEMBER_REMOVE_OPERATION, "DELETE",
             "/groups/{group_id}/members/{member_actor_id}"),
+        WORKSPACE_GROUP_DELETE_OPERATION: route(
+            WORKSPACE_GROUP_DELETE_OPERATION, "DELETE",
+            "/groups/{group_id}?bot_id={driver_actor_id}"),
     }
 
 
@@ -110,11 +114,16 @@ def profile_value(case: str, *, preprod=False) -> dict:
             {"kind": "owned-local-bot-tokens",
              "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN"}
         ),
-        "relationships": {
-            "group": f"bounded-owned-bots-retained-group-{case}",
-            "initial_session": "retained", "cleanup": "none",
-            "participant_mode": "driver-member",
-        },
+        "relationships": (
+            {"group": "bounded-owned-bots-group-lifecycle-delete",
+             "initial_session": "retained",
+             "cleanup": "exact-owned-group-delete-and-not-found",
+             "participant_mode": "driver-member"}
+            if case == "lifecycle" else
+            {"group": "bounded-owned-bots-retained-group-governance",
+             "initial_session": "retained", "cleanup": "none",
+             "participant_mode": "driver-member"}
+        ),
         "policy": {
             "fixture_pool": f"workspace-group-{case}-pool",
             "exclusive_use_confirmed": True, "timeout_seconds": 10,
@@ -152,7 +161,7 @@ class WorkspaceGroupCaseRunTests(unittest.TestCase):
         self.profile_path = self.root / "profile.json"
         self.state_dir = self.root / "state"
 
-    def invoke(self, case: str, *, preprod=False):
+    def invoke(self, case: str, *, preprod=False, cleanup=None):
         self.profile_path.write_text(
             json.dumps(profile_value(case, preprod=preprod)), encoding="utf-8")
         case_id, requirement_id = (
@@ -161,7 +170,11 @@ class WorkspaceGroupCaseRunTests(unittest.TestCase):
             ("DUAL-WORKSPACE-GROUP-GOVERNANCE-01", "WORKSPACE.label")
         )
         result = execution(case_id, requirement_id)
-        with patch.dict(_CASES, {case: {**_CASES[case], "adapter": Mock(),
+        adapter = Mock()
+        if cleanup is not None:
+            adapter.cleanup_receipt = cleanup
+        factory = Mock(return_value=adapter)
+        with patch.dict(_CASES, {case: {**_CASES[case], "adapter": factory,
                                         "execute": Mock(return_value=result)}}):
             report = dual_workspace_group_case_run(
                 profile_path=self.profile_path, case_key=case,
@@ -171,18 +184,47 @@ class WorkspaceGroupCaseRunTests(unittest.TestCase):
         return report, result, case_id
 
     def test_lifecycle_case_entry_writes_a_bound_sanitized_report(self):
-        report, result, case_id = self.invoke("lifecycle")
+        cleanup = {
+            "status": "PASS", "group_id": "bcs_grp_workspace_lifecycle_01",
+            "deleted": True, "not_found_verified": True,
+            "resource_disposition":
+                "EXACT_OWNED_GROUP_DELETED_HISTORY_RETAINED",
+            "retained_groups": [], "requests": [],
+        }
+        report, result, case_id = self.invoke("lifecycle", cleanup=cleanup)
         self.assertEqual(report["status"], "PASS")
         self.assertEqual(report["case_id"], case_id)
         self.assertEqual(report["credential_kind"], "owned_local_bot_token")
         self.assertEqual(report["resource_disposition"],
-                         "RETAINED_BOUNDED_OWNED_BOTS_GROUP_LIFECYCLE")
+                         "EXACT_OWNED_GROUP_DELETED_HISTORY_RETAINED")
+        self.assertEqual(report["cleanup"], cleanup)
+        self.assertEqual(report["retained_groups"], [])
         self.assertEqual(report["case"], result.snapshot())
         self.assertEqual(read(self.state_dir / "workspace-lifecycle-profile.json"),
                          profile_value("lifecycle"))
         self.assertEqual(read(self.state_dir / "workspace-lifecycle-binding.json")["case_id"], case_id)
         self.assertEqual(read(self.state_dir / "workspace-lifecycle-run.json"), report)
         self.assertNotIn(LOCAL_TOKEN, json.dumps(report, sort_keys=True))
+
+    def test_lifecycle_cleanup_failure_is_disclosed_without_masking_case(self):
+        cleanup = {
+            "status": "BLOCKED", "error_type": "RunStateError",
+            "error_detail": "delete unconfirmed",
+            "resource_disposition":
+                "EXACT_OWNED_GROUP_RETAINED_DELETE_UNCONFIRMED",
+            "retained_groups": [{
+                "kind": "group", "id": "bcs_grp_workspace_lifecycle_01",
+                "driver_bot": DRIVER,
+                "disposition": "RETAINED_DELETE_UNCONFIRMED"}],
+            "requests": [],
+        }
+        report, _, _ = self.invoke("lifecycle", cleanup=cleanup)
+        self.assertEqual(report["status"], "PASS")
+        self.assertEqual(report["execution"]["status"], "PASS")
+        self.assertEqual(report["cleanup"]["status"], "BLOCKED")
+        self.assertEqual(report["resource_disposition"],
+                         "EXACT_OWNED_GROUP_RETAINED_DELETE_UNCONFIRMED")
+        self.assertEqual(len(report["retained_groups"]), 1)
 
     def test_preprod_governance_case_entry_writes_a_bound_sanitized_report(self):
         report, result, case_id = self.invoke("governance", preprod=True)

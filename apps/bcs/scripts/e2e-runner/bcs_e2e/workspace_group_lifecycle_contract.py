@@ -11,6 +11,7 @@ from .run_state import RunStateError
 from .write_transport import WriteClient
 from .workspace_cli_profile import (
     WORKSPACE_GROUP_CREATE_OPERATION,
+    WORKSPACE_GROUP_DELETE_OPERATION,
     WORKSPACE_GROUP_DETAIL_OPERATION,
     WORKSPACE_GROUP_LIST_OPERATION,
     WORKSPACE_GROUP_MEMBER_ADD_OPERATION,
@@ -35,7 +36,11 @@ CASE_METHODS = (
     "list_owned_workspace_groups",
     "add_and_remove_workspace_member",
 )
-FIXTURE_EFFECT = "RETAINED_BOUNDED_OWNED_BOTS_GROUP_LIFECYCLE"
+FIXTURE_EFFECT = "BOUNDED_OWNED_BOTS_GROUP_LIFECYCLE_DELETE_CLEANUP"
+CLEANUP_METHOD = "cleanup_owned_workspace_group"
+CLEANUP_SUCCESS_DISPOSITION = "EXACT_OWNED_GROUP_DELETED_HISTORY_RETAINED"
+CLEANUP_RETAINED_DISPOSITION = "EXACT_OWNED_GROUP_RETAINED_DELETE_UNCONFIRMED"
+CLEANUP_NOT_APPLICABLE_DISPOSITION = "NO_OWNED_GROUP_CREATED"
 SOURCE_FUNCTIONS = (
     "test_create_group",
     "test_get_group_detail",
@@ -123,14 +128,15 @@ def workspace_group_lifecycle_adaptability() -> dict:
         "blocker": (
             "The legacy Group lifecycle HTTP contract is implemented and "
             "mock-verified, but real Singlebox or preprod effect admission "
-            "and execution remain independent gates; the created Group stays "
-            "retained."
+            "and execution remain independent gates; successful cleanup "
+            "deletes the exact owned Group and verifies 404, while cleanup "
+            "failure is disclosed without masking the case result."
         ),
     }
 
 
 def validate_workspace_group_lifecycle_adapter(adapter: object) -> None:
-    for name in CASE_METHODS:
+    for name in (*CASE_METHODS, CLEANUP_METHOD):
         if not callable(getattr(adapter, name, None)):
             raise RunStateError(
                 f"workspace group lifecycle adapter is missing {name}")
@@ -221,6 +227,17 @@ def _validate_listing(data: object, group_id: str) -> None:
             "workspace group lifecycle bounded list is not exact")
 
 
+def _validate_cleanup(data: object, group_id: str, driver: str) -> None:
+    if (not isinstance(data, dict)
+            or data.get("group_id") != group_id
+            or data.get("driver_bot") != driver
+            or data.get("deleted") is not True
+            or data.get("not_found_verified") is not True):
+        raise RunStateError(
+            "workspace group lifecycle cleanup did not delete the exact "
+            "owned Group")
+
+
 def _validate_membership(data: object, group_id: str, driver: str,
                           member: str) -> None:
     if (not isinstance(data, dict)
@@ -230,6 +247,59 @@ def _validate_membership(data: object, group_id: str, driver: str,
             or data.get("final_participants") != [driver]):
         raise RunStateError(
             "workspace group lifecycle membership round trip is not exact")
+
+
+def _not_applicable_cleanup() -> dict:
+    return {
+        "status": "NOT_APPLICABLE",
+        "resource_disposition": CLEANUP_NOT_APPLICABLE_DISPOSITION,
+        "retained_groups": [],
+        "requests": [],
+    }
+
+
+def _execute_owned_group_cleanup(adapter: object) -> dict:
+    group_id = getattr(adapter, "group_id", None)
+    driver = getattr(adapter, "driver_id", "")
+    if group_id is None:
+        return _not_applicable_cleanup()
+    try:
+        result = getattr(adapter, CLEANUP_METHOD)()
+        if not isinstance(result, AdapterCall):
+            raise RunStateError(
+                "workspace group lifecycle cleanup did not return AdapterCall")
+        result.validate()
+        _validate_evidence(
+            result, operation=WORKSPACE_GROUP_DELETE_OPERATION,
+            case_class="cleanup")
+        _validate_cleanup(result.data, group_id, driver)
+        return {
+            **result.data,
+            "status": "PASS",
+            "resource_disposition": CLEANUP_SUCCESS_DISPOSITION,
+            "retained_groups": [],
+            "evidence": dict(result.evidence),
+            "requests": [dict(row) for row in result.evidence["requests"]],
+        }
+    except Exception as error:
+        records = [dict(row) for row in getattr(
+            adapter, "_cleanup_request_records", [])]
+        for row in getattr(error, "request_records", []):
+            if row not in records:
+                records.append(dict(row))
+        return {
+            "status": "BLOCKED",
+            "error_type": type(error).__name__,
+            "error_detail": record_error_detail(error),
+            "resource_disposition": CLEANUP_RETAINED_DISPOSITION,
+            "retained_groups": [{
+                "kind": "group",
+                "id": group_id,
+                "driver_bot": driver,
+                "disposition": "RETAINED_DELETE_UNCONFIRMED",
+            }],
+            "requests": records,
+        }
 
 
 def execute_workspace_group_lifecycle_case(adapter: object) -> CaseExecution:
@@ -283,6 +353,8 @@ def execute_workspace_group_lifecycle_case(adapter: object) -> CaseExecution:
                                       data=None, evidence={},
                                       error_type=error_type,
                                       error_detail=detail))
+    cleanup = _execute_owned_group_cleanup(adapter)
+    setattr(adapter, "cleanup_receipt", cleanup)
     execution = CaseExecution(
         case_id=CASE_ID, parent_id=WORKSPACE_PARENT,
         status="PASS" if error_type is None else "BLOCKED",
@@ -312,6 +384,8 @@ class RemoteWorkspaceGroupLifecycleAdapter:
         self.driver_id = self.profile["actors"]["driver"]["bot_id"]
         self.member_id = self.profile["actors"]["member"]["bot_id"]
         self.group_id: str | None = None
+        self.cleanup_receipt = _not_applicable_cleanup()
+        self._cleanup_request_records: list[dict] = []
         self.writer = WriteClient(self._http_profile(self.profile))
 
     @staticmethod
@@ -495,10 +569,6 @@ class RemoteWorkspaceGroupLifecycleAdapter:
                     "the contract")
             if total is None:
                 total = page_total
-            elif page_total != total:
-                raise RunStateError(
-                    "workspace group lifecycle bounded list total changed "
-                    "during deep paging")
             limit = page_limit
             matches = [row for row in items
                        if isinstance(row, dict) and row.get("id") == group_id]
@@ -585,6 +655,36 @@ class RemoteWorkspaceGroupLifecycleAdapter:
                 add_record, after_add_record, remove_record, after_remove_record,
                 operation=WORKSPACE_GROUP_MEMBER_ADD_OPERATION,
                 case_class="membership"),
+        )
+
+    def cleanup_owned_workspace_group(self) -> AdapterCall:
+        group_id = self._require_group()
+        self._cleanup_request_records = []
+        deleted, delete_record = self.writer.call(
+            WORKSPACE_GROUP_DELETE_OPERATION, group_id=group_id,
+            expected=(200,))
+        self._cleanup_request_records.append(dict(delete_record))
+        if (not isinstance(deleted, dict)
+                or deleted.get("deleted") is not True
+                or deleted.get("id") != group_id):
+            raise RunStateError(
+                "workspace group lifecycle cleanup did not acknowledge the "
+                "exact owned Group")
+        gone, gone_record = self.writer.call(
+            WORKSPACE_GROUP_DETAIL_OPERATION, group_id=group_id,
+            expected=(404,))
+        self._cleanup_request_records.append(dict(gone_record))
+        if gone is not None or gone_record.get("http_status") != 404:
+            raise RunStateError(
+                "workspace group lifecycle cleanup left the exact owned "
+                "Group readable")
+        return AdapterCall(
+            data={"group_id": group_id, "driver_bot": self.driver_id,
+                  "deleted": True, "not_found_verified": True},
+            evidence=self._evidence(
+                delete_record, gone_record,
+                operation=WORKSPACE_GROUP_DELETE_OPERATION,
+                case_class="cleanup"),
         )
 
     def _participants(self, data: object) -> list[str]:

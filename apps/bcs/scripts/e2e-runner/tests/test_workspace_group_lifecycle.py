@@ -24,6 +24,7 @@ from bcs_e2e.workspace_group_lifecycle_contract import (
 from bcs_e2e.workspace_cli_profile import (
     ConfigError,
     WORKSPACE_GROUP_CREATE_OPERATION,
+    WORKSPACE_GROUP_DELETE_OPERATION,
     WORKSPACE_GROUP_DETAIL_OPERATION,
     WORKSPACE_GROUP_LIST_OPERATION,
     WORKSPACE_GROUP_MEMBER_ADD_OPERATION,
@@ -70,8 +71,9 @@ def profile_value(*, preprod=False, mutate=None):
                  {"kind": "owned-local-bot-tokens",
                   "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN"}),
         "relationships": {
-            "group": "bounded-owned-bots-retained-group-lifecycle",
-            "initial_session": "retained", "cleanup": "none",
+            "group": "bounded-owned-bots-group-lifecycle-delete",
+            "initial_session": "retained",
+            "cleanup": "exact-owned-group-delete-and-not-found",
             "participant_mode": "driver-member",
         },
         "policy": {
@@ -107,6 +109,11 @@ def profile_value(*, preprod=False, mutate=None):
                 "path": "/groups/{group_id}/members/{member_actor_id}",
                 "api_face": "legacy", "auth": "case_owned_driver",
                 "response": "legacy-json", "traceparent": "disabled"},
+            WORKSPACE_GROUP_DELETE_OPERATION: {
+                "method": "DELETE",
+                "path": "/groups/{group_id}?bot_id={driver_actor_id}",
+                "api_face": "legacy", "auth": "case_owned_driver",
+                "response": "legacy-json", "traceparent": "disabled"},
         },
     }
     if mutate is not None:
@@ -121,6 +128,7 @@ LEGACY_METHODS = {
     WORKSPACE_GROUP_LIST_OPERATION: "GET",
     WORKSPACE_GROUP_MEMBER_ADD_OPERATION: "POST",
     WORKSPACE_GROUP_MEMBER_REMOVE_OPERATION: "DELETE",
+    WORKSPACE_GROUP_DELETE_OPERATION: "DELETE",
 }
 LEGACY_PATHS = {
     WORKSPACE_GROUP_CREATE_OPERATION: "/groups",
@@ -130,6 +138,8 @@ LEGACY_PATHS = {
     WORKSPACE_GROUP_MEMBER_ADD_OPERATION: "/groups/{group_id}/members",
     WORKSPACE_GROUP_MEMBER_REMOVE_OPERATION:
         "/groups/{group_id}/members/{member_actor_id}",
+    WORKSPACE_GROUP_DELETE_OPERATION:
+        "/groups/{group_id}?bot_id={driver_actor_id}",
 }
 
 
@@ -169,9 +179,21 @@ def standard_responses():
             WORKSPACE_GROUP_MEMBER_REMOVE_OPERATION: {
                 "removed": True, "group_id": GROUP,
                 "removed_bot_uuid": MEMBER},
+            WORKSPACE_GROUP_DELETE_OPERATION: {
+                "deleted": True, "id": GROUP},
         }
 
     def fake_call(self_client, operation, **kwargs):
+        if (operation == WORKSPACE_GROUP_DETAIL_OPERATION
+                and kwargs.get("expected") == (404,)):
+            return None, {
+                "operation": operation,
+                "method": LEGACY_METHODS[operation],
+                "http_status": 404,
+                "path": LEGACY_PATHS[operation],
+                "submitted_request_id": "e2e-workspace-group",
+                "traceparent_mode": "disabled",
+            }
         data = responses().get(operation)
         if operation == WORKSPACE_GROUP_DETAIL_OPERATION:
             # call order: initial detail, patch read-back, post-add
@@ -208,7 +230,7 @@ class WorkspaceGroupLifecycleTests(unittest.TestCase):
 
         def deformed_call(self_client, operation, **kwargs):
             data, record = fake_call(self_client, operation, **kwargs)
-            if deform is not None:
+            if deform is not None and kwargs.get("expected") != (404,):
                 deform(data, operation, kwargs)
             return data, record
 
@@ -280,6 +302,13 @@ class WorkspaceGroupLifecycleTests(unittest.TestCase):
                 self.assertEqual(
                     snapshot["steps"][4]["data"]["final_participants"],
                     [DRIVER])
+                cleanup = adapter.cleanup_receipt
+                self.assertEqual(cleanup["status"], "PASS")
+                self.assertTrue(cleanup["not_found_verified"])
+                self.assertEqual(cleanup["retained_groups"], [])
+                self.assertEqual(
+                    cleanup["resource_disposition"],
+                    "EXACT_OWNED_GROUP_DELETED_HISTORY_RETAINED")
                 serialized = json.dumps(snapshot, sort_keys=True)
                 self.assertNotIn(COOKIE, serialized)
                 self.assertNotIn(TOKEN, serialized)
@@ -296,12 +325,17 @@ class WorkspaceGroupLifecycleTests(unittest.TestCase):
         def deform(data, operation, kwargs):
             if operation == WORKSPACE_GROUP_CREATE_OPERATION:
                 data["participants"] = [DRIVER, "foreign-bot"]
-        result, _ = self.run_case(deform=deform)
+        result, adapter = self.run_case(deform=deform)
         self.assertEqual(result.status, "BLOCKED")
         self.assertEqual(result.error_type, "RunStateError")
         self.assertEqual(result.completed_count, 0)
         self.assertEqual(result.steps[0].status, "NOT_RUN")
         self.assertEqual(result.steps[1].status, "NOT_RUN")
+        self.assertEqual(adapter.cleanup_receipt["status"], "NOT_APPLICABLE")
+        self.assertEqual(adapter.cleanup_receipt["retained_groups"], [])
+        self.assertEqual(
+            adapter.cleanup_receipt["resource_disposition"],
+            "NO_OWNED_GROUP_CREATED")
 
     def test_detail_identity_drift_is_blocked(self):
         def deform(data, operation, kwargs):
@@ -429,6 +463,46 @@ class WorkspaceGroupLifecycleTests(unittest.TestCase):
         self.assertEqual(result.status, "BLOCKED")
         self.assertEqual(result.error_type, "RunStateError")
 
+    def test_cleanup_acknowledgement_failure_does_not_mask_case_pass(self):
+        def deform(data, operation, kwargs):
+            if operation == WORKSPACE_GROUP_DELETE_OPERATION:
+                data["deleted"] = False
+
+        result, adapter = self.run_case(deform=deform)
+        self.assertEqual(result.status, "PASS")
+        cleanup = adapter.cleanup_receipt
+        self.assertEqual(cleanup["status"], "BLOCKED")
+        self.assertEqual(cleanup["error_type"], "RunStateError")
+        self.assertEqual(len(cleanup["requests"]), 1)
+        self.assertEqual(cleanup["requests"][0]["method"], "DELETE")
+        self.assertEqual(len(cleanup["retained_groups"]), 1)
+        self.assertEqual(cleanup["retained_groups"][0]["id"], GROUP)
+        self.assertEqual(
+            cleanup["resource_disposition"],
+            "EXACT_OWNED_GROUP_RETAINED_DELETE_UNCONFIRMED")
+
+    def test_cleanup_not_found_verification_failure_is_disclosed(self):
+        base_call, _ = standard_responses()
+
+        def live_after_delete(self_client, operation, **kwargs):
+            if (operation == WORKSPACE_GROUP_DETAIL_OPERATION
+                    and kwargs.get("expected") == (404,)):
+                return group_detail(), {
+                    "operation": operation, "method": "GET",
+                    "http_status": 200, "path": LEGACY_PATHS[operation],
+                    "submitted_request_id": "e2e-workspace-group-live",
+                    "traceparent_mode": "disabled"}
+            return base_call(self_client, operation, **kwargs)
+
+        result, adapter = self.run_case(
+            call_factory=lambda: live_after_delete)
+        self.assertEqual(result.status, "PASS")
+        cleanup = adapter.cleanup_receipt
+        self.assertEqual(cleanup["status"], "BLOCKED")
+        self.assertIn("left the exact owned Group readable",
+                      cleanup["error_detail"])
+        self.assertEqual(cleanup["retained_groups"][0]["driver_bot"], DRIVER)
+
     def test_case_guard_accepts_the_case_files(self):
         guard = ROOT.parents[3] / "scripts/ci/e2e_runner_case_guard.py"
         files = [ROOT / "bcs_e2e/workspace_cli_profile.py",
@@ -451,6 +525,9 @@ class WorkspaceGroupLifecycleTests(unittest.TestCase):
             "member-route": lambda value: value["route_bindings"][
                 WORKSPACE_GROUP_MEMBER_REMOVE_OPERATION].update(
                     path="/groups/{group_id}/members/{driver_actor_id}"),
+            "delete-route": lambda value: value["route_bindings"][
+                WORKSPACE_GROUP_DELETE_OPERATION].update(
+                    path="/groups/{group_id}"),
         }
         for name, mutate in mutations.items():
             with self.subTest(name=name):

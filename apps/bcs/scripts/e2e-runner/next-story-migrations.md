@@ -2957,18 +2957,27 @@ reviewed sequence in order:
    follow-up detail read-back of the persisted `label` and
    `context` with an unchanged roster — an echo without a
    read-back, or a drifted read-back, is a failure, not a pass;
-4. list Groups (`GET /groups?limit=50&group_kind=all`) and
-   require the exact newly created owned Group to be present
-   exactly once in the bounded `items` with its driver Bot, per
-   the migration-contract correction that replaces "global list
-   totals" with exact owned identity — a nonzero `total` without
-   the exact Group is a failure, not a pass;
+4. list Groups through the station's offset pages
+   (`GET /groups?limit=50&offset=<n>&group_kind=all`), scanning
+   up to the first response's `total` and disclosing
+   `pages_scanned`/`limit`/`offset`/`total`, then require the exact
+   newly created owned Group to be present exactly once with its
+   driver Bot; a nonzero `total` without the exact Group after the
+   last reachable page is a failure, not a pass, and an overstated
+   `total` may stop early on a short or empty page;
 5. add the member Bot (`POST /groups/{group_id}/members` with
    the exact `bot_uuid`), read the two-participant roster back,
    remove it (`DELETE /groups/{group_id}/members/{bot_uuid}`),
    and require both exact acknowledgements (`added=true` naming
    the Group and member; `removed=true` naming the Group and the
-   removed Bot) plus the final driver-only roster.
+   removed Bot) plus the final driver-only roster;
+6. delete the exact owned Group (`DELETE
+   /groups/{group_id}?bot_id=<driver>`), require the acknowledged
+   `deleted=true` and the exact id, then verify the detail route
+   returns 404. Cleanup failure is recorded separately and does
+   not overwrite the five-obligation case verdict; unresolved
+   Groups are disclosed in `retained_groups` with their
+   disposition.
 
 This is the raw legacy HTTP face, not public-v1: the deployed
 route contract for these operations is the root `/groups` tree
@@ -2983,16 +2992,16 @@ the admitted two-Bot `driver`/`member` pair; the legacy
 CEO/PM/ENG/QA pairing is represented by those roles, and no
 borrowed or impersonated credential is admitted.
 
-The profile contract is frozen as
-`dual-workspace-group-lifecycle-profile-v1` with six
+The profile contract remains
+`dual-workspace-group-lifecycle-profile-v1`, now with seven
 `case_owned_driver` legacy route bindings (create, detail,
-patch, bounded list, member add, member remove) and the retained
-effect admission `group=bounded-owned-bots-retained-group-lifecycle`,
-`initial_session=retained`, `cleanup=none`; the created Group
-stays retained and no automatic deletion is claimed. The
-membership round trip ends with the driver-only roster, so the
-retained Group carries no foreign participant. To preserve the
-225-entry executor source budget, the 33-line
+patch, deep-paged list, member add, member remove, exact Group
+delete) and the effect admission
+`group=bounded-owned-bots-group-lifecycle-delete`,
+`initial_session=retained`,
+`cleanup=exact-owned-group-delete-and-not-found`; the membership
+round trip ends with the driver-only roster before cleanup. To
+preserve the 225-entry executor source budget, the 33-line
 `actor_admission.py` module (its pilot actor-scope admission
 belongs with the observer admission gate that already enforced
 the same policy) was consolidated into `observation_gate.py`,

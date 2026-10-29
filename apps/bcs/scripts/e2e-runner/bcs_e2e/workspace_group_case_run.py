@@ -19,6 +19,8 @@ from .workspace_group_governance_contract import (
 )
 from .workspace_group_lifecycle_contract import (
     CASE_ID as LIFECYCLE_CASE_ID,
+    CLEANUP_NOT_APPLICABLE_DISPOSITION,
+    FIXTURE_EFFECT as LIFECYCLE_FIXTURE_EFFECT,
     RemoteWorkspaceGroupLifecycleAdapter,
     execute_workspace_group_lifecycle_case,
 )
@@ -32,7 +34,7 @@ _CASES = {
         "validator": validate_workspace_group_lifecycle_profile,
         "adapter": RemoteWorkspaceGroupLifecycleAdapter,
         "execute": execute_workspace_group_lifecycle_case,
-        "fixture_effect": "RETAINED_BOUNDED_OWNED_BOTS_GROUP_LIFECYCLE",
+        "fixture_effect": LIFECYCLE_FIXTURE_EFFECT,
         "credential_kind": None,
     },
     "governance": {
@@ -100,11 +102,25 @@ def dual_workspace_group_case_run(
         "state_dir": str(state_dir),
     }
     write(binding_file, binding)
+    cleanup = None
     try:
         adapter = _CASES[case_key]["adapter"](profile)
         execution = _CASES[case_key]["execute"](adapter)
+        candidate = getattr(adapter, "cleanup_receipt", None)
+        if isinstance(candidate, dict):
+            cleanup = json.loads(json.dumps(candidate, allow_nan=False))
     except (ConfigError, RunStateError, OSError) as error:
         raise ConfigError(f"workspace {case_key} case execution is unavailable: {error}") from None
+    if case_key == "lifecycle" and cleanup is None:
+        cleanup = {
+            "status": "NOT_RUN",
+            "resource_disposition": CLEANUP_NOT_APPLICABLE_DISPOSITION,
+            "retained_groups": [],
+            "requests": [],
+        }
+    resource_disposition = _CASES[case_key]["fixture_effect"]
+    if case_key == "lifecycle" and cleanup is not None:
+        resource_disposition = cleanup["resource_disposition"]
     report = {
         "schema_version": SCHEMA_VERSION,
         "contract": REPORT_CONTRACT,
@@ -127,7 +143,10 @@ def dual_workspace_group_case_run(
             "error_type": execution.error_type,
             "error_detail": execution.error_detail,
         },
-        "resource_disposition": _CASES[case_key]["fixture_effect"],
+        **({"cleanup": cleanup,
+            "retained_groups": cleanup["retained_groups"]}
+           if case_key == "lifecycle" else {}),
+        "resource_disposition": resource_disposition,
         "remote_validation": "NOT_RUN",
         "grants_release_credit": False,
         "credential_kind": (
