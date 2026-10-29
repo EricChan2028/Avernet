@@ -75,6 +75,21 @@ def reviewed_release_inventory(manifest: dict | None = None) -> list[dict]:
     return reviewed
 
 
+def assert_reviewed_parent(parent_id: str, *, family: str) -> str:
+    """Fail closed unless a dual parent is a reviewed release parent.
+
+    Known unmapped backlog parents stay executable and are named explicitly;
+    anything outside the reviewed 29-story denominator or the unmapped backlog
+    is rejected before any binding is frozen.
+    """
+    reviewed = {row['id'] for row in reviewed_release_inventory()}
+    if not isinstance(parent_id, str) or (
+            parent_id not in reviewed and parent_id not in KNOWN_UNMAPPED_LEGACY_IDS):
+        raise RunStateError(
+            family + ' parent is outside the reviewed release denominator')
+    return parent_id
+
+
 def current_manifest(suite: str = 'preprod-pilot-v1') -> dict:
     paths = {'preprod-pilot-v1': 'manifest.json', 'preprod-retained-v1': 'retained-manifest.json',
              'preprod-retained-file-v1': 'retained-file-manifest.json',

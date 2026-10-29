@@ -28,7 +28,7 @@ import time
 from urllib.request import ProxyHandler, build_opener
 
 from .errors import has_cancellation
-from .inventory import current_manifest, executor_digest
+from .inventory import current_manifest, executor_digest, reviewed_release_inventory
 from .local_draft_group_contract import (CASE_ID, MARKER_KEYS, MARKER_PATTERNS, PARENT,
                                          PROVIDER_JUDGE_MOCK, REQUIREMENTS, STATUS,
                                          STORY_SOURCE, SUITE, draft_group_source_binding)
@@ -220,8 +220,9 @@ def local_draft_group_run(*, binary: Path, binary_sha256: str, state_dir: Path, 
     source = executor_digest()
     original = draft_group_source_binding()
     legacy = current_manifest()['legacy_inventory']
-    if len(legacy) != 34 or PARENT in {row['id'] for row in legacy}:
-        raise RunStateError('Draft group slice must stay independent of the 34-story release denominator')
+    reviewed = reviewed_release_inventory()
+    if PARENT in {row['id'] for row in reviewed}:
+        raise RunStateError('Draft group slice must stay independent of the reviewed release denominator')
     binding = {'schema_version': 1, 'contract': SUITE, 'suite': SUITE, 'case_id': CASE_ID,
                'run_id': run_id, 'executor_digest': source, 'binary_kind': BINARY_KIND,
                'bcs_binary_sha256': binary_sha256, 'auto_build': False,

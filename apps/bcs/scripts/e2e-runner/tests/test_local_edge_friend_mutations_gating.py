@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from bcs_e2e.edge_friend_mutation_case import CASE_IDS
+from bcs_e2e.edge_friend_mutation_case import CASE_IDS, RELEASE_PARENT_IDS
 from bcs_e2e.local_edge_friend_mutations_case import (
     OwnedEdgeFriendFixtureAdmission,
     OwnedEdgeFriendMutationsAdapter,
@@ -59,8 +59,19 @@ class EdgeFriendMutationGatingTests(unittest.TestCase):
             local_edge_friend_mutations_run(**self._kwargs(state_dir=existing))
 
     def test_legacy_denominator_drift_is_rejected_before_runtime_creation(self):
-        with patch('bcs_e2e.local_edge_friend_mutations_run.current_manifest',
+        with patch('bcs_e2e.inventory.current_manifest',
                    return_value={'legacy_inventory': [{'id': 'only-one'}]}):
+            with self.assertRaises(RunStateError):
+                local_edge_friend_mutations_run(**self._kwargs())
+
+    def test_reviewed_release_parent_removal_is_rejected_before_runtime_creation(self):
+        manifest_path = Path(__file__).resolve().parents[1] / 'manifest.json'
+        rows = [dict(row) for row in json.loads(manifest_path.read_text())['legacy_inventory']]
+        target = RELEASE_PARENT_IDS[0]
+        drifted = [{**row, 'id': target + '-drift' if row['id'] == target else row['id']}
+                   for row in rows]
+        with patch('bcs_e2e.inventory.current_manifest',
+                   return_value={'legacy_inventory': drifted}):
             with self.assertRaises(RunStateError):
                 local_edge_friend_mutations_run(**self._kwargs())
 

@@ -28,7 +28,7 @@ from .edge_friend_mutation_case import (
     edge_friend_mutation_source_binding,
 )
 from .errors import has_cancellation
-from .inventory import current_manifest, executor_digest
+from .inventory import current_manifest, executor_digest, reviewed_release_inventory
 from .local_edge_friend_mutations_case import (
     OwnedEdgeFriendFixtureAdmission,
     OwnedEdgeFriendMutationsAdapter,
@@ -249,9 +249,9 @@ def local_edge_friend_mutations_run(*, binary: Path, binary_sha256: str,
     bindings = {case_id: edge_friend_mutation_source_binding(case_id)
                 for case_id in CASE_IDS}
     legacy = current_manifest()['legacy_inventory']
-    if (len(legacy) != 34
-            or set(RELEASE_PARENT_IDS) & {row['id'] for row in legacy} != set(RELEASE_PARENT_IDS)):
-        raise RunStateError('Edge friend-mutation reviewed parents are missing from the release denominator')
+    reviewed = reviewed_release_inventory()
+    if set(RELEASE_PARENT_IDS) - {row['id'] for row in reviewed}:
+        raise RunStateError('Edge friend-mutation reviewed parents are missing from the reviewed release denominator')
 
     runtime = identities = None
     cases: list[dict] = []
