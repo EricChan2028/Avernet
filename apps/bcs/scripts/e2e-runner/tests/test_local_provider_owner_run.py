@@ -1,8 +1,7 @@
 """Behavioral guards for the Provider owner-isolation owned-local Run lifecycle.
 
-Staged under provider-owner-slice/tests/ and landed verbatim into tests/ by
-the orchestrator landing recipe; the runner root is located dynamically so the
-file needs no edit when it moves. Every Run here is a fake-owned-runtime
+Landed verbatim from the provider-owner staging payload by the orchestrator
+landing recipe; the runner root is located dynamically. Every Run here is a fake-owned-runtime
 offline rehearsal: the frozen black-box story child is replaced by a seam, no
 BCS server, provider mint or live HTTP happens, and nothing credential-bearing
 is captured.
@@ -36,7 +35,7 @@ from bcs_e2e.local_provider_owner_run import (BINARY_KIND, OWNER_ID, STORY_CHECK
                                               _redaction_gate, _story_argv,
                                               local_provider_owner_run,
                                               validate_provider_owner_binary)
-from bcs_e2e.local_story_commands import CASES
+from bcs_e2e.local_story_commands import CASES, LOCAL_STORY_COMMANDS
 from bcs_e2e.migration_inventory import migration_plan
 from bcs_e2e.profile import fingerprint
 from bcs_e2e.provider_owner_contract import (CASE_ID, MARKER_KEYS, REQUIREMENTS,
@@ -465,13 +464,23 @@ class ProviderOwnerEvidenceTamperTests(unittest.TestCase):
 
 
 class ProviderOwnerIndependentSliceFenceTests(unittest.TestCase):
-    def test_staged_slice_stays_out_of_the_frozen_story_command_registry(self):
+    def test_promoted_slice_uses_backlog_commands_without_release_credit(self):
         self.assertNotIn(CASE_ID, {case.case_id for case in CASES})
+        self.assertIn('local-provider-owner-run', LOCAL_STORY_COMMANDS)
+        self.assertIn('local-provider-owner-report', LOCAL_STORY_COMMANDS)
         plan = migration_plan()
         registered = {row['case_id'] for row in plan['local_registered_executors']}
+        backlog = {row['case_id']: row for row in plan['local_backlog_case_slices']}
         independent = {row['case_id'] for row in plan['local_independent_slices']}
         self.assertNotIn(CASE_ID, registered)
         self.assertNotIn(CASE_ID, independent)
+        row = backlog[CASE_ID]
+        self.assertEqual(row['execution_command'], 'local-provider-owner-run')
+        self.assertEqual(row['report_command'], 'local-provider-owner-report')
+        self.assertEqual(row['status'], 'LOCAL_EXECUTOR_ONLY_BACKLOG')
+        self.assertFalse(row['release_parent_denominator'])
+        self.assertTrue(row['independent_slice'])
+        self.assertFalse(row['grants_release_credit'])
 
     def test_frozen_binding_declares_the_unmapped_backlog_parent(self):
         binding = provider_owner_source_binding()

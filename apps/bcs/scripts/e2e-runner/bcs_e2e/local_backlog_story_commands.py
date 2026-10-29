@@ -19,6 +19,8 @@ BACKLOG_STORY_COMMANDS = frozenset({
     'local-session-owner-report',
     'local-draft-delivery-run',
     'local-draft-delivery-report',
+    'local-provider-owner-run',
+    'local-provider-owner-report',
 })
 
 
@@ -51,6 +53,12 @@ def register_backlog_story_commands(commands) -> None:
     _register_report(
         commands, 'local-draft-delivery-report',
         'Verify frozen owned-local Draft delivery evidence offline')
+    _register_run(
+        commands, 'local-provider-owner-run',
+        'Run the frozen Provider owner-isolation Story beside one owned BCS runtime')
+    _register_report(
+        commands, 'local-provider-owner-report',
+        'Verify frozen owned-local Provider owner evidence offline')
 
 
 def _report_command(args: Namespace, *, write_reports: Callable,
@@ -105,4 +113,21 @@ def dispatch_backlog_story_command(args: Namespace, *,
         return _report_command(
             args, write_reports=write_reports, builder=build_draft_delivery_report,
             label='Draft delivery')
+    if args.command == 'local-provider-owner-run':
+        from .local_provider_owner_run import local_provider_owner_run
+        report = local_provider_owner_run(
+            binary=args.binary, binary_sha256=args.binary_sha256,
+            state_dir=args.state_dir, run_id=args.run_id,
+            confirm_run_id=args.confirm_run_id,
+            allow_local_processes=args.allow_local_processes,
+            allow_fixture_write=args.allow_fixture_write,
+            allow_write=args.allow_write)
+        rc = 0 if report['status'] == 'LOCAL_PROVIDER_OWNER_PASS' else (
+            130 if report['status'] == 'CANCELLED' else 2)
+        return report, rc
+    if args.command == 'local-provider-owner-report':
+        from .local_provider_owner_reporting import build_provider_owner_report
+        return _report_command(
+            args, write_reports=write_reports, builder=build_provider_owner_report,
+            label='Provider owner')
     raise RunStateError('unknown backlog Story command')
