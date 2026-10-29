@@ -1,0 +1,347 @@
+{
+  "schema_version": 1,
+  "parent": "story_collaboration_draft_delivery",
+  "suite": "owned-local-draft-delivery-v1",
+  "case_id": "LOCAL-DRAFT-DELIVERY-01",
+  "environment": {
+    "local": "LOCAL_EXECUTOR_ONLY",
+    "preprod": "REMOTE_UNSUPPORTED"
+  },
+  "sources": {
+    "collaboration_draft_story.sh": "7c081dfb84b04549572c173f5da51125f5ff5475648ce471664c83cf3c77f4d2",
+    "indentation-regression.json": "23e0a22ea7f14f632b1af54a34aaab5bb6679f48580cd99240d36dd6943569e5"
+  },
+  "source_revision": "a6d4ff2242aa8bb23674154abf08c35a66244a42",
+  "source_file_revisions": {
+    "collaboration_draft_story.sh": "a6d4ff2242aa8bb23674154abf08c35a66244a42"
+  },
+  "story_checks": 45,
+  "story_markers": [
+    "Draft delivery story: {checks} live HTTP assertions passed"
+  ],
+  "owned_runtime_binary": {
+    "package": "bcs",
+    "build_command": "cargo build -p bcs --bin bcs",
+    "hash_algorithm": "sha256",
+    "opt_in_env": [
+      "BCS_E2E_TEST_BINARY",
+      "BCS_E2E_TEST_BINARY_SHA256"
+    ],
+    "auto_build": false,
+    "required_arguments": [
+      "--binary",
+      "--binary-sha256"
+    ]
+  },
+  "fixture": {
+    "path": "indentation-regression.json",
+    "definition_yaml_bytes": 2174,
+    "content_hash": "761dc9bc0f748c06ee5152a6ea9dc8bb1c1bba5e385c001930a26c17be43e7b7"
+  },
+  "config_fragment": {
+    "path": "bcs_e2e/draft_delivery/collaboration-drafts.enabled.json",
+    "required": {
+      "collaboration_drafts": {
+        "enabled": true
+      }
+    },
+    "integration_note": "The shared local_config.py has no collaboration_drafts section; integration must merge this slice-owned fragment and enable collaboration_drafts.enabled=true."
+  },
+  "redaction_tokens": [
+    "bot_token",
+    "readToken",
+    "read_token",
+    "Bearer "
+  ],
+  "requirements": [
+    {
+      "id": "DRAFT-DELIVERY.client-selected-idempotent-create",
+      "expectation": "The client selects the canonical lowercase UUID before any write; the first PUT creates revision 1, an exact same-content/same-title replay returns 200 with that unchanged revision 1, and different bytes for the same ID conflict instead of replacing it.",
+      "story_lines": [
+        28,
+        48
+      ],
+      "anchors": [
+        {
+          "line": 28,
+          "literal": "id=\"$(python3 -c 'import uuid; print(uuid.uuid4())')\""
+        },
+        {
+          "line": 43,
+          "literal": "collaboration draft create"
+        },
+        {
+          "line": 44,
+          "literal": "--draft-id \"$id\""
+        },
+        {
+          "line": 45,
+          "literal": "size_bytes 2174"
+        },
+        {
+          "line": 47,
+          "literal": "revision 1"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.immutable-revision-append",
+      "expectation": "Revisions are immutable: revision 1 remains byte-for-byte readable after revision 2 is appended, and an update with expected_revision=1 produces exactly revision 2 rather than mutating or renumbering history.",
+      "story_lines": [
+        45,
+        75
+      ],
+      "anchors": [
+        {
+          "line": 45,
+          "literal": "size_bytes 2174"
+        },
+        {
+          "line": 47,
+          "literal": "revision 1"
+        },
+        {
+          "line": 66,
+          "literal": "collaboration draft get"
+        },
+        {
+          "line": 68,
+          "literal": "cmp \"$directory/original.yaml\" \"$directory/download.yaml\""
+        },
+        {
+          "line": 72,
+          "literal": "update advances exactly once"
+        },
+        {
+          "line": 74,
+          "literal": "size_bytes 2174"
+        },
+        {
+          "line": 75,
+          "literal": "reference.revision 1"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.stale-update-conflict",
+      "expectation": "A stale update whose expected_revision no longer equals the live head is rejected with HTTP 409; it neither advances the head nor replaces the newer revision.",
+      "story_lines": [
+        70,
+        78
+      ],
+      "anchors": [
+        {
+          "line": 70,
+          "literal": "collaboration draft update"
+        },
+        {
+          "line": 71,
+          "literal": "--expected-revision 1"
+        },
+        {
+          "line": 76,
+          "literal": "/collaboration/drafts/$id/revisions"
+        },
+        {
+          "line": 77,
+          "literal": "expected_revision\":1"
+        },
+        {
+          "line": 78,
+          "literal": "require_status \"stale writer cannot replace the newer revision\" 409"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.read-token-single-revision",
+      "expectation": "A reference/card is bound to exactly one fixed revision: reissuing the historical card after head advances still reports revision 1, the readToken placeholder is revision-scoped compatibility data, and reads require only the client-selected draft ID plus revision.",
+      "story_lines": [
+        48,
+        75
+      ],
+      "anchors": [
+        {
+          "line": 48,
+          "literal": "readToken"
+        },
+        {
+          "line": 55,
+          "literal": "/collaboration/drafts/$id/revisions/1"
+        },
+        {
+          "line": 57,
+          "literal": "content_hash"
+        },
+        {
+          "line": 60,
+          "literal": "/collaboration/drafts/$id/revisions/1/validate"
+        },
+        {
+          "line": 73,
+          "literal": "collaboration draft preview"
+        },
+        {
+          "line": 75,
+          "literal": "reference.revision 1"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.revoked-or-deleted-unavailable",
+      "expectation": "Revoked revisions and every revision of a deleted Draft are uniformly unavailable to public reads (404 DRAFT_REFERENCE_UNAVAILABLE); revoking one revision leaves its historical sibling readable, while deletion makes all historical cards unreadable and a late PUT cannot resurrect the ID.",
+      "story_lines": [
+        80,
+        91
+      ],
+      "anchors": [
+        {
+          "line": 80,
+          "literal": "collaboration draft revoke"
+        },
+        {
+          "line": 83,
+          "literal": "require_status \"revoked card becomes unavailable\" 404"
+        },
+        {
+          "line": 84,
+          "literal": "/collaboration/drafts/$id/revisions/1"
+        },
+        {
+          "line": 85,
+          "literal": "require_status \"old shared revision remains readable\" 200"
+        },
+        {
+          "line": 86,
+          "literal": "collaboration draft delete"
+        },
+        {
+          "line": 88,
+          "literal": "require_status \"deletion revokes every historical card\" 404"
+        },
+        {
+          "line": 89,
+          "literal": "PUT \"/collaboration/drafts/$id\""
+        },
+        {
+          "line": 91,
+          "literal": "require_status \"late create cannot revive a deleted Draft\" 404"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.read-token-read-only",
+      "expectation": "A draft read token/reference is read-only: it never authorizes DELETE or revision management, and management remains behind the owner Bot credential; a public caller is rejected (401/403) and the Draft remains unchanged.",
+      "story_lines": [
+        52,
+        91
+      ],
+      "anchors": [
+        {
+          "line": 52,
+          "literal": "Authorization: Bearer $owner_token"
+        },
+        {
+          "line": 63,
+          "literal": "DELETE \"/collaboration/drafts/$id\""
+        },
+        {
+          "line": 64,
+          "literal": "require_status \"public reader cannot delete\" 401"
+        },
+        {
+          "line": 89,
+          "literal": "PUT \"/collaboration/drafts/$id\""
+        },
+        {
+          "line": 91,
+          "literal": "require_status \"late create cannot revive a deleted Draft\" 404"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.no-store-every-response",
+      "expectation": "Every Draft HTTP response, including success and error responses on management and public read/validate surfaces, carries Cache-Control: no-store so immutable source and reference material is never cached.",
+      "story_lines": [
+        55,
+        59
+      ],
+      "anchors": [
+        {
+          "line": 55,
+          "literal": "/collaboration/drafts/$id/revisions/1"
+        },
+        {
+          "line": 56,
+          "literal": "require_status \"a card holder reads without Bot credentials or Session membership\" 200"
+        },
+        {
+          "line": 59,
+          "literal": "no-store"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.token-redaction",
+      "expectation": "No draft token (owner Bot token, revision readToken placeholder, or authorization header value) enters child logs, run receipts, evidence journals, or canonical reports; the redaction gate refuses any credential-shaped output and the child only emits a non-secret completion marker.",
+      "story_lines": [
+        43,
+        64
+      ],
+      "anchors": [
+        {
+          "line": 43,
+          "literal": "collaboration draft create"
+        },
+        {
+          "line": 48,
+          "literal": "readToken"
+        },
+        {
+          "line": 49,
+          "literal": "owner_token=\"$(get_bot_token PM)\""
+        },
+        {
+          "line": 52,
+          "literal": "Authorization: Bearer $owner_token"
+        },
+        {
+          "line": 55,
+          "literal": "/collaboration/drafts/$id/revisions/1"
+        },
+        {
+          "line": 64,
+          "literal": "require_status \"public reader cannot delete\" 401"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    }
+  ],
+  "remote_validation": "NOT_RUN",
+  "grants_release_credit": false,
+  "release_parent_denominator": false,
+  "independent_slice": true,
+  "evidence_granularity": "OWNED_CHILD_RECEIPT"
+}
