@@ -8,13 +8,15 @@ const mocks = vi.hoisted(() => ({
   spec: { id: 'wf-1', version: 3, title: '测试工作流', nodes: [] },
   dbWorkflow: { id: 'wf-1', version: 3, title: '测试工作流', nodes: [] },
   isDirty: false,
+  sessionId: 1,
+  pendingEdits: {} as Record<string, string>,
   saveDb: vi.fn(),
   gitSave: vi.fn(),
   deploy: vi.fn(),
   getHistory: vi.fn(),
   getDeploySnapshot: vi.fn(),
   loadSpec: vi.fn(),
-  markClean: vi.fn(),
+  completeSave: vi.fn(),
   updateSpecField: vi.fn(),
 }))
 
@@ -46,13 +48,15 @@ vi.mock('../../editor/store', () => {
       isDirty: mocks.isDirty,
       selectedNodeId: null,
       validationErrors: [],
+      pendingEdits: mocks.pendingEdits,
+      canUndo: false, canRedo: false, undo: vi.fn(), redo: vi.fn(), setActionError: vi.fn(),
       loadSpec: mocks.loadSpec,
       createNew: vi.fn(),
       importYaml: vi.fn(),
       selectNode: vi.fn(),
-      markClean: mocks.markClean,
+      completeSave: mocks.completeSave,
     }),
-    { getState: () => ({ updateSpecField: mocks.updateSpecField }) },
+    { getState: () => ({ sessionId: mocks.sessionId, spec: mocks.spec, completeSave: mocks.completeSave, updateSpecField: mocks.updateSpecField, pendingEdits: mocks.pendingEdits }) },
   )
   return { useEditorStore }
 })
@@ -65,7 +69,7 @@ vi.mock('../../components/WorkflowPackSidebar', () => ({ default: () => null }))
 vi.mock('../../components/EditorCanvas', () => ({ default: () => null }))
 vi.mock('../../components/NodePalette', () => ({ default: () => null }))
 vi.mock('../../components/NodePropertyPanel', () => ({ default: () => null }))
-vi.mock('../../components/WorkflowConfigPanel', () => ({ default: () => null }))
+vi.mock('../../components/editor/WorkflowSettingsPanel', () => ({ default: () => null }))
 vi.mock('../../components/YamlEditor', () => ({ default: () => null }))
 vi.mock('../../components/WorkflowHistoryPanel', () => ({ default: () => null }))
 
@@ -77,7 +81,9 @@ function renderEditor() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.sessionId = 1
   mocks.isDirty = false
+  mocks.pendingEdits = {}
   mocks.getHistory.mockResolvedValue({ active: null, history: [] })
   mocks.getDeploySnapshot.mockResolvedValue(null)
   mocks.saveDb.mockResolvedValue(mocks.spec)
@@ -85,6 +91,7 @@ beforeEach(() => {
     ok: true, saved: true, workflowId: 'wf-1', packId: 'wf-1',
     branch: 'saved/wf-1', commit: 'abcd1234ef56', version: 4,
   })
+  mocks.completeSave.mockReturnValue(true)
   mocks.deploy.mockResolvedValue({
     ok: true, deployed: true, workflowId: 'wf-1', packId: 'wf-1',
     deployNumber: 5, version: 9, tagName: 'deploy/wf-1/#5', messageId: null,
@@ -92,6 +99,17 @@ beforeEach(() => {
 })
 
 describe('editor save (DB + git snapshot) and server-side deploy', () => {
+  it('blocks save and deploy while configuration or YAML has an unapplied draft', async () => {
+    mocks.pendingEdits = { yaml: '未应用' }
+    renderEditor()
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    expect(screen.getByText('请先应用或放弃未完成的配置草稿，再保存。')).toBeInTheDocument()
+    expect(mocks.saveDb).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: '部署' }))
+    expect(screen.getByText('存在未应用的配置草稿，请先应用并保存再部署。')).toBeInTheDocument()
+    expect(mocks.deploy).not.toHaveBeenCalled()
+  })
+
   it('saves to the DB first, then snapshots to git and reports the saved branch and commit', async () => {
     renderEditor()
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
@@ -103,8 +121,44 @@ describe('editor save (DB + git snapshot) and server-side deploy', () => {
     expect(mocks.gitSave).toHaveBeenCalledWith(
       expect.objectContaining({ workflowId: 'wf-1', spec: expect.anything(), note: 'editor save' }),
     )
-    expect(mocks.markClean).toHaveBeenCalled()
+    expect(mocks.completeSave).toHaveBeenCalled()
     expect(await screen.findByText(/工作流已保存（git saved\/wf-1 · abcd1234）/)).toBeInTheDocument()
+  })
+
+  it('gives save completion the original document snapshot and requested rename identity', async () => {
+    mocks.gitSave.mockImplementationOnce(({ workflowId }: { workflowId: string }) => ({
+      ok: true, saved: true, workflowId, packId: workflowId,
+      branch: `saved/${workflowId}`, commit: 'abcd1234ef56', version: 4,
+    }))
+    renderEditor()
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    await userEvent.clear(screen.getByLabelText('标识'))
+    await userEvent.type(screen.getByLabelText('标识'), 'wf-2')
+    await userEvent.click(screen.getByRole('button', { name: '保存工作流' }))
+    await waitFor(() => expect(mocks.completeSave).toHaveBeenCalledTimes(1))
+    const [savedSpec, requestSpec, sessionId] = mocks.completeSave.mock.calls[0]
+    expect(savedSpec).toMatchObject({ id: 'wf-2', title: '测试工作流' })
+    expect(requestSpec).toMatchObject({ id: 'wf-1', title: '测试工作流' })
+    expect(sessionId).toBe(1)
+    expect(mocks.saveDb).toHaveBeenCalledWith(expect.objectContaining({ workflowId: 'wf-2', originalWorkflowId: 'wf-1' }))
+    expect(await screen.findByText(/工作流已保存（git saved\/wf-2/)).toBeInTheDocument()
+  })
+
+  it('routes a stale save result through the rejecting session boundary', async () => {
+    mocks.completeSave.mockImplementationOnce(() => false)
+    let resolveDb!: (value: unknown) => void
+    mocks.saveDb.mockImplementationOnce(() => new Promise(resolve => { resolveDb = resolve }))
+    renderEditor()
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    await userEvent.click(screen.getByRole('button', { name: '保存工作流' }))
+    expect(mocks.saveDb).toHaveBeenCalledTimes(1)
+    mocks.sessionId += 1
+    resolveDb(mocks.spec)
+    await waitFor(() => expect(mocks.gitSave).toHaveBeenCalledTimes(1))
+    expect(mocks.completeSave).toHaveBeenCalledTimes(1)
+    expect(mocks.completeSave).toHaveLastReturnedWith(false)
+    expect(mocks.updateSpecField).not.toHaveBeenCalled()
+    expect(screen.queryByText(/工作流已保存（git/)).not.toBeInTheDocument()
   })
 
   it('keeps the DB save and shows a degraded warning when the git snapshot fails', async () => {
@@ -114,7 +168,7 @@ describe('editor save (DB + git snapshot) and server-side deploy', () => {
     await userEvent.click(screen.getByRole('button', { name: '保存工作流' }))
     expect(await screen.findByText(/数据库已保存，但 git 快照失败：git push failed/)).toBeInTheDocument()
     expect(mocks.saveDb).toHaveBeenCalledTimes(1)
-    expect(mocks.markClean).toHaveBeenCalled()
+    expect(mocks.completeSave).toHaveBeenCalled()
   })
 
   it('blocks deploy while the canvas has unsaved edits', async () => {
