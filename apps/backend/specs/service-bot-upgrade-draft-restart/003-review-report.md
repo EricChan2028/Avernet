@@ -2,7 +2,7 @@
 agent: tc-code-reviewer
 status: completed
 created: 2026-10-29
-iteration: 2
+iteration: 3
 ---
 
 # 代码评审报告
@@ -92,3 +92,25 @@ iteration: 2
 - `create_publish`是plain INSERT，不会因upsert返回已有草稿；本次不存在“insert复用旧草稿仍触发restart”的新增路径。旧upgrade查后建及非唯一last_pub_id未改，本次不提供并发/跨进程恰好一次承诺；普通restart仍沿用既有durable锁。
 - 首次提交失败后upgrade重试只返回既有草稿，恢复走手动草稿重启。这是已批准方案，不将幂等返回误记为补偿完成。
 - 本review不访问真实Bot、不部署、不创建/更新OCB gitlink，也不替用户合并PR。
+
+
+## 全量CI架构门禁修复复审
+
+主流程首次Backend全量报告发现唯一失败：HTTP层依赖guard未登记新增领域异常名`UpgradeDraftRestartError`；其他26678 passed、40 skipped、2 subtests由主流程报告，本review不将该次失败全套记作PASS。
+
+最终补丁仅两点：
+
+1. router从异常定义模块`core.service_bot.services.publish_exceptions`直接导入该类型，避免通过具体service模块re-export导入。
+2. `test_http_adapter_layer_is_http_only.py::_CORE_SERVICE_NAMES_OK`在既有“Errors raised by services that the router translates to HTTP”段精确登记`UpgradeDraftRestartError`。
+
+**复审结论：PASS，此为原guard设计允许的领域异常登记，不是降低门禁。** Guard文件开头的第二条不变量明确允许core/services中的异常类型和helper，禁止的是具体service类。新类型仅继承`BotPublishServiceError`并携带草稿record/安全消息，不是service实现。此次没有添加模块级后缀豁免、路径豁免、正则通配或关闭具体service检查；现有非endpoint文件及flat-core-service反例测试仍原样运行。
+
+独立验证（最终两文件补丁）：
+
+```bash
+apps/backend/.venv/bin/python -m pytest apps/backend/tests/community/architecture/test_http_adapter_layer_is_http_only.py apps/backend/tests/community/adapters/http/service_bot/test_router_publish_coverage.py apps/backend/tests/community/core/service_bot/services/test_upgrade_draft_restart.py -q --no-cov
+```
+
+结果：49 passed，17条既有warnings；包含guard全部6例及既有具体service导入反例。上述两个改动文件ruff通过，`git diff --check`通过。业务接线和P1修复无变化。
+
+本地最终全量及PR3292新head远端CI仍交主流程完成；此处不把旧head运行中或首次唯一失败替换成远端PASS。

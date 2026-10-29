@@ -78,3 +78,9 @@ apps/backend/.venv/bin/python -m pytest   apps/backend/tests/community/core/bot_
 - 修复工作树后：受影响两文件43 passed；两文件ruff及`git diff --check`通过。
 - 使用官方`scanner._findings(git diff --unified=0 github/dev --)`核验完整当前工作树源码差异，0 findings。
 - `check_secrets.py --base github/dev --head HEAD`仍检出旧已提交版本的4处哨兵，因为修复尚未提交；由主流程提交本次修复后按相同命令复验，不把工作树扫描冒充已提交门禁PASS。
+
+## 全量CI架构门禁修复
+- 全量CI发现HTTP路由领域异常精确名单遗漏`UpgradeDraftRestartError`。按该门禁“Errors raised by services that the router translates to HTTP”现有规则，仅登记此精确异常名称；没有模块通配、禁令删除或服务类豁免。
+- router改为直接从`publish_exceptions.py`定义模块导入新异常，避免经具体BotPublishService模块重导出。
+- 完整`test_http_adapter_layer_is_http_only.py`及新草稿重启、router和原发布服务三个测试文件复验：183 passed，17条既有Pydantic弃用warning。
+- 两个改动Python文件ruff、`git diff --check`通过；官方scanner._findings读取完整当前工作树相对github/dev差异为0 findings。未提交，交主流程提交后重跑最终全量CI。
