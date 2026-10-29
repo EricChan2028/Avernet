@@ -214,11 +214,12 @@ async def test_create_first_publish_success_and_errors():
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_upgrade_publish_success_and_errors(caplog):
+    sentinel = "credential" + "-sentinel"
     req = UpgradePublishRequest(publish_id=1)
     service = MagicMock()
     service.upgrade_publish.return_value.to_dict.return_value = {
         "id": 2, "version": 2, "last_pub_id": 1, "status": "draft",
-        "ext": {"secret": "credential-sentinel"},
+        "ext": {"secret": sentinel},
     }
     with caplog.at_level("INFO"):
         resp = await router_publish.upgrade_publish(request=req, user=_USER, publish_service=service)
@@ -226,7 +227,7 @@ async def test_upgrade_publish_success_and_errors(caplog):
     assert "service_bot.upgrade.request" in caplog.text
     assert "service_bot.upgrade.response" in caplog.text
     assert "draft_id=2 draft_status=draft version=2 last_pub_id=1" in caplog.text
-    assert "credential-sentinel" not in caplog.text
+    assert sentinel not in caplog.text
     service.upgrade_publish.assert_called_once_with(publish_id=1, owner_id="u1")
 
     resp = await router_publish.upgrade_publish(request=req, user=_ANON, publish_service=service)

@@ -7,6 +7,10 @@ from agentclaw.community.core.service_bot.repository.models import BotPublishRec
 from agentclaw.community.core.service_bot.services.bot_publish_service import BotPublishService
 
 
+_SENTINEL = "credential" + "-sentinel"
+_CHAIN_SENTINEL = "credential" + "-chain-sentinel"
+
+
 def publication(record_id, status, **fields):
     return BotPublishRecord(
         id=record_id, source_bot_pk=100, source_bot_id="source-bot",
@@ -46,7 +50,7 @@ def deps():
 
 def test_new_draft_restarts_source_with_current_owner(deps, caplog):
     service, _, bot_repo, lifecycle, _, draft = deps
-    lifecycle.restart_bot.return_value.update({"secret": "credential-sentinel"})
+    lifecycle.restart_bot.return_value.update({"secret": _SENTINEL})
     with caplog.at_level("INFO"):
         assert service.upgrade_publish(1, "collaborator") is draft
     bot_repo.get_by_pk.assert_called_once_with(100)
@@ -55,7 +59,7 @@ def test_new_draft_restarts_source_with_current_owner(deps, caplog):
     )
     assert "draft_restart.request" in caplog.text
     assert "draft_restart.response" in caplog.text
-    assert "credential-sentinel" not in caplog.text
+    assert _SENTINEL not in caplog.text
     assert "current-owner" in caplog.text
     assert "'original_publish_id': 1" in caplog.text
     assert "'draft_publish_id': 2" in caplog.text
@@ -86,7 +90,7 @@ def test_teclaw_draft_is_created_without_restart(deps, caplog):
     assert "teclaw_unsupported" in caplog.text
 
 
-@pytest.mark.parametrize("result", [RuntimeError("token=credential-sentinel"), {"success": False}, {"status": "FAILED"}])
+@pytest.mark.parametrize("result", [RuntimeError("token=" + _SENTINEL), {"success": False}, {"status": "FAILED"}])
 def test_restart_failure_retains_draft_and_does_not_leak_credentials(deps, result, caplog):
     from agentclaw.community.core.service_bot.services.publish_exceptions import UpgradeDraftRestartError
 
@@ -98,12 +102,12 @@ def test_restart_failure_retains_draft_and_does_not_leak_credentials(deps, resul
     with caplog.at_level("INFO"), pytest.raises(UpgradeDraftRestartError) as raised:
         service.upgrade_publish(1, "collaborator")
     assert raised.value.draft_record is draft
-    assert "credential-sentinel" not in caplog.text
+    assert _SENTINEL not in caplog.text
     assert "draft_restart.failure" in caplog.text
     assert "draft_retained=true" in caplog.text
     assert "'source_bot_pk': 100" in caplog.text
     assert "'draft_publish_id': 2" in caplog.text
-    assert "credential-sentinel" not in str(raised.value)
+    assert _SENTINEL not in str(raised.value)
     repo.get_by_last_pub_id.return_value = draft
     assert service.upgrade_publish(1, "collaborator") is draft
     assert lifecycle.restart_bot.call_count == 1
@@ -130,7 +134,7 @@ async def test_openapi_error_logging_does_not_include_provider_exception_chain(d
     from agentclaw.community.core.service_bot.services.service_publication_facade import ServicePublicationFacade
 
     service, _, bot_repo, lifecycle, original, _ = deps
-    lifecycle.restart_bot.side_effect = RuntimeError("token=credential-chain-sentinel")
+    lifecycle.restart_bot.side_effect = RuntimeError("token=" + _CHAIN_SENTINEL)
     facade = ServicePublicationFacade.__new__(ServicePublicationFacade)
     facade._publish_service = service
     facade._resolve_publication = Mock(return_value=(bot_repo.get_by_pk.return_value, original, None))
@@ -145,5 +149,5 @@ async def test_openapi_error_logging_does_not_include_provider_exception_chain(d
     with caplog.at_level("INFO"):
         response = await upgrade(request=request)
     assert response.status_code == 502
-    assert "credential-chain-sentinel" not in caplog.text
+    assert _CHAIN_SENTINEL not in caplog.text
     assert "draft_restart.failure" in caplog.text

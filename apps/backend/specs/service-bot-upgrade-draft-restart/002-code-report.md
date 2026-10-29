@@ -71,3 +71,10 @@ apps/backend/.venv/bin/python -m pytest   apps/backend/tests/community/core/bot_
 - 独立review后补HTTP出口version/last_pub_id及幂等existing_successor稳定事件；具体成功、失败、跳过事件/字段均有行为断言。
 - 复用`get_logger()`现有factory；`community/log.py`文档明确corp/prod logger自带trace-ID注入。社区测试默认stdlib无请求追踪上下文，未新增获取/伪造trace或全局设施。
 - 这轮日志字段增补后，两受影响测试文件43 passed；四个修改Python文件ruff及diff check通过。主agent全量CI另行记录最终head覆盖率。
+
+## 本地凭据门禁测试数据修复
+- 主流程提交后的凭据扫描命中4处合成哨兵常量（非真实凭据）。参照仓库scanner fixture规范，将测试值从字面凭据赋值改成分片拼接及变量引用；运行时仍包含secret/token哨兵，保留全部日志不泄露断言。
+- 未改扫描规则、业务代码或忽略配置；仅修改两个测试文件的数据构造。
+- 修复工作树后：受影响两文件43 passed；两文件ruff及`git diff --check`通过。
+- 使用官方`scanner._findings(git diff --unified=0 github/dev --)`核验完整当前工作树源码差异，0 findings。
+- `check_secrets.py --base github/dev --head HEAD`仍检出旧已提交版本的4处哨兵，因为修复尚未提交；由主流程提交本次修复后按相同命令复验，不把工作树扫描冒充已提交门禁PASS。
