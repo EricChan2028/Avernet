@@ -57,7 +57,7 @@ def public_accept_result(*, request_count=2, edge_count=2,
 def connection_page(*actor_ids):
     return {"items": [{"actor": {"type": "bot", "id": value}, "is_online": True}
                        for value in actor_ids],
-            "total": len(actor_ids), "page": 1, "page_size": 20}
+            "total": len(actor_ids), "page": 1, "page_size": 100}
 
 
 def base_profile(*, gateway=False, admitted=True):

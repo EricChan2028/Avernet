@@ -52,8 +52,8 @@ class RemoteFriendPublicAcceptAdapter:
         observation = self.client.read(operation)
         page, record = observation.data, observation.evidence
         items = page.get("items") if isinstance(page, dict) else None
-        if (not isinstance(items, list) or len(items) > 20
-                or page.get("page") != 1 or page.get("page_size") != 20
+        if (not isinstance(items, list) or len(items) > 100
+                or page.get("page") != 1 or page.get("page_size") != 100
                 or type(page.get("total")) is not int):
             raise RunStateError("friend-connection page is outside the bounded contract")
         matches = [item for item in items

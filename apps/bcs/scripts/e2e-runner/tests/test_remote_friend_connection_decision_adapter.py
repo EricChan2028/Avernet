@@ -63,13 +63,13 @@ def request_view(request_id, sender, receiver, status="pending", decided_by=None
 
 
 def request_page(*items):
-    return {"items": list(items), "total": len(items), "page": 1, "page_size": 20}
+    return {"items": list(items), "total": len(items), "page": 1, "page_size": 100}
 
 
 def connection_page(*actor_ids):
     return {"items": [{"actor": {"type": "bot", "id": value}, "is_online": True}
                       for value in actor_ids],
-            "total": len(actor_ids), "page": 1, "page_size": 20}
+            "total": len(actor_ids), "page": 1, "page_size": 100}
 
 
 def base_profile(*, gateway=False, bounded=True):
