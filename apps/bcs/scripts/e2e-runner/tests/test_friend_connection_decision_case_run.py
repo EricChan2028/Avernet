@@ -16,6 +16,12 @@ sys.path.insert(0, str(ROOT))
 
 from bcs_e2e.case_executor import CaseExecution, StepOutcome
 from bcs_e2e.cli import main
+from bcs_e2e.fresh_fixture_pair import (
+    CONTRACT as FRESH_FIXTURE_CONTRACT,
+    FreshFixturePair,
+    FreshFixtureProvisioningError,
+    initial_fresh_fixture_receipt,
+)
 from bcs_e2e.friend_connection_decision_case_run import (
     CREDENTIAL_KIND,
     dual_friend_connection_decision_case_run,
@@ -161,11 +167,27 @@ class FriendConnectionDecisionCaseRunTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def fresh_pair(self, profile: dict) -> FreshFixturePair:
+        receipt = initial_fresh_fixture_receipt(
+            run_id=RUN_ID, purpose="friend-connection-decisions")
+        receipt.update({
+            "status": "PASS",
+            "resource_disposition": "FRESH_OWNED_BOT_PAIR_RETAINED_PUBLIC_V1_NO_DELETE_ROUTE",
+            "fresh_pair": {
+                "driver": {"bot_id": DRIVER, "bot_name": "story-agent-driver"},
+                "member": {"bot_id": MEMBER, "bot_name": "story-agent-member"},
+            },
+        })
+        return FreshFixturePair(profile=profile, evidence=receipt)
+
     def invoke(self, status: str = "PASS"):
         profile = profile_value()
         self.profile_path.write_text(json.dumps(profile), encoding="utf-8")
         expected = expected_execution(status=status)
         with patch(
+                "bcs_e2e.friend_connection_decision_case_run.provision_fresh_owned_bot_pair",
+                return_value=self.fresh_pair(profile)), \
+             patch(
                 "bcs_e2e.friend_connection_decision_case_run.RemoteFriendConnectionDecisionAdapter",
                 FakeAdapter), \
              patch(
@@ -192,7 +214,15 @@ class FriendConnectionDecisionCaseRunTests(unittest.TestCase):
                          ["protected-reject", "protected-accept"])
         self.assertEqual(report["case_scope"]["public_operations"],
                          list(dict.fromkeys(PUBLIC_OPERATIONS)))
+        self.assertEqual(report["fresh_fixture"]["status"], "PASS")
+        self.assertEqual(report["fresh_fixture"]["contract"], FRESH_FIXTURE_CONTRACT)
+        self.assertEqual(
+            report["fresh_fixture"]["resource_disposition"],
+            "FRESH_OWNED_BOT_PAIR_RETAINED_PUBLIC_V1_NO_DELETE_ROUTE")
         self.assertEqual(read(state_dir / "friend-connection-decision-profile.json"), profile)
+        self.assertEqual(
+            read(state_dir / "friend-connection-decision-fresh-fixture.json"),
+            report["fresh_fixture"])
         self.assertEqual(
             read(state_dir / "friend-connection-decision-binding.json")["case_id"],
             expected.case_id)
@@ -209,6 +239,40 @@ class FriendConnectionDecisionCaseRunTests(unittest.TestCase):
         self.assertEqual(report["case"]["completed_count"], 0)
         self.assertEqual(
             read(state_dir / "friend-connection-decision-run.json"), report)
+
+    def test_fresh_fixture_failure_blocks_before_the_case_adapter(self):
+        profile = profile_value()
+        self.profile_path.write_text(json.dumps(profile), encoding="utf-8")
+        partial = initial_fresh_fixture_receipt(
+            run_id=RUN_ID, purpose="friend-connection-decisions")
+        partial.update({
+            "status": "BLOCKED",
+            "resource_disposition": "FRESH_OWNED_BOT_PAIR_PARTIAL_RETAINED",
+            "retained_bots": [{"role": "driver", "bot_id": "fresh-driver"}],
+        })
+        with patch(
+                "bcs_e2e.friend_connection_decision_case_run.provision_fresh_owned_bot_pair",
+                side_effect=FreshFixtureProvisioningError(
+                    "member fresh Bot registration failed", partial)), \
+             patch(
+                "bcs_e2e.friend_connection_decision_case_run.RemoteFriendConnectionDecisionAdapter",
+                side_effect=AssertionError("case adapter must not be constructed")):
+            report = dual_friend_connection_decision_case_run(
+                profile_path=self.profile_path,
+                state_dir=self.state_dir,
+                run_id=RUN_ID,
+                allow_write=True,
+                confirm_run_id=RUN_ID,
+            )
+        self.assertEqual(report["status"], "BLOCKED")
+        self.assertEqual(report["fresh_fixture"]["status"], "BLOCKED")
+        self.assertEqual(
+            report["resource_disposition"],
+            "FRESH_OWNED_BOT_PAIR_PARTIAL_RETAINED")
+        self.assertEqual(report["case"]["completed_count"], 0)
+        self.assertEqual(
+            read(self.state_dir / "friend-connection-decision-fresh-fixture.json"),
+            report["fresh_fixture"])
 
     def test_profile_must_bind_the_exact_case_operations(self):
         profile = profile_value()

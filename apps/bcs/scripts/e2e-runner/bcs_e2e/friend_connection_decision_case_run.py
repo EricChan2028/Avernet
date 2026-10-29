@@ -1,12 +1,21 @@
 """Command lifecycle for the reviewed public friend-connection decisions.
 
-This slice intentionally leaves the bounded rejection and acceptance evidence in place.
-It does not create a second friend surface or silently turn the retained effect into a
-cleanup completion."""
+Each run first provisions a fresh Human-owned driver/member Bot pair through
+the reviewed public-v1 register path.  The pair is single-run only; the receipt
+records the retained Bot identities because public-v1 has no Bot-delete route.
+The slice intentionally leaves the bounded rejection and acceptance evidence in
+place and does not create a second friend surface."""
 from __future__ import annotations
 
 from pathlib import Path
 
+from .fresh_fixture_pair import (
+    CONTRACT as FRESH_FIXTURE_CONTRACT,
+    RETAINED_DISPOSITION as FRESH_FIXTURE_DISPOSITION,
+    FreshFixtureProvisioningError,
+    initial_fresh_fixture_receipt,
+    provision_fresh_owned_bot_pair,
+)
 from .inventory import executor_digest
 from .local_friend_connection_decision_contract import (
     CASE_ID,
@@ -30,6 +39,7 @@ from .run_state import RunStateError, write
 SCHEMA_VERSION = 1
 REPORT_CONTRACT = "dual-friend-connection-decision-case-run-v1"
 CREDENTIAL_KIND = "human_cookie"
+FRESH_FIXTURE_PURPOSE = "friend-connection-decisions"
 
 BINDING_KEYS = frozenset(dict.fromkeys(PUBLIC_OPERATIONS))
 
@@ -52,6 +62,32 @@ def load_friend_connection_decision_case_profile(path: Path) -> dict:
         raise ConfigError(
             "friend-connection decision profile must explicitly admit only bounded owned-Bot decisions")
     return profile
+
+
+def _blocked_case_snapshot(plan, error_type: str, error_detail: str) -> dict:
+    return {
+        "case_id": CASE_ID,
+        "parent_id": FRIENDSHIP_PARENT,
+        "status": "BLOCKED",
+        "completed_count": 0,
+        "total_count": len(plan.requirement_ids),
+        "ready_to_execute": False,
+        "error_type": error_type,
+        "error_detail": error_detail,
+        "steps": [
+            {
+                "requirement_id": requirement_id,
+                "method": "fresh_fixture_pair_provisioning",
+                "status": "NOT_RUN",
+                "data": None,
+                "evidence": {},
+                "error_type": None,
+                "error_gap": None,
+                "error_detail": None,
+            }
+            for requirement_id in plan.requirement_ids
+        ],
+    }
 
 
 def dual_friend_connection_decision_case_run(
@@ -87,6 +123,8 @@ def dual_friend_connection_decision_case_run(
 
     profile_file = state_dir / "friend-connection-decision-profile.json"
     binding_file = state_dir / "friend-connection-decision-binding.json"
+    fresh_fixture_file = state_dir / "friend-connection-decision-fresh-fixture.json"
+    effective_profile_file = state_dir / "friend-connection-decision-effective-profile.json"
     report_file = state_dir / "friend-connection-decision-run.json"
     write(profile_file, profile)
     binding = {
@@ -99,6 +137,11 @@ def dual_friend_connection_decision_case_run(
         "executor_digest": artifact,
         "credential_kind": CREDENTIAL_KIND,
         "planned_resource_disposition": RESOURCE_DISPOSITION,
+        "fresh_fixture_provisioning": {
+            "contract": FRESH_FIXTURE_CONTRACT,
+            "roles": ["driver", "member"],
+            "disposition": FRESH_FIXTURE_DISPOSITION,
+        },
         "case_scope": {
             "requirement_ids": list(plan.requirement_ids),
             "selected_obligations": list(adaptability["selected_obligations"]),
@@ -107,15 +150,78 @@ def dual_friend_connection_decision_case_run(
         "state_dir": str(state_dir),
     }
     write(binding_file, binding)
-    try:
-        adapter = RemoteFriendConnectionDecisionAdapter(profile)
-        execution = execute_friend_connection_decision_case(adapter)
-    except (ConfigError, RunStateError, OSError) as error:
-        raise ConfigError(
-            f"friend-connection decision case execution is unavailable: {error}") from None
 
-    success = execution.status == "PASS"
+    fresh_fixture = initial_fresh_fixture_receipt(
+        run_id=run_id, purpose=FRESH_FIXTURE_PURPOSE)
+    write(fresh_fixture_file, fresh_fixture)
+    effective_profile = None
+    execution = None
+    execution_snapshot = None
+    error_type = None
+    error_detail = None
+    try:
+        fresh = provision_fresh_owned_bot_pair(
+            profile=profile,
+            run_id=run_id,
+            purpose=FRESH_FIXTURE_PURPOSE,
+            on_progress=lambda receipt: write(fresh_fixture_file, receipt),
+        )
+        fresh_fixture = fresh.evidence
+        effective_profile = fresh.profile
+        write(fresh_fixture_file, fresh_fixture)
+        write(effective_profile_file, effective_profile)
+        adapter = RemoteFriendConnectionDecisionAdapter(effective_profile)
+        execution = execute_friend_connection_decision_case(adapter)
+        execution_snapshot = execution.snapshot()
+        error_type = execution.error_type
+        error_detail = execution.error_detail
+    except FreshFixtureProvisioningError as error:
+        fresh_fixture = error.evidence
+        write(fresh_fixture_file, fresh_fixture)
+        execution_snapshot = _blocked_case_snapshot(
+            plan, type(error).__name__, str(error))
+        error_type = type(error).__name__
+        error_detail = str(error)
+    except (ConfigError, RunStateError, OSError) as error:
+        if fresh_fixture.get("status") != "PASS":
+            fresh_fixture.update({
+                "status": "BLOCKED",
+                "error_type": type(error).__name__,
+                "error_detail": str(error)[:800],
+            })
+        else:
+            fresh_fixture["post_provisioning_error"] = {
+                "type": type(error).__name__,
+                "detail": str(error)[:800],
+            }
+        write(fresh_fixture_file, fresh_fixture)
+        execution_snapshot = _blocked_case_snapshot(
+            plan, type(error).__name__, str(error)[:800])
+        error_type = type(error).__name__
+        error_detail = str(error)[:800]
+
+    success = execution is not None and execution.status == "PASS"
     disposition = RESOURCE_DISPOSITION if success else "UNKNOWN_OWNED_BOT_DECISIONS"
+    if fresh_fixture.get("status") != "PASS":
+        disposition = fresh_fixture.get(
+            "resource_disposition", "UNKNOWN_FRESH_OWNED_BOT_PAIR")
+    execution_report = (
+        {
+            "status": execution.status,
+            "completed_count": execution.completed_count,
+            "total_count": execution.total_count,
+            "error_type": execution.error_type,
+            "error_detail": execution.error_detail,
+        }
+        if execution is not None
+        else {
+            "status": "BLOCKED",
+            "completed_count": 0,
+            "total_count": len(plan.requirement_ids),
+            "error_type": error_type,
+            "error_detail": error_detail,
+        }
+    )
     report = {
         "schema_version": SCHEMA_VERSION,
         "contract": REPORT_CONTRACT,
@@ -131,19 +237,14 @@ def dual_friend_connection_decision_case_run(
             "id": profile["environment"]["id"],
             "entrypoint_kind": profile["entrypoint"]["kind"],
         },
-        "case": execution.snapshot(),
+        "fresh_fixture": fresh_fixture,
+        "case": execution_snapshot,
         "case_scope": {
             "requirement_ids": list(plan.requirement_ids),
             "selected_obligations": list(adaptability["selected_obligations"]),
             "public_operations": list(dict.fromkeys(PUBLIC_OPERATIONS)),
         },
-        "execution": {
-            "status": execution.status,
-            "completed_count": execution.completed_count,
-            "total_count": execution.total_count,
-            "error_type": execution.error_type,
-            "error_detail": execution.error_detail,
-        },
+        "execution": execution_report,
         "resource_disposition": disposition,
         "remote_validation": "NOT_RUN",
         "grants_release_credit": False,
