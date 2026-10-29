@@ -98,5 +98,69 @@ class SessionOwnerCommandTests(unittest.TestCase):
         self.assertFalse(row['grants_release_credit'])
 
 
+
+class DraftDeliveryCommandTests(unittest.TestCase):
+    def test_commands_are_in_the_shared_local_registry(self):
+        self.assertIn('local-draft-delivery-run', LOCAL_STORY_COMMANDS)
+        self.assertIn('local-draft-delivery-report', LOCAL_STORY_COMMANDS)
+        parsed = parser().parse_args(run_args('local-draft-delivery-run'))
+        self.assertEqual(parsed.binary, Path('/bcs'))
+        self.assertTrue(parsed.allow_fixture_write)
+
+    def test_run_dispatch_forwards_exact_arguments(self):
+        args = parser().parse_args(run_args('local-draft-delivery-run'))
+        for status, expected_rc in (
+                ('LOCAL_DRAFT_DELIVERY_PASS', 0), ('BLOCKED', 2), ('CANCELLED', 130)):
+            with self.subTest(status=status), patch(
+                    'bcs_e2e.draft_delivery.run.local_draft_delivery_run',
+                    return_value={'status': status}) as execute:
+                from bcs_e2e.local_story_commands import dispatch_local_story_command
+                report, rc = dispatch_local_story_command(args, write_reports=Mock())
+            self.assertEqual((report, rc), ({'status': status}, expected_rc))
+            execute.assert_called_once_with(
+                binary=Path('/bcs'), binary_sha256='bcs-sha',
+                state_dir=Path('/state'), run_id='run-1', confirm_run_id='run-1',
+                allow_local_processes=True, allow_fixture_write=True,
+                allow_write=True)
+
+    def test_report_dispatch_guards_the_original_evidence_tree(self):
+        args = parser().parse_args(
+            ['local-draft-delivery-report', '--state-dir', '/state',
+             '--output-dir', '/out/reports'])
+        summary = {'status': 'LOCAL_SUITE_PASS'}
+        writes = Mock(return_value={'json': '/out/reports/summary.json'})
+        with patch(
+                'bcs_e2e.draft_delivery.reporting.build_draft_delivery_report',
+                return_value=summary) as build:
+            from bcs_e2e.local_story_commands import dispatch_local_story_command
+            report, rc = dispatch_local_story_command(args, write_reports=writes)
+        self.assertEqual(rc, 0)
+        self.assertEqual(report['outputs'], {'json': '/out/reports/summary.json'})
+        build.assert_called_once_with(Path('/state'))
+        inside = parser().parse_args(
+            ['local-draft-delivery-report', '--state-dir', '/state',
+             '--output-dir', '/state/reports'])
+        with patch(
+                'bcs_e2e.draft_delivery.reporting.build_draft_delivery_report',
+                return_value=summary), self.assertRaisesRegex(
+                    RunStateError, 'Draft delivery'):
+            from bcs_e2e.local_story_commands import dispatch_local_story_command
+            dispatch_local_story_command(inside, write_reports=Mock())
+
+    def test_draft_delivery_is_a_backlog_row_without_release_credit(self):
+        rows = migration_plan()['local_backlog_case_slices']
+        row = next(row for row in rows if row['case_id'] == 'LOCAL-DRAFT-DELIVERY-01')
+        self.assertEqual(row['suite'], 'owned-local-draft-delivery-v1')
+        self.assertEqual(row['legacy_id'], 'story_collaboration_draft_delivery')
+        self.assertEqual(row['status'], 'LOCAL_EXECUTOR_ONLY_BACKLOG')
+        self.assertEqual(row['execution_command'], 'local-draft-delivery-run')
+        self.assertEqual(row['report_command'], 'local-draft-delivery-report')
+        self.assertEqual(row['environment'], {
+            'local': 'LOCAL_EXECUTOR_ONLY', 'preprod': 'REMOTE_UNSUPPORTED'})
+        self.assertFalse(row['release_parent_denominator'])
+        self.assertTrue(row['independent_slice'])
+        self.assertFalse(row['grants_release_credit'])
+
+
 if __name__ == '__main__':
     unittest.main()

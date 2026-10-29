@@ -75,6 +75,8 @@ COMMAND_ORDER = (
     'local-authority-report',
     'local-session-owner-run',
     'local-session-owner-report',
+    'local-draft-delivery-run',
+    'local-draft-delivery-report',
 )
 
 
