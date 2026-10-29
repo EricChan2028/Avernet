@@ -17,8 +17,8 @@ from __future__ import annotations
 import asyncio
 
 from agentclaw.community.core.agentswarm.domain.models import (
-    AgentId, AgentKind, AgentSpec, Run, RunId, TaskEnvelope, TenantId,
-    RunStatus, RequestMetadata, EpochMillis, spawn_digest,
+    AgentId, AgentKind, AgentSpec, Run, RunId, RunOptions, TaskEnvelope,
+    TenantId, RunStatus, RequestMetadata, EpochMillis, spawn_digest,
 )
 from agentclaw.community.core.agentswarm.runtime.handler.impl import SwarmRunHandler
 from agentclaw.community.core.agentswarm.runtime.pool.impl import SubagentRuntime
@@ -114,10 +114,119 @@ class TestResolveKind:
         kind = SwarmRunHandler._resolve_kind(run, "coder_rust")
         assert kind == AgentKind.LLM
 
-    def test_no_match_returns_llm(self):
-        run = mk_run([mk_catalog_entry("coder")])
+    def test_no_match_unanimous_bot_catalog_inherits_bot(self):
+        """PRE incident (run 88addaf6f, post-REL20261029 deploy): the
+        orchestrator named a spawn 'rust_coder' (language first), the
+        prefix match against catalog 'coder' missed, and dispatch labeled
+        the row llm while the pool's _unanimous_catalog_surface minted a
+        bot persona parked at the consent gate. The detail surfaces the
+        authorization descriptor only for kind=bot, so the human gate
+        was invisible and the run could never be approved. An unresolved
+        name in a unanimous catalog must predict the execution kind."""
+        run = mk_run([mk_catalog_entry("coder", kind=AgentKind.BOT)])
+        kind = SwarmRunHandler._resolve_kind(run, "rust_coder")
+        assert kind == AgentKind.BOT
+
+    def test_no_match_unanimous_llm_catalog_inherits_llm(self):
+        run = mk_run([mk_catalog_entry("analyst", kind=AgentKind.LLM)])
         kind = SwarmRunHandler._resolve_kind(run, "ghost")
         assert kind == AgentKind.LLM
+
+    def test_no_match_mixed_catalog_returns_llm(self):
+        """Was test_no_match_returns_llm: a mixed catalog has no unique
+        execution surface to inherit, so the llm default stands."""
+        run = mk_run([
+            mk_catalog_entry("coder", kind=AgentKind.BOT),
+            mk_catalog_entry("analyst", kind=AgentKind.LLM),
+        ])
+        kind = SwarmRunHandler._resolve_kind(run, "ghost")
+        assert kind == AgentKind.LLM
+
+    def test_no_match_empty_catalog_returns_llm(self):
+        run = mk_run([])
+        kind = SwarmRunHandler._resolve_kind(run, "ghost")
+        assert kind == AgentKind.LLM
+
+    def test_unanimous_string_kinds_coerce_before_inheritance(self):
+        catalog = mk_catalog_entry("coder", kind=AgentKind.BOT)
+        catalog.__dict__["kind"] = "bot"
+        run = mk_run([catalog])
+        kind = SwarmRunHandler._resolve_kind(run, "rust_coder")
+        assert kind == AgentKind.BOT
+
+
+class TestBotChatTimeoutOption:
+    """RunOptions.bot_chat_timeout_seconds: the per-run engine-chat
+    deadline resolved against the platform's deployment default."""
+
+    def test_request_replaces_default_within_wire_cap(self):
+        opts = RunOptions(bot_chat_timeout_seconds=3600.0)
+        assert opts.resolved_bot_chat_timeout(1800.0) == 3600.0
+
+    def test_absent_request_falls_to_deployment_default(self):
+        assert RunOptions().resolved_bot_chat_timeout(1800.0) == 1800.0
+
+    def test_stale_metadata_clamped_to_wire_cap(self):
+        opts = RunOptions(bot_chat_timeout_seconds=99999.0)
+        assert opts.resolved_bot_chat_timeout(1800.0) == 3600.0
+
+    def test_run_task_passes_the_resolved_timeout_to_the_platform(self):
+        """The route the option actually serves: run_task forwards the
+        resolved bot_chat_timeout_seconds into platform.chat's
+        timeout_seconds kwarg (and the call omits it when unset)."""
+        import asyncio as _aio
+        import json as _json
+        from agentclaw.community.plugins.community.agentswarm import (
+            bot_subagent as bs,
+        )
+
+        captured: list[dict] = []
+
+        class _RecordingPlatform:
+            def chat(self, bot_id, message, owner_id="", cancel_event=None,
+                     timeout_seconds=None):
+                captured.append({"bot_id": bot_id, "timeout": timeout_seconds})
+                return _json.dumps({"text": "ok"})
+
+        run = mk_run([])
+        run.owner_id = "owner-1"
+        run.run_options = RunOptions(bot_chat_timeout_seconds=2700.0)
+        sub = bs.AvernetSubagent(
+            mk_catalog_entry(), run, _RecordingPlatform(),
+            AgentId("a-1"), attempt=1)
+        sub._bot_id = "bot-run-1"
+
+        result = _aio.run(sub.run_task(TaskEnvelope(
+            name="coder_rust", objective="obj",
+            output_schema={}, boundaries="", parent_goal="")))
+        assert captured[0]["timeout"] == 2700.0
+        assert captured[0]["bot_id"] == "bot-run-1"
+        assert result.output == {"text": "ok"}
+
+        run.run_options = RunOptions()
+        captured.clear()
+        _aio.run(sub.run_task(TaskEnvelope(
+            name="coder_rust", objective="obj",
+            output_schema={}, boundaries="", parent_goal="")))
+        assert captured[0]["timeout"] is None
+
+    def test_subagent_passes_timeout_only_when_requested(self):
+        import functools
+        import inspect
+        from agentclaw.community.plugins.community.agentswarm import (
+            bot_subagent as bs,
+        )
+
+        run = mk_run([])
+        run.run_options = RunOptions(bot_chat_timeout_seconds=2700.0)
+        sub = bs.AvernetSubagent(
+            mk_catalog_entry(), run, object(), AgentId("a-1"), attempt=1)
+        assert sub._resolved_chat_timeout() == 2700.0
+        # without the option the subagent stays off the call signature,
+        # so platform implementations without the kwarg keep working
+        run.run_options = RunOptions()
+        # guard: _resolved_chat_timeout never touches the platform api
+        assert sub._resolved_chat_timeout() is None
 
 
 class TestExecutorKindCoercion:
