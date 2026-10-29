@@ -102,11 +102,17 @@ failure is a 503 rather than a write success or empty 200; readiness exposes
 `index_state_unavailable: true`, and mutations fail closed with stable code
 `INDEX_STATE_UNAVAILABLE` rather than a misleading `INDEX_READ_ONLY`. Set `BCSFUSE_INDEX_OWNER_ID` to a
 stable pod/application identity, and configure
-`vector.index.stale_after_seconds` (default 60) and
-`vector.index.lease_seconds` (default 120). Local/test modes remain single-store
-and do not claim the state row. Server mode alone still does not establish
-capacity; each layer must continue to use the bounded degradation chain and its
-own durability/HA deployment.
+`vector.index.stale_after_seconds` (default 20) and
+`vector.index.lease_seconds` (default 30). The default owner heartbeat runs
+every ten seconds, so a failed owner can be taken over after the bounded
+30-second lease window without waiting two minutes. Local/test modes remain
+single-store and do not claim the state row. Readiness and metrics also expose
+`index_owner_changes`, `index_owner_takeover_seconds`,
+`bcsfuse_index_owner_changes_total`, and
+`bcsfuse_index_owner_takeover_seconds`; owner transitions are emitted to the
+business audit log without endpoint or credential details. Server mode alone
+still does not establish capacity; each layer must continue to use the bounded
+degradation chain and its own durability/HA deployment.
 
 ## Verification
 

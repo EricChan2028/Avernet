@@ -38,13 +38,14 @@ def _configure_fusion_dependencies(context: ApplicationContext) -> None:
 
 
 _INDEX_METRICS = None
+_OWNER_CHANGE_LAST: dict[tuple[str, str], int] = {}
 
 
 def _get_index_metrics():
     """Create index gauges once; labels follow the active collection owner."""
     global _INDEX_METRICS
     if _INDEX_METRICS is None:
-        from prometheus_client import Gauge
+        from prometheus_client import Counter, Gauge
 
         labels = ["collection", "owner"]
         _INDEX_METRICS = {
@@ -66,6 +67,16 @@ def _get_index_metrics():
             "degraded": Gauge(
                 "bcsfuse_index_degraded",
                 "Whether the index is serving with a degraded dependency",
+                labels,
+            ),
+            "owner_changes": Counter(
+                "bcsfuse_index_owner_changes_total",
+                "Index owner changes observed by this replica",
+                labels,
+            ),
+            "owner_takeover_seconds": Gauge(
+                "bcsfuse_index_owner_takeover_seconds",
+                "Seconds taken by the most recently observed index owner change",
                 labels,
             ),
         }
@@ -135,6 +146,13 @@ async def _index_readiness(context: ApplicationContext) -> tuple[bool, dict]:
         "index_version": getattr(vector_store, "index_version", None),
         "index_lag_seconds": getattr(vector_store, "index_lag_seconds", None),
         "index_stale": index_stale,
+        "stale_after_seconds": getattr(
+            vector_store, "stale_after_seconds", None
+        ),
+        "index_owner_changes": getattr(vector_store, "index_owner_changes", None),
+        "index_owner_takeover_seconds": getattr(
+            vector_store, "index_owner_takeover_seconds", None
+        ),
         "index_state_unavailable": bool(
             getattr(vector_store, "index_state_unavailable", False)
         ),
@@ -229,6 +247,16 @@ def _register_health_routes(app: FastAPI, context: ApplicationContext) -> None:
         gauges["lag_seconds"].labels(**labels).set(max(lag, 0))
         gauges["degraded"].labels(**labels).set(
             1 if bool(info.get("degraded", False)) else 0
+        )
+        label_key = (collection, owner)
+        current_owner_changes = int(info.get("index_owner_changes") or 0)
+        owner_change_delta = max(
+            0, current_owner_changes - _OWNER_CHANGE_LAST.get(label_key, 0)
+        )
+        gauges["owner_changes"].labels(**labels).inc(owner_change_delta)
+        _OWNER_CHANGE_LAST[label_key] = current_owner_changes
+        gauges["owner_takeover_seconds"].labels(**labels).set(
+            max(0.0, float(info.get("index_owner_takeover_seconds") or 0))
         )
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 

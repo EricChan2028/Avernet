@@ -5,6 +5,7 @@ Builds provider registry for OSS deployments in different modes.
 """
 import logging
 import os
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
@@ -181,6 +182,37 @@ def register_runtime_service_providers(
     )
 
 
+@dataclass(frozen=True)
+class IndexLeaseSettings:
+    """Bounded owner/staleness windows selected by composition."""
+
+    stale_after_seconds: float
+    lease_seconds: float
+    heartbeat_seconds: float
+
+    def __post_init__(self) -> None:
+        if self.stale_after_seconds <= 0:
+            raise ValueError("stale_after_seconds must be positive")
+        if self.lease_seconds <= self.stale_after_seconds:
+            raise ValueError("lease_seconds must exceed stale_after_seconds")
+
+
+def resolve_index_lease_settings(config) -> IndexLeaseSettings:
+    # A short lease bounds worst-case owner takeover. Longer leases remain an
+    # explicit deployment choice, but the public default fails over quickly.
+    stale_after_seconds = config.get_float(
+        "vector.index.stale_after_seconds", 20.0
+    )
+    lease_seconds = max(
+        stale_after_seconds + 1.0,
+        config.get_float("vector.index.lease_seconds", 30.0),
+    )
+    return IndexLeaseSettings(
+        stale_after_seconds=stale_after_seconds,
+        lease_seconds=lease_seconds,
+        heartbeat_seconds=lease_seconds / 3.0,
+    )
+
 def build_opensource_provider_registry(mode: str = "runtime") -> "ProviderRegistry":
     """Build provider registry for OSS deployment.
 
@@ -332,20 +364,14 @@ def _build_runtime_providers(registry: "ProviderRegistry", config: "YamlEnvConfi
     from app.infra.public.stores.mysql_index_state_store import MySQLIndexStateStore
 
     collection_name = config.get("vector.qdrant.collection", "bcsfuse_profiles")
-    stale_after_seconds = config.get_float(
-        "vector.index.stale_after_seconds", 60.0
-    )
-    lease_seconds = max(
-        stale_after_seconds + 1.0,
-        config.get_float("vector.index.lease_seconds", 120.0),
-    )
+    lease_settings = resolve_index_lease_settings(config)
     vector_store = wrap_vector_store_with_index_state(
         vector_store,
         store=MySQLIndexStateStore(connection_pool=mysql_pool),
         owner_id=_index_owner_id(),
         collection_pair=f"{collection_name}:dense+keyword",
-        stale_after_seconds=stale_after_seconds,
-        lease_seconds=lease_seconds,
+        stale_after_seconds=lease_settings.stale_after_seconds,
+        lease_seconds=lease_settings.lease_seconds,
     )
     vector_store = _with_literal_fallback(vector_store)
     registry.register("vector_store", vector_store)

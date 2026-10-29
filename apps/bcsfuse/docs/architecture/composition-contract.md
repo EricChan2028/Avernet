@@ -322,7 +322,14 @@ state-store failure prevents writes and marks the replica not ready rather than
 returning a false write success or empty success. Readiness reports this
 explicitly as `index_state_unavailable: true`; index mutations fail closed with
 HTTP 503 and stable code `INDEX_STATE_UNAVAILABLE` rather than a misleading
-reader-only 403. A successful lease read clears the condition.
+reader-only 403. A successful lease read clears the condition. Composition
+defaults are `vector.index.stale_after_seconds=20` and
+`vector.index.lease_seconds=30`; the owner heartbeat runs every ten seconds.
+Owner transitions increment an audit counter, record takeover elapsed time, and
+emit a business log record. Readiness exposes `index_owner_changes` and
+`index_owner_takeover_seconds`; metrics expose
+`bcsfuse_index_owner_changes_total` and
+`bcsfuse_index_owner_takeover_seconds`.
 Read replicas clear staleness only after reconstruction or sync reaches the
 shared revision.
 

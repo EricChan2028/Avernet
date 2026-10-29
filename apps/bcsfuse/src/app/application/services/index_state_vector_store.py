@@ -53,6 +53,9 @@ class IndexStateMaintainingVectorStore:
         self.index_stale = True
         self.read_only = True
         self.index_state_unavailable = False
+        self._index_owner_changes = 0
+        self._index_owner_takeover_seconds = 0.0
+        self._last_owner_observed_at = 0.0
         try:
             self._refresh_from_record(self._store.claim_owner(
                 collection_pair, owner_id, lease_seconds=lease_seconds
@@ -72,6 +75,24 @@ class IndexStateMaintainingVectorStore:
     @property
     def lease_seconds(self) -> float:
         return self._lease_seconds
+
+    @property
+    def stale_after_seconds(self) -> float:
+        return self._stale_after_seconds
+
+    @property
+    def owner_id(self) -> str:
+        if self.index_owner is None:
+            raise RuntimeError("index owner has not been observed")
+        return self.index_owner
+
+    @property
+    def index_owner_changes(self) -> int:
+        return self._index_owner_changes
+
+    @property
+    def index_owner_takeover_seconds(self) -> float:
+        return self._index_owner_takeover_seconds
 
     @property
     def lease_heartbeat_seconds(self) -> float:
@@ -249,6 +270,20 @@ class IndexStateMaintainingVectorStore:
 
     def _refresh_from_record(self, record: IndexStateRecord) -> None:
         self.index_state_unavailable = False
+        previous_owner = self.index_owner
+        if previous_owner is not None and record.owner_id != previous_owner:
+            self._index_owner_changes += 1
+            if self._last_owner_observed_at > 0:
+                self._index_owner_takeover_seconds = max(
+                    0.0, record.observed_at - self._last_owner_observed_at
+                )
+            logger.info(
+                "[INDEX-STATE] owner changed: old=%s new=%s takeover_seconds=%.3f",
+                previous_owner,
+                record.owner_id,
+                self._index_owner_takeover_seconds,
+            )
+        self._last_owner_observed_at = record.observed_at
         self.index_owner = record.owner_id
         self.index_version = record.index_version
         # Revision lag measures how far a local projection is behind the shared
