@@ -10,6 +10,7 @@ from bcs_e2e.draft_delivery.checks import (DraftDeliveryViolation,
                                            check_client_selected_idempotent_create,
                                            check_immutable_revision_append,
                                            check_read_token_single_revision,
+                                           check_no_store_every_response,
                                            check_read_token_read_only,
                                            check_revoked_or_deleted_unavailable,
                                            check_stale_update_conflict)
@@ -283,6 +284,49 @@ class ReadTokenReadOnlyTests(unittest.TestCase):
                 value['management'][field] = replacement
                 with self.assertRaises(DraftDeliveryViolation):
                     check_read_token_read_only(value)
+
+
+def response_rows():
+    rows = []
+    for method, suffix, status in (
+            ('PUT', '', 201), ('PUT', '', 200), ('GET', '/revisions/1', 200),
+            ('POST', '/revisions/1/validate', 200), ('POST', '/revisions', 409),
+            ('DELETE', '/revisions/2/share', 204), ('DELETE', '', 401),
+            ('GET', '/revisions/2', 404)):
+        rows.append({'method': method, 'path': '/collaboration/drafts/' + DRAFT_ID + suffix,
+                     'status': status, 'cache_control': 'no-store'})
+    return rows
+
+
+def no_store_evidence():
+    return {'responses': response_rows()}
+
+
+class NoStoreEveryResponseTests(unittest.TestCase):
+    def test_accepts_complete_no_store_matrix(self):
+        check_no_store_every_response(no_store_evidence())
+
+    def test_rejects_any_cacheable_success_or_error(self):
+        for index in (0, 3, 7):
+            with self.subTest(index=index):
+                value = no_store_evidence()
+                value['responses'][index]['cache_control'] = 'private'
+                with self.assertRaisesRegex(RunStateError, 'did not carry no-store'):
+                    check_no_store_every_response(value)
+
+    def test_rejects_empty_or_incomplete_response_matrix(self):
+        for mutation in ('empty', 'missing_status', 'outside_draft_surface'):
+            with self.subTest(mutation=mutation):
+                value = no_store_evidence()
+                if mutation == 'empty':
+                    value['responses'] = []
+                elif mutation == 'missing_status':
+                    value['responses'] = [row for row in value['responses']
+                                          if row['status'] != 404]
+                else:
+                    value['responses'][0]['path'] = '/health'
+                with self.assertRaises(DraftDeliveryViolation):
+                    check_no_store_every_response(value)
 
 
 if __name__ == '__main__':

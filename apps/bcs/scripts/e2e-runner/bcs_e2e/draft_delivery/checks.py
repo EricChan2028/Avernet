@@ -16,6 +16,7 @@ OBLIGATION_STALE = 'DRAFT-DELIVERY.stale-update-conflict'
 OBLIGATION_READ_TOKEN = 'DRAFT-DELIVERY.read-token-single-revision'
 OBLIGATION_UNAVAILABLE = 'DRAFT-DELIVERY.revoked-or-deleted-unavailable'
 OBLIGATION_READ_ONLY = 'DRAFT-DELIVERY.read-token-read-only'
+OBLIGATION_NO_STORE = 'DRAFT-DELIVERY.no-store-every-response'
 _UUID = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')
 
 
@@ -201,3 +202,26 @@ def check_read_token_read_only(evidence: dict) -> None:
         _fail(OBLIGATION_READ_ONLY, 'rejected management operation changed the head')
     if management.get('deleted_after') is not False:
         _fail(OBLIGATION_READ_ONLY, 'rejected management operation deleted the Draft')
+
+
+def check_no_store_every_response(evidence: dict) -> None:
+    """Every observed success and error response carries Cache-Control: no-store."""
+    responses = evidence.get('responses')
+    if not isinstance(responses, list) or not responses:
+        _fail(OBLIGATION_NO_STORE, 'no Draft HTTP responses were observed')
+    observed_statuses = set()
+    for index, value in enumerate(responses):
+        response = _mapping(value, 'response ' + str(index), OBLIGATION_NO_STORE)
+        method, path = response.get('method'), response.get('path')
+        if not isinstance(method, str) or method not in {'GET', 'PUT', 'POST', 'DELETE'}:
+            _fail(OBLIGATION_NO_STORE, 'response method is invalid')
+        if not isinstance(path, str) or not path.startswith('/collaboration/drafts/'):
+            _fail(OBLIGATION_NO_STORE, 'response path is outside the Draft surface')
+        status = _integer(response.get('status'), 'response status', OBLIGATION_NO_STORE)
+        observed_statuses.add(status)
+        if response.get('cache_control') != 'no-store':
+            _fail(OBLIGATION_NO_STORE,
+                  method + ' ' + path + ' response did not carry no-store')
+    required = {200, 201, 204, 401, 404, 409}
+    if not required.issubset(observed_statuses):
+        _fail(OBLIGATION_NO_STORE, 'response matrix omitted success or error status coverage')
