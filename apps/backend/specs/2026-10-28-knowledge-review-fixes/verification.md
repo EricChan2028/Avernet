@@ -295,3 +295,55 @@ deployment, live configuration or DB operation is claimed.
   lock contention/multi-instance load, actual BaaS/OSS/ECB/MCP behavior or deployed
   acceptance. No merge, deployment, live configuration change, production DML/DDL,
   permission operation or historical backfill is performed by this repair.
+
+
+## Release-target conflict resolution (2026-10-29)
+
+- Previous delivered Head: `3391deafd37683d3a884d3330282fec8494d31f6`.
+  Its applicable remote checks had all succeeded when this follow-up began;
+  those checks do not validate the rebased Head.
+- Rebased all 36 feature commits onto
+  `REL20261029@19c10cfca422bacd4aedade8e0f04ff95c8bdcdd`.
+  Rebased implementation/test tree before this documentation-only closure:
+  `332e17c6154f93537fd9b440cc9551325463ec7f`.
+- Two content conflicts were resolved without choosing either complete file:
+  repository README retains both the target's read-only manager-sync contract
+  and this PR's bounded knowledge publication persistence contract; Singlebox
+  effective-config golden retains both manager-sync and knowledge publication.
+  The approved knowledge publication policy remains enabled.
+- Range-diff retains all 36 commits. Its changed patch contexts are confined to
+  these README/golden integrations; no original production-code patch changed.
+  The final tree differs from the original current-target merge-tree only in
+  the two manually resolved files. Community/test/singlebox JSON comparisons
+  also prove each target golden is preserved, with only the expected enabled
+  knowledge publication mapping added.
+- DI root automatically integrates the target's manager-sync assembly with this
+  PR's early KnowledgePublicationPolicy validation. No new plugin, schema,
+  dependency, worker, rollout-config change, knowledge backfill or scope expansion
+  was introduced by conflict resolution. Existing online observation, native
+  restart retry and legacy-Owner UNKNOWN restore protections are retained.
+- Targeted configuration, DI, architecture and publishing regressions:
+  **1,233 passed, 44 warnings**, 145.68 seconds.
+- Complete Backend CI at rebased source `332e17c6154f93537fd9b440cc9551325463ec7f`:
+  **27,755 passed, 40 existing skipped, 2 subtests passed**, 494.99 seconds.
+  Case pass rate **100.00%**, line coverage **90.65%**, changed-line coverage
+  **95.14% (704/740)**. Original 75% / 80% coverage floors, normal four-worker
+  runner, already installed dependencies reused; no exclusions, timeout or
+  threshold changes. Targeted counts overlap the complete suite.
+
+  ```sh
+  BACKEND_CI_SKIP_INSTALL=1 BACKEND_CI_PYTEST_WORKERS=4 \
+  PYTHONDONTWRITEBYTECODE=1 SERVER_ENV=dev \
+    apps/backend/scripts/ci_test.sh \
+      --base 19c10cfca422bacd4aedade8e0f04ff95c8bdcdd \
+      --head 332e17c6154f93537fd9b440cc9551325463ec7f
+  ```
+
+- Whitespace validation and conflict-marker checks passed. Original branch must
+  be updated using an exact lease on the previously verified remote Head and
+  normal plaintext-secret/blocking-SAST hooks. Fresh remote checks must validate
+  the rewritten Head; former-Head results are historical.
+- This only resolves release integration and records validation. No merge,
+  deployment, live configuration or production DML/DDL operation is performed.
+  Production query plans, lock contention, multi-instance load and real external
+  provider/corp/prod acceptance remain outside this local CI evidence.
