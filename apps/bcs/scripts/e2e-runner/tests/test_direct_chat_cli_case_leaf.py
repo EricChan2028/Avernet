@@ -343,7 +343,7 @@ class DirectChatCliRunnerTests(unittest.TestCase):
                     self.profile, MAIN_RUN, MAIN_SESSION, state="RUNNING",
                     version=5, is_terminal=False)), "status projection"),
                 (DIRECT_CHAT_MAIN_CANCEL_OPERATION, bytes_json(
-                    {**cancel_projection(MAIN_RUN, 1), "cancelled": False}),
+                    {**cancel_projection(MAIN_RUN, 1), "cancelled": "yes"}),
                  "cancel projection")):
             with self.subTest(where=where):
                 side_effect = [
@@ -373,6 +373,106 @@ class DirectChatCliRunnerTests(unittest.TestCase):
                                                 "projection|differs"):
                         runner.execute(operation, run_id=MAIN_RUN)
                     self.assertEqual(capture.call_count, len(side_effect))
+
+    def test_cancel_leaf_admits_asynchronous_ack_shapes(self):
+        # The station acknowledges cancel before the downstream abort
+        # converges; the CLI help allows an unconfirmed abort.  Shape-valid
+        # acks with cancelled=false are admitted here; terminal convergence
+        # is the dual adapter's remote-tier obligation.
+        for state in ("running", "cancelled", "completed", "pending"):
+            payload = {**cancel_projection(MAIN_RUN, 9), "cancelled": False,
+                       "state": state}
+            with self.subTest(state=state):
+                side_effect = [
+                    completed(0, bytes_json(submit_projection(
+                        self.profile, PING_RUN, PING_SESSION))),
+                    completed(0, bytes_json(submit_projection(
+                        self.profile, MAIN_RUN, MAIN_SESSION))),
+                    completed(0, bytes_json(status_projection(
+                        self.profile, MAIN_RUN, MAIN_SESSION, state="running",
+                        version=5, is_terminal=False))),
+                    completed(0, bytes_json(payload)),
+                ]
+                with self.leaf(token=DRIVER_TOKEN,
+                               side_effect=side_effect) as capture:
+                    runner = self.fresh()
+                    runner.execute(DIRECT_CHAT_PING_SUBMIT_OPERATION,
+                                   message=PING_MESSAGE, bot_uuid=MEMBER_BOT)
+                    runner.execute(DIRECT_CHAT_MAIN_SUBMIT_OPERATION,
+                                   message=MAIN_MESSAGE, tags=list(MAIN_TAGS),
+                                   timeout_ms=MAIN_TIMEOUT_MS,
+                                   bot_uuid=MEMBER_BOT)
+                    runner.execute(DIRECT_CHAT_MAIN_READ_OPERATION,
+                                   run_id=MAIN_RUN)
+                    data = runner.execute(DIRECT_CHAT_MAIN_CANCEL_OPERATION,
+                                          run_id=MAIN_RUN)["data"]
+                    self.assertEqual(data["cancelled"], False)
+                    self.assertEqual(data["state"], state)
+                self.assertEqual(capture.call_count, len(side_effect))
+
+    def test_cancel_leaf_still_rejects_invalid_ack_shapes(self):
+        for mutate, where in (
+                ({"cancelled": "yes"}, "boolean cancelled"),
+                ({"state": "exploded"}, "state vocabulary"),
+                ({"version": 0}, "positive version"),
+                ({"response": "not-a-dict"}, "response object")):
+            payload = {**cancel_projection(MAIN_RUN, 9), **mutate}
+            with self.subTest(where=where):
+                side_effect = [
+                    completed(0, bytes_json(submit_projection(
+                        self.profile, PING_RUN, PING_SESSION))),
+                    completed(0, bytes_json(submit_projection(
+                        self.profile, MAIN_RUN, MAIN_SESSION))),
+                    completed(0, bytes_json(status_projection(
+                        self.profile, MAIN_RUN, MAIN_SESSION, state="running",
+                        version=5, is_terminal=False))),
+                    completed(0, bytes_json(payload)),
+                ]
+                with self.leaf(token=DRIVER_TOKEN,
+                               side_effect=side_effect):
+                    runner = self.fresh()
+                    runner.execute(DIRECT_CHAT_PING_SUBMIT_OPERATION,
+                                   message=PING_MESSAGE, bot_uuid=MEMBER_BOT)
+                    runner.execute(DIRECT_CHAT_MAIN_SUBMIT_OPERATION,
+                                   message=MAIN_MESSAGE, tags=list(MAIN_TAGS),
+                                   timeout_ms=MAIN_TIMEOUT_MS,
+                                   bot_uuid=MEMBER_BOT)
+                    runner.execute(DIRECT_CHAT_MAIN_READ_OPERATION,
+                                   run_id=MAIN_RUN)
+                    with self.assertRaisesRegex(DirectChatCliRunnerError,
+                                                "projection|differs"):
+                        runner.execute(DIRECT_CHAT_MAIN_CANCEL_OPERATION,
+                                       run_id=MAIN_RUN)
+
+    def test_status_leaf_admits_station_extras_and_queue_states(self):
+        # Station status payloads carry delivery/completion bookkeeping
+        # beyond the reviewed subset contract; queue states are lawful.
+        payload = {**status_projection(
+            self.profile, MAIN_RUN, MAIN_SESSION, state="pending",
+            version=4, is_terminal=False),
+            "completed_at_ms": 1735689600003,
+            "delivery": {"delivery_id": "delivery-e2e",
+                         "message_id": "message-e2e", "state_version": 5,
+                         "status": "queued", "wait_reason": "rate_limited"}}
+        side_effect = [
+            completed(0, bytes_json(submit_projection(
+                self.profile, PING_RUN, PING_SESSION))),
+            completed(0, bytes_json(submit_projection(
+                self.profile, MAIN_RUN, MAIN_SESSION))),
+            completed(0, bytes_json(payload)),
+        ]
+        with self.leaf(token=DRIVER_TOKEN, side_effect=side_effect):
+            runner = self.fresh()
+            runner.execute(DIRECT_CHAT_PING_SUBMIT_OPERATION,
+                           message=PING_MESSAGE, bot_uuid=MEMBER_BOT)
+            runner.execute(DIRECT_CHAT_MAIN_SUBMIT_OPERATION,
+                           message=MAIN_MESSAGE, tags=list(MAIN_TAGS),
+                           timeout_ms=MAIN_TIMEOUT_MS, bot_uuid=MEMBER_BOT)
+            data = runner.execute(DIRECT_CHAT_MAIN_READ_OPERATION,
+                                  run_id=MAIN_RUN)["data"]
+        self.assertEqual(data["state"], "pending")
+        self.assertEqual(data["delivery"]["status"], "queued")
+        self.assertEqual(data["delivery"]["wait_reason"], "rate_limited")
 
     def test_operations_are_once_only_ordered_and_contracted(self):
         ping_kwargs = {"message": PING_MESSAGE, "bot_uuid": MEMBER_BOT}

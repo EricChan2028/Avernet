@@ -4136,3 +4136,89 @@ The resulting temporary Bot remains retained under
 `REGISTERED_TEMPORARY_BOT_RETAINED`; this run is case validation, not release
 credit.  The focused remote-register adapter contract passed 17/17 tests and
 `compileall` remained clean.
+
+
+## 2026-10-29 preprod Direct-chat DM asynchronous convergence surgery
+
+The r3 preprod DM leaf replay (evidence root
+`~/.codex/bcs-e2e/preprod-live-evidence/20261029-direct-chat-preprod-r3/r3-leaf-replay/`)
+established that the station DM ticketer is a true asynchronous queue with rate
+limiting: submit acknowledgements can remain pending/queued, the cancel
+acknowledgement can precede abort convergence (`cancelled=false` with the Run
+still running), and the preliminary ping Run completes naturally ("pong") before
+its supplementary cancel. The frozen CLI leaves are one-shot and strictly
+ordered, so the preprod tier now converges those pacing conditions through a
+case-owned derived-profile WriteClient GET on the reviewed
+`/chat/runs/{run_id}` route (PRODUCT_HTTP, legacy-json) with disclosed bounded
+budgets; the Singlebox local tier keeps the reviewed synchronous contract
+byte-for-byte unchanged and never constructs a convergence HTTP client.
+
+Leaf changes (`direct_chat_cli_case_leaf.py`): `_parse_cancel_output` admits
+any boolean `cancelled` together with a legal chat Run state (the station abort
+may remain unconfirmed downstream, per the `bcs-cli chat` cancel help);
+genuinely invalid shapes still fail closed. `CHAT_RUN_STATES` is unchanged: no
+unobserved `cancelling` state was invented.
+
+Adapter changes (`direct_chat_cli_case_run.py`):
+`RemoteLocalDirectChatAdapter` gains a convergence profile (deep-cloned case
+profile with the three status GET bindings and two cancel bindings bound to the
+concrete `/chat/runs/{run_id}` and `/chat/runs/{run_id}/cancel` paths; preprod
+trio auth rewritten to `header_env` Cookie/Authorization, with the bearer scheme
+recorded only when a driver Bot token actually exists), a per-Run WriteClient
+cache, and `_converge_remote` bounded polling. An acknowledgement projection
+without `is_terminal` is synthesized non-terminal so the first authoritative
+GET corrects it, and the acknowledgement version is disclosed as the
+convergence starting point. Deadline exhaustion raises `RunStateError`
+carrying run_id/state/is_terminal/wait_reason/polls/budget. `read_main_run`
+converges to running (45 s); `cancel_main_run` enforces the cancelled terminal
+obligation on the converged projection (120 s, version >= acknowledgement
+version) instead of the one-shot acknowledgement; `read_main_terminal_run`
+converges only when the one-shot CLI read is not yet the exact cancelled
+terminal (30 s); the ping cancel records the asynchronous acknowledgement shape
+and `read_ping_terminal_run` converges to a versioned terminal (120 s),
+admitting natural completion (response content exactly "pong", disclosed as
+`ping_natural_completion` / `ping_cancel_preceeded_by_completion`) or the strict
+cancelled projection, and failing closed on any other terminal state. Every
+convergence is disclosed in the step data (transport PRODUCT_HTTP, method GET,
+path template, operation, deadlines, poll count, version first/last, version
+regressions, HTTP status sequence, full HTTP records) while step evidence
+transport remains PRODUCT_CLI exactly once per obligation.
+
+Surgery corrections found while authoring the convergence tests:
+`ping_lifecycle()` previously returned before its convergence-summary block
+(dead code and an unbound `lifecycle` name); it now builds the lifecycle dict
+and appends the convergence disclosures, tier-gated so the local Singlebox
+lifecycle shape stays unchanged. The ping acknowledgement/terminal disclosure
+keys are remote-tier only. `cancel_main_run` now persists
+`main_cancel_convergence` on the adapter so the lifecycle summary can disclose
+it.
+
+Validation: focused leaf+run suites pass 61 tests / 65 subtests
+(`tests/test_direct_chat_cli_case_leaf.py`,
+`tests/test_direct_chat_cli_case_run.py`). New
+`RemoteDirectChatConvergenceTests` cover the full remote asynchronous chain
+(exactly one derived-profile WriteClient per Run, pending -> running -> running
+cancel ack -> cancelled terminal convergence with version bookkeeping, all step
+evidence still PRODUCT_CLI), ping terminal lag converging on its own Run-scoped
+client with natural completion disclosure, running-budget exhaustion BLOCKED,
+cancel converging to a non-cancelled terminal BLOCKED (the main obligation is
+never loosened), wrong pong content BLOCKED, the local tier executing PASS with
+an exploding WriteClient patched in (zero HTTP, no convergence lifecycle keys),
+the cookie-only remote derived profile carrying Cookie only, and invalid
+convergence budgets failing closed. Full e2e-runner regression parity was
+verified against the unpatched rebase head `d6cbd69d3`: identical pre-existing
+failure set of 19 entries (browser-context, failure-evidence,
+response-correlation x2 plus subfailures, retained admission quota order,
+retained file remote, storage targets x5 plus one subfailure) on both trees;
+surgical tree 2989 passed / 220 skipped versus baseline 2978 passed / 220
+skipped (the +11 are this surgery's new tests). `test_local_judge_sandbox`
+tripped once under full-suite ordering on the surgical tree and passes in
+isolation and on the full-suite rerun, matching its known flake character.
+No credential value is echoed; all fixtures keep the synthetic placeholder
+policy.
+
+Live closure remains the separate gate: DM live r4 against the preprod station
+with the refreshed trio Cookie/token material and the reviewed convergence
+budgets, the ledger rebuild for the retained 29 parent stories, and
+`remote_validation=NOT_RUN` / `grants_release_credit=false` stay in force until
+that evidence lands.

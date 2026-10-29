@@ -174,11 +174,12 @@ def submit_projection(profile, run_id, session_id) -> dict:
 
 
 def status_projection(profile, run_id, session_id, *, state, version,
-                      is_terminal) -> dict:
+                      is_terminal, content: str = "") -> dict:
     return {"run_id": run_id,
             "bot_uuid": profile["actors"]["member"]["bot_id"],
             "from_bot_id": profile["actors"]["driver"]["bot_id"],
-            "session_id": session_id, "state": state, "response": {"content": ""},
+            "session_id": session_id, "state": state,
+            "response": {"content": content},
             "error_message": None, "created_at_ms": 1735689600000,
             "updated_at_ms": 1735689600001, "expires_at_ms": 1735689600002,
             "version": version, "content_truncated": False,
@@ -211,6 +212,9 @@ class FakeChainRunner:
         self.calls = []
         self.fail_at = None
         self.duplicate_ping_identity = False
+        self.remote_async = False
+        self.ping_terminal_pending = False
+        self.ping_cancel_state = "running"
         self.main_cancel_version = MAIN_CANCEL_VERSION
         self.main_terminal_version = MAIN_TERMINAL_VERSION
         self.ping_cancel_version = PING_CANCEL_VERSION
@@ -240,10 +244,19 @@ class FakeChainRunner:
             return {"data": submit_projection(self.profile, run_id, session_id),
                     "evidence": evidence}
         if operation == DIRECT_CHAT_MAIN_READ_OPERATION:
-            return {"data": status_projection(self.profile, MAIN_RUN, MAIN_SESSION,
-                                              state="running", version=5,
-                                              is_terminal=False), "evidence": evidence}
+            state_data = (status_projection(self.profile, MAIN_RUN, MAIN_SESSION,
+                                            state="pending", version=4,
+                                            is_terminal=False)
+                          if self.remote_async else
+                          status_projection(self.profile, MAIN_RUN, MAIN_SESSION,
+                                            state="running", version=5,
+                                            is_terminal=False))
+            return {"data": state_data, "evidence": evidence}
         if operation == DIRECT_CHAT_MAIN_CANCEL_OPERATION:
+            if self.remote_async:
+                return {"data": {**cancel_projection(
+                    MAIN_RUN, self.main_cancel_version), "cancelled": False,
+                    "state": "running"}, "evidence": evidence}
             return {"data": cancel_projection(MAIN_RUN, self.main_cancel_version),
                     "evidence": evidence}
         if operation == DIRECT_CHAT_MAIN_TERMINAL_OPERATION:
@@ -252,9 +265,23 @@ class FakeChainRunner:
                                               version=self.main_terminal_version,
                                               is_terminal=True), "evidence": evidence}
         if operation == DIRECT_CHAT_PING_CANCEL_OPERATION:
+            if self.remote_async:
+                return {"data": {**cancel_projection(
+                    PING_RUN, self.ping_cancel_version), "cancelled": False,
+                    "state": self.ping_cancel_state}, "evidence": evidence}
             return {"data": cancel_projection(PING_RUN, self.ping_cancel_version),
                     "evidence": evidence}
         if operation == DIRECT_CHAT_PING_TERMINAL_OPERATION:
+            if self.remote_async and self.ping_terminal_pending:
+                return {"data": status_projection(
+                    self.profile, PING_RUN, PING_SESSION, state="running",
+                    version=self.ping_cancel_version, is_terminal=False),
+                    "evidence": evidence}
+            if self.remote_async:
+                return {"data": status_projection(
+                    self.profile, PING_RUN, PING_SESSION, state="completed",
+                    version=self.ping_terminal_version, is_terminal=True,
+                    content="pong"), "evidence": evidence}
             return {"data": status_projection(self.profile, PING_RUN, PING_SESSION,
                                               state="cancelled",
                                               version=self.ping_terminal_version,
@@ -742,7 +769,7 @@ class DirectChatPlanAndRegistryTests(unittest.TestCase):
             profile_value(preprod=True, auth=trio_auth())),
             "human_cookie_with_owned_bot_tokens")
 
-    def test_adaptability_row_covers_both_environments_with_the_writeclient_gap(self):
+    def test_adaptability_row_discloses_derived_profile_convergence(self):
         row = dual_direct_chat_adaptability()
         self.assertEqual(row["case_id"], "DUAL-DIRECT-CHAT-01")
         self.assertEqual(row["legacy_id"], PARENT)
@@ -753,7 +780,10 @@ class DirectChatPlanAndRegistryTests(unittest.TestCase):
         self.assertEqual(row["local_executor_status"], "LOCAL_FULL_EXECUTOR")
         self.assertEqual(row["remote_validation"], "NOT_RUN")
         self.assertFalse(row["grants_release_credit"])
-        self.assertIn("WriteClient", row["blocker"])
+        self.assertIn("derived-profile WriteClient", row["blocker"])
+        self.assertIn("bounded budgets", row["blocker"])
+        self.assertIn("rate_limited", row["blocker"])
+        self.assertIn("naturally completing ping", row["blocker"])
 
 
 class DirectChatExecutionTests(unittest.TestCase):
@@ -913,6 +943,376 @@ class DirectChatExecutionTests(unittest.TestCase):
         with self.assertRaisesRegex(RunStateError, "AdapterCall"):
             _require_step_evidence(adapter, {"evidence": {}},
                                    DIRECT_CHAT_PING_SUBMIT_OPERATION)
+
+
+class FakeDmConvergenceWriteClient:
+    """Offline WriteClient double issuing only the disclosed DM convergence GETs."""
+
+    instances: list = []
+    stage: dict = {}
+
+    def __init__(self, profile: dict):
+        self.profile = profile
+        self.calls: list = []
+        FakeDmConvergenceWriteClient.instances.append(self)
+
+    def call(self, operation, *, expected=(200,), **kwargs):
+        path = self.profile["route_bindings"][operation]["path"]
+        header_env = self.profile["auth"].get("header_env", {})
+        record = {
+            "operation": operation, "method": "GET", "path": path,
+            "http_status": 200, "elapsed_ms": 0.4,
+            "credentials_sent": "Cookie" in header_env,
+            "authorization_sent": "Authorization" in header_env,
+            "traceparent_mode": "disabled",
+        }
+        self.calls.append({"operation": operation, "expected": expected,
+                           "path": path, "record": record})
+        queue = FakeDmConvergenceWriteClient.stage.get(operation, [])
+        if not queue:
+            raise AssertionError("unexpected convergence GET: " + operation)
+        return queue.pop(0), record
+
+
+class ExplodingDmConvergenceClient:
+    """Guards the local Singlebox tier: it must never build an HTTP client."""
+
+    def __init__(self, profile: dict):
+        raise AssertionError(
+            "local Singlebox tier must not build a convergence HTTP client")
+
+
+class RemoteDirectChatConvergenceTests(unittest.TestCase):
+    """Preprod DM async convergence through derived-profile WriteClient GETs."""
+
+    CONVERGENCE = {
+        "main_running_deadline_seconds": 5.0,
+        "main_cancel_deadline_seconds": 5.0,
+        "main_terminal_deadline_seconds": 5.0,
+        "ping_terminal_deadline_seconds": 5.0,
+        "poll_interval_seconds": 0.001,
+    }
+
+    def setUp(self):
+        FakeDmConvergenceWriteClient.instances = []
+        FakeDmConvergenceWriteClient.stage = {}
+
+    def remote_adapter(self, *, convergence=None, auth=None):
+        profile = preprod_profile(trio_auth() if auth is None else auth)
+        runner = FakeChainRunner(profile)
+        adapter = DualDirectChatAdapter(
+            profile, runner,
+            convergence=self.CONVERGENCE if convergence is None else convergence)
+        return adapter, runner
+
+    def stage(self, operation, payload):
+        FakeDmConvergenceWriteClient.stage.setdefault(operation, []).append(
+            payload)
+
+    def patched(self):
+        return patch.object(direct_chat_case_runner, "WriteClient",
+                            FakeDmConvergenceWriteClient)
+
+    def test_remote_async_chain_passes_with_disclosed_convergence(self):
+        adapter, runner = self.remote_adapter()
+        runner.remote_async = True
+        profile = runner.profile
+        self.stage(DIRECT_CHAT_MAIN_READ_OPERATION,
+                   status_projection(profile, MAIN_RUN, MAIN_SESSION,
+                                     state="running", version=8,
+                                     is_terminal=False))
+        self.stage(DIRECT_CHAT_MAIN_TERMINAL_OPERATION,
+                   status_projection(profile, MAIN_RUN, MAIN_SESSION,
+                                     state="running", version=10,
+                                     is_terminal=False))
+        self.stage(DIRECT_CHAT_MAIN_TERMINAL_OPERATION,
+                   status_projection(profile, MAIN_RUN, MAIN_SESSION,
+                                     state="cancelled", version=13,
+                                     is_terminal=True))
+        with self.patched():
+            execution = execute_direct_chat_case(adapter)
+        self.assertEqual(execution.status, "PASS")
+        self.assertEqual(execution.completed_count, 5)
+        self.assertIsNone(execution.error_type)
+        self.assertEqual([call[0] for call in runner.calls], OPERATIONS_BY_RUN)
+        for step in execution.steps:
+            self.assertEqual(step.status, "PASS")
+            for record in step.evidence["requests"]:
+                self.assertEqual(record["transport"], "PRODUCT_CLI")
+        self.assertEqual(len(FakeDmConvergenceWriteClient.instances), 1)
+        client = FakeDmConvergenceWriteClient.instances[0]
+        self.assertEqual(
+            [recorded["operation"] for recorded in client.calls],
+            [DIRECT_CHAT_MAIN_READ_OPERATION,
+             DIRECT_CHAT_MAIN_TERMINAL_OPERATION,
+             DIRECT_CHAT_MAIN_TERMINAL_OPERATION])
+        for recorded in client.calls:
+            self.assertEqual(recorded["expected"], (200,))
+            self.assertEqual(recorded["record"]["method"], "GET")
+            self.assertEqual(recorded["record"]["http_status"], 200)
+            self.assertTrue(recorded["record"]["credentials_sent"])
+            self.assertTrue(recorded["record"]["authorization_sent"])
+            self.assertEqual(recorded["record"]["traceparent_mode"],
+                             "disabled")
+        self.assertEqual(
+            client.profile["route_bindings"][DIRECT_CHAT_MAIN_READ_OPERATION]["path"],
+            "/chat/runs/" + MAIN_RUN)
+        self.assertEqual(
+            client.profile["route_bindings"][DIRECT_CHAT_MAIN_TERMINAL_OPERATION]["path"],
+            "/chat/runs/" + MAIN_RUN)
+        self.assertEqual(
+            client.profile["route_bindings"][DIRECT_CHAT_MAIN_CANCEL_OPERATION]["path"],
+            "/chat/runs/" + MAIN_RUN + "/cancel")
+        auth = client.profile["auth"]
+        self.assertEqual(auth["kind"], "human-cookie-with-owned-bot-tokens")
+        self.assertEqual(auth["header_env"],
+                         {"Cookie": COOKIE_ENV, "Authorization": DRIVER_TOKEN_ENV})
+        self.assertEqual(auth["authorization_scheme"], "bearer")
+        self.assertEqual(client.profile["actors"], profile["actors"])
+        self.assertEqual(client.profile["entrypoint"], profile["entrypoint"])
+        running = adapter.main_running_convergence
+        self.assertEqual(running["polls"], 1)
+        self.assertEqual(running["version_first"], 4)
+        self.assertEqual(running["version_last"], 8)
+        self.assertEqual(running["ack_state"], "pending")
+        self.assertEqual(running["transport"], "PRODUCT_HTTP")
+        self.assertEqual(running["method"], "GET")
+        self.assertEqual(running["path_template"], "/chat/runs/{run_id}")
+        self.assertEqual(running["deadline_seconds"], 5.0)
+        self.assertEqual(running["poll_interval_seconds"], 0.001)
+        self.assertEqual(running["version_regressions"], 0)
+        self.assertEqual(running["http_status_sequence"], [200])
+        self.assertEqual(running["http_records"][0]["path"],
+                         "/chat/runs/" + MAIN_RUN)
+        self.assertEqual(running["final_state"], "running")
+        self.assertFalse(running["final_is_terminal"])
+        cancelling = adapter.main_cancel_convergence
+        self.assertEqual(cancelling["polls"], 2)
+        self.assertEqual(cancelling["version_first"], MAIN_CANCEL_VERSION)
+        self.assertEqual(cancelling["version_last"], 13)
+        self.assertEqual(cancelling["final_state"], "cancelled")
+        self.assertEqual(cancelling["http_status_sequence"], [200, 200])
+        self.assertEqual(adapter.main_terminal_convergence["polls"], 0)
+        self.assertEqual(adapter.ping_terminal_convergence["polls"], 0)
+        self.assertEqual(adapter.main_cancel_version, MAIN_CANCEL_VERSION)
+        self.assertEqual(adapter.ping_cancel_version, PING_CANCEL_VERSION)
+        self.assertFalse(adapter.ping_ack_cancelled)
+        self.assertEqual(adapter.ping_ack_state, "running")
+        self.assertEqual(adapter.ping_terminal_state, "completed")
+        self.assertTrue(adapter.ping_natural_completion)
+        steps = {step.method: step for step in execution.steps}
+        read_data = steps["read_main_run"].data
+        self.assertEqual(read_data["main_running_convergence"]["polls"], 1)
+        cancel_data = steps["cancel_main_run"].data
+        self.assertFalse(cancel_data["main_cancel_ack_cancelled"])
+        self.assertEqual(cancel_data["main_cancel_ack_state"], "running")
+        self.assertEqual(cancel_data["state"], "cancelled")
+        self.assertEqual(cancel_data["version"], 13)
+        self.assertEqual(cancel_data["main_cancel_convergence"]["polls"], 2)
+        terminal = steps["read_main_terminal_run"]
+        self.assertEqual(terminal.data["main_terminal_convergence"]["polls"], 0)
+        self.assertEqual(terminal.data["main_terminal_convergence"]["ack_state"],
+                         "cancelled")
+        self.assertEqual(len(terminal.evidence["requests"]), 3)
+        supplementary = terminal.data["supplementary_ping_lifecycle"]
+        self.assertEqual(supplementary["cancel"]["run_id"], PING_RUN)
+        self.assertFalse(supplementary["cancel"]["cancelled"])
+        self.assertEqual(supplementary["cancel"]["state"], "running")
+        self.assertEqual(supplementary["terminal"]["state"], "completed")
+        self.assertEqual(supplementary["terminal"]["response"]["content"],
+                         "pong")
+        self.assertEqual(supplementary["terminal"]["ping_terminal_state"],
+                         "completed")
+        self.assertTrue(supplementary["terminal"]["ping_natural_completion"])
+        self.assertTrue(
+            supplementary["terminal"]["ping_cancel_preceeded_by_completion"])
+        self.assertFalse(supplementary["parent_requirement_credit"])
+        lifecycle = adapter.ping_lifecycle()
+        self.assertEqual(lifecycle["main_running_convergence_polls"], 1)
+        self.assertEqual(lifecycle["main_cancel_convergence_polls"], 2)
+        self.assertEqual(lifecycle["main_cancel_terminal_state"], "cancelled")
+        self.assertEqual(lifecycle["main_terminal_convergence_polls"], 0)
+        self.assertEqual(lifecycle["ping_terminal_convergence_polls"], 0)
+        self.assertFalse(lifecycle["ping_ack_cancelled"])
+        self.assertEqual(lifecycle["ping_ack_state"], "running")
+        self.assertEqual(lifecycle["ping_terminal_state"], "completed")
+        self.assertTrue(lifecycle["ping_natural_completion"])
+
+    def test_remote_ping_terminal_lag_converges_on_its_own_client(self):
+        adapter, runner = self.remote_adapter()
+        runner.remote_async = True
+        runner.ping_terminal_pending = True
+        profile = runner.profile
+        self.stage(DIRECT_CHAT_MAIN_READ_OPERATION,
+                   status_projection(profile, MAIN_RUN, MAIN_SESSION,
+                                     state="running", version=8,
+                                     is_terminal=False))
+        self.stage(DIRECT_CHAT_MAIN_TERMINAL_OPERATION,
+                   status_projection(profile, MAIN_RUN, MAIN_SESSION,
+                                     state="cancelled", version=13,
+                                     is_terminal=True))
+        self.stage(DIRECT_CHAT_PING_TERMINAL_OPERATION,
+                   status_projection(profile, PING_RUN, PING_SESSION,
+                                     state="completed",
+                                     version=PING_TERMINAL_VERSION,
+                                     is_terminal=True, content="pong"))
+        with self.patched():
+            execution = execute_direct_chat_case(adapter)
+        self.assertEqual(execution.status, "PASS")
+        self.assertEqual(len(FakeDmConvergenceWriteClient.instances), 2)
+        main_client, ping_client = FakeDmConvergenceWriteClient.instances
+        self.assertEqual([recorded["operation"] for recorded in main_client.calls],
+                         [DIRECT_CHAT_MAIN_READ_OPERATION,
+                          DIRECT_CHAT_MAIN_TERMINAL_OPERATION])
+        self.assertEqual([recorded["operation"] for recorded in ping_client.calls],
+                         [DIRECT_CHAT_PING_TERMINAL_OPERATION])
+        self.assertEqual(
+            ping_client.profile["route_bindings"][
+                DIRECT_CHAT_PING_TERMINAL_OPERATION]["path"],
+            "/chat/runs/" + PING_RUN)
+        convergence = adapter.ping_terminal_convergence
+        self.assertGreaterEqual(convergence["polls"], 1)
+        self.assertEqual(convergence["version_first"], PING_CANCEL_VERSION)
+        self.assertEqual(convergence["version_last"], PING_TERMINAL_VERSION)
+        self.assertEqual(convergence["final_state"], "completed")
+        self.assertEqual(adapter.ping_terminal_state, "completed")
+        self.assertTrue(adapter.ping_natural_completion)
+        lifecycle = adapter.ping_lifecycle()
+        self.assertGreaterEqual(lifecycle["ping_terminal_convergence_polls"], 1)
+
+    def test_remote_running_budget_exhaustion_blocks_the_case(self):
+        convergence = {"main_running_deadline_seconds": 0.05,
+                       "poll_interval_seconds": 0.001}
+        adapter, runner = self.remote_adapter(convergence=convergence)
+        runner.remote_async = True
+        profile = runner.profile
+        for _ in range(400):
+            self.stage(DIRECT_CHAT_MAIN_READ_OPERATION,
+                       status_projection(profile, MAIN_RUN, MAIN_SESSION,
+                                         state="pending", version=4,
+                                         is_terminal=False))
+        with self.patched():
+            execution = execute_direct_chat_case(adapter)
+        self.assertEqual(execution.status, "BLOCKED")
+        self.assertEqual(execution.error_type, "RunStateError")
+        self.assertEqual(execution.completed_count, 0)
+        for step in execution.steps:
+            self.assertEqual(step.status, "NOT_RUN")
+            self.assertEqual(step.evidence, {})
+            self.assertIsNone(step.data)
+        self.assertEqual(len(FakeDmConvergenceWriteClient.instances), 1)
+        polls = len(FakeDmConvergenceWriteClient.instances[0].calls)
+        self.assertGreater(polls, 10)
+        adapter, runner = self.remote_adapter(convergence=convergence)
+        runner.remote_async = True
+        adapter.ping_run_id = PING_RUN
+        adapter.ping_session_id = PING_SESSION
+        adapter.main_run_id = MAIN_RUN
+        adapter.main_session_id = MAIN_SESSION
+        with self.patched():
+            with self.assertRaisesRegex(
+                    RunStateError, "did not reach the running state"):
+                adapter.read_main_run()
+
+    def test_remote_cancel_converging_to_completed_blocks(self):
+        adapter, runner = self.remote_adapter()
+        runner.remote_async = True
+        with self.patched():
+            adapter.submit_ping_run()
+            adapter.submit_main_run()
+            self.stage(DIRECT_CHAT_MAIN_TERMINAL_OPERATION,
+                       status_projection(runner.profile, MAIN_RUN, MAIN_SESSION,
+                                         state="completed", version=13,
+                                         is_terminal=True))
+            with self.assertRaisesRegex(
+                    RunStateError, "non-cancelled terminal"):
+                adapter.cancel_main_run()
+
+    def test_remote_ping_terminal_wrong_pong_content_blocks(self):
+        adapter, runner = self.remote_adapter()
+        runner.remote_async = True
+        runner.ping_terminal_pending = True
+        profile = runner.profile
+        self.stage(DIRECT_CHAT_MAIN_READ_OPERATION,
+                   status_projection(profile, MAIN_RUN, MAIN_SESSION,
+                                     state="running", version=8,
+                                     is_terminal=False))
+        self.stage(DIRECT_CHAT_MAIN_TERMINAL_OPERATION,
+                   status_projection(profile, MAIN_RUN, MAIN_SESSION,
+                                     state="cancelled", version=13,
+                                     is_terminal=True))
+        self.stage(DIRECT_CHAT_PING_TERMINAL_OPERATION,
+                   status_projection(profile, PING_RUN, PING_SESSION,
+                                     state="completed",
+                                     version=PING_TERMINAL_VERSION,
+                                     is_terminal=True, content="not-pong"))
+        with self.patched():
+            adapter.submit_ping_run()
+            adapter.submit_main_run()
+            adapter.read_main_run()
+            adapter.cancel_main_run()
+            adapter.read_main_terminal_run()
+            adapter.cancel_ping_run()
+            with self.assertRaisesRegex(
+                    RunStateError, "pong terminal projection"):
+                adapter.read_ping_terminal_run()
+
+    def test_local_tier_never_builds_a_convergence_http_client(self):
+        profile = local_profile()
+        runner = FakeChainRunner(profile)
+        adapter = DualDirectChatAdapter(
+            profile, runner, convergence=self.CONVERGENCE)
+        with patch.object(direct_chat_case_runner, "WriteClient",
+                          ExplodingDmConvergenceClient):
+            execution = execute_direct_chat_case(adapter)
+        self.assertEqual(execution.status, "PASS")
+        self.assertEqual([call[0] for call in runner.calls], OPERATIONS_BY_RUN)
+        self.assertIsNone(adapter.ping_terminal_state)
+        self.assertFalse(adapter.ping_natural_completion)
+        lifecycle = adapter.ping_lifecycle()
+        self.assertEqual(lifecycle["ping_run_id"], PING_RUN)
+        self.assertEqual(lifecycle["main_run_id"], MAIN_RUN)
+        self.assertNotIn("main_running_convergence_polls", lifecycle)
+        self.assertNotIn("ping_terminal_convergence_polls", lifecycle)
+        self.assertNotIn("ping_terminal_state", lifecycle)
+
+    def test_cookie_only_remote_profile_derives_cookie_header_only(self):
+        adapter, _ = self.remote_adapter(
+            auth={"kind": "human-cookie", "cookie_env": COOKIE_ENV})
+        derived = adapter._dm_convergence_profile(MAIN_RUN)
+        self.assertEqual(derived["auth"]["kind"], "human-cookie")
+        self.assertEqual(derived["auth"]["header_env"],
+                         {"Cookie": COOKIE_ENV})
+        self.assertNotIn("Authorization", derived["auth"]["header_env"])
+        self.assertNotIn("authorization_scheme", derived["auth"])
+        for operation in (DIRECT_CHAT_MAIN_READ_OPERATION,
+                          DIRECT_CHAT_MAIN_TERMINAL_OPERATION,
+                          DIRECT_CHAT_PING_TERMINAL_OPERATION):
+            self.assertEqual(
+                derived["route_bindings"][operation]["path"],
+                "/chat/runs/" + MAIN_RUN)
+        for operation in (DIRECT_CHAT_MAIN_CANCEL_OPERATION,
+                          DIRECT_CHAT_PING_CANCEL_OPERATION):
+            self.assertEqual(
+                derived["route_bindings"][operation]["path"],
+                "/chat/runs/" + MAIN_RUN + "/cancel")
+        self.assertEqual(derived["entrypoint"], adapter.profile["entrypoint"])
+        self.assertEqual(derived["actors"], adapter.profile["actors"])
+
+    def test_invalid_convergence_budget_fails_closed(self):
+        adapter, runner = self.remote_adapter(
+            convergence={"main_running_deadline_seconds": 5.0,
+                         "main_cancel_deadline_seconds": 5.0,
+                         "main_terminal_deadline_seconds": 5.0,
+                         "ping_terminal_deadline_seconds": 5.0,
+                         "poll_interval_seconds": 0})
+        runner.remote_async = True
+        with self.patched():
+            adapter.submit_ping_run()
+            adapter.submit_main_run()
+            with self.assertRaisesRegex(
+                    RunStateError, "convergence budget is invalid"):
+                adapter.read_main_run()
 
 
 if __name__ == "__main__":

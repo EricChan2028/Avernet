@@ -1,11 +1,17 @@
 """Command entry for the reviewed dual Direct-chat product-CLI case run.
 
 The five reviewed DM obligations chain the frozen legacy product bcs-cli
-Direct-chat leaves only; every step rides PRODUCT_CLI because the DM run
-lifecycle routes are not expressible through the cleanup WriteClient
-templates (no {run_id} or bot-target placeholder), the main --timeout-ms
-budget is a client dispatch header, and the pinned preprod browser_origin
-is validated but unconsumed by this slice.  The frozen operation
+Direct-chat leaves only.  Submit, read, cancel and terminal reads ride
+PRODUCT_CLI exactly once, in order.  Preprod is a true asynchronous DM
+queue: submit acknowledgements can remain pending/queued under rate
+limiting, cancel acknowledgements can precede the abort's convergence, and
+the ping Run can complete naturally before its supplementary cancel.  The
+remote tier converges those pacing conditions through a case-owned
+derived-profile WriteClient GET on the reviewed /chat/runs/{run_id} route
+(PRODUCT_HTTP, legacy-json) with disclosed bounded budgets, while the
+Singlebox local tier keeps the reviewed synchronous contract unchanged.
+The main --timeout-ms budget is a client dispatch header, and the pinned
+preprod browser_origin is validated but unconsumed by this slice.  The frozen operation
 vocabulary, the reviewed route bindings, the fail-closed profile validator
 and the one-shot launcher envelope live in the focused leaf module; this
 module owns the frozen DM plan, the dual-environment adapters, the
@@ -16,6 +22,8 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import time
+from urllib.parse import quote
 
 from .case_adapters import AdapterCall
 from .case_executor import CaseExecution, StepOutcome
@@ -56,6 +64,7 @@ from .profile import (
     unique_keys,
 )
 from .run_state import RunStateError, write
+from .write_transport import WriteClient, WriteTransportError
 from .workspace_cli_commands import WorkspaceCliRunnerError
 
 SCHEMA_VERSION = 1
@@ -69,6 +78,18 @@ CASE_COMMAND = "dual-direct-chat-run"
 
 DUAL_DIRECT_CHAT_CASE_ID = "DUAL-DIRECT-CHAT-01"
 DUAL_DIRECT_CHAT_CASE_METHOD = "execute_direct_chat_case"
+
+# Bounded remote convergence budgets (seconds), disclosed per projection.
+# Derived from the r3 preprod natural history: submits acknowledge pending
+# under station rate limiting, the main Run reaches running within seconds
+# to tens of seconds, cancel acknowledgements precede abort convergence,
+# and the ping Run completes naturally ("pong") in a few minutes on the
+# shared asynchronous queue.
+DM_RUNNING_DEADLINE_SECONDS = 45.0
+DM_CANCEL_DEADLINE_SECONDS = 120.0
+DM_TERMINAL_DEADLINE_SECONDS = 30.0
+DM_PING_TERMINAL_DEADLINE_SECONDS = 120.0
+DM_POLL_INTERVAL_SECONDS = 2.0
 
 
 def direct_chat_cli_case_plan() -> dict:
@@ -118,10 +139,14 @@ def dual_direct_chat_adaptability() -> dict:
         "remote_validation": "NOT_RUN",
         "grants_release_credit": False,
         "blocker": (
-            "Mock-verified Singlebox and preprod product-CLI contexts; the DM run "
-            "lifecycle stays on PRODUCT_CLI because the cleanup WriteClient "
-            "templates cannot express {run_id} routes. Live effect admission "
-            "remains a separate gate."
+            "Mock-verified Singlebox and preprod product-CLI contexts; the DM "
+            "lifecycle leaves ride PRODUCT_CLI once each in order, and the "
+            "preprod tier's asynchronous queue (pending/rate_limited submits, "
+            "non-terminal cancel acknowledgements, naturally completing ping "
+            "Runs) is converged by a case-owned derived-profile WriteClient "
+            "GET /chat/runs/{run_id} with disclosed bounded budgets. Live "
+            "preprod effect admission and convergence pacing remain a "
+            "separate gate."
         ),
     }
 
@@ -131,7 +156,8 @@ class RemoteLocalDirectChatAdapter:
 
     _profile_validator = staticmethod(validate_direct_chat_cli_profile)
 
-    def __init__(self, profile: dict, runner: object):
+    def __init__(self, profile: dict, runner: object,
+                 *, convergence: dict | None = None):
         self.profile = self._profile_validator(profile)
         if not callable(getattr(runner, "execute", None)):
             raise RunStateError("Direct chat requires a product-CLI runner")
@@ -145,11 +171,129 @@ class RemoteLocalDirectChatAdapter:
         self.main_cancel_version = 0
         self.ping_cancel_version = 0
         self.fixture_effect = DIRECT_CHAT_CLI_EFFECT
+        self.main_running_convergence: dict | None = None
+        self.main_cancel_convergence: dict | None = None
+        self.main_terminal_convergence: dict | None = None
+        self.ping_terminal_convergence: dict | None = None
+        self.ping_ack_cancelled: bool | None = None
+        self.ping_ack_state: str | None = None
+        self.ping_terminal_state: str | None = None
+        self.ping_natural_completion = False
+        self._convergence: dict = dict(convergence or {})
+        self._convergence_clients: dict[str, WriteClient] = {}
 
     def _credential_kind(self) -> str:
         return ("owned_local_bot_token"
                 if self.profile["environment"]["tier"] == "local"
                 else "human_cookie")
+
+    def _tier_local(self) -> bool:
+        return self.profile["environment"]["tier"] == "local"
+
+    def _budget(self, key: str, default: float) -> float:
+        value = self._convergence.get(key, default)
+        if (type(value) is not int and type(value) is not float) or value <= 0:
+            raise RunStateError("Direct chat convergence budget is invalid")
+        return float(value)
+
+    def _dm_convergence_profile(self, run_id: object) -> dict:
+        """Derived profile expressing the concrete Run-scoped DM routes."""
+        identifier(run_id, "direct chat Run ID")
+        quoted = quote(str(run_id), safe="")
+        value = json.loads(json.dumps(self.profile, allow_nan=False))
+        get_binding = "/chat/runs/" + quoted
+        cancel_binding = get_binding + "/cancel"
+        for operation in (DIRECT_CHAT_MAIN_READ_OPERATION,
+                          DIRECT_CHAT_MAIN_TERMINAL_OPERATION,
+                          DIRECT_CHAT_PING_TERMINAL_OPERATION):
+            binding = dict(value["route_bindings"][operation])
+            binding["path"] = get_binding
+            value["route_bindings"][operation] = binding
+        for operation in (DIRECT_CHAT_MAIN_CANCEL_OPERATION,
+                          DIRECT_CHAT_PING_CANCEL_OPERATION):
+            binding = dict(value["route_bindings"][operation])
+            binding["path"] = cancel_binding
+            value["route_bindings"][operation] = binding
+        if value["environment"]["tier"] == "preprod":
+            header_env = {"Cookie": value["auth"]["cookie_env"]}
+            derived_auth = {"kind": value["auth"]["kind"],
+                            "header_env": header_env}
+            if value["auth"].get("driver_token_env"):
+                header_env["Authorization"] = value["auth"]["driver_token_env"]
+                derived_auth["authorization_scheme"] = "bearer"
+            value["auth"] = derived_auth
+        return value
+
+    def _convergence_client(self, run_id: object) -> WriteClient:
+        key = str(run_id)
+        client = self._convergence_clients.get(key)
+        if client is None:
+            client = WriteClient(self._dm_convergence_profile(run_id))
+            self._convergence_clients[key] = client
+        return client
+
+    def _converge_remote(self, *, initial: dict, run_id: object, operation: str,
+                         deadline: float, interval: float, predicate,
+                         exhausted_message: str) -> tuple[dict, dict]:
+        """Bounded station-state convergence over the case-owned WriteClient.
+
+        The frozen CLI leaves are one-shot and strictly ordered, so the
+        convergence polling rides the reviewed DM route bindings through a
+        derived profile whose Run-scoped paths are concrete (the ``{run_id}``
+        placeholder is bound per Run), never through the CLI leaves.  Every
+        admission shape stays fail-closed; the local Singlebox simulator
+        path never enters this branch.
+        """
+        # A cancel acknowledgement projection carries no ``is_terminal``
+        # key; treat it as a non-terminal first observation and let the
+        # first authoritative WriteClient GET correct it, disclosing the
+        # acknowledgement version as the convergence starting point.
+        if type(initial.get("is_terminal")) is not bool:
+            initial = {**initial, "is_terminal": False}
+        if (type(initial.get("version")) is not int or initial["version"] <= 0
+                or type(initial.get("is_terminal")) is not bool):
+            raise RunStateError(
+                "Direct chat convergence requires a versioned Run projection")
+        started = time.monotonic()
+        polls = 0
+        versions = [initial["version"]]
+        records: list[dict] = []
+        data = initial
+        while not predicate(data):
+            if time.monotonic() - started >= deadline:
+                raise RunStateError(
+                    f"{exhausted_message} (run_id={data.get('run_id')!r} "
+                    f"state={data.get('state')!r} "
+                    f"is_terminal={data.get('is_terminal')!r} "
+                    f"wait_reason={data.get('wait_reason')!r} polls={polls} "
+                    f"budget_seconds={deadline})")
+            payload, record = self._convergence_client(run_id).call(
+                operation, expected=(200,))
+            polls += 1
+            records.append(record)
+            data = self._status_projection(payload, operation)
+            if (type(data.get("version")) is not int or data["version"] <= 0
+                    or type(data.get("is_terminal")) is not bool):
+                raise RunStateError(
+                    "Direct chat convergence read an invalid Run projection")
+            versions.append(data["version"])
+            time.sleep(interval)
+        return data, {
+            "transport": "PRODUCT_HTTP", "method": "GET",
+            "path_template": "/chat/runs/{run_id}", "operation": operation,
+            "deadline_seconds": deadline, "poll_interval_seconds": interval,
+            "polls": polls,
+            "wait_seconds": round(time.monotonic() - started, 2),
+            "version_first": versions[0], "version_last": versions[-1],
+            "version_regressions": sum(
+                1 for previous, current in zip(versions, versions[1:])
+                if current < previous),
+            "http_status_sequence": [record.get("http_status")
+                                     for record in records],
+            "http_records": records,
+            "final_state": data["state"],
+            "final_is_terminal": data["is_terminal"],
+        }
 
     def _run(self, operation: str, *, case_class: str, **kwargs) -> AdapterCall:
         try:
@@ -245,6 +389,27 @@ class RemoteLocalDirectChatAdapter:
             DIRECT_CHAT_MAIN_READ_OPERATION, case_class="main-read",
             run_id=self.main_run_id)
         data = self._status_projection(call.data, DIRECT_CHAT_MAIN_READ_OPERATION)
+        if not self._tier_local():
+            ack_state = data["state"]
+            if not (data["state"] == "running" and data["is_terminal"] is False):
+                data, disclosure = self._converge_remote(
+                    initial=data, run_id=self.main_run_id,
+                    operation=DIRECT_CHAT_MAIN_READ_OPERATION,
+                    deadline=self._budget("main_running_deadline_seconds",
+                                          DM_RUNNING_DEADLINE_SECONDS),
+                    interval=self._budget("poll_interval_seconds",
+                                          DM_POLL_INTERVAL_SECONDS),
+                    predicate=lambda projection: (
+                        projection["state"] == "running"
+                        and projection["is_terminal"] is False),
+                    exhausted_message=(
+                        "Direct chat main Run did not reach the running state "
+                        "within its disclosed convergence budget"))
+            else:
+                disclosure = {"polls": 0, "wait_seconds": 0.0}
+            disclosure["ack_state"] = ack_state
+            self.main_running_convergence = disclosure
+            data = {**data, "main_running_convergence": disclosure}
         if (data["run_id"] != self.main_run_id
                 or data["session_id"] != self.main_session_id
                 or data["bot_uuid"] != self.member_id
@@ -265,15 +430,52 @@ class RemoteLocalDirectChatAdapter:
             DIRECT_CHAT_MAIN_CANCEL_OPERATION, case_class="main-cancel",
             run_id=self.main_run_id)
         data = self._cancel_projection(call.data, DIRECT_CHAT_MAIN_CANCEL_OPERATION)
-        if (data["run_id"] != self.main_run_id
-                or data["cancelled"] is not True
-                or data["state"] != "cancelled"
-                or data.get("response", {}).get("content") != ""
-                or data.get("error_message") is not None
-                or data.get("content_truncated") is not False):
+        if data["run_id"] != self.main_run_id:
             raise RunStateError(
                 "Direct chat main cancel acknowledgement differs from the exact Run")
-        self.main_cancel_version = data["version"]
+        if self._tier_local():
+            if (data["cancelled"] is not True
+                    or data["state"] != "cancelled"
+                    or data.get("response", {}).get("content") != ""
+                    or data.get("error_message") is not None
+                    or data.get("content_truncated") is not False):
+                raise RunStateError(
+                    "Direct chat main cancel acknowledgement differs from the exact Run")
+            self.main_cancel_version = data["version"]
+            return AdapterCall(data=data, evidence=call.evidence)
+        # Remote tier: the acknowledgement may precede the abort's
+        # convergence (cancelled=false with the Run still running), so the
+        # reviewed main obligation is enforced on the converged terminal
+        # projection, never loosened.
+        ack_cancelled = data["cancelled"]
+        ack_state = data["state"]
+        ack_version = data["version"]
+        converged, disclosure = self._converge_remote(
+            initial=data, run_id=self.main_run_id,
+            operation=DIRECT_CHAT_MAIN_TERMINAL_OPERATION,
+            deadline=self._budget("main_cancel_deadline_seconds",
+                                  DM_CANCEL_DEADLINE_SECONDS),
+            interval=self._budget("poll_interval_seconds", DM_POLL_INTERVAL_SECONDS),
+            predicate=lambda projection: projection["is_terminal"] is True,
+            exhausted_message=(
+                "Direct chat main Run cancel did not converge to a terminal "
+                "state within its disclosed convergence budget"))
+        if (converged["state"] != "cancelled"
+                or converged["is_terminal"] is not True
+                or converged.get("response", {}).get("content") != ""
+                or converged.get("error_message") is not None
+                or converged.get("content_truncated") is not False
+                or type(converged.get("version")) is not int
+                or converged["version"] < ack_version):
+            raise RunStateError(
+                "Direct chat main Run cancel converged to a non-cancelled "
+                "terminal projection")
+        self.main_cancel_version = ack_version
+        self.main_cancel_convergence = disclosure
+        data = {**converged,
+                "main_cancel_ack_cancelled": ack_cancelled,
+                "main_cancel_ack_state": ack_state,
+                "main_cancel_convergence": disclosure}
         return AdapterCall(data=data, evidence=call.evidence)
 
     def read_main_terminal_run(self) -> AdapterCall:
@@ -284,6 +486,37 @@ class RemoteLocalDirectChatAdapter:
             DIRECT_CHAT_MAIN_TERMINAL_OPERATION, case_class="main-terminal-read",
             run_id=self.main_run_id)
         data = self._status_projection(call.data, DIRECT_CHAT_MAIN_TERMINAL_OPERATION)
+        if not self._tier_local():
+            ack_state = data["state"]
+            if not (data["state"] == "cancelled"
+                    and data["is_terminal"] is True
+                    and data["version"] >= self.main_cancel_version
+                    and data.get("error_message") is None
+                    and data.get("response", {}).get("content") == ""
+                    and data.get("content_truncated") is False):
+                data, disclosure = self._converge_remote(
+                    initial=data, run_id=self.main_run_id,
+                    operation=DIRECT_CHAT_MAIN_TERMINAL_OPERATION,
+                    deadline=self._budget("main_terminal_deadline_seconds",
+                                          DM_TERMINAL_DEADLINE_SECONDS),
+                    interval=self._budget("poll_interval_seconds",
+                                          DM_POLL_INTERVAL_SECONDS),
+                    predicate=lambda projection: (
+                        projection["state"] == "cancelled"
+                        and projection["is_terminal"] is True
+                        and projection["version"] >= self.main_cancel_version
+                        and projection.get("error_message") is None
+                        and projection.get("response", {}).get("content") == ""
+                        and projection.get("content_truncated") is False),
+                    exhausted_message=(
+                        "Direct chat main terminal read did not satisfy the "
+                        "cancelled terminal contract within its disclosed "
+                        "convergence budget"))
+            else:
+                disclosure = {"polls": 0, "wait_seconds": 0.0}
+            disclosure["ack_state"] = ack_state
+            self.main_terminal_convergence = disclosure
+            data = {**data, "main_terminal_convergence": disclosure}
         if (data["run_id"] != self.main_run_id
                 or data["session_id"] != self.main_session_id
                 or data["bot_uuid"] != self.member_id
@@ -306,12 +539,26 @@ class RemoteLocalDirectChatAdapter:
             DIRECT_CHAT_PING_CANCEL_OPERATION, case_class="ping-cancel-supplementary",
             run_id=self.ping_run_id)
         data = self._cancel_projection(call.data, DIRECT_CHAT_PING_CANCEL_OPERATION)
-        if (data["run_id"] != self.ping_run_id
-                or data["cancelled"] is not True
-                or data["state"] != "cancelled"):
+        if data["run_id"] != self.ping_run_id:
             raise RunStateError(
                 "Direct chat ping cancel acknowledgement differs from the exact Run")
+        if self._tier_local():
+            if (data["cancelled"] is not True
+                    or data["state"] != "cancelled"):
+                raise RunStateError(
+                    "Direct chat ping cancel acknowledgement differs from the exact Run")
+            self.ping_cancel_version = data["version"]
+            return AdapterCall(data=data, evidence=call.evidence)
+        # Remote tier: the queued station may have completed the ping Run
+        # naturally before this supplementary cancel lands; the
+        # acknowledgement shape is recorded and the terminal read enforces
+        # the real end state with disclosure.
+        self.ping_ack_cancelled = data["cancelled"]
+        self.ping_ack_state = data["state"]
         self.ping_cancel_version = data["version"]
+        data = {**data,
+                "ping_cancel_ack_cancelled": data["cancelled"],
+                "ping_cancel_ack_state": data["state"]}
         return AdapterCall(data=data, evidence=call.evidence)
 
     def read_ping_terminal_run(self) -> AdapterCall:
@@ -322,6 +569,68 @@ class RemoteLocalDirectChatAdapter:
             DIRECT_CHAT_PING_TERMINAL_OPERATION, case_class="ping-terminal-supplementary",
             run_id=self.ping_run_id)
         data = self._status_projection(call.data, DIRECT_CHAT_PING_TERMINAL_OPERATION)
+        if not self._tier_local():
+            ack_state = data["state"]
+            if not (data["is_terminal"] is True
+                    and data["version"] >= self.ping_cancel_version):
+                data, disclosure = self._converge_remote(
+                    initial=data, run_id=self.ping_run_id,
+                    operation=DIRECT_CHAT_PING_TERMINAL_OPERATION,
+                    deadline=self._budget("ping_terminal_deadline_seconds",
+                                          DM_PING_TERMINAL_DEADLINE_SECONDS),
+                    interval=self._budget("poll_interval_seconds",
+                                          DM_POLL_INTERVAL_SECONDS),
+                    predicate=lambda projection: (
+                        projection["is_terminal"] is True
+                        and projection["version"] >= self.ping_cancel_version),
+                    exhausted_message=(
+                        "Direct chat supplementary ping Run did not reach a "
+                        "versioned terminal state within its disclosed "
+                        "convergence budget"))
+            else:
+                disclosure = {"polls": 0, "wait_seconds": 0.0}
+            disclosure["ack_state"] = ack_state
+            self.ping_terminal_convergence = disclosure
+            data = {**data, "ping_terminal_convergence": disclosure}
+            if (data["run_id"] != self.ping_run_id
+                    or data["session_id"] != self.ping_session_id
+                    or type(data.get("version")) is not int):
+                raise RunStateError(
+                    "Direct chat ping terminal read differs from the exact Run")
+            if data["state"] == "cancelled":
+                if (data["is_terminal"] is not True
+                        or data["version"] < self.ping_cancel_version
+                        or data.get("error_message") is not None
+                        or data.get("response", {}).get("content") != ""
+                        or data.get("content_truncated") is not False):
+                    raise RunStateError(
+                        "Direct chat ping terminal read differs from the exact cancelled Run")
+                data["ping_terminal_state"] = "cancelled"
+                data["ping_natural_completion"] = False
+                data["ping_cancel_preceeded_by_completion"] = False
+            elif data["state"] == "completed":
+                # The queued station may consume the ping Run naturally
+                # (answer "pong") before the supplementary cancel lands; the
+                # observed lifecycle is disclosed, never disguised, and the
+                # strict main chain above is unaffected.
+                if (data["is_terminal"] is not True
+                        or data["version"] < self.ping_cancel_version
+                        or data.get("error_message") is not None
+                        or data.get("response", {}).get("content") != "pong"
+                        or data.get("content_truncated") is not False):
+                    raise RunStateError(
+                        "Direct chat ping natural completion differs from the "
+                        "observed pong terminal projection")
+                data["ping_terminal_state"] = "completed"
+                data["ping_natural_completion"] = True
+                data["ping_cancel_preceeded_by_completion"] = True
+            else:
+                raise RunStateError(
+                    "Direct chat ping terminal read state is not an admitted "
+                    "terminal projection")
+            self.ping_terminal_state = data["state"]
+            self.ping_natural_completion = data["ping_natural_completion"]
+            return AdapterCall(data=data, evidence=call.evidence)
         if (data["run_id"] != self.ping_run_id
                 or data["session_id"] != self.ping_session_id
                 or data["state"] != "cancelled"
@@ -333,7 +642,7 @@ class RemoteLocalDirectChatAdapter:
         return AdapterCall(data=data, evidence=call.evidence)
 
     def ping_lifecycle(self) -> dict:
-        return {
+        lifecycle = {
             "ping_run_id": self.ping_run_id or "",
             "ping_session_id": self.ping_session_id or "",
             "main_run_id": self.main_run_id or "",
@@ -341,6 +650,30 @@ class RemoteLocalDirectChatAdapter:
             "cancel_version": self.main_cancel_version,
             "ping_cancel_version": self.ping_cancel_version,
         }
+        if self.main_running_convergence is not None:
+            lifecycle["main_running_convergence_polls"] = (
+                self.main_running_convergence.get("polls"))
+            lifecycle["main_running_convergence_wait_seconds"] = (
+                self.main_running_convergence.get("wait_seconds"))
+        if self.main_cancel_convergence is not None:
+            lifecycle["main_cancel_convergence_polls"] = (
+                self.main_cancel_convergence.get("polls"))
+            lifecycle["main_cancel_convergence_wait_seconds"] = (
+                self.main_cancel_convergence.get("wait_seconds"))
+            lifecycle["main_cancel_terminal_state"] = (
+                self.main_cancel_convergence.get("final_state"))
+        if self.main_terminal_convergence is not None:
+            lifecycle["main_terminal_convergence_polls"] = (
+                self.main_terminal_convergence.get("polls"))
+        if self.ping_terminal_convergence is not None:
+            lifecycle["ping_terminal_convergence_polls"] = (
+                self.ping_terminal_convergence.get("polls"))
+        if not self._tier_local():
+            lifecycle["ping_ack_cancelled"] = self.ping_ack_cancelled
+            lifecycle["ping_ack_state"] = self.ping_ack_state
+            lifecycle["ping_terminal_state"] = self.ping_terminal_state
+            lifecycle["ping_natural_completion"] = self.ping_natural_completion
+        return lifecycle
 
 
 class DualDirectChatAdapter(RemoteLocalDirectChatAdapter):

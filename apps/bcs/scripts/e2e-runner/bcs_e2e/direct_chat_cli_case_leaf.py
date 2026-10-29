@@ -594,10 +594,15 @@ class DirectChatCliRunner:
         return value
 
     def _parse_cancel_output(self, raw: bytes) -> dict:
+        # The station acknowledges cancel asynchronously: the ack may carry
+        # ``cancelled=false`` with the Run still running (or already completed
+        # naturally), while the downstream abort converges afterwards.  The CLI
+        # help states a downstream abort may remain unconfirmed; the leaf
+        # therefore validates the ack shape only, and the dual-environment
+        # adapter enforces terminal-state convergence for the remote tier.
         value = self._parse_projection(raw, "run cancel", self._CANCEL_CONTRACT, exact=False)
         if (not isinstance(value["run_id"], str) or not value["run_id"]
                 or type(value.get("cancelled")) is not bool
-                or value["cancelled"] is not True
                 or value["state"] not in CHAT_RUN_STATES
                 or type(value.get("version")) is not int or value["version"] <= 0
                 or not isinstance(value.get("response"), dict)):
