@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "source_revision": "8559a7a5258a2cb6750befec187e50aa85060cc6",
+  "parent": "caller_execution_story",
+  "suite": "owned-local-caller-execution-v1",
+  "case_id": "LOCAL-CALLER-EXEC-01",
+  "environment": {
+    "local": "LOCAL_EXECUTOR_ONLY",
+    "preprod": "REMOTE_UNSUPPORTED"
+  },
+  "sources": {
+    "caller_execution_story.py": "7d7f565b0b9c6e2d72c1ba4df452027e8af47e0400decb981703d9d10d893945",
+    "caller_e2e_coverage.sh": "4e4ee24551eca8f0b29a879802f57f8378f0e23f52530694c0dd9e151c6b4cf3"
+  },
+  "test_utils_binary": {
+    "cargo_package": "bcs",
+    "cargo_bin": "bcs-caller-e2e",
+    "cargo_features": [
+      "test-utils"
+    ],
+    "build_command": "cargo build -p bcs --features test-utils --bin bcs-caller-e2e",
+    "auto_build": false,
+    "required_arguments": [
+      "--binary",
+      "--binary-sha256"
+    ],
+    "hash_algorithm": "sha256"
+  },
+  "requirements": [
+    {
+      "id": "LOCAL-CALLER-EXEC.provider-bot-binding",
+      "expectation": "Human principal, provider, provider Bot, public visibility and caller channel binding are created through original business APIs before any ingress.",
+      "story_lines": [
+        124,
+        136
+      ],
+      "markers": [
+        "http-queue-provider"
+      ]
+    },
+    {
+      "id": "LOCAL-CALLER-EXEC.binding-mode-guard",
+      "expectation": "Group-target caller binding and caller execution_mode on an existing group binding are both rejected; the default-mode group binding is accepted.",
+      "story_lines": [
+        137,
+        139
+      ],
+      "markers": [
+        "http-queue-provider"
+      ]
+    },
+    {
+      "id": "LOCAL-CALLER-EXEC.ingress-rejection",
+      "expectation": "Missing credential, blank credential, empty sender and missing ingress key are rejected with 422/401 and never reach the provider queue.",
+      "story_lines": [
+        140,
+        145
+      ],
+      "markers": [
+        "http-queue-provider"
+      ]
+    },
+    {
+      "id": "LOCAL-CALLER-EXEC.queue-pause",
+      "expectation": "With pause_dispatch enabled, queued caller messages from two distinct humans remain queued and are not dispatched early.",
+      "story_lines": [
+        147,
+        151
+      ],
+      "markers": [
+        "http-queue-provider"
+      ]
+    },
+    {
+      "id": "LOCAL-CALLER-EXEC.caller-context-token",
+      "expectation": "After dispatch resumes, caller_context subject and caller_execution_token are delivered per request with strict per-human isolation and never copied into message content.",
+      "story_lines": [
+        153,
+        165
+      ],
+      "markers": [
+        "http-queue-provider"
+      ]
+    },
+    {
+      "id": "LOCAL-CALLER-EXEC.downgrade-no-inherit",
+      "expectation": "Binding downgrade to default blocks credential inheritance for new ingress while already accepted queued work still delivers.",
+      "story_lines": [
+        167,
+        171
+      ],
+      "markers": [
+        "http-queue-provider"
+      ]
+    },
+    {
+      "id": "LOCAL-CALLER-EXEC.sse-token",
+      "expectation": "Provider webhook switched to /sse still receives the caller execution token per request and the streamed run converges to completed.",
+      "story_lines": [
+        172,
+        177
+      ],
+      "markers": [
+        "http-queue-provider"
+      ]
+    },
+    {
+      "id": "LOCAL-CALLER-EXEC.cache-loss-fail-closed",
+      "expectation": "BCS restart loses the in-memory caller credential cache while the durable queue survives; the queued caller delivery fails closed instead of falling back to provider identity.",
+      "story_lines": [
+        179,
+        266
+      ],
+      "markers": [
+        "cache-loss-fail-closed"
+      ]
+    },
+    {
+      "id": "LOCAL-CALLER-EXEC.token-redaction",
+      "expectation": "SQLite dump and every .log file under the story directory are free of raw caller tokens.",
+      "story_lines": [
+        268,
+        277
+      ],
+      "markers": [
+        "credential-redaction"
+      ]
+    }
+  ],
+  "story_markers": [
+    "Caller HTTP/queue/provider E2E: {http_assertions} HTTP assertions passed",
+    "Durable queue/cache-loss restart fails closed: PASS",
+    "Caller credential persistence and log redaction: PASS"
+  ],
+  "remote_validation": "NOT_RUN",
+  "grants_release_credit": false,
+  "release_parent_denominator": false,
+  "independent_slice": true,
+  "evidence_granularity": "SHARED_CHILD_RECEIPT"
+}

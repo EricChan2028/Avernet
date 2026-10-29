@@ -1,0 +1,266 @@
+{
+  "schema_version": 1,
+  "source_revision": "8559a7a5258a2cb6750befec187e50aa85060cc6",
+  "parent": "story_provider_operator_publishes_agent",
+  "sources": {
+    "stories.sh": "3025c6ee245a2a3b514fba18fe913bb8d1ad42dc37183602521f29c496a4f10f"
+  },
+  "requirements": [
+    {
+      "id": "PROVIDER.register",
+      "function": "story_provider_operator_publishes_agent",
+      "source": "stories.sh",
+      "method": "POST",
+      "path": "/providers",
+      "expectation": "Human registers Provider2.0 static_bearer/native_tool; ID and both credentials returned, credentials never journaled."
+    },
+    {
+      "id": "PROVIDER.duplicate-slug-conflict",
+      "function": "story_provider_operator_publishes_agent",
+      "source": "stories.sh",
+      "method": "POST",
+      "path": "/providers",
+      "expectation": "A second Provider cannot claim the already registered slug and is denied409."
+    },
+    {
+      "id": "PROVIDER.read",
+      "function": "story_provider_operator_publishes_agent",
+      "source": "stories.sh",
+      "method": "GET",
+      "path": "/providers/${provider_id}",
+      "expectation": "Admin reads exact Provider, static_bearer and enabled state."
+    },
+    {
+      "id": "PROVIDER.update",
+      "function": "story_provider_operator_publishes_agent",
+      "source": "stories.sh",
+      "method": "PATCH",
+      "path": "/providers/${provider_id}",
+      "expectation": "Admin plus Human updates name, stable Provider ID."
+    },
+    {
+      "id": "PROVIDER.bot-publish",
+      "function": "story_provider_operator_publishes_agent",
+      "source": "stories.sh",
+      "method": "POST",
+      "path": "/providers/${provider_id}/bots",
+      "expectation": "Admin publishes own Bot, captures exact UUID/ref and ephemeral runtime credential."
+    },
+    {
+      "id": "PROVIDER.bot-update",
+      "function": "story_provider_operator_publishes_agent",
+      "source": "stories.sh",
+      "method": "PATCH",
+      "path": "/providers/${provider_id}/bots/${provider_bot_ref}",
+      "expectation": "Patch keeps UUID/ref/runtime identity, updates name/domains and clears scopes."
+    },
+    {
+      "id": "PROVIDER.attributes-read-denied",
+      "function": "story_provider_operator_publishes_agent",
+      "source": "stories.sh",
+      "method": "GET",
+      "path": "/providers/${provider_id}/bots/${provider_bot_uuid}/attributes",
+      "expectation": "Non-allowlisted Provider attribute read denied403."
+    },
+    {
+      "id": "PROVIDER.attributes-write-denied",
+      "function": "story_provider_operator_publishes_agent",
+      "source": "stories.sh",
+      "method": "PATCH",
+      "path": "/providers/${provider_id}/bots/${provider_bot_uuid}/attributes",
+      "expectation": "Non-allowlisted Provider attribute write denied403 without mutation."
+    },
+    {
+      "id": "PROVIDER.org-create",
+      "function": "_story_provider_manages_organization",
+      "source": "stories.sh",
+      "method": "POST",
+      "path": "/providers/${provider_id}/organizations",
+      "expectation": "Create exact unique organization under owned Provider."
+    },
+    {
+      "id": "PROVIDER.org-list",
+      "function": "_story_provider_manages_organization",
+      "source": "stories.sh",
+      "method": "GET",
+      "path": "/providers/${provider_id}/organizations",
+      "expectation": "Provider organization list contains exact created code."
+    },
+    {
+      "id": "PROVIDER.org-read",
+      "function": "_story_provider_manages_organization",
+      "source": "stories.sh",
+      "method": "GET",
+      "path": "/organizations/${organization_code}",
+      "expectation": "Organization name/code read back."
+    },
+    {
+      "id": "PROVIDER.org-update",
+      "function": "_story_provider_manages_organization",
+      "source": "stories.sh",
+      "method": "PATCH",
+      "path": "/organizations/${organization_code}",
+      "expectation": "Organization rename read back."
+    },
+    {
+      "id": "PROVIDER.candidate-list-before",
+      "function": "_story_provider_manages_organization",
+      "source": "stories.sh",
+      "method": "GET",
+      "path": "/providers/${provider_id}/organization-candidate-bots?organization_code=${organization_code}&q=Provider",
+      "expectation": "Candidates include exact owned Bot before membership."
+    },
+    {
+      "id": "PROVIDER.candidate-before",
+      "function": "_story_provider_manages_organization",
+      "source": "stories.sh",
+      "method": "GET",
+      "path": "/providers/${provider_id}/organization-candidate-bots/${provider_bot_uuid}?organization_code=${organization_code}",
+      "expectation": "Candidate exact Bot reports is_member false."
+    },
+    {
+      "id": "PROVIDER.member-add",
+      "function": "_story_provider_manages_organization",
+      "source": "stories.sh",
+      "method": "PUT",
+      "path": "/organizations/${organization_code}/members/${provider_bot_uuid}",
+      "expectation": "Add exact Bot membership with reviewer role."
+    },
+    {
+      "id": "PROVIDER.candidate-list-after",
+      "function": "_story_provider_manages_organization",
+      "source": "stories.sh",
+      "method": "GET",
+      "path": "/providers/${provider_id}/organization-candidate-bots?organization_code=${organization_code}&q=Provider",
+      "expectation": "Candidates exclude exact Bot after membership."
+    },
+    {
+      "id": "PROVIDER.candidate-after",
+      "function": "_story_provider_manages_organization",
+      "source": "stories.sh",
+      "method": "GET",
+      "path": "/providers/${provider_id}/organization-candidate-bots/${provider_bot_uuid}?organization_code=${organization_code}",
+      "expectation": "Candidate reports is_member true."
+    },
+    {
+      "id": "PROVIDER.member-profile",
+      "function": "_story_provider_manages_organization",
+      "source": "stories.sh",
+      "method": "PATCH",
+      "path": "/organizations/${organization_code}/members/${provider_bot_uuid}/profile",
+      "expectation": "Member profile name update read back."
+    },
+    {
+      "id": "PROVIDER.member-read",
+      "function": "_story_provider_manages_organization",
+      "source": "stories.sh",
+      "method": "GET",
+      "path": "/organizations/${organization_code}/members/${provider_bot_uuid}",
+      "expectation": "Member read returns exact Bot."
+    },
+    {
+      "id": "PROVIDER.member-list",
+      "function": "_story_provider_manages_organization",
+      "source": "stories.sh",
+      "method": "GET",
+      "path": "/organizations/${organization_code}/members?role=reviewer",
+      "expectation": "Reviewer member list contains exact Bot."
+    },
+    {
+      "id": "PROVIDER.admin-start",
+      "function": "_story_provider_manages_organization",
+      "source": "stories.sh",
+      "method": "POST",
+      "path": "/organizations/${organization_code}/admin-runs",
+      "expectation": "Detached admin run returns ID, organization and target; acceptance is not engine completion."
+    },
+    {
+      "id": "PROVIDER.admin-read",
+      "function": "_story_provider_manages_organization",
+      "source": "stories.sh",
+      "method": "GET",
+      "path": "/organizations/${organization_code}/admin-runs/${admin_run_id}",
+      "expectation": "Exact admin run read returns ID,target and nonempty status; controlled downstream rejection explicitly reported."
+    },
+    {
+      "id": "PROVIDER.member-remove",
+      "function": "_story_provider_manages_organization",
+      "source": "stories.sh",
+      "method": "DELETE",
+      "path": "/organizations/${organization_code}/members/${provider_bot_uuid}",
+      "expectation": "Exact owned member removal returns204, retained organization is not deleted."
+    },
+    {
+      "id": "PROVIDER.bot-list",
+      "function": "story_provider_operator_publishes_agent",
+      "source": "stories.sh",
+      "method": "GET",
+      "path": "/providers/${provider_id}/bots",
+      "expectation": "Provider Bot list contains exact Bot."
+    },
+    {
+      "id": "PROVIDER.roster-denied",
+      "function": "story_provider_operator_publishes_agent",
+      "source": "stories.sh",
+      "method": "GET",
+      "path": "/providers/${provider_id}/bots/by-task-modes",
+      "expectation": "Non-allowlisted task-mode roster denied403 with diagnostic."
+    },
+    {
+      "id": "PROVIDER.agentpass-negative",
+      "function": "story_provider_operator_publishes_agent",
+      "source": "stories.sh",
+      "method": "POST",
+      "path": "/providers/agentpass/resolve",
+      "expectation": "Original runtime token resolves no AgentPass agent_code or provider_bot_binding."
+    },
+    {
+      "id": "PROVIDER.unknown-run-callback",
+      "function": "story_provider_operator_publishes_agent",
+      "source": "stories.sh",
+      "method": "POST",
+      "path": "/bot/events",
+      "expectation": "Runtime-token callback for unknown run returns404 run_not_found."
+    },
+    {
+      "id": "PROVIDER.takeover-denied",
+      "function": "story_provider_operator_publishes_agent",
+      "source": "stories.sh",
+      "method": "POST",
+      "path": "/providers/${provider_id}/delivery/switch-bot",
+      "expectation": "Non-allowlisted takeover of QA denied403 with diagnostic; QA unchanged."
+    },
+    {
+      "id": "PROVIDER.disable",
+      "function": "story_provider_operator_publishes_agent",
+      "source": "stories.sh",
+      "method": "POST",
+      "path": "/providers/${provider_id}/disable",
+      "expectation": "Owned Provider disable persisted true."
+    },
+    {
+      "id": "PROVIDER.enable",
+      "function": "story_provider_operator_publishes_agent",
+      "source": "stories.sh",
+      "method": "POST",
+      "path": "/providers/${provider_id}/enable",
+      "expectation": "Owned Provider enable persisted false."
+    },
+    {
+      "id": "PROVIDER.bot-retire",
+      "function": "story_provider_operator_publishes_agent",
+      "source": "stories.sh",
+      "method": "DELETE",
+      "path": "/providers/${provider_id}/bots/${provider_bot_ref}",
+      "expectation": "Exact owned Bot/ref retirement acknowledged; no unknown-resource cleanup."
+    },
+    {
+      "id": "PROVIDER.bot-list-empty",
+      "function": "story_provider_operator_publishes_agent",
+      "source": "stories.sh",
+      "method": "GET",
+      "path": "/providers/${provider_id}/bots",
+      "expectation": "Provider Bot list empty; retained Provider/organization/history explicitly accounted."
+    }
+  ]
+}

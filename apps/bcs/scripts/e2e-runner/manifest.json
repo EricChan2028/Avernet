@@ -1,0 +1,444 @@
+{
+  "schema_version": 1,
+  "baseline_commit": "8559a7a5258a2cb6750befec187e50aa85060cc6",
+  "suite": "preprod-pilot-v1",
+  "legacy_inventory": [
+    {
+      "id": "story_human_manages_delivery_policy",
+      "source": "stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_user_prepares_agent_network",
+      "source": "stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_user_builds_trusted_team",
+      "source": "stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_user_operates_group_workspace",
+      "source": "stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_user_runs_and_shares_sessions",
+      "source": "stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_user_has_direct_agent_conversation",
+      "source": "stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_user_runs_structured_collaboration",
+      "source": "stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_provider_operator_publishes_agent",
+      "source": "stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_user_validates_external_channel_setup",
+      "source": "stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_operator_coordinates_with_cli",
+      "source": "stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_cli_operator_creates_custom_collaboration",
+      "source": "cli-stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_cli_operator_builds_collaboration_team",
+      "source": "cli-stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_cli_operator_runs_sessions_and_services",
+      "source": "cli-stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_cli_operator_validates_channel_management",
+      "source": "cli-stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_cli_operator_manages_group_context",
+      "source": "cli-stories.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_session_file_workspace",
+      "source": "session_files.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_user_receives_group_event_webhooks",
+      "source": "stories.sh",
+      "conditional": true,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_provider_callback_survives_slow_judge",
+      "source": "stories.sh",
+      "conditional": true,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_fixed_loop_human_editor_workflow",
+      "source": "fixed_loop_story.sh",
+      "conditional": true,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_nested_fixed_loop_workflows",
+      "source": "fixed_loop_story.sh",
+      "conditional": true,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_state_machine_result_queue",
+      "source": "fixed_loop_story.sh",
+      "conditional": true,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_admission",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_friend_connections_friend_request_and_list",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_friend_connections_friend_accept_reject_cancel",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_friend_connections_friend_revoke",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_friend_connections_friend_requests_list",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_ensure_bot",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_friend_connections_full_lifecycle",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_friend_connections_mutual_auto_approve",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_bot_search",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_error_and_admission_branches",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_connect_private_and_discover_branches",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_tc_friend_auth_sync_readdressed_principal",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "test_ep_dept_scope_parses_object_friend_ext_entries",
+      "source": "edge_permission.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_authority_user_journey",
+      "source": "authority.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_provider_owner_isolation",
+      "source": "provider_scope_story.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_session_owner_permissions",
+      "source": "session_owner_story.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_provider_operator_manages_subbots",
+      "source": "e2e.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_retired_service_policy",
+      "source": "service_policy_story.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_collaboration_draft_delivery",
+      "source": "collaboration_draft_story.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_collaboration_draft_group_launch",
+      "source": "collaboration_draft_story.sh",
+      "conditional": true,
+      "migration_status": "NOT_MIGRATED"
+    }
+  ],
+  "cases": [
+    {
+      "id": "PRE-01",
+      "version": 3,
+      "source_story": "story_user_runs_and_shares_sessions",
+      "source_fragment": "_story_connect_with_group_session_jwt",
+      "title": "Human-owned normal group lifecycle",
+      "implementation_status": "IMPLEMENTED_SHARED_LOCAL_LIVE_AND_REMOTE_TRANSPORT",
+      "required_evidence": [
+        "api",
+        "ob"
+      ],
+      "roles": [
+        "driver",
+        "member"
+      ],
+      "effects": [
+        "create:group",
+        "create:initial_session",
+        "update:owned_group",
+        "delete:owned_initial_session",
+        "delete:owned_group"
+      ],
+      "steps": [
+        "read_bots",
+        "create_group",
+        "read_group",
+        "update_group",
+        "verify_group",
+        "read_initial_session",
+        "delete_initial_session",
+        "verify_initial_session_deleted",
+        "delete_group",
+        "verify_deleted"
+      ],
+      "assertions": [
+        "PRE-01.owner_matches",
+        "PRE-01.driver_and_members_match",
+        "PRE-01.update_persisted",
+        "PRE-01.ob_group_matches",
+        "PRE-01.owned_group_deleted",
+        "PRE-01.owned_initial_session_deleted"
+      ],
+      "services": [
+        "bcs",
+        "bcs-database",
+        "gateway-if-selected"
+      ],
+      "remote_validation": "NOT_RUN",
+      "execution_command": "run --case PRE-01 --allow-write --confirm-run-id <run-id>",
+      "diagnostic_evidence": [
+        "request_correlation",
+        "logs"
+      ],
+      "local_validation": "OPT_IN_LIVE_REGRESSION"
+    },
+    {
+      "id": "PRE-02",
+      "version": 3,
+      "source_story": "story_user_runs_and_shares_sessions",
+      "source_fragment": "_story_connect_with_group_session_jwt",
+      "title": "Human Session lifecycle and WebSocket connection",
+      "implementation_status": "IMPLEMENTED_SHARED_LOCAL_LIVE_AND_REMOTE_TRANSPORT",
+      "required_evidence": [
+        "api",
+        "websocket",
+        "ob"
+      ],
+      "roles": [
+        "driver",
+        "member"
+      ],
+      "effects": [
+        "create:group",
+        "create:initial_session",
+        "create:session",
+        "update:owned_session",
+        "mint:session_token",
+        "delete:owned_session",
+        "delete:owned_initial_session",
+        "delete:owned_group"
+      ],
+      "steps": [
+        "create_group",
+        "create_session",
+        "read_session",
+        "update_session",
+        "read_messages",
+        "issue_token",
+        "connect_ws",
+        "close_ws",
+        "delete_session",
+        "read_initial_session",
+        "delete_initial_session",
+        "verify_initial_session_deleted",
+        "delete_group"
+      ],
+      "assertions": [
+        "PRE-02.session_parent_matches",
+        "PRE-02.title_persisted",
+        "PRE-02.websocket_upgrade",
+        "PRE-02.session_binding_matches",
+        "PRE-02.ob_session_matches",
+        "PRE-02.owned_resources_cleaned",
+        "PRE-02.owned_initial_session_deleted"
+      ],
+      "services": [
+        "bcs",
+        "bcs-websocket",
+        "bcs-database",
+        "gateway-if-selected"
+      ],
+      "remote_validation": "NOT_RUN",
+      "execution_command": "run --case PRE-02 --allow-write --confirm-run-id <run-id>",
+      "diagnostic_evidence": [
+        "request_correlation",
+        "logs"
+      ],
+      "local_validation": "OPT_IN_LIVE_REGRESSION"
+    },
+    {
+      "id": "PRE-03",
+      "version": 3,
+      "source_story": "story_session_file_workspace",
+      "source_fragment": "story_session_file_workspace",
+      "title": "Small session file via Web API, not CLI coverage",
+      "implementation_status": "IMPLEMENTED_SHARED_LOCAL_LIVE_AND_REMOTE_TRANSPORT",
+      "required_evidence": [
+        "api",
+        "bytes",
+        "ob"
+      ],
+      "roles": [
+        "driver",
+        "member"
+      ],
+      "effects": [
+        "create:group",
+        "create:initial_session",
+        "create:session",
+        "upload:file",
+        "share:owned_file",
+        "delete:owned_file",
+        "delete:owned_session",
+        "delete:owned_initial_session",
+        "delete:owned_group"
+      ],
+      "steps": [
+        "create_group",
+        "create_session",
+        "prepare_upload",
+        "upload_bytes",
+        "complete_upload",
+        "list_files",
+        "read_metadata",
+        "download",
+        "share",
+        "shared_download",
+        "delete_file",
+        "verify_file_deleted",
+        "verify_share_invalid",
+        "delete_session",
+        "read_initial_session",
+        "delete_initial_session",
+        "verify_initial_session_deleted",
+        "delete_group"
+      ],
+      "assertions": [
+        "PRE-03.storage_backend_matches",
+        "PRE-03.file_and_session_match",
+        "PRE-03.download_bytes_match",
+        "PRE-03.share_bytes_match",
+        "PRE-03.ob_file_matches",
+        "PRE-03.owned_resources_cleaned",
+        "PRE-03.owned_initial_session_deleted"
+      ],
+      "services": [
+        "bcs",
+        "bcs-database",
+        "baas-for-preprod",
+        "object-storage-or-proxy",
+        "gateway-if-selected"
+      ],
+      "remote_validation": "NOT_RUN",
+      "diagnostic_evidence": [
+        "request_correlation",
+        "logs"
+      ],
+      "local_validation": "OPT_IN_LIVE_REGRESSION"
+    }
+  ]
+}

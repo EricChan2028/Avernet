@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "source_revision": "8559a7a5258a2cb6750befec187e50aa85060cc6",
+  "parent": "story_cli_operator_builds_collaboration_team",
+  "sources": {
+    "cli-stories.sh": "576031c026007346206ec1d77666f04852908f9fec5fe29c9c9e255c5977b13d"
+  },
+  "requirements": [
+    {
+      "id": "CLI-COLLAB-TEAM.protect-visibility",
+      "command": "bcs-cli visibility set --value protected + bcs-cli visibility set --value public",
+      "expectation": "Product CLI changes customer-service visibility to protected and can restore it to public after the friendship decision, with no unrelated visibility mutation."
+    },
+    {
+      "id": "CLI-COLLAB-TEAM.friend-request-reject",
+      "command": "bcs-cli friend request --bot-uuid <CS> + friend requests --direction received --status pending + friend reject --request-id <ID> + friend list",
+      "expectation": "Engineering creates one protected CS friendship request, customer-service selects and rejects the exact request, and engineering's final friend list omits CS while the rejected request remains identifiable."
+    },
+    {
+      "id": "CLI-COLLAB-TEAM.group-create-read",
+      "command": "bcs-cli group create + bcs-cli get-group --id <group_id>",
+      "expectation": "PM creates exactly one CLI-managed release coordination Group and the later CLI read confirms its group ID and driver Bot without prompting or inventing an identifier."
+    },
+    {
+      "id": "CLI-COLLAB-TEAM.group-add-member",
+      "command": "bcs-cli add-member --group <group_id> --bot-uuid <QA> + bcs-cli get-group --id <group_id>",
+      "expectation": "PM adds QA to the exact CLI-created Group and the returned Group read contains QA, using only the owned Group and no borrowed fixture."
+    },
+    {
+      "id": "CLI-COLLAB-TEAM.group-list",
+      "command": "bcs-cli list-groups --batch-size 20",
+      "expectation": "PM's CLI group listing contains the exact created Group and the CLI result count agrees with the formal bot-group API count, with no unrelated group counted."
+    },
+    {
+      "id": "CLI-COLLAB-TEAM.group-fuse",
+      "command": "bcs-cli fuse --group <group_id>",
+      "expectation": "PM invokes the exact owned Group fuse operation with two or more owned participants and receives a recommendation payload, not a synthetic or simulated fusion result."
+    },
+    {
+      "id": "CLI-COLLAB-TEAM.group-complete",
+      "command": "bcs-cli group-status --group <group_id> --status completed",
+      "expectation": "PM marks the exact owned Group completed and a later CLI read reports completed; cleanup keeps the Group retained rather than silently deleting or pretending it was removed."
+    },
+    {
+      "id": "CLI-COLLAB-TEAM.group-terminate",
+      "command": "bcs-cli terminate-group --group <group_id>",
+      "expectation": "PM terminates exactly the second owned CLI-created Group, the later read reports completed, and cleanup is restricted to that Group rather than broad or shared resources."
+    }
+  ]
+}

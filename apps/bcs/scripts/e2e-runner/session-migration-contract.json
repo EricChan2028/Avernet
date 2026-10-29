@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "source_revision": "8559a7a5258a2cb6750befec187e50aa85060cc6",
+  "parent": "story_user_runs_and_shares_sessions",
+  "sources": {
+    "stories.sh": "3025c6ee245a2a3b514fba18fe913bb8d1ad42dc37183602521f29c496a4f10f",
+    "group.sh": "2bbb82c417261900265ce39f69aebb01633bb0700c4d7c71c1a2c9d7d9131c1d",
+    "common.sh": "44f5445031e82cfb06b75fc35721eb4ed4338539f04ec7364b35386a3fe923b0",
+    "group_session_ws_probe.py": "954b4b962f2eaffd5aba06db2b9702221c3ef2cd443185987e157980a51eec04"
+  },
+  "requirements": [
+    {
+      "id": "SESSION.public-jwt-ws",
+      "function": "_story_connect_with_group_session_jwt",
+      "source": "stories.sh",
+      "expectation": "Owned-local Gateway Principal; unauthenticated401 and invalid DTO400; public Bot reads, Group and Session create/list/read/patch/messages; JWT no-store and real WS101 with closure; exact Session and Group deletion and independent absence."
+    },
+    {
+      "id": "SESSION.cli-create-list-get",
+      "function": "test_group_session_via_cli",
+      "source": "group.sh",
+      "expectation": "Actual bcs-cli PM creates Group and Session; session list contains exact new ID and session get succeeds, then exact Group cleanup. No HTTP substitute or soft success for failed get."
+    },
+    {
+      "id": "SESSION.group-invite",
+      "function": "test_group_invite_link",
+      "source": "group.sh",
+      "expectation": "Actual CLI creates owned Group; Human mints bounded Group invitation and joins exact Group using token, then precise cleanup. No broad adoption."
+    },
+    {
+      "id": "SESSION.cli-session-invite",
+      "function": "test_session_invite_link",
+      "source": "group.sh",
+      "expectation": "Actual CLI creates Group and Session and mints session invite-link containing valid scoped token and join URL; precise cleanup. Credential-bearing CLI output remains private."
+    },
+    {
+      "id": "SESSION.bot-groups",
+      "function": "test_bot_groups_of_bot",
+      "source": "group.sh",
+      "expectation": "Actual CLI creates PM-driven Group and GET /bots/{PM}/groups returns that exact new Group under bounded page, then cleanup."
+    },
+    {
+      "id": "SESSION.invite-join",
+      "function": "test_session_invite_join",
+      "source": "group.sh",
+      "expectation": "Actual CLI creates Group, PM creates explicit Session and mints its invitation, Human joins exact Session through token; scoped cleanup."
+    },
+    {
+      "id": "SESSION.lifecycle",
+      "function": "test_session_lifecycle",
+      "source": "group.sh",
+      "expectation": "Actual CLI Group, PM Session creation/rename, add ENG/mute, actual chat and history readback, remove ENG, creator-scoped delete and healthy listing confirms absence; no 403/409-as-PASS."
+    },
+    {
+      "id": "SESSION.complete-invoke",
+      "function": "_story_complete_and_invoke_sessions",
+      "source": "stories.sh",
+      "expectation": "PM creates service Group and chat Session; empty delivery reads and missing-message cancellation400; Bot manual resolution403; chat complete/output readback; service concurrency2, invocation202, creator read, CEO403, wrong completion API403, creator-scoped cleanup without fabricating execution completion."
+    },
+    {
+      "id": "SESSION.collection",
+      "function": "test_session_collection",
+      "source": "group.sh",
+      "expectation": "Actual CLI Group and explicit Session; empty PM collection, missing participant400, collect/repeat200, PM membership, ENG isolation, nonparticipant QA404, uncollect/repeat200, empty final list; exact cleanup."
+    }
+  ]
+}

@@ -1,0 +1,238 @@
+{
+  "schema_version": 1,
+  "source_revision": "8559a7a5258a2cb6750befec187e50aa85060cc6",
+  "source_file_revisions": {
+    "collaboration_draft_group_story.py": "a6d4ff2242aa8bb23674154abf08c35a66244a42",
+    "indentation-regression.json": "224168875416599204e5726b918531b54954d01c",
+    "http_provider_judge_mock.py": "c86bc262ea2513d9eb6d13c1f0725ed0ace204d5"
+  },
+  "parent": "collaboration_draft_group_story",
+  "suite": "owned-local-draft-group-v1",
+  "case_id": "LOCAL-DRAFT-GROUP-01",
+  "environment": {
+    "local": "LOCAL_EXECUTOR_ONLY",
+    "preprod": "REMOTE_UNSUPPORTED"
+  },
+  "sources": {
+    "collaboration_draft_group_story.py": "f0df15f704b9fec3586ece7b76cf7f56c887c2d5fd0fe30fced7e9b58fc28523",
+    "indentation-regression.json": "23e0a22ea7f14f632b1af54a34aaab5bb6679f48580cd99240d36dd6943569e5",
+    "http_provider_judge_mock.py": "fe56c8c2d79ce141fe1d2784cc21c184c90000bb8e6908c976168f3bdfad70c4"
+  },
+  "definition_yaml_bytes": 2174,
+  "owned_runtime_binary": {
+    "package": "bcs",
+    "opt_in_env": [
+      "BCS_E2E_TEST_BINARY",
+      "BCS_E2E_TEST_BINARY_SHA256"
+    ],
+    "build_command": "cargo build -p bcs --bin bcs",
+    "auto_build": false,
+    "required_arguments": [
+      "--binary",
+      "--binary-sha256"
+    ],
+    "hash_algorithm": "sha256"
+  },
+  "mock_child": {
+    "script": "http_provider_judge_mock.py",
+    "ready_protocol": "ready-file",
+    "expected_webhook_requests": 0
+  },
+  "requirements": [
+    {
+      "id": "LOCAL-DRAFT-GROUP.human-registration",
+      "expectation": "Issues a registration token, registers and onboards a disposable author Bot, and bootstraps the local Human principal before any business request; every later call carries the Human mock identity headers.",
+      "story_lines": [
+        73,
+        98
+      ],
+      "markers": [
+        "draft-group-launch"
+      ]
+    },
+    {
+      "id": "LOCAL-DRAFT-GROUP.provider-collaborator-friendship",
+      "expectation": "Registers the scripted coverage Provider (static_bearer auth, protocol 2.0, native_tool coordination, webhook pointed at the owned mock sink), publishes driver and reviewer provider Bots under provider_admin_token, and completes the driver-to-reviewer friendship request/accept.",
+      "story_lines": [
+        100,
+        114
+      ],
+      "markers": [
+        "draft-group-launch"
+      ]
+    },
+    {
+      "id": "LOCAL-DRAFT-GROUP.immutable-source-upload",
+      "expectation": "Uploads the unchanged 2174-byte indentation-regression incident YAML as Draft revision 1; the saved revision and content_hash must equal the fixture bytes and their SHA-256 digest.",
+      "story_lines": [
+        116,
+        124
+      ],
+      "markers": [
+        "draft-group-launch"
+      ]
+    },
+    {
+      "id": "LOCAL-DRAFT-GROUP.share-reference-issuance",
+      "expectation": "The revision reference remains CLI-compatible, exposes exactly schemaVersion/draftId/revision/readToken, and uses a fixed non-secret legacy placeholder rather than an authority grant.",
+      "story_lines": [
+        125,
+        129
+      ],
+      "markers": [
+        "draft-group-launch"
+      ]
+    },
+    {
+      "id": "LOCAL-DRAFT-GROUP.v1-preview-byte-fidelity",
+      "expectation": "The /api/v1 preview returns the stored YAML byte-for-byte (no re-indentation or rewriting) without accepting a separate read-token grant and pins content_hash and revision to the uploaded values.",
+      "story_lines": [
+        130,
+        133
+      ],
+      "markers": [
+        "draft-group-launch"
+      ]
+    },
+    {
+      "id": "LOCAL-DRAFT-GROUP.shared-validation-binding",
+      "expectation": "Validation through the unambiguous V1 revision path runs against the same stored revision; validity, content_hash and revision stay bound instead of re-parsing supplied input.",
+      "story_lines": [
+        134,
+        137
+      ],
+      "markers": [
+        "draft-group-launch"
+      ]
+    },
+    {
+      "id": "LOCAL-DRAFT-GROUP.grant-negative-matrix",
+      "expectation": "Both the V1 preview and validation surface reject a missing/unknown revision with 404 DRAFT_REFERENCE_UNAVAILABLE; the fixed placeholder readToken does not help and no alternate draft resource is inferred.",
+      "story_lines": [
+        139,
+        141
+      ],
+      "markers": [
+        "draft-group-launch"
+      ]
+    },
+    {
+      "id": "LOCAL-DRAFT-GROUP.revision-input-guards",
+      "expectation": "A non-integer revision path segment and a validate body attempting to replace the stored YAML both fail with 400 DRAFT_INPUT.",
+      "story_lines": [
+        142,
+        146
+      ],
+      "markers": [
+        "draft-group-launch"
+      ]
+    },
+    {
+      "id": "LOCAL-DRAFT-GROUP.browser-identity-chain",
+      "expectation": "The browser API derives the operator identity from the configured Human auth chain (/me returns user_id and display_name) and every browser submission must present the matching X-BCS-Expected-User header.",
+      "story_lines": [
+        148,
+        151
+      ],
+      "markers": [
+        "draft-group-launch"
+      ]
+    },
+    {
+      "id": "LOCAL-DRAFT-GROUP.originator-selection",
+      "expectation": "The owned Bot selector (/bots/mine) returns exactly the user's registered Bots and the collaborator candidates of the chosen driver Bot include the accepted friend, so the originator is user-selected rather than assistant-chosen.",
+      "story_lines": [
+        152,
+        160
+      ],
+      "markers": [
+        "draft-group-launch"
+      ]
+    },
+    {
+      "id": "LOCAL-DRAFT-GROUP.group-launch-input",
+      "expectation": "The group launch body applies the edited title to the Draft YAML, selects the driver Bot as originator and driver, pins the state_machine collaboration strategy, and binds writer/reviewer/publisher roles to explicit Bot actor ids.",
+      "story_lines": [
+        162,
+        172
+      ],
+      "markers": [
+        "draft-group-launch"
+      ]
+    },
+    {
+      "id": "LOCAL-DRAFT-GROUP.browser-context-submission-guards",
+      "expectation": "POST /groups without browser context, with a cross-site Sec-Fetch-Site header, with a changed expected account, or with a duplicated expected-user header is refused with 403 browser_context_required or user_context_changed.",
+      "story_lines": [
+        173,
+        179
+      ],
+      "markers": [
+        "draft-group-launch"
+      ]
+    },
+    {
+      "id": "LOCAL-DRAFT-GROUP.impersonation-rejection",
+      "expectation": "Author Bot credentials, an Actor header and an invalid X-Avernet-Principal cannot impersonate the Human at the browser submission boundary (401 unauthenticated).",
+      "story_lines": [
+        180,
+        183
+      ],
+      "markers": [
+        "draft-group-launch"
+      ]
+    },
+    {
+      "id": "LOCAL-DRAFT-GROUP.group-launch-binding",
+      "expectation": "Group creation succeeds with an initial navigation session; the persisted group keeps the chosen driver Bot, the user-edited YAML and the explicit role bindings without substituting the author Bot.",
+      "story_lines": [
+        185,
+        196
+      ],
+      "markers": [
+        "draft-group-launch"
+      ]
+    },
+    {
+      "id": "LOCAL-DRAFT-GROUP.draft-immutability",
+      "expectation": "After the group is created, the historical shared card still returns the original immutable source bytes; group launch never mutates the Draft.",
+      "story_lines": [
+        197,
+        198
+      ],
+      "markers": [
+        "draft-group-launch"
+      ]
+    },
+    {
+      "id": "LOCAL-DRAFT-GROUP.share-revocation",
+      "expectation": "The author revokes the revision share (204); afterwards both preview and validate through the old reference fail with 404 DRAFT_REFERENCE_UNAVAILABLE.",
+      "story_lines": [
+        199,
+        203
+      ],
+      "markers": [
+        "draft-group-launch"
+      ]
+    },
+    {
+      "id": "LOCAL-DRAFT-GROUP.cleanup-disposition",
+      "expectation": "Cleanup deletes the group, the Draft, every disposable Bot (provider Bots via provider admin token, the author Bot via the bot API) and disables the scripted Provider; any cleanup failure fails the story instead of leaking state.",
+      "story_lines": [
+        205,
+        231
+      ],
+      "markers": [
+        "draft-group-launch"
+      ]
+    }
+  ],
+  "story_markers": [
+    "Draft group launch story: {checks} live HTTP assertions passed (including cleanup)"
+  ],
+  "remote_validation": "NOT_RUN",
+  "grants_release_credit": false,
+  "release_parent_denominator": false,
+  "independent_slice": true,
+  "evidence_granularity": "OWNED_CHILD_RECEIPT"
+}

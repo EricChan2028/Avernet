@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "source_revision": "8559a7a5258a2cb6750befec187e50aa85060cc6",
+  "parent": "story_user_has_direct_agent_conversation",
+  "sources": {
+    "stories.sh": "3025c6ee245a2a3b514fba18fe913bb8d1ad42dc37183602521f29c496a4f10f",
+    "actor.sh": "9b7679964e0afdac13ad34960ddb475cf09e710c751efbbdd5005555f1056497",
+    "common.sh": "44f5445031e82cfb06b75fc35721eb4ed4338539f04ec7364b35386a3fe923b0"
+  },
+  "requirements": [
+    {
+      "id": "DM.ping-submit",
+      "method": "POST",
+      "path": "/bots/${BOT_PM_UUID}/chat-async",
+      "expectation": "Original helper submits ping as CEO and gets202; actual preliminary Run is tracked and later separately cancelled/read, not discarded."
+    },
+    {
+      "id": "DM.main-submit",
+      "method": "POST",
+      "path": "/bots/${BOT_PM_UUID}/chat-async",
+      "expectation": "CEO submits original release checklist with timeout60000/tags e2e,release;202returns exact PM and stable run/session IDs."
+    },
+    {
+      "id": "DM.main-read",
+      "method": "GET",
+      "path": "/chat/runs/${run_id}",
+      "expectation": "Original caller reads exact mainRun identity and lifecycle state."
+    },
+    {
+      "id": "DM.main-cancel",
+      "method": "POST",
+      "path": "/chat/runs/${run_id}/cancel",
+      "expectation": "Exact original caller cancels mainRun:200,cancelled true,state cancelled; not proof externalengine stopped."
+    },
+    {
+      "id": "DM.main-terminal",
+      "method": "GET",
+      "path": "/chat/runs/${run_id}",
+      "expectation": "Subsequent exact mainRun read remains cancelled and is_terminal true; ping cancellation is additional lifecycle evidence, not extra parent credit."
+    }
+  ]
+}

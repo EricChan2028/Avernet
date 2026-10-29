@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "source_revision": "8559a7a5258a2cb6750befec187e50aa85060cc6",
+  "parent": "story_cli_operator_runs_sessions_and_services",
+  "sources": {
+    "cli-stories.sh": "576031c026007346206ec1d77666f04852908f9fec5fe29c9c9e255c5977b13d"
+  },
+  "requirements": [
+    {
+      "id": "CLI-SESSION-SERVICE.session-lifecycle",
+      "command": "bcs-cli session create + session list + session get + session patch",
+      "expectation": "PM creates one release Session inside the exact CLI-managed Group, and independent CLI list, get, and patch reads keep its session ID, group binding, title, and renamed title consistent; persisted input is never treated as downstream execution completion."
+    },
+    {
+      "id": "CLI-SESSION-SERVICE.member-chat-lifecycle",
+      "command": "bcs-cli session add-member + set-member-mode + get + chat + messages + invite-link + remove-member + get",
+      "expectation": "PM governs only the owned QA membership in the exact Session: add, mute, read, chat, and message-history operations are observable, the invite returns token and join URL, and QA is absent only after removal. Chat and history never invent delivery results."
+    },
+    {
+      "id": "CLI-SESSION-SERVICE.session-complete",
+      "command": "bcs-cli session complete --output <payload>",
+      "expectation": "PM completes the exact owned Session and receives completed with its exact output payload; completion is not inferred from a missing or synthetic response."
+    },
+    {
+      "id": "CLI-SESSION-SERVICE.service-roundtrip",
+      "command": "bcs-cli service invoke --detach + service status + service wait",
+      "expectation": "PM invokes one detached group service in the owned Group and keeps service session identity and group binding through status; bounded wait reports either a terminal completed record or the exact session-specific timeout contract, never an unbounded or synthetic terminal state; the owned chat Session, exact bot-owned service Session, and its Group are then cleaned up with creator-scoped requests."
+    }
+  ]
+}

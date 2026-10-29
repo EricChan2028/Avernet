@@ -1,0 +1,403 @@
+{
+  "schema_version": 1,
+  "source_revision": "8559a7a5258a2cb6750befec187e50aa85060cc6",
+  "sources": {
+    "stories.sh": "3025c6ee245a2a3b514fba18fe913bb8d1ad42dc37183602521f29c496a4f10f",
+    "group.sh": "2bbb82c417261900265ce39f69aebb01633bb0700c4d7c71c1a2c9d7d9131c1d",
+    "friends.sh": "80c76bb471dbe42a2e891e10558d920723d133510e6661b8cb3457381050b946",
+    "session_files.sh": "836d05d1798da0592c7eb027bed4f1fc762510bcbae083c5e129ac7deebfc724",
+    "common.sh": "44f5445031e82cfb06b75fc35721eb4ed4338539f04ec7364b35386a3fe923b0"
+  },
+  "stories": [
+    {
+      "legacy_id": "story_user_operates_group_workspace",
+      "migration_status": "NOT_MIGRATED",
+      "required_bot_roles": [
+        "CEO",
+        "PM",
+        "ENG",
+        "QA"
+      ],
+      "steps": [
+        {
+          "function": "test_create_group",
+          "source": "group.sh"
+        },
+        {
+          "function": "test_create_group_with_members",
+          "source": "group.sh"
+        },
+        {
+          "function": "test_get_group_detail",
+          "source": "group.sh"
+        },
+        {
+          "function": "test_patch_group",
+          "source": "group.sh"
+        },
+        {
+          "function": "test_list_groups",
+          "source": "group.sh"
+        },
+        {
+          "function": "test_add_member",
+          "source": "group.sh"
+        },
+        {
+          "function": "test_remove_member",
+          "source": "group.sh"
+        },
+        {
+          "function": "test_update_group_label",
+          "source": "group.sh"
+        },
+        {
+          "function": "test_update_group_visibility",
+          "source": "group.sh"
+        },
+        {
+          "function": "test_group_create_via_cli",
+          "source": "group.sh"
+        },
+        {
+          "function": "test_group_add_member_via_cli",
+          "source": "group.sh"
+        },
+        {
+          "function": "test_group_get_via_cli",
+          "source": "group.sh"
+        },
+        {
+          "function": "test_group_fuse_via_cli",
+          "source": "group.sh"
+        },
+        {
+          "function": "test_group_status_via_cli",
+          "source": "group.sh"
+        },
+        {
+          "function": "test_group_terminate_via_cli",
+          "source": "group.sh"
+        },
+        {
+          "function": "_story_group_metadata_without_workspace",
+          "source": "stories.sh"
+        }
+      ],
+      "requirements": [
+        {
+          "id": "WORKSPACE.create",
+          "expectation": "Creation returns an exact group ID; a three-participant group preserves all participants.",
+          "functions": [
+            "test_create_group",
+            "test_create_group_with_members"
+          ]
+        },
+        {
+          "id": "WORKSPACE.detail",
+          "expectation": "Read-back preserves ID, driver, kind and visibility.",
+          "functions": [
+            "test_get_group_detail"
+          ]
+        },
+        {
+          "id": "WORKSPACE.patch",
+          "expectation": "PATCH name/context are independently read back as label/context.",
+          "functions": [
+            "test_patch_group"
+          ]
+        },
+        {
+          "id": "WORKSPACE.list",
+          "expectation": "A bounded list contains the exact newly created group, not merely an unrelated nonzero total.",
+          "functions": [
+            "test_list_groups"
+          ]
+        },
+        {
+          "id": "WORKSPACE.members",
+          "expectation": "Add/remove changes the exact participant membership and expected cardinality.",
+          "functions": [
+            "test_add_member",
+            "test_remove_member"
+          ]
+        },
+        {
+          "id": "WORKSPACE.label",
+          "expectation": "An authorized label mutation succeeds and persists; authentication denial is not a pass.",
+          "functions": [
+            "test_update_group_label"
+          ]
+        },
+        {
+          "id": "WORKSPACE.visibility",
+          "expectation": "Visibility update succeeds and public visibility is read back.",
+          "functions": [
+            "test_update_group_visibility"
+          ]
+        },
+        {
+          "id": "WORKSPACE.cli-create-get",
+          "expectation": "Actual CLI creation/get preserve exact group/driver identity.",
+          "functions": [
+            "test_group_create_via_cli",
+            "test_group_get_via_cli"
+          ]
+        },
+        {
+          "id": "WORKSPACE.cli-add-member",
+          "expectation": "Actual CLI add-member is verified by an independent CLI read.",
+          "functions": [
+            "test_group_add_member_via_cli"
+          ]
+        },
+        {
+          "id": "WORKSPACE.cli-fuse",
+          "expectation": "Actual CLI fusion produces the required recommendation; arbitrary JSON on a nonzero exit does not pass.",
+          "functions": [
+            "test_group_fuse_via_cli"
+          ]
+        },
+        {
+          "id": "WORKSPACE.cli-status",
+          "expectation": "Actual CLI completion and termination have independently observed expected states.",
+          "functions": [
+            "test_group_status_via_cli",
+            "test_group_terminate_via_cli"
+          ]
+        },
+        {
+          "id": "WORKSPACE.incident-group",
+          "expectation": "Bot-originated three-participant creation returns ID and preserves the label.",
+          "functions": [
+            "_story_group_metadata_without_workspace"
+          ]
+        },
+        {
+          "id": "WORKSPACE.participant-mode",
+          "expectation": "ENG mutes itself; returned actor ID and mode match.",
+          "functions": [
+            "_story_group_metadata_without_workspace"
+          ]
+        },
+        {
+          "id": "WORKSPACE.workspace",
+          "expectation": "Deprecated Workspace PUT and GET return 404; the Group keeps metadata, participant mode, routing, and service settings instead of legacy Workspace state.",
+          "functions": [
+            "_story_group_metadata_without_workspace"
+          ]
+        },
+        {
+          "id": "WORKSPACE.routing-service",
+          "expectation": "Driver structured routes/default delivery and bounded service concurrency persist.",
+          "functions": [
+            "_story_group_metadata_without_workspace"
+          ]
+        },
+        {
+          "id": "WORKSPACE.messages",
+          "expectation": "Persistent message ID/routing, live chat and callback group/delivery results match the exact owned scope.",
+          "functions": [
+            "_story_group_metadata_without_workspace"
+          ]
+        },
+        {
+          "id": "WORKSPACE.incident-delete",
+          "expectation": "Exact incident group deletion is confirmed and independently returns not-found only after admitted execution convergence.",
+          "functions": [
+            "_story_group_metadata_without_workspace"
+          ]
+        }
+      ],
+      "capability_gaps": [
+        "Expanded owned-local actors can now be provisioned; versioned Story bindings and legitimate per-operation identities remain required.",
+        "Legacy workspace/mode/routing/service/message/callback and full CLI contracts are not migrated.",
+        "Current V1 contract has no workspace equivalent; no inferred native or gateway fallback is permitted.",
+        "Bootstrap, chat, callback and fusion effects need admission and terminal/retention handling."
+      ],
+      "corrections": [
+        "Do not count a label 401 as PASS.",
+        "Do not count nonzero fuse JSON or unverified termination as business success.",
+        "Replace global list totals and best-effort group deletion with exact owned identity and durable finalization."
+      ]
+    },
+    {
+      "legacy_id": "story_user_builds_trusted_team",
+      "migration_status": "NOT_MIGRATED",
+      "required_bot_roles": [
+        "CEO",
+        "ENG",
+        "PM",
+        "QA",
+        "CS"
+      ],
+      "steps": [
+        {
+          "function": "test_friend_auto_accept_public",
+          "source": "friends.sh"
+        },
+        {
+          "function": "test_friend_request_accept_protected",
+          "source": "friends.sh"
+        },
+        {
+          "function": "test_friend_request_reject_protected",
+          "source": "friends.sh"
+        },
+        {
+          "function": "test_list_friends",
+          "source": "friends.sh"
+        },
+        {
+          "function": "test_friend_flow_via_cli",
+          "source": "friends.sh"
+        }
+      ],
+      "requirements": [
+        {
+          "id": "FRIEND.public-accept",
+          "expectation": "Public auto-accept makes the exact intended relationship visible without manual approval.",
+          "functions": [
+            "test_friend_auto_accept_public"
+          ]
+        },
+        {
+          "id": "FRIEND.protected-accept",
+          "expectation": "QA-to-PM is initially absent; exact newly created pending request is accepted by the authorized receiver and friendship is read back.",
+          "functions": [
+            "test_friend_request_accept_protected"
+          ]
+        },
+        {
+          "id": "FRIEND.protected-reject",
+          "expectation": "ENG-to-CS is initially absent; reject the exact new request and verify no friendship was created.",
+          "functions": [
+            "test_friend_request_reject_protected"
+          ]
+        },
+        {
+          "id": "FRIEND.list",
+          "expectation": "CEO friend list includes the exact ENG relationship established by this Story.",
+          "functions": [
+            "test_list_friends"
+          ]
+        },
+        {
+          "id": "FRIEND.cli-accept",
+          "expectation": "Actual CEO CLI request and PM received-list/accept use distinct legitimate contexts and the exact intended request; acceptance succeeds and PM is present in CEO's final CLI friend list.",
+          "functions": [
+            "test_friend_flow_via_cli"
+          ]
+        }
+      ],
+      "capability_gaps": [
+        "Visibility and relationship mutation are forbidden by the pilot unchanged-friendship contract.",
+        "Exact request/relationship ownership, retained history, baseline validation and safe restoration are not implemented.",
+        "CLI Bot credentials and remote identity routes need explicit mapping; Human Cookie is not an invented Bot token."
+      ],
+      "corrections": [
+        "Existing friendship cannot count as testing request acceptance.",
+        "Never select the first pending request or silently skip failed CLI acceptance.",
+        "Restore observed original visibility only if it has not drifted, not unconditional public visibility.",
+        "Legacy friends do not qualify the separately inventoried edge friend-connections accept/reject/cancel API."
+      ]
+    },
+    {
+      "legacy_id": "story_session_file_workspace",
+      "migration_status": "NOT_MIGRATED",
+      "required_bot_roles": [
+        "PM",
+        "ENG"
+      ],
+      "steps": [
+        {
+          "function": "story_session_file_workspace",
+          "source": "session_files.sh"
+        }
+      ],
+      "requirements": [
+        {
+          "id": "CLI-FILE.setup",
+          "expectation": "Actual PM CLI identity creates a PM-driven group containing PM/ENG and a Session with recoverable exact IDs.",
+          "functions": [
+            "story_session_file_workspace"
+          ]
+        },
+        {
+          "id": "CLI-FILE.upload",
+          "expectation": "Actual session file upload succeeds and returns file ID after prepare/byte-transfer/complete.",
+          "functions": [
+            "story_session_file_workspace"
+          ]
+        },
+        {
+          "id": "CLI-FILE.list",
+          "expectation": "Actual CLI list contains the exact uploaded file.",
+          "functions": [
+            "story_session_file_workspace"
+          ]
+        },
+        {
+          "id": "CLI-FILE.capabilities",
+          "expectation": "Actual CLI capabilities returns the declared environment storage backend; local expects local.",
+          "functions": [
+            "story_session_file_workspace"
+          ]
+        },
+        {
+          "id": "CLI-FILE.metadata",
+          "expectation": "Authenticated HTTP metadata returns success and the exact file ID.",
+          "functions": [
+            "story_session_file_workspace"
+          ]
+        },
+        {
+          "id": "CLI-FILE.download",
+          "expectation": "Actual CLI download returns exactly the uploaded bytes.",
+          "functions": [
+            "story_session_file_workspace"
+          ]
+        },
+        {
+          "id": "CLI-FILE.share",
+          "expectation": "Actual CLI share returns an issued nonempty token.",
+          "functions": [
+            "story_session_file_workspace"
+          ]
+        },
+        {
+          "id": "CLI-FILE.shared-metadata",
+          "expectation": "Token-only HTTP shared metadata succeeds and omits session_id; no ambient user/Bot auth.",
+          "functions": [
+            "story_session_file_workspace"
+          ]
+        },
+        {
+          "id": "CLI-FILE.shared-content",
+          "expectation": "Token-only shared HTTP content succeeds and equals the source bytes.",
+          "functions": [
+            "story_session_file_workspace"
+          ]
+        },
+        {
+          "id": "CLI-FILE.delete",
+          "expectation": "Actual CLI delete succeeds; independently confirm file/share invalidation without replacing failed business deletion with successful fallback cleanup.",
+          "functions": [
+            "story_session_file_workspace"
+          ]
+        }
+      ],
+      "capability_gaps": [
+        "Six actual CLI file leaves and Bot-originated CLI setup are not replaced by PRE-03 HTTP operations.",
+        "Legacy capabilities and anonymous metadata are absent from the current V1 file surface; paths must not be guessed.",
+        "File complete can notify Bots and create a separate completion link; effect admission remains mandatory.",
+        "CLI upload failures may hide a created file ID; unknown outcomes cannot authorize blind retries or broad cleanup."
+      ],
+      "corrections": [
+        "Missing CLI token or skipped operation is not PASS.",
+        "Retain unknown prepare/upload outcomes; register exact file and both explicit/initial Session parents.",
+        "Clean file/upload before Sessions/group, preserve failures, and isolate temporary CLI/local-file credentials."
+      ]
+    }
+  ]
+}

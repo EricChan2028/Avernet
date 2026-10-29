@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "source_revision": "8559a7a5258a2cb6750befec187e50aa85060cc6",
+  "parent": "story_provider_callback_survives_slow_judge",
+  "sources": {
+    "stories.sh": "3025c6ee245a2a3b514fba18fe913bb8d1ad42dc37183602521f29c496a4f10f",
+    "common.sh": "44f5445031e82cfb06b75fc35721eb4ed4338539f04ec7364b35386a3fe923b0",
+    "http_provider_judge_mock.py": "fe56c8c2d79ce141fe1d2784cc21c184c90000bb8e6908c976168f3bdfad70c4",
+    "mock_services.sh": "712273ff91e486d42cd47419d0cd809149b02809add0ade4af6afb7358d4b9c5"
+  },
+  "requirements": [
+    {
+      "id": "JUDGE.sandbox-empty",
+      "kind": "fixture",
+      "method": "NONE",
+      "path": "/control/reset",
+      "actor": "LOCAL_CONTROL",
+      "expectation": "New Run-owned empty Provider/Judge sandbox replaces shared reset."
+    },
+    {
+      "id": "JUDGE.provider-register",
+      "kind": "http",
+      "method": "POST",
+      "path": "/providers",
+      "actor": "HUMAN_LOCAL",
+      "expectation": "HTTP200 exact Provider and nonempty admin/downlink credentials, retained only in memory."
+    },
+    {
+      "id": "JUDGE.bot-publish",
+      "kind": "http",
+      "method": "POST",
+      "path": "/providers/${provider_id}/bots",
+      "actor": "PROVIDER_ADMIN",
+      "expectation": "HTTP200 exact Provider Bot and runtime credential; original capability/owner fields."
+    },
+    {
+      "id": "JUDGE.bot-public",
+      "kind": "http",
+      "method": "PUT",
+      "path": "/bots/${provider_bot_uuid}/visibility",
+      "actor": "PROVIDER_RUNTIME",
+      "expectation": "HTTP200 makes the new Provider-backed Bot discoverable using its own runtime credential (X-BCS-Bot-Token), without minting a Human authority edge."
+    },
+    {
+      "id": "JUDGE.friend-request",
+      "kind": "http",
+      "method": "POST",
+      "path": "/friends/request",
+      "actor": "HUMAN_LOCAL",
+      "expectation": "HTTP200or201 establishes original CEO-to-Provider Bot trust."
+    },
+    {
+      "id": "JUDGE.friends-read",
+      "kind": "http",
+      "method": "GET",
+      "path": "/bots/${BOT_CEO_UUID}/friends",
+      "actor": "HUMAN_LOCAL",
+      "expectation": "HTTP200 friend list contains newly published exact Provider Bot."
+    },
+    {
+      "id": "JUDGE.group-create",
+      "kind": "http",
+      "method": "POST",
+      "path": "/groups",
+      "actor": "HUMAN_LOCAL",
+      "expectation": "HTTP200 judged state-machine Group with original review->publish YAML and manual worker binding; preserve implicit Run."
+    },
+    {
+      "id": "JUDGE.explicit-receipt-boundary",
+      "kind": "fixture",
+      "method": "NONE",
+      "path": "/control/provider/clear",
+      "actor": "LOCAL_CONTROL",
+      "expectation": "Replace destructive clear with immutable receipt cursor and exact explicit Run correlation; retain implicit receipt."
+    },
+    {
+      "id": "JUDGE.run-start",
+      "kind": "http",
+      "method": "POST",
+      "path": "/groups/${group_id}/state-machine-runs",
+      "actor": "HUMAN_LOCAL",
+      "expectation": "HTTP202 starts original explicit workflow, exact Run identity."
+    },
+    {
+      "id": "JUDGE.review-delivery",
+      "kind": "delivery",
+      "method": "POST",
+      "path": "${OWNED_PROVIDER_ENDPOINT}",
+      "actor": "BCS_PROVIDER",
+      "expectation": "Actual authenticated Provider chat.send review request carries exact Provider run ID."
+    },
+    {
+      "id": "JUDGE.awaiting-response",
+      "kind": "poll",
+      "method": "GET",
+      "path": "/state-machine-runs/${run_id}/graph",
+      "actor": "HUMAN_LOCAL",
+      "expectation": "Review node durably running with sub_status awaiting_response before callback."
+    },
+    {
+      "id": "JUDGE.publish-receipt-boundary",
+      "kind": "fixture",
+      "method": "NONE",
+      "path": "/control/provider/clear",
+      "actor": "LOCAL_CONTROL",
+      "expectation": "Use immutable receipt cursor rather than erasing earlier Provider requests."
+    },
+    {
+      "id": "JUDGE.review-callback-deadline",
+      "kind": "http",
+      "method": "POST",
+      "path": "/bot/events",
+      "actor": "PROVIDER_RUNTIME",
+      "expectation": "Original final candidate callback returns HTTP200 within one-second absolute deadline while Judge release is withheld."
+    },
+    {
+      "id": "JUDGE.judge-started",
+      "kind": "observation",
+      "method": "NONE",
+      "path": "${OWNED_JUDGE_STARTED}",
+      "actor": "LOCAL_CONTROL",
+      "expectation": "Real BCS Judge HTTP request starts after callback acceptance and remains blocked."
+    },
+    {
+      "id": "JUDGE.judging",
+      "kind": "poll",
+      "method": "GET",
+      "path": "/state-machine-runs/${run_id}/graph",
+      "actor": "HUMAN_LOCAL",
+      "expectation": "Review node remains durably running with judging sub_status while Judge is blocked."
+    },
+    {
+      "id": "JUDGE.review-node",
+      "kind": "http",
+      "method": "GET",
+      "path": "/state-machine-runs/${run_id}/nodes/review",
+      "actor": "HUMAN_LOCAL",
+      "expectation": "HTTP200 exposes judging and exact candidate awaiting slow judge artifact_text."
+    },
+    {
+      "id": "JUDGE.judge-release",
+      "kind": "fixture",
+      "method": "NONE",
+      "path": "/control/judge/release",
+      "actor": "LOCAL_CONTROL",
+      "expectation": "Release only this Run-owned pending Judge to original deterministic approved response; failure shutdown never fabricates approval."
+    },
+    {
+      "id": "JUDGE.publish-delivery",
+      "kind": "delivery",
+      "method": "POST",
+      "path": "${OWNED_PROVIDER_ENDPOINT}",
+      "actor": "BCS_PROVIDER",
+      "expectation": "Actual publish chat.send after explicit Judge release with distinct exact Provider run ID."
+    },
+    {
+      "id": "JUDGE.publish-callback",
+      "kind": "http",
+      "method": "POST",
+      "path": "/bot/events",
+      "actor": "PROVIDER_RUNTIME",
+      "expectation": "HTTP200 accepted publish callback with original published after slow judge artifact."
+    },
+    {
+      "id": "JUDGE.run-completed",
+      "kind": "poll",
+      "method": "GET",
+      "path": "/state-machine-runs/${run_id}",
+      "actor": "HUMAN_LOCAL",
+      "expectation": "Run completes with exact published output and judge_outputs[0].decision.outcome approved."
+    },
+    {
+      "id": "JUDGE.group-delete",
+      "kind": "http",
+      "method": "DELETE",
+      "path": "/groups/${group_id}?bot_id=${BOT_CEO_UUID}",
+      "actor": "HUMAN_LOCAL",
+      "expectation": "HTTP200 original exact Group business deletion after full explicit completion; account for implicit Run too."
+    },
+    {
+      "id": "JUDGE.bot-retire",
+      "kind": "http",
+      "method": "DELETE",
+      "path": "/providers/${provider_id}/bots/${provider_bot_ref}",
+      "actor": "PROVIDER_ADMIN",
+      "expectation": "HTTP200 original Provider Bot retirement; retained Provider/definition/history and trust effects remain explicit."
+    }
+  ]
+}

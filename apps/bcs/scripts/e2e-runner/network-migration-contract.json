@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "source_revision": "8559a7a5258a2cb6750befec187e50aa85060cc6",
+  "parent": "story_user_prepares_agent_network",
+  "sources": {
+    "stories.sh": "3025c6ee245a2a3b514fba18fe913bb8d1ad42dc37183602521f29c496a4f10f",
+    "actor.sh": "9b7679964e0afdac13ad34960ddb475cf09e710c751efbbdd5005555f1056497"
+  },
+  "requirements": [
+    {
+      "id": "NETWORK.platform",
+      "function": "_story_platform_entrypoints",
+      "source": "stories.sh",
+      "expectation": "Health is ok/bcs; schema1 local manifest serves exact real JavaScript bytes and digest; /me matches Human and actor/nickname; repair inspection matches; missing environment-backed secret returns structured404."
+    },
+    {
+      "id": "NETWORK.actor-list",
+      "function": "test_actor_list",
+      "source": "actor.sh",
+      "expectation": "Actor directory from CEO viewpoint returns200 with bots list and integer total; empty visibility-filtered directory is valid."
+    },
+    {
+      "id": "NETWORK.actor-search",
+      "function": "test_actor_search",
+      "source": "actor.sh",
+      "expectation": "Actor search from CEO viewpoint for original product keyword returns200 with bots and context; recommendation fallback is not model inference."
+    },
+    {
+      "id": "NETWORK.actor-status",
+      "function": "test_actor_put_status",
+      "source": "actor.sh",
+      "expectation": "Owned CEO authenticates with its Bot token, updates own status hidden then online; both responses and returned status are verified."
+    },
+    {
+      "id": "NETWORK.bots-my",
+      "function": "test_bots_my",
+      "source": "actor.sh",
+      "expectation": "Human-owned Bot directory returns200 and at least one own Bot."
+    },
+    {
+      "id": "NETWORK.bots-paged",
+      "function": "test_bots_paged",
+      "source": "actor.sh",
+      "expectation": "Paged Bot directory returns200 and at least one item under limit5 offset0."
+    },
+    {
+      "id": "NETWORK.bots-query",
+      "function": "test_bots_query",
+      "source": "actor.sh",
+      "expectation": "Bulk query resolves both exact owned CEO and PM IDs."
+    },
+    {
+      "id": "NETWORK.register-onboard",
+      "function": "_story_register_and_onboard_owned_agent",
+      "source": "stories.sh",
+      "expectation": "Human obtains bounded registration token/expiry, registers one new Bot; token-auth capabilities onboarding, browser onboarding URL, Human-admin re-onboarding, exact capability readback, owner deletion and404. Unknown creation/deletion is not replayed or adopted."
+    }
+  ]
+}

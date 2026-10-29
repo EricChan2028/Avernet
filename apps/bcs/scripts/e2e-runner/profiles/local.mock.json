@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "environment": {
+    "tier": "local",
+    "id": "local-mock",
+    "expected_bcs_env": "local",
+    "lifecycle": "local-provision",
+    "deployment": "singlebox",
+    "provider": "local"
+  },
+  "entrypoint": {
+    "kind": "mock",
+    "origin": "mock://local",
+    "api_face": "public-v1",
+    "manifest_face": "internal-v1"
+  },
+  "human": {
+    "user_id": "human_local"
+  },
+  "actors": {
+    "driver": {
+      "bot_id": "bot_local_driver",
+      "owner_id": "human_local",
+      "dedicated": true
+    },
+    "member": {
+      "bot_id": "bot_local_member",
+      "owner_id": "human_local",
+      "dedicated": true
+    }
+  },
+  "auth": {
+    "header_env": {
+      "Cookie": "LOCAL_MOCK_UNUSED"
+    }
+  },
+  "observer": {
+    "kind": "local-mock",
+    "server": "local-mock",
+    "database": "local-mock",
+    "environment_binding_confirmed": true
+  },
+  "policy": {
+    "fixture_pool": "local-mock-pool",
+    "exclusive_use_confirmed": true,
+    "timeout_seconds": 10,
+    "max_response_bytes": 1048576,
+    "failure_retention_hours": 24
+  },
+  "relationships": {
+    "friendship": "unchanged"
+  }
+}

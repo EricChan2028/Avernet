@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "source_revision": "8559a7a5258a2cb6750befec187e50aa85060cc6",
+  "parent": "test_ep_friend_connections_friend_request_and_list",
+  "sources": {
+    "edge_permission.sh": "e395ff4f203cd4fb0a7396230240c2542a8caadd0675eaa8b9dc5a8294986983"
+  },
+  "requirements": [
+    {
+      "id": "EDGE-FRIEND-CONNECTIONS.list",
+      "kind": "http",
+      "method": "GET",
+      "path": "/collaboration/friend-connections?actor=$BOT_CEO_UUID&actor_kind=bot",
+      "actor": "CEO_BOT",
+      "expectation": "Authenticated CEO Bot reads its friend-connection list with HTTP 200, a bounded items contract and a total derived from the same list; this covers only two original GETs and does not admit the parent Story's POST request step."
+    },
+    {
+      "id": "EDGE-FRIEND-CONNECTIONS.list-repeat",
+      "kind": "http",
+      "method": "GET",
+      "path": "/collaboration/friend-connections?actor=$BOT_CEO_UUID&actor_kind=bot",
+      "actor": "CEO_BOT",
+      "expectation": "The same exact friend-connection list read is repeated once without retry semantics, proving deterministic read behavior; no friendship or visibility fixture is changed by this slice."
+    }
+  ]
+}

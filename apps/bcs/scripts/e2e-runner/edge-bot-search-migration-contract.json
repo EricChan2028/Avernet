@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "source_revision": "8559a7a5258a2cb6750befec187e50aa85060cc6",
+  "parent": "test_ep_bot_search",
+  "sources": {
+    "edge_permission.sh": "e395ff4f203cd4fb0a7396230240c2542a8caadd0675eaa8b9dc5a8294986983"
+  },
+  "requirements": [
+    {
+      "id": "EDGE-BOT-SEARCH.name-fuzzy",
+      "kind": "http",
+      "effect": "READ",
+      "method": "GET",
+      "path": "/bots/search?q=CEO&offset=0&limit=20",
+      "actor": "CEO_BOT",
+      "expectation": "Authenticated fuzzy search returns200; result and response scope must be bounded and fixture-exclusive."
+    },
+    {
+      "id": "EDGE-BOT-SEARCH.public-online-not-friend",
+      "kind": "http",
+      "effect": "READ",
+      "method": "GET",
+      "path": "/bots/search?visibility=public&status=online&is_friend=false&limit=50",
+      "actor": "CEO_BOT",
+      "expectation": "Filtered public/online/non-friend search returns an explicit contract; source warning-only status must become a strict assertion."
+    },
+    {
+      "id": "EDGE-BOT-SEARCH.friend-true",
+      "kind": "http",
+      "effect": "READ",
+      "method": "GET",
+      "path": "/bots/search?is_friend=true&limit=50",
+      "actor": "CEO_BOT",
+      "expectation": "Friend-filtered search returns an explicit contract and must not mutate the caller friend set."
+    },
+    {
+      "id": "EDGE-BOT-SEARCH.hidden-status",
+      "kind": "http",
+      "effect": "READ",
+      "method": "GET",
+      "path": "/bots/search?status=hidden&limit=10",
+      "actor": "CEO_BOT",
+      "expectation": "Hidden-status search exercises the branch with a bounded result assertion."
+    },
+    {
+      "id": "EDGE-BOT-SEARCH.private-visibility",
+      "kind": "http",
+      "effect": "READ",
+      "method": "GET",
+      "path": "/bots/search?visibility=private&limit=10",
+      "actor": "CEO_BOT",
+      "expectation": "Private-visibility search exercises the branch with a bounded result assertion."
+    },
+    {
+      "id": "EDGE-BOT-SEARCH.empty-query",
+      "kind": "http",
+      "effect": "READ",
+      "method": "GET",
+      "path": "/bots/search?limit=5",
+      "actor": "CEO_BOT",
+      "expectation": "Empty-query list-all branch returns a bounded, explicit page contract."
+    },
+    {
+      "id": "EDGE-BOT-SEARCH.ensure-tc-fixture",
+      "kind": "fixture",
+      "effect": "MUTATION",
+      "method": "POST",
+      "path": "/admin/bots/$tc_uuid/ensure",
+      "actor": "SERVICE_KEY",
+      "expectation": "Creates the dedicated TCCov Bot before tc_bot filters; this embedded fixture mutation must be separately owned and admitted in every environment."
+    },
+    {
+      "id": "EDGE-BOT-SEARCH.tc-true",
+      "kind": "http",
+      "effect": "READ",
+      "method": "GET",
+      "path": "/bots/search?tc_bot=true&limit=50",
+      "actor": "CEO_BOT",
+      "expectation": "Search proves the dedicated TC Bot is visible under the tc_bot=true branch."
+    },
+    {
+      "id": "EDGE-BOT-SEARCH.tc-false",
+      "kind": "http",
+      "effect": "READ",
+      "method": "GET",
+      "path": "/bots/search?tc_bot=false&limit=50",
+      "actor": "CEO_BOT",
+      "expectation": "Search proves the dedicated TC Bot is excluded by the tc_bot=false branch."
+    },
+    {
+      "id": "EDGE-BOT-SEARCH.anonymous",
+      "kind": "http",
+      "effect": "READ",
+      "method": "GET",
+      "path": "/bots/search?limit=10",
+      "actor": "UNAUTHENTICATED",
+      "expectation": "Anonymous search is forced to public scope and must not expose private or friendship attributes."
+    },
+    {
+      "id": "EDGE-BOT-SEARCH.bad-limit",
+      "kind": "http",
+      "effect": "READ",
+      "method": "GET",
+      "path": "/bots/search?limit=999",
+      "actor": "CEO_BOT",
+      "expectation": "Invalid limit must be rejected by an explicit 400 validation contract."
+    },
+    {
+      "id": "EDGE-BOT-SEARCH.bad-visibility",
+      "kind": "http",
+      "effect": "READ",
+      "method": "GET",
+      "path": "/bots/search?visibility=bogus",
+      "actor": "CEO_BOT",
+      "expectation": "Invalid visibility must be rejected by an explicit 400 validation contract."
+    },
+    {
+      "id": "EDGE-BOT-SEARCH.bad-status",
+      "kind": "http",
+      "effect": "READ",
+      "method": "GET",
+      "path": "/bots/search?status=bogus",
+      "actor": "CEO_BOT",
+      "expectation": "Invalid status must be rejected by an explicit 400 validation contract."
+    }
+  ]
+}

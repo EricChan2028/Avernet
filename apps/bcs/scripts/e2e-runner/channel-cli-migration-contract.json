@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "source_revision": "8559a7a5258a2cb6750befec187e50aa85060cc6",
+  "parent": "story_cli_operator_validates_channel_management",
+  "sources": {
+    "cli-stories.sh": "576031c026007346206ec1d77666f04852908f9fec5fe29c9c9e255c5977b13d",
+    "common.sh": "44f5445031e82cfb06b75fc35721eb4ed4338539f04ec7364b35386a3fe923b0",
+    "stories.sh": "3025c6ee245a2a3b514fba18fe913bb8d1ad42dc37183602521f29c496a4f10f"
+  },
+  "requirements": [
+    {
+      "id": "CHANNEL-CLI.bind-redacted",
+      "command": "channel bind",
+      "expectation": "CEO actualCLI bind fails nonzero with disabled-bridge diagnostic, never exposes synthetic client secret in stdout/stderr."
+    },
+    {
+      "id": "CHANNEL-CLI.list-before",
+      "command": "channel list",
+      "expectation": "CEO actualCLI list returns empty items."
+    },
+    {
+      "id": "CHANNEL-CLI.group-create",
+      "command": "create-group",
+      "expectation": "PM actualCLI create-group retains original context/topic and PM/ENG participants, returns exact Group and implicit Session."
+    },
+    {
+      "id": "CHANNEL-CLI.session-create",
+      "command": "session create",
+      "expectation": "PM actualCLI creates explicit Session under exact Group."
+    },
+    {
+      "id": "CHANNEL-CLI.conversation-empty",
+      "command": "channel conversation-id",
+      "expectation": "Participating PM actualCLI conversation-id reads empty DingTalk conversations for exact Session."
+    },
+    {
+      "id": "CHANNEL-CLI.unbind-missing",
+      "command": "channel unbind",
+      "expectation": "CEO actualCLI unbind only a Run-derived proved-absent binding under disabled bridge, returns oktrue."
+    },
+    {
+      "id": "CHANNEL-CLI.list-after",
+      "command": "channel list",
+      "expectation": "CEO actualCLI list confirms no phantom bindings."
+    },
+    {
+      "id": "CHANNEL-CLI.session-delete",
+      "command": "DELETE session",
+      "expectation": "Exact creator-scoped explicit Session API deletion verified against ownedSQLite, not borrowed cleanup."
+    },
+    {
+      "id": "CHANNEL-CLI.group-delete",
+      "command": "DELETE group",
+      "expectation": "Exact creator-scoped Group deletion verified with remaining implicitSession, child-before-parent ledger tombstones and fixture visibility restoration."
+    }
+  ]
+}
