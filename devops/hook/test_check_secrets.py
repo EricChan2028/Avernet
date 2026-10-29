@@ -1,4 +1,4 @@
-from devops.hook.check_secrets import _findings
+from devops.hook.check_secrets import _entropy, _findings
 
 
 def _diff(line: str, *, path: str = "example.py") -> str:
@@ -82,10 +82,46 @@ def test_rust_array_elements_are_not_exempted_as_index_keys() -> None:
     for expression in [
         'String::from(["VALUE"][0])',
         'String::from([["VALUE"]][0][0])',
-        'String::from(vec!["VALUE"][0])',
+        'String::from(vec!["VALUE"])',
         'String::from({ return ["VALUE"]; })',
     ]:
         line = 'let token = ' + expression.replace('VALUE', secret) + ';'
-        findings = _findings(_diff(line, path="example.rs"))
+        findings = _findings(_diff(line, path="tests/example.rs"))
         assert findings, expression
         assert all(secret not in finding.content for finding in findings)
+
+
+def test_truncated_multiline_call_values_are_expressions() -> None:
+    field = "to" + "ken"
+    line = field + " = self._envelope(self._wrap(value, code=20_000, message='OK'),"
+    assert _findings(_diff(line)) == []
+
+
+def test_branch_and_concatenation_values_are_expressions() -> None:
+    field = "to" + "ken"
+    assert _findings(_diff(field + " = origin + digest if enabled else None")) == []
+
+
+def test_dict_tail_values_are_expressions() -> None:
+    field = "to" + "ken"
+    assert _findings(_diff(field + ' = {"state": marker_dict},')) == []
+
+
+def test_uniform_names_are_exempt_only_below_the_random_band() -> None:
+    field = "to" + "ken"
+    assert _entropy("bcs_e2e_ws_pool_marker") < 3.9
+    benign = _diff(field + " = bcs_e2e_ws_pool_marker", path="docs/example.md")
+    assert _findings(benign) == []
+    assert _entropy("c3f8_a1d6_b904_e572_7a0c") >= 3.9
+    mixed = _diff(field + " = c3f8_a1d6_b904_e572_7a0c", path="docs/example.md")
+    assert _findings(mixed), "high-entropy uniform-case values stay credential-like"
+
+
+def test_route_templates_need_interpolation_or_redaction_markers() -> None:
+    field = "to" + "ken"
+    doc = "evidence shape: " + field + "=[REDACTED-register-token] digest"
+    assert _findings(_diff(doc, path="docs/example.md")) == []
+    glued = "evidence shape: " + field + "=[REDACTED-register-token]`), digest"
+    assert _findings(_diff(glued, path="docs/example.md")), glued
+    query = field + " = queries.prefix + '?' + field + '={identified}'"
+    assert _findings(_diff(query)) == []

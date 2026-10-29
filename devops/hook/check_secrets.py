@@ -91,6 +91,20 @@ SECRET_REFERENCE_RE = re.compile(r"^other_manual_agentclaw_[a-z0-9_]+$")
 PYTHON_ATTRIBUTE_RE = re.compile(r"^\(*[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+\)*$")
 
 
+# Uniform-case reference names (environment variable names, configuration
+# keys, ledger state markers) are identifiers, not credential material; real
+# credential material is randomly mixed-case, so word-like uniform-case names
+# stay exempt only while their entropy remains below the random band.
+BENIGN_NAME_RE = re.compile(
+    r"(?x)^(?:[A-Z0-9]+(?:_[A-Z0-9]+)+|[a-z0-9]+(?:[._-][a-z0-9]+)+)$"
+)
+# Route templates and the scanner's own [REDACTED-...] markers interpolate
+# identifiers only; they never carry credential material.
+SAFE_TEMPLATE_RE = re.compile(
+    r"^(?:[A-Za-z0-9_?&=./\-]|\{[A-Za-z_]\w*\}|\[REDACTED[-A-Za-z0-9_]*\])+$"
+)
+
+
 def _entropy(value: str) -> float:
     counts: dict[str, int] = {}
     for char in value:
@@ -108,6 +122,14 @@ def _looks_like_plaintext_value(value: str) -> bool:
         return False
     if (len(value) < 12 or PLACEHOLDER_RE.fullmatch(value)
             or NON_SECRET_VALUE_RE.fullmatch(value) or SECRET_REFERENCE_RE.fullmatch(value)):
+        return False
+    # Only genuinely interpolated templates and explicit redaction markers
+    # qualify; a plain hyphenated lowercase string is word salad, not a
+    # template, and stays subject to the entropy/length heuristics.
+    if (("{" in value or "[REDACTED" in value)
+            and SAFE_TEMPLATE_RE.fullmatch(value)):
+        return False
+    if BENIGN_NAME_RE.fullmatch(value) and _entropy(value) < 3.9:
         return False
     # A high-entropy value is a strong signal. Password/secret assignments are
     # also suspicious at a lower threshold because human-generated secrets can
@@ -200,6 +222,87 @@ def _added_lines(diff: str) -> list[tuple[str, int, str]]:
     return added
 
 
+def _balanced_expression(content: str, start: int) -> str:
+    """Capture one lexically bounded expression; no container-tail truncation.
+
+    Assignment detection anchors on the value, but dict/kwargs tails such as a
+    trailing ``}`` or ``)`` belong to the enclosing structure, not the value.
+    The capture stops at a depth-zero comma or semicolon and honors quotes.
+    """
+    depth = 0
+    quote = ""
+    index = start
+    while index < len(content):
+        char = content[index]
+        if quote:
+            if char == "\\":
+                index += 2
+                continue
+            if char == quote:
+                quote = ""
+            index += 1
+            continue
+        if char in "'\"":
+            quote = char
+        elif char in "([{":
+            depth += 1
+        elif char in ")]}":
+            if depth == 0:
+                break
+            depth -= 1
+        elif char in ",;" and depth == 0:
+            break
+        elif char == "\n" and depth == 0:
+            break
+        index += 1
+    return content[start:index]
+
+
+def _net_open_parens(expression: str) -> int:
+    """Count unclosed parens outside string bodies; unknown inside strings."""
+    depth = 0
+    quote = ""
+    index = 0
+    while index < len(expression):
+        char = expression[index]
+        if quote:
+            if char == "\\":
+                index += 2
+                continue
+            if char == quote:
+                quote = ""
+        elif char in "'\"":
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        index += 1
+    return depth if not quote and depth > 0 else 0
+
+
+def _parse_candidates(expression: str) -> list[str]:
+    """Trim enclosing-container artifacts so the fragment can parse alone.
+
+    Diff fragments cut multi-line calls at the line boundary; appended
+    closers re-balance that truncation so a genuine runtime expression
+    parses instead of keeping the conservative regex behavior.
+    """
+    stripped = expression.strip()
+    candidates = [stripped]
+    work = stripped
+    for _ in range(4):
+        if not work or work[-1] not in ",;)]}":
+            break
+        work = work[:-1]
+        candidates.append(work)
+    for candidate in list(candidates):
+        net = _net_open_parens(candidate)
+        if net > 0:
+            candidates.append(candidate + ")" * net)
+    return candidates
+
+
 def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
     """Recognize expressions, not secrets, without evaluating Python source.
 
@@ -222,10 +325,15 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
                 )
     if assignment.group("quoted") is not None:
         return False
-    expression = content[assignment.start("bare"):].strip().rstrip(",")
-    try:
-        node = ast.parse(expression, mode="eval").body
-    except (SyntaxError, ValueError):
+    expression = _balanced_expression(content, assignment.start("bare"))
+    node = None
+    for candidate in _parse_candidates(expression):
+        try:
+            node = ast.parse(candidate, mode="eval").body
+            break
+        except (SyntaxError, ValueError):
+            continue
+    if node is None:
         return False
 
     def safe(value: ast.AST) -> bool:
@@ -237,6 +345,10 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
             return safe(value.value) and safe(value.slice)
         if isinstance(value, ast.BoolOp):
             return all(safe(item) for item in value.values)
+        if isinstance(value, ast.IfExp):
+            return safe(value.body) and safe(value.orelse)
+        if isinstance(value, ast.BinOp):
+            return safe(value.left) and safe(value.right)
         if isinstance(value, ast.JoinedStr):
             return all(safe(item) for item in value.values)
         if isinstance(value, ast.FormattedValue):
@@ -257,9 +369,13 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
             )
         return False
 
+    if SAFE_TEMPLATE_RE.fullmatch(expression.strip()) and (
+            "{" in expression or "[REDACTED" in expression):
+        return True
     return isinstance(
         node,
-        (ast.Name, ast.Attribute, ast.Call, ast.Subscript, ast.BoolOp, ast.JoinedStr),
+        (ast.Name, ast.Attribute, ast.Call, ast.Subscript, ast.BoolOp, ast.JoinedStr,
+         ast.IfExp, ast.BinOp),
     ) and safe(node)
 
 
