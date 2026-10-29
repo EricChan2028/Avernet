@@ -251,7 +251,7 @@ provider = "noop"
 
 [security.outbound_url]
 block_private_networks = true
-allow_loopback = false
+allow_loopback = true
 
 [invite]
 token_secret = "local-development-only-token-secret"

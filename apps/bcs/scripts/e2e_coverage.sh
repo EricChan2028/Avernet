@@ -216,7 +216,7 @@ if [[ -x "$cov_cli_bin" ]]; then
   export BCS_BIN="$bcs_dir/target/cov-e2e/llvm-cov-target/debug/bcs"
   export LLVM_PROFILE_FILE="$bcs_dir/target/cov-e2e/llvm-cov-target/bcs-%m-%p.profraw"
 else
-  echo "WARN: instrumented bcs-cli not found at $cov_cli_bin; e2e cli cases will use the src/bcs/target/debug fallback or cargo run." >&2
+  echo "WARN: instrumented bcs-cli not found at $cov_cli_bin; e2e cli cases will use the apps/bcs/target/debug fallback or cargo run." >&2
 fi
 
 # 2. Run e2e (curl hits :21000, exercising the instrumented bcs; profraw is
