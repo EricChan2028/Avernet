@@ -89,3 +89,25 @@ def test_rust_array_elements_are_not_exempted_as_index_keys() -> None:
         findings = _findings(_diff(line, path="example.rs"))
         assert findings, expression
         assert all(secret not in finding.content for finding in findings)
+
+
+def test_python_conditional_runtime_reference_is_not_a_credential() -> None:
+    expression = 'passport_result.get("token") if passport_result else None'
+    assert _findings(_diff("passport_token = " + expression)) == []
+
+
+def test_python_conditional_literal_credentials_remain_blocked() -> None:
+    secret = "a-real-looking-" + "secret-value-12345"
+    for expression in [
+        '"VALUE" if result else None',
+        'result if result else "VALUE"',
+        'result if "VALUE" else None',
+        'lookup("VALUE") if result else None',
+    ]:
+        findings = _findings(_diff("passport_token = " + expression.replace("VALUE", secret)))
+        assert findings
+        assert all(secret not in finding.content for finding in findings)
+
+
+def test_python_jwt_runtime_encoding_is_not_a_plaintext_credential() -> None:
+    assert _findings(_diff('token = ' + 'jwt.encode(claims, KEY, algorithm="HS256")')) == []

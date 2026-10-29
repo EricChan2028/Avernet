@@ -200,6 +200,27 @@ def _added_lines(diff: str) -> list[tuple[str, int, str]]:
     return added
 
 
+def _python_conditional_has_secret(content: str, assignment: re.Match[str]) -> bool:
+    """Inspect every branch, even when the regex captured a short runtime name."""
+    if assignment.group("bare") is None:
+        return False
+    expression = content[assignment.start("bare"):].strip().rstrip(",")
+    try:
+        node = ast.parse(expression, mode="eval").body
+    except (SyntaxError, ValueError):
+        return False
+    if not isinstance(node, ast.IfExp):
+        return False
+    for item in ast.walk(node):
+        if isinstance(item, ast.Constant) and isinstance(item.value, (str, bytes)):
+            value = item.value
+            if isinstance(value, bytes):
+                value = value.decode("utf-8", errors="replace")
+            if _looks_like_plaintext_value(value):
+                return True
+    return False
+
+
 def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
     """Recognize expressions, not secrets, without evaluating Python source.
 
@@ -235,6 +256,8 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
             return safe(value.value)
         if isinstance(value, ast.Subscript):
             return safe(value.value) and safe(value.slice)
+        if isinstance(value, ast.IfExp):
+            return safe(value.test) and safe(value.body) and safe(value.orelse)
         if isinstance(value, ast.BoolOp):
             return all(safe(item) for item in value.values)
         if isinstance(value, ast.JoinedStr):
@@ -259,7 +282,7 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
 
     return isinstance(
         node,
-        (ast.Name, ast.Attribute, ast.Call, ast.Subscript, ast.BoolOp, ast.JoinedStr),
+        (ast.Name, ast.Attribute, ast.Call, ast.Subscript, ast.BoolOp, ast.IfExp, ast.JoinedStr),
     ) and safe(node)
 
 
@@ -338,6 +361,10 @@ def _findings(diff: str) -> list[Finding]:
                 detected = False
                 for assignment in assignment_pattern.finditer(content):
                     value = assignment.group("quoted") or assignment.group("bare") or ""
+                    if path.endswith(".py") and _python_conditional_has_secret(content, assignment):
+                        findings.append(Finding(path, line, rule, _redact_content(content)))
+                        detected = True
+                        break
                     if path.endswith(".py") and (
                         _python_reference_is_safe(content, assignment)
                         or (assignment.group("quoted") is None
