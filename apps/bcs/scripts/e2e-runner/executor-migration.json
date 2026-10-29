@@ -1,0 +1,384 @@
+{
+  "schema_version": 1,
+  "rows": [
+    {
+      "id": "story_human_manages_delivery_policy",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "PASS",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_user_prepares_agent_network",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "PASS",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_user_builds_trusted_team",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "PASS",
+        "gates": [],
+        "notes": [
+          "FRESH_FIXTURE_R5G"
+        ]
+      }
+    },
+    {
+      "id": "story_user_operates_group_workspace",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "PASS",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_user_runs_and_shares_sessions",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "PASS",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_user_has_direct_agent_conversation",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "BLOCKED_INVENTORIED",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_user_runs_structured_collaboration",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "PASS",
+        "gates": [],
+        "notes": [
+          "STATION_DEFECT_R5_CAVEAT"
+        ]
+      }
+    },
+    {
+      "id": "story_provider_operator_publishes_agent",
+      "executor_migration": {
+        "mode": "LOCAL_ONLY",
+        "preprod_verdict": "NOT_RUN",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_user_validates_external_channel_setup",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "PASS",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_operator_coordinates_with_cli",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "BLOCKED_INVENTORIED",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_cli_operator_creates_custom_collaboration",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "BLOCKED_INVENTORIED",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_cli_operator_builds_collaboration_team",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "BLOCKED_INVENTORIED",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_cli_operator_runs_sessions_and_services",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "PASS",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_cli_operator_validates_channel_management",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "BLOCKED_INVENTORIED",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_cli_operator_manages_group_context",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "PASS",
+        "gates": [],
+        "notes": [
+          "ROSTER_LAG"
+        ]
+      }
+    },
+    {
+      "id": "story_session_file_workspace",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "PASS",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_user_receives_group_event_webhooks",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "NOT_RUN",
+        "gates": [
+          "MOCK"
+        ],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_provider_callback_survives_slow_judge",
+      "executor_migration": {
+        "mode": "LOCAL_ONLY",
+        "preprod_verdict": "NOT_RUN",
+        "gates": [
+          "MOCK"
+        ],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_fixed_loop_human_editor_workflow",
+      "executor_migration": {
+        "mode": "DYNAMIC_OWNED_LOCAL",
+        "preprod_verdict": "NOT_APPLICABLE",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_nested_fixed_loop_workflows",
+      "executor_migration": {
+        "mode": "DYNAMIC_OWNED_LOCAL",
+        "preprod_verdict": "NOT_APPLICABLE",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_state_machine_result_queue",
+      "executor_migration": {
+        "mode": "DYNAMIC_OWNED_LOCAL",
+        "preprod_verdict": "NOT_APPLICABLE",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "test_ep_admission",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "PASS",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "test_ep_friend_connections_friend_request_and_list",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "PASS",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "test_ep_friend_connections_friend_accept_reject_cancel",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "PASS",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "test_ep_friend_connections_friend_revoke",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "BLOCKED_INVENTORIED",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "test_ep_friend_connections_friend_requests_list",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "PASS",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "test_ep_ensure_bot",
+      "executor_migration": {
+        "mode": "EDGE_OBLIGATION_IN_FAMILY",
+        "preprod_verdict": "NOT_APPLICABLE",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "test_ep_friend_connections_full_lifecycle",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "BLOCKED_INVENTORIED",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "test_ep_friend_connections_mutual_auto_approve",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "PASS",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "test_ep_bot_search",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "PASS",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "test_ep_error_and_admission_branches",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "PASS",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "test_ep_connect_private_and_discover_branches",
+      "executor_migration": {
+        "mode": "DUAL",
+        "preprod_verdict": "PASS",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "test_ep_tc_friend_auth_sync_readdressed_principal",
+      "executor_migration": {
+        "mode": "LOCAL_ONLY",
+        "preprod_verdict": "NOT_RUN",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "test_ep_dept_scope_parses_object_friend_ext_entries",
+      "executor_migration": {
+        "mode": "LOCAL_ONLY",
+        "preprod_verdict": "NOT_RUN",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_authority_user_journey",
+      "executor_migration": {
+        "mode": "LOCAL_ONLY",
+        "preprod_verdict": "NOT_RUN",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_provider_owner_isolation",
+      "executor_migration": {
+        "mode": "LOCAL_ONLY",
+        "preprod_verdict": "NOT_RUN",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_session_owner_permissions",
+      "executor_migration": {
+        "mode": "LOCAL_ONLY",
+        "preprod_verdict": "NOT_RUN",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_provider_operator_manages_subbots",
+      "executor_migration": {
+        "mode": "LOCAL_ONLY",
+        "preprod_verdict": "NOT_RUN",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_retired_service_policy",
+      "executor_migration": {
+        "mode": "LOCAL_ONLY",
+        "preprod_verdict": "NOT_RUN",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_collaboration_draft_delivery",
+      "executor_migration": {
+        "mode": "LOCAL_ONLY",
+        "preprod_verdict": "NOT_RUN",
+        "gates": [],
+        "notes": []
+      }
+    },
+    {
+      "id": "story_collaboration_draft_group_launch",
+      "executor_migration": {
+        "mode": "DYNAMIC_OWNED_LOCAL",
+        "preprod_verdict": "NOT_APPLICABLE",
+        "gates": [],
+        "notes": []
+      }
+    }
+  ]
+}

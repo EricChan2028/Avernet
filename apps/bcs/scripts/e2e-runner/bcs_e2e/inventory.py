@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections import Counter
 from pathlib import Path
 
 from .artifact import process_digest
@@ -65,6 +66,128 @@ KNOWN_UNMAPPED_LEGACY_IDS = frozenset({
 })
 REVIEWED_RELEASE_PARENT_COUNT = 31
 
+EXECUTOR_MIGRATION_PATH = ROOT / 'executor-migration.json'
+EXECUTOR_MIGRATION_MODES = frozenset({
+    'DUAL', 'LOCAL_ONLY', 'DYNAMIC_OWNED_LOCAL', 'EDGE_OBLIGATION_IN_FAMILY',
+})
+PREPROD_VERDICTS = frozenset({
+    'PASS', 'BLOCKED_INVENTORIED', 'NOT_RUN', 'NOT_APPLICABLE',
+})
+EXECUTOR_MIGRATION_GATES = frozenset({'MOCK'})
+EXECUTOR_MIGRATION_NOTES = frozenset({
+    'ROSTER_LAG', 'STATION_DEFECT_R5_CAVEAT', 'FRESH_FIXTURE_R5G',
+})
+_VALID_EXECUTOR_MIGRATION_STATES = frozenset({
+    ('DUAL', 'PASS'),
+    ('DUAL', 'BLOCKED_INVENTORIED'),
+    ('DUAL', 'NOT_RUN'),
+    ('LOCAL_ONLY', 'NOT_RUN'),
+    ('DYNAMIC_OWNED_LOCAL', 'NOT_APPLICABLE'),
+    ('EDGE_OBLIGATION_IN_FAMILY', 'NOT_APPLICABLE'),
+})
+_EXPECTED_EXECUTOR_MIGRATION_COUNTS = {
+    ('DUAL', 'PASS'): 18,
+    ('DUAL', 'BLOCKED_INVENTORIED'): 7,
+    ('DUAL', 'NOT_RUN'): 1,
+    ('LOCAL_ONLY', 'NOT_RUN'): 10,
+    ('DYNAMIC_OWNED_LOCAL', 'NOT_APPLICABLE'): 4,
+    ('EDGE_OBLIGATION_IN_FAMILY', 'NOT_APPLICABLE'): 1,
+}
+_EXPECTED_EXECUTOR_MIGRATION_GATE_COUNTS = {'MOCK': 2}
+_EXPECTED_EXECUTOR_MIGRATION_NOTE_COUNTS = {
+    'STATION_DEFECT_R5_CAVEAT': 1,
+    'FRESH_FIXTURE_R5G': 1,
+    'ROSTER_LAG': 1,
+}
+
+
+def load_executor_migration() -> dict[str, dict]:
+    """Load the single 41-row executor migration status source by story ID."""
+    try:
+        value = read(EXECUTOR_MIGRATION_PATH)
+    except RunStateError:
+        raise RunStateError(
+            'executor migration status source is missing or unreadable') from None
+    try:
+        if (set(value) != {'schema_version', 'rows'}
+                or not isinstance(value['rows'], list)
+                or len(value['rows']) != 41):
+            raise ValueError
+        statuses = {}
+        for item in value['rows']:
+            if not isinstance(item, dict) or set(item) != {'id', 'executor_migration'}:
+                raise ValueError
+            story_id = identifier(item['id'], 'executor migration ID')
+            if story_id in statuses:
+                raise ValueError
+            status = item['executor_migration']
+            if (not isinstance(status, dict)
+                    or set(status) != {'mode', 'preprod_verdict', 'gates', 'notes'}):
+                raise ValueError
+            mode, verdict = status['mode'], status['preprod_verdict']
+            if ((mode, verdict) not in _VALID_EXECUTOR_MIGRATION_STATES
+                    or mode not in EXECUTOR_MIGRATION_MODES
+                    or verdict not in PREPROD_VERDICTS):
+                raise ValueError
+            gates, notes = status['gates'], status['notes']
+            if (not isinstance(gates, list) or len(set(gates)) != len(gates)
+                    or any(gate not in EXECUTOR_MIGRATION_GATES for gate in gates)
+                    or not isinstance(notes, list) or len(set(notes)) != len(notes)
+                    or any(note not in EXECUTOR_MIGRATION_NOTES for note in notes)):
+                raise ValueError
+            statuses[story_id] = {
+                'mode': mode, 'preprod_verdict': verdict,
+                'gates': list(gates), 'notes': list(notes),
+            }
+        states = Counter(
+            (status['mode'], status['preprod_verdict']) for status in statuses.values())
+        gates = Counter(
+            gate for status in statuses.values() for gate in status['gates'])
+        notes = Counter(
+            note for status in statuses.values() for note in status['notes'])
+        if (states != Counter(_EXPECTED_EXECUTOR_MIGRATION_COUNTS)
+                or gates != Counter(_EXPECTED_EXECUTOR_MIGRATION_GATE_COUNTS)
+                or notes != Counter(_EXPECTED_EXECUTOR_MIGRATION_NOTE_COUNTS)):
+            raise ValueError
+        return statuses
+    except (KeyError, TypeError, ValueError, ConfigError):
+        raise RunStateError(
+            'executor migration status source is invalid or drifted') from None
+
+
+def legacy_inventory_with_executor_migration(manifest: dict | None = None) -> list[dict]:
+    """Return every legacy row with its executor_migration object joined by ID."""
+    value = current_manifest() if manifest is None else manifest
+    try:
+        legacy = value['legacy_inventory']
+        if not isinstance(legacy, list) or any(
+                not isinstance(row, dict) or 'id' not in row for row in legacy):
+            raise ValueError
+        statuses = load_executor_migration()
+        legacy_ids = [row['id'] for row in legacy]
+        if len(legacy_ids) != len(set(legacy_ids)):
+            raise ValueError
+        missing = set(legacy_ids) - set(statuses)
+        extra = set(statuses) - set(legacy_ids)
+        if missing or extra:
+            raise RunStateError(
+                'executor migration status join is incomplete: '
+                f'missing={len(missing)} extra={len(extra)}')
+        rows = []
+        for row in legacy:
+            status = statuses[row['id']]
+            enriched = dict(row)
+            enriched['executor_migration'] = {
+                'mode': status['mode'],
+                'preprod_verdict': status['preprod_verdict'],
+                'gates': list(status['gates']),
+                'notes': list(status['notes']),
+            }
+            rows.append(enriched)
+        return rows
+    except (KeyError, TypeError, ValueError):
+        raise RunStateError('executor migration status join is invalid') from None
+
 
 def reviewed_release_inventory(manifest: dict | None = None) -> list[dict]:
     """Return the reviewed 31-Story release denominator from the current 41-row legacy inventory.
@@ -75,7 +198,7 @@ def reviewed_release_inventory(manifest: dict | None = None) -> list[dict]:
     backlog, not silently missing or absorbed into this release denominator.
     """
     value = current_manifest() if manifest is None else manifest
-    legacy = value['legacy_inventory']
+    legacy = legacy_inventory_with_executor_migration(value)
     ids = [row['id'] for row in legacy]
     reviewed = [row for row in legacy if row['id'] not in KNOWN_UNMAPPED_LEGACY_IDS]
     if len(ids) != len(set(ids)) or len(reviewed) != REVIEWED_RELEASE_PARENT_COUNT:
