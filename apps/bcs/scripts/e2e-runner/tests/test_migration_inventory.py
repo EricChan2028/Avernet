@@ -11,7 +11,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from bcs_e2e.cli import plan
-from bcs_e2e.inventory import current_manifest
+from bcs_e2e.inventory import KNOWN_UNMAPPED_LEGACY_IDS, current_manifest
 from bcs_e2e.local_caller_execution_contract import caller_execution_source_binding
 from bcs_e2e.local_draft_group_contract import draft_group_source_binding
 from bcs_e2e.local_nested_fixed_loop_contract import (
@@ -262,13 +262,7 @@ class MigrationInventoryTests(unittest.TestCase):
         self.assertEqual(len(result['local_registered_executors']), 29)
         self.assertEqual(result['local_partial_executors'], [])
         all_inventory = {row['id'] for row in current_manifest()['legacy_inventory']}
-        known_unmapped = {
-            'story_cli_operator_manages_group_context',
-            'story_nested_fixed_loop_workflows',
-            'story_state_machine_result_queue',
-            'test_ep_tc_friend_auth_sync_readdressed_principal',
-            'test_ep_dept_scope_parses_object_friend_ext_entries',
-        }
+        known_unmapped = set(KNOWN_UNMAPPED_LEGACY_IDS)
         expected_parents = all_inventory - known_unmapped
         actual_parents = {row['legacy_id'] for row in result['local_registered_executors']}
         self.assertEqual(actual_parents, expected_parents)

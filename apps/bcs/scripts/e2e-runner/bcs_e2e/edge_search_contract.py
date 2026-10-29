@@ -19,7 +19,7 @@ REQUIREMENTS = tuple('EDGE-BOT-SEARCH.' + name for name in (
     'name-fuzzy', 'public-online-not-friend', 'friend-true', 'hidden-status',
     'private-visibility', 'empty-query', 'ensure-tc-fixture', 'tc-true',
     'tc-false', 'anonymous', 'bad-limit', 'bad-visibility', 'bad-status'))
-_SOURCE_REVISION = '71860eae99c62d7bf1349a0f46562f6395acbf1e'
+_SOURCE_REVISION = '8559a7a5258a2cb6750befec187e50aa85060cc6'
 
 
 def bot_search_source_binding() -> dict:

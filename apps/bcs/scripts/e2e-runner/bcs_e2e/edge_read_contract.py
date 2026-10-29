@@ -21,7 +21,7 @@ FRIEND_CONNECTIONS_PARENT = 'test_ep_friend_connections_friend_request_and_list'
 ADMISSION_REQUIREMENTS = tuple('EDGE-ADMISSION.' + name for name in ('human-actor', 'actor-kind'))
 FRIEND_REQUESTS_REQUIREMENTS = tuple('EDGE-FRIEND-REQUESTS.' + name for name in ('received', 'sent', 'all'))
 FRIEND_CONNECTIONS_REQUIREMENTS = tuple('EDGE-FRIEND-CONNECTIONS.' + name for name in ('list', 'list-repeat'))
-_SOURCE_REVISION = '71860eae99c62d7bf1349a0f46562f6395acbf1e'
+_SOURCE_REVISION = '8559a7a5258a2cb6750befec187e50aa85060cc6'
 
 
 def _body(text: str, parent: str) -> str:
