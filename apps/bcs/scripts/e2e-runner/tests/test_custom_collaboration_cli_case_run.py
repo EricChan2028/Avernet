@@ -51,6 +51,10 @@ DRIVER_TOKEN, MEMBER_TOKEN, HUMAN_COOKIE = "secret-driver-token-value", "secret-
 TRIAL_GROUP, TRIAL_SESSION = "grp-custom-trial-0001", "grp-custom-trial-0001:00000001"
 PERSIST_GROUP, PERSIST_SESSION = "grp-custom-persistent-0002", "grp-custom-persistent-0002:00000001"
 TRIAL_RUN = "run-custom-e2e-0001"
+# Run-scoped Session derived by the group-domain Run start: deliberately
+# distinct from the create-bound consultant Session so the split binding is
+# locked (r13 live binding drift regression).
+TRIAL_RUN_SESSION = "grp-custom-trial-0001:90000001"
 SECRETS = {DRIVER_TOKEN_ENV: DRIVER_TOKEN, MEMBER_TOKEN_ENV: MEMBER_TOKEN, COOKIE_ENV: HUMAN_COOKIE}
 
 
@@ -119,7 +123,7 @@ def cli_projection(profile, operation, **kwargs):
     if operation == TRIAL_CREATE_GROUP_OPERATION:
         return {"id": TRIAL_GROUP, "session_id": TRIAL_SESSION, "driver_bot": driver, "participants": [driver, member], "created": True}
     if operation == TRIAL_QUERY_GRAPH_OPERATION:
-        return {"run": {"run_id": kwargs["run_id"], "session_id": TRIAL_SESSION, "group_id": TRIAL_GROUP}, "nodes": [{"node_id": "plan", "status": "completed"}, {"node_id": "review", "status": "running"}]}
+        return {"run": {"run_id": kwargs["run_id"], "session_id": TRIAL_RUN_SESSION, "group_id": TRIAL_GROUP}, "nodes": [{"node_id": "plan", "status": "completed"}, {"node_id": "review", "status": "running"}]}
     if operation == TRIAL_QUERY_PENDING_OPERATION:
         return []
     if operation == TRIAL_RESPOND_GUARD_OPERATION:
@@ -167,7 +171,7 @@ class FakeWriteClient:
             run_id = path.split("/state-machine-runs/", 1)[1].rsplit("/cancel", 1)[0]
             return ({"run": {"run_id": run_id, "status": "aborted"}}, self.record(operation, 200))
         if operation == GROUP_RUN_START_OPERATION:
-            run = {"run_id": TRIAL_RUN, "session_id": session_id or TRIAL_SESSION,
+            run = {"run_id": TRIAL_RUN, "session_id": session_id or TRIAL_RUN_SESSION,
                    "group_id": group_id, "status": "running", "created_by": "human_" + HUMAN}
             return ({"run": run}, self.record(operation, 202))
         if operation == GROUP_DELETE_OPERATION:
@@ -224,13 +228,13 @@ class SequenceCapture:
                 return completed(0, bytes_json({"id": TRIAL_GROUP, "session_id": TRIAL_SESSION, "driver_bot": driver, "participants": [driver, member], "created": True}))
             return completed(0, bytes_json({"id": PERSIST_GROUP, "session_id": PERSIST_SESSION, "driver_bot": driver, "participants": [driver, member], "created": True}))
         if argv[:2] == ["collaborate", "query"] and "--graph" in argv:
-            return completed(0, bytes_json({"run": {"run_id": TRIAL_RUN, "session_id": session, "group_id": group}, "nodes": [{"node_id": "plan", "status": "completed"}, {"node_id": "review", "status": "running"}]}))
+            return completed(0, bytes_json({"run": {"run_id": TRIAL_RUN, "session_id": TRIAL_RUN_SESSION, "group_id": group}, "nodes": [{"node_id": "plan", "status": "completed"}, {"node_id": "review", "status": "running"}]}))
         if argv[:2] == ["collaborate", "query"]:
             return completed(0, b"[]")
         if argv[:2] == ["collaborate", "respond"]:
             return completed(self.guard_exit, b'{"allowed": true}' if self.guard_exit == 0 else b"guard refused by policy")
         if argv[:2] == ["session", "messages"]:
-            return completed(0, bytes_json([{"view": "bcsPanel.StateMachineRunView", "run_id": TRIAL_RUN, "session_id": session}]))
+            return completed(0, bytes_json([{"view": "bcsPanel.StateMachineRunView", "run_id": TRIAL_RUN, "session_id": argv[2]}]))
         if argv[:1] == ["get-group"]:
             return completed(0, bytes_json({"id": PERSIST_GROUP, "driver_bot": driver, "group_strategy": "state_machine", "participants": [{"bot_uuid": driver}, {"bot_uuid": member}]}))
         raise AssertionError(f"unexpected argv {argv}")
@@ -410,7 +414,14 @@ class CustomCollaborationExecutionTests(unittest.TestCase):
         self.assertEqual(trial.data, {
             "trial_group_id": TRIAL_GROUP, "trial_group_strategy": "state_machine",
             "trial_group_session_handle": TRIAL_SESSION, "trial_session_id": TRIAL_SESSION,
-            "trial_session_origin": "group_domain_run_derived", "trial_run_id": TRIAL_RUN,
+            "trial_session_origin": "create_bound_consultant_session",
+            "trial_run_session_id": TRIAL_RUN_SESSION,
+            "trial_run_session_origin": "group_domain_run_derived",
+            "station_session_finalization": (
+                "the run-scoped derived Session is finalized completed/aborted "
+                "by the station on abort; the create-bound consultant Session "
+                "carries the preserved-running obligation"),
+            "trial_run_id": TRIAL_RUN,
             "run_start_transport": "raw_group_domain_http", "run_start_created_by": "human_" + HUMAN,
             "pending_human_inputs": 0, "respond_guard": "REFUSED", "restored_history": True,
             "run_cancelled": True, "session_preserved_running": True, "group_cleanup": "DELETED",
@@ -446,6 +457,25 @@ class CustomCollaborationExecutionTests(unittest.TestCase):
         self.assertEqual((binding["method"], binding["api_face"], binding["traceparent"]), ("POST", "legacy", "disabled"))
         self.assertEqual(binding["path"], f"/state-machine-runs/{quote(TRIAL_RUN, safe='')}/cancel")
         self.assertEqual((cancel.calls[0][0], cancel.calls[0][1]["body"]), (RUN_CANCEL_OPERATION, {"reason": "E2E one-shot trial completed"}))
+
+    def test_trial_session_bindings_split_create_bound_and_run_derived(self):
+        adapter, runner, execution = self.chain()
+        self.assertEqual(execution.status, "PASS")
+        # r13 live binding-drift lock: the create-bound consultant Session is
+        # the Session-preservation read target, while the run-scoped derived
+        # Session from the group-domain Run start carries the run-domain reads
+        # and the restored history leaf.
+        self.assertEqual((adapter.trial_session_id, adapter.trial_group_session_handle),
+                         (TRIAL_SESSION, TRIAL_SESSION))
+        self.assertEqual(adapter.trial_run_session_id, TRIAL_RUN_SESSION)
+        seen = {}
+        for operation, kwargs in FakeWriteClient.instances[0].calls:
+            seen.setdefault(operation, []).append(kwargs)
+        self.assertEqual(seen[GROUP_RUN_START_OPERATION][0]["session_id"], "")
+        self.assertEqual(seen[SESSION_READ_OPERATION][0]["session_id"], TRIAL_SESSION)
+        cli_kwargs = {operation: kwargs for operation, kwargs in runner.calls}
+        self.assertEqual(cli_kwargs[TRIAL_MESSAGES_OPERATION]["session_id"], TRIAL_RUN_SESSION)
+        self.assertEqual(cli_kwargs[TRIAL_QUERY_GRAPH_OPERATION]["run_id"], TRIAL_RUN)
 
     def test_failed_leaf_or_drifted_projection_blocks_without_release_credit(self):
         for fail_at, invalid_at in ((TRIAL_CREATE_GROUP_OPERATION, None), (None, TRIAL_MESSAGES_OPERATION)):

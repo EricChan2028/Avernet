@@ -24,6 +24,13 @@ notes, never silently repaired:
   and session-domain Run-start leaves of the frozen owned-local parent are
   not re-chained on either tier; the difference is pinned in the trial
   projection and disclosed in the case report.
+- The group-domain Run start derives a run-scoped Session (prefix
+  group_id + ':', station-finalized completed/aborted on abort) beside the
+  create-bound consultant Session of the frozen owned-local parent. The
+  history-restore leaf reads the run-scoped handle while the Run-cancel
+  Session-preservation read keeps the create-bound handle (live r13 binding
+  drift corrected; the projection carries both handles plus the
+  station-finalization disclosure).
 - Blocked runs project one scrubbed public failure class (receipt keys
   ``failed_method``/``failure_class`` plus every frozen step's ``error_gap``;
   live r1-r4 showed all-first-step NOT_RUN blocks whose failing leaf was
@@ -224,8 +231,13 @@ def custom_collaboration_cli_adaptability() -> dict:
             "the CLI binary is never modified. Real preprod Bot runtimes did not "
             "consume the bot_task node inside the live 75s window (plan node "
             "awaiting_response until cancel); consumption is disclosed as a live "
-            "condition, never asserted. Live effect admission and real preprod "
-            "credentials remain separate gates."),
+            "condition, never asserted. The group-domain Run start derives a "
+            "run-scoped Session (station-finalized completed/aborted on abort) "
+            "beside the create-bound consultant Session that carries the "
+            "preserved-running obligation: the history-restore leaf reads the "
+            "run-scoped handle and the Session-preservation read keeps the "
+            "create-bound handle (r13 live binding drift corrected 2026-10-29). "
+            "Live effect admission and real preprod credentials remain separate gates."),
     }
 
 
@@ -245,6 +257,7 @@ class RemoteLocalCustomCollaborationAdapter:
         self.trial_group_id: str | None = None
         self.trial_group_session_handle: str | None = None
         self.trial_session_id: str | None = None
+        self.trial_run_session_id: str | None = None
         self.trial_run_id: str | None = None
         self.trial_run_created_by: object | None = None
         self.persistent_group_id: str | None = None
@@ -342,8 +355,13 @@ class RemoteLocalCustomCollaborationAdapter:
                 or set(participant_ids(data.get("participants")))
                 != {self.driver_id, self.member_id}):
             raise RunStateError("custom collaboration trial Group differs")
+        # The frozen owned-local parent binds the whole trial lifecycle to
+        # this create-bound consultant Session (local_cli._parse_trial_group).
+        # The remote convergence keeps that binding and derives the
+        # run-scoped Session separately when the group-domain Run starts.
         self.trial_group_id, self.trial_group_session_handle = (
             data["id"], data["session_id"])
+        self.trial_session_id = data["session_id"]
         return call
 
     def trial_start_run(self) -> AdapterCall:
@@ -361,19 +379,23 @@ class RemoteLocalCustomCollaborationAdapter:
                 or bound_group != self.trial_group_id
                 or run.get("status") not in ("running", "waiting")):
             raise RunStateError("custom collaboration group-domain Run start differs")
-        self.trial_run_id, self.trial_session_id = run["run_id"], run["session_id"]
+        self.trial_run_id = run["run_id"]
+        # The group-domain Run start derives a run-scoped Session beside the
+        # create-bound consultant Session; it never overwrites the
+        # Session-preservation binding.
+        self.trial_run_session_id = run["session_id"]
         self.trial_run_created_by = run.get("created_by")
         return call
 
     def trial_query_graph(self) -> AdapterCall:
-        if self.trial_run_id is None:
+        if self.trial_run_id is None or self.trial_run_session_id is None:
             raise RunStateError("custom collaboration graph read requires its Run")
         call = self._cli(TRIAL_QUERY_GRAPH_OPERATION, case_class="trial-query-graph",
                          run_id=self.trial_run_id)
         data = call.data
         run = data.get("run") if isinstance(data, dict) else None
         if (not isinstance(run, dict) or run.get("run_id") != self.trial_run_id
-                or run.get("session_id") != self.trial_session_id
+                or run.get("session_id") != self.trial_run_session_id
                 or run.get("group_id") != self.trial_group_id
                 or not isinstance(data.get("nodes"), list) or not data["nodes"]):
             raise RunStateError("custom collaboration execution graph differs")
@@ -398,10 +420,13 @@ class RemoteLocalCustomCollaborationAdapter:
         return call
 
     def trial_messages(self) -> AdapterCall:
-        if self.trial_session_id is None or self.trial_run_id is None:
+        if self.trial_run_session_id is None or self.trial_run_id is None:
             raise RunStateError("custom collaboration history read requires its Run")
+        # The restored bcsPanel.StateMachineRunView history rides the
+        # run-scoped derived Session (live r13 green), never the create-bound
+        # consultant Session.
         call = self._cli(TRIAL_MESSAGES_OPERATION, case_class="trial-messages",
-                         session_id=self.trial_session_id, run_id=self.trial_run_id)
+                         session_id=self.trial_run_session_id, run_id=self.trial_run_id)
         if not isinstance(call.data, list):
             raise RunStateError("custom collaboration restored history differs")
         return call
@@ -420,6 +445,10 @@ class RemoteLocalCustomCollaborationAdapter:
         return call
 
     def read_trial_session(self) -> AdapterCall:
+        # Session preservation reads the create-bound consultant Session: on
+        # remote tiers the station finalizes the run-scoped derived Session
+        # completed/aborted at cancel while the create-bound Session preserves
+        # running at read time (live r13 evidence).
         if self.trial_session_id is None or self.trial_group_id is None:
             raise RunStateError("custom collaboration Session read requires its identities")
         call = self._http(SESSION_READ_OPERATION, case_class="cleanup-session-read",
@@ -567,7 +596,13 @@ def execute_custom_collaboration_case(adapter: object) -> CaseExecution:
             "trial_group_strategy": "state_machine",
             "trial_group_session_handle": adapter.trial_group_session_handle,
             "trial_session_id": adapter.trial_session_id,
-            "trial_session_origin": "group_domain_run_derived",
+            "trial_session_origin": "create_bound_consultant_session",
+            "trial_run_session_id": adapter.trial_run_session_id,
+            "trial_run_session_origin": "group_domain_run_derived",
+            "station_session_finalization": (
+                "the run-scoped derived Session is finalized completed/aborted "
+                "by the station on abort; the create-bound consultant Session "
+                "carries the preserved-running obligation"),
             "trial_run_id": adapter.trial_run_id,
             "run_start_transport": "raw_group_domain_http",
             "run_start_created_by": adapter.trial_run_created_by,
