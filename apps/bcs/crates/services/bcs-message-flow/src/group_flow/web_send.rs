@@ -367,10 +367,19 @@ pub(super) async fn handle_web_send_with_result(
     // runs its ordinary course, and the relay-side stays fail-closed rather
     // than failing the Human's speech on housekeeping.
     if let Some(relay) = flow.caller_relay.as_ref() {
+        // Presence counts either way: an explicit mention OR the allowlisted
+        // middle bot just being a participant of this session — the real
+        // frontend speech path (handle_group_chat) forwards with no
+        // mentions, and requiring a hand-crafted @ would neuter capture for
+        // everyday messages. The from_bot must be allowlisted regardless:
+        // presence of a DECLARED middleman, never of an arbitrary bot.
         let routed_hits_allowlist = cmd
             .mentions
             .iter()
-            .any(|mention| relay.policy.allow.iter().any(|rule| rule.from_bot == *mention));
+            .any(|mention| relay.policy.allow.iter().any(|rule| rule.from_bot == *mention))
+            || group.participants.iter().any(|participant| {
+                relay.policy.allow.iter().any(|rule| rule.from_bot == participant.bot_uuid)
+            });
         if routed_hits_allowlist {
             if let Some(ingress) = cmd.caller_ingress.as_ref() {
                 let capture_session = cmd.session_id.clone().unwrap_or_else(|| cmd.group_id.clone());

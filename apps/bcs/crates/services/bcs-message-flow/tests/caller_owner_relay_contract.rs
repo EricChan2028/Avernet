@@ -367,6 +367,29 @@ async fn an_authenticated_human_speech_is_captured_at_admission() {
     assert_eq!(captured.actor().actor_id, "human_alice");
 }
 
+#[tokio::test]
+async fn a_frontend_group_chat_speech_is_captured_without_mentions() {
+    // The real frontend speech path: handle_group_chat forwards with
+    // `mentions: Vec::new()` — the common everyday message carries no
+    // explicit @. Capture must key off the allowlisted middle bot being a
+    // SESSION PARTICIPANT (presence), not an explicit mention, or relay
+    // only ever fires for hand-crafted mentions.
+    let f = fixture_with_plane(vec![CallerRelayRule { from_bot: "bot-driver".into(), to_bot: "bot-observer".into() }], true, false).await;
+    let now = chrono::Utc::now().timestamp_millis();
+    f.flow.handle_group_chat(bcs_service_api::GroupChatCommand {
+        caller: CallerContext::Human(HumanActor { actor_id: "human_1".into(), staff_no: "S12345".into() }),
+        group_id: "group-1".into(),
+        requested_sender_id: None,
+        message: "please handle this quietly".into(),
+        session_id: Some(SESSION.into()),
+        provider_bypass_headers: vec![],
+        caller_ingress: Some(ingress("human_1")),
+    }).await.expect("group chat admits");
+    let (_, captured) = f.ledger.redeem(&resolve_env(), SESSION, now)
+        .expect("a speech into a session with an allowlisted middle member must capture");
+    assert_eq!(captured.actor().actor_id, "human_1");
+}
+
 // Keep the unused-variable lint honest for fixtures that ignore status.
 #[allow(dead_code)]
 fn _status_shape(_: Status) {}
