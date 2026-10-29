@@ -595,3 +595,78 @@ Previous freeze generations: `48b23001e` (umbrella + 15 families) and `71860eae`
   forbidden-substring scan, staged-diff credential grep, strict mock-header admission record
   per run). SOP deviation recorded: this freeze-review entry was appended after live-2 so the
   document carries real results; every other SOP step ran in its documented order.
+
+## Backlog slice integration (2026-10-30)
+
+Four independent backlog slices were connected to the command and migration
+facades without changing the reviewed release denominator.
+
+| Slice | Commands | Backlog row | Source map | Environment |
+| --- | --- | --- | --- | --- |
+| Session owner | `local-session-owner-run`, `local-session-owner-report` | `LOCAL-SESSION-OWNER-01` | `session-owner-migration-contract.json` | local executor only; preprod remote unsupported |
+| Draft delivery | `local-draft-delivery-run`, `local-draft-delivery-report` | `LOCAL-DRAFT-DELIVERY-01` | `draft-delivery-migration-contract.json` | local executor only; preprod remote unsupported |
+| Provider owner | `local-provider-owner-run`, `local-provider-owner-report` | `LOCAL-PROVIDER-OWNER-01` | `provider-owner-migration-contract.json` | local executor only; preprod remote unsupported |
+| Group context | existing `dual-group-context-run` | `DUAL-GROUP-CONTEXT-CLI-01` | `group-context-migration-contract.json` | local executor only; preprod profile asset present, not run |
+
+- Session-owner evidence: source binding, owned-local executor and 9 frozen
+  obligations are covered by `tests/test_session_owner_contract.py` and
+  `tests/test_local_session_owner_run.py`. No retained run state with the
+  passing marker was found under `~/.codex/bcs-e2e` during this audit, so the
+  integration claims offline tests only, not a live pass.
+- Draft-delivery evidence: contract/run/report implementation and marker
+  `LOCAL_DRAFT_DELIVERY_PASS` are covered by `tests/test_draft_delivery_*` and
+  commits `4d429c7fb` through `8419d226a`. A retained live run state for the
+  marker was not found under `~/.codex/bcs-e2e`; this is an evidence gap, not a
+  claim of live success.
+- Provider-owner evidence: the promoted modules are flat backlog modules; the
+  live drift receipt is retained at
+  `provider-owner-slice/evidence/live-drift-evidence.json`. Replay remains
+  BLOCKED at story request 8 (visibility mutation returns 403), because the
+  frozen story predates the Bot-authority owner-edge model. Preprod remains
+  unsupported because the provider administration face is absent.
+- Group-context evidence: `dual-group-context-run` was already registered in
+  `CASE_COMMANDS` and the CLI before this integration; it was not duplicated in
+  `LOCAL_STORY_COMMANDS`. The preprod receipt
+  `~/.codex/bcs-e2e/group-context-preprod-postfreeze-r3/group-context-run.json`
+  records PASS 9/9, but also `remote_validation=NOT_RUN` and
+  `grants_release_credit=false`. No local profile asset or offline report
+  builder exists, so the backlog row deliberately leaves `report_command`
+  empty instead of inventing a second command or contract.
+
+Facade counts after integration: `REVIEWED_RELEASE_PARENT_COUNT=31`,
+`local_registered_executors=31`, `CASES=31`, `local_backlog_case_slices=6`,
+`LOCAL_STORY_COMMANDS=58`, `CASE_COMMANDS=27`, and `additional_source_maps=33`.
+The release `manifest.json` remains the frozen 41 legacy rows and 3 pilot cases;
+backlog rows stay in `migration_plan()['local_backlog_case_slices']` and never
+join the release denominator.
+
+Artifact allowance: the flat executor digest contains 332 files (including
+`runner.py`) under a 340-file cap, leaving eight slots. The count is 328 before
+this promotion, plus three flat Provider-owner modules, plus the one shared
+backlog command router. Session-owner and Draft-delivery remain subpackages
+outside the non-recursive flat glob. No cap increase beyond 340 was needed.
+
+Gates run on the integration tree:
+
+- Focused unittest: 273 tests OK across backlog commands, migration inventory,
+  Group Context, entry-switch, coverage suite, service-policy,
+  custom-collaboration, Session-owner, Draft-delivery and Provider-owner.
+- Full tracked BCS E2E unittest: 3460 tests, 5 failures, 15 errors, 224 skips.
+  Every reported failure/error is in an unchanged file from `d8f938734`
+  (file-transport correlation, browser-context, local-file-retention and a
+  timing-sensitive judge-sandbox check); no touched slice test failed. The
+  suite is reported as non-green, not as a verified full pass.
+- `runner.py local-coverage-suite --list-cases`: `READY`, `case_count=31`, all
+  31 reviewed parents `READY`; backlog slices are intentionally absent.
+- `python -m compileall -q bcs_e2e tests runner.py`: exit 0.
+- `git diff --check`: clean before the final commit.
+
+SOP deviations: `local_story_commands.py` was already above the 1,000-line
+file limit (1,194 lines) before this work, so the new backlog command family
+was isolated in `bcs_e2e/local_backlog_story_commands.py` instead of growing
+that file further. Group Context was audited rather than re-registered: the
+run command already exists, while the local profile and offline report asset
+do not. `unittest discover -s tests -t .` is not usable in this tree because
+`tests/` has no package marker; the full gate used the tracked test-module list
+with `PYTHONPATH=.:tests`. The review records these as documentation/audit
+boundaries, not as fabricated release evidence.

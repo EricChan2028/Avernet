@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from bcs_e2e.case_command_registration import CASE_COMMANDS
 from bcs_e2e.local_story_commands import (
     LOCAL_STORY_COMMANDS,
     register_local_story_commands,
@@ -221,6 +222,34 @@ class ProviderOwnerCommandTests(unittest.TestCase):
         self.assertEqual(row['report_command'], 'local-provider-owner-report')
         self.assertEqual(row['environment'], {
             'local': 'LOCAL_EXECUTOR_ONLY', 'preprod': 'REMOTE_UNSUPPORTED'})
+        self.assertFalse(row['release_parent_denominator'])
+        self.assertTrue(row['independent_slice'])
+        self.assertFalse(row['grants_release_credit'])
+
+
+class GroupContextBacklogTests(unittest.TestCase):
+    def test_existing_dual_command_is_reused_without_a_duplicate_local_alias(self):
+        self.assertIn('dual-group-context-run', CASE_COMMANDS)
+        self.assertNotIn('dual-group-context-run', LOCAL_STORY_COMMANDS)
+        self.assertNotIn('local-group-context-run', LOCAL_STORY_COMMANDS)
+
+    def test_group_context_row_is_backlog_with_explicit_report_gap(self):
+        rows = migration_plan()['local_backlog_case_slices']
+        self.assertEqual(len(rows), 6)
+        row = next(row for row in rows if row['case_id'] == 'DUAL-GROUP-CONTEXT-CLI-01')
+        self.assertEqual(row['suite'], 'dual-group-context-cli-v1')
+        self.assertEqual(row['legacy_id'], 'story_cli_operator_manages_group_context')
+        self.assertEqual(row['status'], 'LOCAL_EXECUTOR_ONLY_BACKLOG')
+        self.assertEqual(row['required_assertion_count'], 9)
+        self.assertEqual(row['execution_command'], 'dual-group-context-run')
+        self.assertEqual(row['report_command'], '')
+        self.assertEqual(row['required_parameters'], [
+            'profile', 'cli_binary', 'cli_binary_sha256', 'state_dir',
+            'run_id', 'confirm_run_id', 'allow_write'])
+        self.assertEqual(row['environment'], {
+            'local': 'LOCAL_EXECUTOR_ONLY',
+            'preprod': 'PROFILE_ASSET_PRESENT_NOT_RUN'})
+        self.assertEqual(row['source_map'], 'group-context-migration-contract.json')
         self.assertFalse(row['release_parent_denominator'])
         self.assertTrue(row['independent_slice'])
         self.assertFalse(row['grants_release_credit'])

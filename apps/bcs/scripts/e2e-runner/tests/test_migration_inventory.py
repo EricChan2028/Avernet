@@ -572,3 +572,24 @@ class MigrationInventoryTests(unittest.TestCase):
         self.assertIn('story_nested_fixed_loop_workflows', {entry['id'] for entry in legacy})
         self.assertEqual(nested_fixed_loop_source_binding()['parent'],
                          'story_nested_fixed_loop_workflows')
+
+    def test_backlog_registry_has_six_independent_rows_outside_release_credit(self):
+        result = migration_plan()
+        rows = result['local_backlog_case_slices']
+        self.assertEqual(len(rows), 6)
+        self.assertEqual([row['case_id'] for row in rows], [
+            'LOCAL-EDGE-TC-FRIEND-AUTH-SYNC-01',
+            'LOCAL-EDGE-DEPT-SCOPE-FRIEND-EXT-01',
+            'LOCAL-SESSION-OWNER-01',
+            'LOCAL-DRAFT-DELIVERY-01',
+            'LOCAL-PROVIDER-OWNER-01',
+            'DUAL-GROUP-CONTEXT-CLI-01',
+        ])
+        registered = {row['case_id'] for row in result['local_registered_executors']}
+        for row in rows:
+            with self.subTest(case_id=row['case_id']):
+                self.assertNotIn(row['case_id'], registered)
+                self.assertFalse(row['release_parent_denominator'])
+                self.assertTrue(row['independent_slice'])
+                self.assertEqual(row['remote_validation'], 'NOT_RUN')
+                self.assertFalse(row['grants_release_credit'])

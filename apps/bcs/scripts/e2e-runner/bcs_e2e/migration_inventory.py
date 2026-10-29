@@ -274,7 +274,13 @@ def migration_plan() -> dict:
         edge_read_case_plans,
     )
     from .collaboration_team_contract import CASE_ID as COLLABORATION_TEAM_CASE, SUITE as COLLABORATION_TEAM_SUITE, collaboration_team_adaptability
-    from .group_context_contract import group_context_adaptability
+    from .group_context_contract import (
+        CASE_ID as GROUP_CONTEXT_CASE_ID,
+        PARENT as GROUP_CONTEXT_PARENT,
+        SUITE as GROUP_CONTEXT_SUITE,
+        group_context_adaptability,
+        group_context_source_binding,
+    )
     from .edge_search_case import (
         CASE_ID as EDGE_SEARCH_CASE_ID,
         edge_bot_search_candidates_adaptability,
@@ -418,6 +424,7 @@ def migration_plan() -> dict:
     session_owner = session_owner_source_binding()
     draft_delivery = draft_delivery_source_binding()
     provider_owner = provider_owner_source_binding()
+    group_context = group_context_source_binding()
     session_owner_slice = {
         'suite': SESSION_OWNER_SUITE, 'case_id': SESSION_OWNER_CASE_ID, 'case_version': 1,
         'legacy_id': session_owner['parent'], 'status': 'LOCAL_EXECUTOR_ONLY_BACKLOG',
@@ -470,6 +477,25 @@ def migration_plan() -> dict:
         'release_parent_denominator': False, 'independent_slice': True,
         'remote_validation': 'NOT_RUN', 'grants_release_credit': False,
         'source_map': 'provider-owner-migration-contract.json',
+    }
+    group_context_slice = {
+        'suite': GROUP_CONTEXT_SUITE, 'case_id': GROUP_CONTEXT_CASE_ID,
+        'case_version': 1, 'legacy_id': GROUP_CONTEXT_PARENT,
+        'status': 'LOCAL_EXECUTOR_ONLY_BACKLOG',
+        'required_assertion_count': len(group_context['requirements']),
+        'requirement_ids': [row['id'] for row in group_context['requirements']],
+        'canonical_reporting': 'DUAL_CASE_RECEIPT',
+        'execution_command': 'dual-group-context-run',
+        'report_command': '',
+        'required_parameters': ['profile', 'cli_binary', 'cli_binary_sha256',
+                                'state_dir', 'run_id', 'confirm_run_id',
+                                'allow_write'],
+        'binary_kind': 'bcs-cli', 'auto_build': False,
+        'environment': {'local': 'LOCAL_EXECUTOR_ONLY',
+                        'preprod': 'PROFILE_ASSET_PRESENT_NOT_RUN'},
+        'release_parent_denominator': False, 'independent_slice': True,
+        'remote_validation': 'NOT_RUN', 'grants_release_credit': False,
+        'source_map': 'group-context-migration-contract.json',
     }
     admission = admission_source_binding()
     friend_requests = friend_requests_list_source_binding()
@@ -625,14 +651,15 @@ def migration_plan() -> dict:
                    'independent_slice': True,
                    'grants_release_credit': False}
                   for plan in edge_friend_backlog_plans.values()],
-                session_owner_slice, draft_delivery_slice, provider_owner_slice],
+                session_owner_slice, draft_delivery_slice, provider_owner_slice,
+                group_context_slice],
             'local_partial_executors': [],
             'status': 'PLANNED_NOT_EXECUTABLE', 'ready_to_execute': False,
             'source_revision': contract['source_revision'], 'source_integrity': 'MATCHED',
             'legacy_inventory_count': len(inventory), 'mapped_story_count': len(contract['stories']),
             'migrated_story_count': 0, 'passed_assertion_count': 0,
             'scope': 'next three parent Stories only; requirements are not executed assertions',
-            'stories': contract['stories'], 'additional_source_maps': [network, sessions, provider, channel, channel_cli, direct_chat, structured, webhook, judge, fixed_loop, admission, friend_requests, friend_connections, bot_search, delivery_policy, operator_cli, collaboration_team, sessions_services, service_policy, authority, session_owner, draft_delivery, provider_owner, *edge_friend_mutation_maps],
+            'stories': contract['stories'], 'additional_source_maps': [network, sessions, provider, channel, channel_cli, direct_chat, structured, webhook, judge, fixed_loop, admission, friend_requests, friend_connections, bot_search, delivery_policy, operator_cli, collaboration_team, sessions_services, service_policy, authority, session_owner, draft_delivery, provider_owner, group_context, *edge_friend_mutation_maps],
             'cross_environment_source_candidates': {
                 **edge_read_adaptability(),
                 'cases': edge_read_adaptability()['cases'] + edge_search_adaptability()['cases'],
