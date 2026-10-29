@@ -61,7 +61,7 @@ def build_v1_recommendation_response_cache_key(
         elif legacy_min_score is not None:
             rerank_min_score = legacy_min_score
         else:
-            rerank_min_score = 0.6
+            rerank_min_score = 0.01
     else:
         if explicit_min_score:
             vector_min_score = request.min_score

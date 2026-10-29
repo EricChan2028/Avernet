@@ -38,7 +38,7 @@ def get_drm_config() -> "DrmConfigProvider":
     - BCSFUSE_CAPABILITY_VERIFY_ENABLED: Enable capability verification (default: true)
     - BCSFUSE_GENERIC_CHECK_ENABLED: Enable generic check for intros (default: true)
     - BCSFUSE_PEER_MIN_SIMILARITY: Peer review similarity threshold 0.0-1.0 (default: 0.85)
-    - BCSFUSE_RECOMMEND_MIN_SCORE: Minimum recommendation score (default: 0.6)
+    - BCSFUSE_RECOMMEND_MIN_SCORE: Minimum recommendation score (default: 0.01)
     - BCSFUSE_JUDGE_PROMPT_TEMPLATE: Judge prompt template (default: None)
     - BCSFUSE_PROFILE_PROMPT_TEMPLATE: Profile generation prompt template (default: None)
     - BCSFUSE_TRUST_LEVEL_THRESHOLDS: JSON trust thresholds (default: {"trusted": 0.8, "guarded": 0.6})

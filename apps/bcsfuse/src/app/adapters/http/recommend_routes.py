@@ -177,7 +177,7 @@ async def recommend_bots(
         # 注意：request 暂无 vector_min_score 字段，未来可扩展
         vector_min_score = drm_vector_min_score if drm_vector_min_score is not None else 0.01
 
-        # 优先级: request.rerank_min_score > explicit request.min_score > BCSFUSE_RERANK_MIN_SCORE > legacy BCSFUSE_RECOMMEND_MIN_SCORE > default 0.6
+        # 优先级: request.rerank_min_score > explicit request.min_score > BCSFUSE_RERANK_MIN_SCORE > legacy BCSFUSE_RECOMMEND_MIN_SCORE > default 0.01
         if explicit_min_score_provided:
             # 关键兼容性：显式传入的 min_score 用作 rerank_min_score，不影响向量召回
             rerank_min_score = request.min_score
@@ -190,7 +190,7 @@ async def recommend_bots(
             rerank_min_score = drm_legacy_min_score
             min_score_source = "legacy_BCSFUSE_RECOMMEND_MIN_SCORE"
         else:
-            rerank_min_score = 0.6
+            rerank_min_score = 0.01
             min_score_source = "default"
 
         min_score_compat_mode = "rerank_split"
