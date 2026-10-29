@@ -347,3 +347,67 @@ deployment, live configuration or DB operation is claimed.
   deployment, live configuration or production DML/DDL operation is performed.
   Production query plans, lock contention, multi-instance load and real external
   provider/corp/prod acceptance remain outside this local CI evidence.
+
+
+## Knowledge AGENTS.md release integration (2026-10-29)
+
+- Previous delivered Head: `762f4bda79cf30433d74412a1cd8379cb0343caf`.
+  Its applicable remote checks had all succeeded when this follow-up began.
+- Rebased onto `REL20261029@a0ac8382e0d13b78a3a0b7aa6a023440d7d71654`,
+  which includes #3259 connector-state reads and #3260 knowledge AGENTS.md sync.
+  Rebased Backend implementation/test source:
+  `47ac25bee642746be11e4e07efa324863a9bdd34`.
+- Both conflicts concern obsolete Singlebox registration: the target already
+  moved bot_knowledge into pending_modules because its SQL-seeded stories lack
+  a device binding for the new identity-file projection. Preserve the target's
+  manifest and pending-registration guard exactly; do not resurrect this PR's
+  old 66.32% registration. The superseded CI-only rebaseline commit became empty
+  and was dropped; all feature/repair behavior remains. Range-diff otherwise
+  shows contextual router/README integration and removal of obsolete manifest
+  commentary, not changes to the original publication implementation patches.
+- Before documentation/guard cleanup, the rebased tree differs from the original
+  current-target merge-tree only at the two resolved CI files. The normally
+  wired enablement route retains the target's background AGENTS.md projection
+  and this PR's stage-aware read API. Shipped publication enablement, observed
+  completion, atomic selection bookkeeping, native failed-restart retry and
+  legacy-Owner UNKNOWN restore remain unchanged.
+- Corrected the module README's stale claim that bot_knowledge participates in
+  default Singlebox measurement. A green default Singlebox run no longer proves
+  this module's device-bound acceptance. Re-registration requires actual
+  device-bound stories and a fresh complete-module measurement; historical
+  percentages must not be reported as a current gate.
+- Manifest/report validation initially returned 1 failed / 26 passed because
+  the target's expected default-module list omitted its existing manager_sync
+  module. An archive of the exact target reproduced the same assertion failure
+  (1 failed). The bounded repair adds only manager_sync to that expected list;
+  it does not change module selection, thresholds, exclusions or acceptance.
+  Registration/manifest/report suites then passed **27 tests**, 0.36 seconds.
+- Focused config, DI, knowledge selection and AGENTS.md projection, router,
+  draft-restore and native-retry suites passed **731 tests, 19 warnings**,
+  50.50 seconds. Counts overlap the complete Backend suite.
+- Complete Backend CI at source `47ac25bee642746be11e4e07efa324863a9bdd34`
+  passed **27,793 tests, 40 existing skipped, 2 subtests passed**, 517.45 seconds.
+  Case pass rate **100.00%**, line coverage **90.66%**, changed-line coverage
+  **95.14% (704/740)**; required floors remain 75% / 80%. Normal four-worker
+  runner and installed dependencies reused, with no test exclusion, timeout,
+  worker-count or threshold adjustment. Final delivery adds only this verification,
+  the acceptance-scope README correction, and the separately tested one-line
+  expected-module-list repair; no Backend implementation/test changes follow
+  that complete run.
+
+  ```sh
+  BACKEND_CI_SKIP_INSTALL=1 BACKEND_CI_PYTEST_WORKERS=4 \
+  PYTHONDONTWRITEBYTECODE=1 SERVER_ENV=dev \
+    apps/backend/scripts/ci_test.sh \
+      --base a0ac8382e0d13b78a3a0b7aa6a023440d7d71654 \
+      --head 47ac25bee642746be11e4e07efa324863a9bdd34
+  ```
+
+- Whitespace/conflict-marker checks pass. Delivery requires normal plaintext
+  secret and blocking-SAST hooks plus an exact lease on the old verified remote
+  Head. Fresh remote checks must validate the new Head; they cannot inherit
+  former-Head greens. Target-owned pending registration means default Singlebox
+  success is not complete knowledge-module device-bound acceptance.
+- No merge/deployment, live config, production DML/DDL, backfill, new Plugin,
+  schema or worker. Production plans/locks/multi-instance behavior and real
+  external-provider/corp/prod acceptance remain unverified.

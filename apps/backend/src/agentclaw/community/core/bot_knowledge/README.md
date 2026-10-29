@@ -85,14 +85,20 @@ the section; an unchanged projection is not written back.
 
 ## Live local acceptance
 
-The unified Singlebox manifest registers all production Core files, both HTTP
-routes and both declared `KnowledgeCatalogPlugin` methods. `list_authorized`
-is exercised; `list_in_space` currently has no production caller, remains in the
-denominator and is not manufactured into coverage through test-only business
-calls. The initial Plugin API threshold is the measured 1/2 (50%), not a claim
-that both methods were called. The three live HTTP/DB stories cover
-selection/CAS/pagination, Personal editor access, Team revocation, draft lifecycle
-and tenant-isolated legacy publication selection.
+Following release PR #3260, the unified Singlebox manifest lists
+`bot_knowledge` under `pending_modules`, not the default measured modules. The
+legacy SQL-seeded story Bots have no device binding and cannot exercise the new
+`AGENTS.md` projection through its identity-file seam. A passing default
+Singlebox run therefore does not establish complete Bot knowledge acceptance.
+Restore measured registration only after device-bound acceptance exists and the
+complete module has been measured again; prior Core/Router/Plugin percentages
+are historical evidence, not current gating results.
+
+The retained three live HTTP/DB stories cover selection/CAS/pagination, Personal
+editor access, Team revocation, draft lifecycle and tenant-isolated legacy
+publication selection. Their historical Plugin API measurement exercised
+`list_authorized`, not `list_in_space`, which has no production caller; no
+test-only business call is added to manufacture coverage.
 
 The runner sets `SINGLEBOX_ACCEPTANCE_KNOWLEDGE_FIXTURE_FILE` to the reviewed JSON
 catalog. Only the `SINGLEBOX` composition profile reads it; exact Bot/owner/env/
