@@ -52,6 +52,9 @@ STEP_OPERATIONS = {
 }
 PATCH_LABEL = "dual-group-lifecycle-e2e"
 PATCH_CONTEXT = "dual-group-context-e2e"
+WORKSPACE_GROUP_LIST_PAGE_SIZE = 50
+_EXPECTED_LIST_PATH = (
+    f"/groups?limit={WORKSPACE_GROUP_LIST_PAGE_SIZE}&group_kind=all")
 
 
 @dataclass(frozen=True)
@@ -159,6 +162,18 @@ def _validate_evidence(result: AdapterCall, *, operation: str,
                 or not isinstance(record.get("submitted_request_id"), str)):
             raise RunStateError(
                 "workspace group lifecycle request record is outside the contract")
+    if case_class == "list":
+        for field in ("pages_scanned", "limit", "offset", "total"):
+            if type(evidence.get(field)) is not int:
+                raise RunStateError(
+                    "workspace group lifecycle list evidence omits deep-paging "
+                    "disclosure")
+        if (evidence["pages_scanned"] < 1 or evidence["limit"] < 1
+                or evidence["offset"] < 0 or evidence["total"] < 1
+                or evidence["pages_scanned"] != len(requests)):
+            raise RunStateError(
+                "workspace group lifecycle list evidence is outside the "
+                "deep-paging contract")
 
 
 def _validate_created(data: object, group_id: str, driver: str) -> None:
@@ -197,9 +212,13 @@ def _validate_listing(data: object, group_id: str) -> None:
     if (not isinstance(data, dict)
             or data.get("group_id") != group_id
             or data.get("bounded_list_match") is not True
-            or type(data.get("total")) is not int
-            or data["total"] < 1):
-        raise RunStateError("workspace group lifecycle bounded list is not exact")
+            or type(data.get("pages_scanned")) is not int
+            or data["pages_scanned"] < 1
+            or type(data.get("limit")) is not int or data["limit"] < 1
+            or type(data.get("offset")) is not int or data["offset"] < 0
+            or type(data.get("total")) is not int or data["total"] < 1):
+        raise RunStateError(
+            "workspace group lifecycle bounded list is not exact")
 
 
 def _validate_membership(data: object, group_id: str, driver: str,
@@ -324,7 +343,7 @@ class RemoteWorkspaceGroupLifecycleAdapter:
                 else "human_cookie")
 
     def _evidence(self, *records: dict, operation: str,
-                    case_class: str) -> dict:
+                    case_class: str, **details: object) -> dict:
         evidence = {
             "transport": "PRODUCT_HTTP",
             "operation": operation,
@@ -335,6 +354,7 @@ class RemoteWorkspaceGroupLifecycleAdapter:
             "remote_validation": "NOT_RUN",
             "grants_release_credit": False,
             "requests": [dict(record) for record in records],
+            **details,
         }
         secrets = list(self.writer.headers.values())
         if any(secret and secret in repr(evidence) for secret in secrets):
@@ -433,29 +453,90 @@ class RemoteWorkspaceGroupLifecycleAdapter:
                           case_class="patch"),
         )
 
+    def _list_page_profile(self, offset: int) -> dict:
+        profile = json.loads(json.dumps(
+            self.writer.profile, allow_nan=False))
+        binding = profile["route_bindings"][WORKSPACE_GROUP_LIST_OPERATION]
+        if binding.get("path") != _EXPECTED_LIST_PATH:
+            raise RunStateError(
+                "workspace group lifecycle list binding differs from the "
+                "reviewed page route")
+        binding["path"] = f"{_EXPECTED_LIST_PATH}&offset={offset}"
+        return profile
+
     def list_owned_workspace_groups(self) -> AdapterCall:
         group_id = self._require_group()
-        data, record = self.writer.call(
-            WORKSPACE_GROUP_LIST_OPERATION, expected=(200,))
-        items = data.get("items") if isinstance(data, dict) else None
-        if (not isinstance(items, list)
-                or type(data.get("total")) is not int or data["total"] < 1):
-            raise RunStateError(
-                "workspace group lifecycle bounded list is outside the contract")
-        matches = [row for row in items
-                   if isinstance(row, dict) and row.get("id") == group_id]
-        if (len(matches) != 1
-                or matches[0].get("driver_bot") != self.driver_id):
-            raise RunStateError(
-                "workspace group lifecycle bounded list does not contain the "
-                "exact newly created owned Group")
-        return AdapterCall(
-            data={"group_id": group_id, "bounded_list_match": True,
-                  "total": data["total"], "offset": data.get("offset"),
-                  "limit": data.get("limit")},
-            evidence=self._evidence(record, operation=WORKSPACE_GROUP_LIST_OPERATION,
-                          case_class="list"),
-        )
+        records: list[dict] = []
+        offset = 0
+        pages_scanned = 0
+        total: int | None = None
+        limit = WORKSPACE_GROUP_LIST_PAGE_SIZE
+        short_page_seen = False
+        while total is None or offset < total:
+            if (total is not None
+                    and pages_scanned >= (total + limit - 1) // limit):
+                break
+            data, record = WriteClient(
+                self._list_page_profile(offset)).call(
+                    WORKSPACE_GROUP_LIST_OPERATION, expected=(200,))
+            records.append(record)
+            pages_scanned += 1
+            items = data.get("items") if isinstance(data, dict) else None
+            page_total = data.get("total") if isinstance(data, dict) else None
+            page_offset = data.get("offset") if isinstance(data, dict) else None
+            page_limit = data.get("limit") if isinstance(data, dict) else None
+            if (not isinstance(items, list)
+                    or type(page_total) is not int or page_total < 0
+                    or type(page_offset) is not int or page_offset != offset
+                    or type(page_limit) is not int or page_limit < 1
+                    or len(items) > page_limit):
+                raise RunStateError(
+                    "workspace group lifecycle bounded list page is outside "
+                    "the contract")
+            if total is None:
+                total = page_total
+            elif page_total != total:
+                raise RunStateError(
+                    "workspace group lifecycle bounded list total changed "
+                    "during deep paging")
+            limit = page_limit
+            matches = [row for row in items
+                       if isinstance(row, dict) and row.get("id") == group_id]
+            if len(matches) > 1:
+                raise RunStateError(
+                    "workspace group lifecycle bounded list contains the "
+                    "exact Group ID more than once")
+            if matches:
+                if matches[0].get("driver_bot") != self.driver_id:
+                    raise RunStateError(
+                        "workspace group lifecycle bounded list contains the "
+                        "exact Group ID with a different driver Bot")
+                paging = {
+                    "pages_scanned": pages_scanned,
+                    "limit": limit,
+                    "offset": offset,
+                    "total": total,
+                }
+                return AdapterCall(
+                    data={"group_id": group_id, "bounded_list_match": True,
+                          **paging},
+                    evidence=self._evidence(
+                        *records, operation=WORKSPACE_GROUP_LIST_OPERATION,
+                        case_class="list", **paging),
+                )
+            if not items or len(items) < limit:
+                short_page_seen = True
+                break
+            offset += limit
+        total_cap = total if total is not None else 0
+        detail = (
+            "workspace group lifecycle bounded list does not contain the "
+            "exact newly created owned Group after exhaustive paging "
+            f"(pages_scanned={pages_scanned}, limit={limit}, "
+            f"last_offset={offset}, total={total_cap})")
+        if short_page_seen and pages_scanned * limit < total_cap:
+            detail += "; station total may exceed reachable rows"
+        raise RunStateError(detail)
 
     def add_and_remove_workspace_member(self) -> AdapterCall:
         group_id = self._require_group()

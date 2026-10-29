@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import unittest
+from urllib.parse import parse_qs, urlsplit
 from unittest.mock import patch
 
 TEST_ROOT = Path(__file__).resolve().parent
@@ -199,9 +200,11 @@ def standard_responses():
 
 
 class WorkspaceGroupLifecycleTests(unittest.TestCase):
-    def run_case(self, *, preprod=False, deform=None):
+    def run_case(self, *, preprod=False, deform=None, call_factory=None):
         profile = profile_value(preprod=preprod)
         fake_call, _ = standard_responses()
+        if call_factory is not None:
+            fake_call = call_factory()
 
         def deformed_call(self_client, operation, **kwargs):
             data, record = fake_call(self_client, operation, **kwargs)
@@ -217,6 +220,35 @@ class WorkspaceGroupLifecycleTests(unittest.TestCase):
             adapter = RemoteWorkspaceGroupLifecycleAdapter(profile)
             execution = execute_workspace_group_lifecycle_case(adapter)
         return execution, adapter
+
+    @staticmethod
+    def paged_call_factory(pages, *, total, offsets=None):
+        base_call, _ = standard_responses()
+
+        def paged_call(self_client, operation, **kwargs):
+            if operation != WORKSPACE_GROUP_LIST_OPERATION:
+                return base_call(self_client, operation, **kwargs)
+            path = self_client.profile["route_bindings"][
+                WORKSPACE_GROUP_LIST_OPERATION]["path"]
+            offset = int(parse_qs(urlsplit(path).query)["offset"][0])
+            if offsets is not None:
+                offsets.append(offset)
+            items = pages.get(offset, [])
+            return ({"items": items, "total": total, "offset": offset,
+                     "limit": 50, "group_kind": "all"},
+                    {"operation": operation, "method": "GET", "http_status": 200,
+                     "path": path, "submitted_request_id":
+                     f"e2e-workspace-group-page-{offset}",
+                     "traceparent_mode": "disabled"})
+
+        return paged_call
+
+    @staticmethod
+    def filler_groups(start, count):
+        return [{"id": f"retained-group-{index}",
+                 "driver_bot": DRIVER, "label": None,
+                 "group_kind": "normal", "visibility": "public"}
+                for index in range(start, start + count)]
 
     def test_local_and_preprod_lifecycle(self):
         for preprod in (False, True):
@@ -237,6 +269,14 @@ class WorkspaceGroupLifecycleTests(unittest.TestCase):
                     snapshot["steps"][2]["data"]["label"], LABEL)
                 self.assertEqual(
                     snapshot["steps"][3]["data"]["bounded_list_match"], True)
+                self.assertEqual(
+                    snapshot["steps"][3]["data"]["pages_scanned"], 1)
+                self.assertEqual(
+                    snapshot["steps"][3]["data"]["offset"], 0)
+                self.assertEqual(
+                    snapshot["steps"][3]["data"]["limit"], 50)
+                self.assertEqual(
+                    snapshot["steps"][3]["data"]["total"], 1)
                 self.assertEqual(
                     snapshot["steps"][4]["data"]["final_participants"],
                     [DRIVER])
@@ -296,6 +336,72 @@ class WorkspaceGroupLifecycleTests(unittest.TestCase):
         result, _ = self.run_case(deform=deform)
         self.assertEqual(result.status, "BLOCKED")
         self.assertEqual(result.error_type, "RunStateError")
+
+    def test_list_deep_pages_to_the_exact_owned_group(self):
+        target = {"id": GROUP, "driver_bot": DRIVER, "label": LABEL,
+                  "group_kind": "normal", "visibility": "public"}
+        pages = {
+            0: self.filler_groups(0, 50),
+            50: self.filler_groups(50, 50),
+            100: [target],
+        }
+        offsets = []
+        factory = lambda: self.paged_call_factory(
+            pages, total=120, offsets=offsets)
+        result, _ = self.run_case(call_factory=factory)
+        self.assertEqual(result.status, "PASS")
+        listing = result.steps[3].data
+        self.assertEqual(listing["bounded_list_match"], True)
+        self.assertEqual(listing["pages_scanned"], 3)
+        self.assertEqual(listing["offset"], 100)
+        self.assertEqual(listing["limit"], 50)
+        self.assertEqual(listing["total"], 120)
+        self.assertEqual(offsets, [0, 50, 100])
+        evidence = result.steps[3].evidence
+        for field in ("pages_scanned", "limit", "offset", "total"):
+            self.assertEqual(evidence[field], listing[field])
+        self.assertEqual(len(evidence["requests"]), 3)
+
+    def test_list_total_caps_the_scan_without_a_livelock(self):
+        pages = {
+            0: self.filler_groups(0, 50),
+            50: self.filler_groups(50, 50),
+            100: self.filler_groups(100, 50),
+            150: self.filler_groups(150, 50),
+        }
+        offsets = []
+        factory = lambda: self.paged_call_factory(
+            pages, total=120, offsets=offsets)
+        result, _ = self.run_case(call_factory=factory)
+        self.assertEqual(result.status, "BLOCKED")
+        self.assertEqual(result.error_type, "RunStateError")
+        self.assertEqual(offsets, [0, 50, 100])
+        self.assertIn("pages_scanned=3", result.error_detail)
+        self.assertIn("total=120", result.error_detail)
+
+    def test_list_exact_id_with_foreign_driver_is_blocked(self):
+        pages = {0: [{"id": GROUP, "driver_bot": "foreign-driver",
+                      "group_kind": "normal", "visibility": "public"}]}
+        factory = lambda: self.paged_call_factory(pages, total=1)
+        result, _ = self.run_case(call_factory=factory)
+        self.assertEqual(result.status, "BLOCKED")
+        self.assertEqual(result.error_type, "RunStateError")
+        self.assertIn("different driver Bot", result.error_detail)
+
+    def test_list_overstated_total_fails_on_the_last_reachable_page(self):
+        pages = {
+            0: self.filler_groups(0, 50),
+            50: [],
+        }
+        offsets = []
+        factory = lambda: self.paged_call_factory(
+            pages, total=200, offsets=offsets)
+        result, _ = self.run_case(call_factory=factory)
+        self.assertEqual(result.status, "BLOCKED")
+        self.assertEqual(offsets, [0, 50])
+        self.assertIn("pages_scanned=2", result.error_detail)
+        self.assertIn("total=200", result.error_detail)
+        self.assertIn("total may exceed reachable rows", result.error_detail)
 
     def test_member_not_added_is_blocked(self):
         def deform(data, operation, kwargs):
