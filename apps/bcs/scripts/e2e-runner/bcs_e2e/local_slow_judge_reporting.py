@@ -133,7 +133,7 @@ def _summary(binding: dict, projected: dict, issues: list[str]) -> dict:
         'schema_version': 1, 'run_id': binding['run_id'],
         'status': 'LOCAL_SUITE_PASS' if status == 'PASS' else status,
         'target': {'tier': 'local', 'environment_id': binding['run_id']},
-        'scope': {'suite': SUITE, 'selected_cases': [CASE_ID], 'legacy_inventory_count': 34,
+        'scope': {'suite': SUITE, 'selected_cases': [CASE_ID], 'legacy_inventory_count': len(binding['legacy_inventory']),
                   'full_release_status': 'NOT_QUALIFIED',
                   'full_story_status': 'LOCAL_INTEGRATED' if status == 'PASS' else 'NOT_QUALIFIED',
                   'manifest_digest': fingerprint(binding)},

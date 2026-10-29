@@ -18,6 +18,7 @@ from bcs_e2e.cli import main
 from bcs_e2e.bounded_process import capture
 from bcs_e2e.local_workspace_run import REQUIREMENTS, CLI_REQUIREMENTS
 from bcs_e2e.run_state import read
+from bcs_e2e.inventory import current_manifest
 
 BINARY = os.environ.get('BCS_E2E_TEST_BINARY', '')
 DIGEST = os.environ.get('BCS_E2E_TEST_BINARY_SHA256', '')
@@ -77,7 +78,7 @@ class WorkspaceCombinedLiveTests(unittest.TestCase):
             {'id': name, 'status': 'PASS'} for name in REQUIREMENTS+CLI_REQUIREMENTS])
         self.assertEqual([r['status'] for r in result['requirements'][11:]], ['NOT_RUN']*6)
         self.assertEqual(result['parent_requirement_count'], 17)
-        self.assertEqual(result['legacy_inventory_count'], 34)
+        self.assertEqual(result['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(result['full_story_status'], 'NOT_MIGRATED')
         self.assertEqual(result['remote_validation'], 'NOT_RUN')
         self.assertEqual(result['fusion_mode'], 'PRODUCT_LOCAL_SIMPLE_FUSION_NO_LLM')

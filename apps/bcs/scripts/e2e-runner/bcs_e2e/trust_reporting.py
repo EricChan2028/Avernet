@@ -17,6 +17,7 @@ from .profile import fingerprint, load
 from .run_state import RunStateError, read
 from .trust_context import CONTEXT_CONTRACT, _exclusive, validate_profile
 from .trust_registration import CASE_ID, SUITE, expected_requirements, finalization_ids
+from .inventory import current_manifest
 
 COMPLETION_CONTRACT = 'owned-local-trust-completion-v1'
 REPORT_NAME = 'report-'+CASE_ID+'.json'
@@ -58,7 +59,7 @@ def _bound(profile, root):
              and manifest['cases'][0]['id']==CASE_ID and manifest['cases'][0]['version']==1
              and manifest['cases'][0]['requirements']==expected_requirements()
              and set(manifest['cases'][0]['assertions'])==set(sum(expected_requirements().values(),[])+finalization_ids())
-             and len(manifest['legacy_inventory'])==34, 'trusted report inventory or Run declaration is invalid')
+             and len(manifest['legacy_inventory'])==len(current_manifest('owned-local-trusted-team-v1')['legacy_inventory']), 'trusted report inventory or Run declaration is invalid')
     _require(run.get('run_id')==context.get('run_id')==registration.get('run_id')==profile['environment']['id']
              and run.get('runtime_dir')==context.get('runtime_dir')==registration.get('runtime_dir')==str(root)
              and fingerprint(profile)==run.get('profile_digest')==context.get('profile_digest')
@@ -139,7 +140,7 @@ def _summary(profile, run, manifest, case, issues):
         'runner':{'version':1,'executor_digest':run['executor_digest'],'baseline_commit':manifest['baseline_commit']},
         'target':{'tier':'local','environment_id':profile['environment']['id'],'entrypoint':profile['entrypoint'],'deployment_version':'owned-binary'},
         'scope':{'suite':SUITE,'manifest_digest':run['manifest_digest'],'pilot_cases':[CASE_ID],
-                 'legacy_inventory_count':34,'full_release_status':'NOT_QUALIFIED',
+                 'legacy_inventory_count':len(manifest['legacy_inventory']),'full_release_status':'NOT_QUALIFIED',
                  'reason':'One locally verified parent is not the full multi-environment release inventory.'},
         'cases':[{'id':CASE_ID,'version':1,'title':manifest['cases'][0]['title'],'required':True,'status':status,
                   'functional':case.get('functional','NOT_RUN'),'cleanup':case.get('cleanup','BLOCKED'),

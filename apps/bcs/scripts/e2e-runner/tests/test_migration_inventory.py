@@ -40,7 +40,7 @@ class MigrationInventoryTests(unittest.TestCase):
     def test_original_source_and_complete_three_parent_inventory_match(self):
         self.assertEqual(validate_contract(self.contract, source_root=self.source), self.contract)
         result = migration_plan()
-        self.assertEqual(result['legacy_inventory_count'], 34)
+        self.assertEqual(result['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(result['mapped_story_count'], 3)
         self.assertEqual([len(s['steps']) for s in result['stories']], [16, 5, 1])
         self.assertEqual([len(s['requirements']) for s in result['stories']], [17, 5, 10])
@@ -83,7 +83,7 @@ class MigrationInventoryTests(unittest.TestCase):
         row = next(r for r in result['additional_source_maps']
                    if r['parent'] == 'story_cli_operator_builds_collaboration_team')
         self.assertEqual(len(row['requirements']), 8)
-        self.assertEqual(result['legacy_inventory_count'], 34)
+        self.assertEqual(result['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(result['migrated_story_count'], 0)
         self.assertEqual(result['mapped_story_count'], 3)
         self.assertEqual(result['passed_assertion_count'], 0)
@@ -117,7 +117,7 @@ class MigrationInventoryTests(unittest.TestCase):
         row = next(r for r in result['additional_source_maps']
                    if r['parent'] == 'story_cli_operator_runs_sessions_and_services')
         self.assertEqual(len(row['requirements']), 4)
-        self.assertEqual(result['legacy_inventory_count'], 34)
+        self.assertEqual(result['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(result['migrated_story_count'], 0)
         self.assertEqual(result['mapped_story_count'], 3)
         self.assertEqual(result['passed_assertion_count'], 0)
@@ -230,7 +230,7 @@ class MigrationInventoryTests(unittest.TestCase):
         self.assertEqual(custom_slice['remote_validation'], 'NOT_RUN')
         self.assertFalse(custom_slice['grants_release_credit'])
         self.assertIn('preprod', custom_slice['blocker'])
-        self.assertEqual(result['legacy_inventory_count'], 34)
+        self.assertEqual(result['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(result['migrated_story_count'], 0)
         self.assertEqual(result['passed_assertion_count'], 0)
 
@@ -527,7 +527,7 @@ class MigrationInventoryTests(unittest.TestCase):
                                     'independent_slice', 'remote_validation',
                                     'grants_release_credit', 'source_map'})
         # The slice never joins the 29-case release coverage registry; its parent stays a
-        # known unmapped backlog row inside the 34-story legacy inventory.
+        # known unmapped backlog row inside the 41-story legacy inventory.
         self.assertNotIn('LOCAL-RESULT-QUEUE-01', {case.case_id for case in CASES})
         for suite in ('preprod-pilot-v1', 'owned-local-trusted-team-v1'):
             manifest = current_manifest(suite)

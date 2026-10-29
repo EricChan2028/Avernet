@@ -8,7 +8,7 @@ from pathlib import Path
 import stat
 
 from .case_rewrite import fixed_loop_case_rewrite
-from .inventory import executor_digest
+from .inventory import current_manifest, executor_digest
 from .local_fixed_loop_contract import CASE_ID, PARENT, SUITE
 from .profile import fingerprint
 from .run_state import RunStateError, read
@@ -71,8 +71,8 @@ def _bound(root: Path) -> dict:
              and binding.get('adapter_family') == 'OwnedLocalCaseAdapter'
              and binding.get('source_binding', {}).get('parent') == PARENT
              and [row.get('id') for row in binding['source_binding']['requirements']] == list(plan.requirement_ids)
-             and len(binding.get('legacy_inventory', [])) == 34
-             and len({row.get('id') for row in binding.get('legacy_inventory', [])}) == 34,
+             and len(binding.get('legacy_inventory', [])) == len(current_manifest()['legacy_inventory'])
+             and len({row.get('id') for row in binding.get('legacy_inventory', [])}) == len(current_manifest()['legacy_inventory']),
              'Fixed Loop frozen complete binding is invalid')
     return binding
 
@@ -137,7 +137,7 @@ def _summary(binding: dict, projected: dict, issues: list[str]) -> dict:
         'schema_version': 1, 'run_id': binding['run_id'],
         'status': 'LOCAL_SUITE_PASS' if status == 'PASS' else status,
         'target': {'tier': 'local', 'environment_id': binding['run_id']},
-        'scope': {'suite': SUITE, 'selected_cases': [CASE_ID], 'legacy_inventory_count': 34,
+        'scope': {'suite': SUITE, 'selected_cases': [CASE_ID], 'legacy_inventory_count': len(binding['legacy_inventory']),
                   'full_release_status': 'NOT_QUALIFIED',
                   'full_story_status': 'LOCAL_INTEGRATED' if status == 'PASS' else 'NOT_QUALIFIED',
                   'manifest_digest': fingerprint(binding)},

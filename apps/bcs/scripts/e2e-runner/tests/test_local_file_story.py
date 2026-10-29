@@ -21,6 +21,7 @@ from bcs_e2e.run_state import read, write
 from bcs_e2e.local_file_story import CASE_ID, LEAVES, REQUIREMENTS, PAYLOAD, OwnedLocalFileStory
 from bcs_e2e.local_file_reporting import build_file_report
 from bcs_e2e.bounded_process import capture
+from bcs_e2e.inventory import current_manifest
 
 BINARY = os.environ.get('BCS_E2E_TEST_BINARY', '')
 DIGEST = os.environ.get('BCS_E2E_TEST_BINARY_SHA256', '')
@@ -117,7 +118,7 @@ class LocalFileStoryLiveTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT state FROM resource WHERE kind='file'").fetchone()[0], 'deleted')
         summary = build_file_report(self.root)
         self.assertEqual(summary['status'], 'LOCAL_SUITE_PASS')
-        self.assertEqual(summary['scope']['legacy_inventory_count'], 34)
+        self.assertEqual(summary['scope']['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(summary['scope']['full_release_status'], 'NOT_QUALIFIED')
         self.assertEqual(summary['reports']['expected_assertion_count'], 10)
         for path in (self.root/'reports').iterdir():

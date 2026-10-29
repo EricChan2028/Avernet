@@ -20,6 +20,7 @@ from bcs_e2e.local_channel_cli_contract import CASE_ID, PARENT, REQUIREMENTS, ch
 from bcs_e2e.local_channel_cli_run import local_channel_cli_run
 from bcs_e2e.local_channel_cli_reporting import build_channel_cli_report, _business_evidence
 from bcs_e2e.run_state import RunStateError, read
+from bcs_e2e.inventory import current_manifest
 BINARY = os.environ.get('BCS_E2E_TEST_BINARY','')
 SHA = os.environ.get('BCS_E2E_TEST_BINARY_SHA256','')
 CLI = os.environ.get('BCS_E2E_TEST_CLI_BINARY','')
@@ -50,7 +51,7 @@ class ChannelCliAdmissionTests(unittest.TestCase):
         from bcs_e2e.migration_inventory import migration_plan
         plan=migration_plan();row=next(r for r in plan['local_registered_executors'] if r['case_id']==CASE_ID)
         self.assertEqual(row['requirement_ids'],list(REQUIREMENTS));self.assertFalse(row['grants_release_credit'])
-        self.assertEqual(plan['legacy_inventory_count'],34);self.assertEqual(plan['migrated_story_count'],0)
+        self.assertEqual(plan['legacy_inventory_count'],len(current_manifest()['legacy_inventory']));self.assertEqual(plan['migrated_story_count'],0)
         self.assertNotEqual(row['legacy_id'],'story_user_validates_external_channel_setup')
 
     def test_missing_permissions_precede_actual_binary_or_process(self):

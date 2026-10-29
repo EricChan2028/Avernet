@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT))
 from bcs_e2e.cli import main
 from bcs_e2e.local_workspace_run import REQUIREMENTS
 from bcs_e2e.run_state import read
+from bcs_e2e.inventory import current_manifest
 
 BINARY = os.environ.get('BCS_E2E_TEST_BINARY', '')
 DIGEST = os.environ.get('BCS_E2E_TEST_BINARY_SHA256', '')
@@ -94,7 +95,7 @@ class WorkspaceRunLiveTests(unittest.TestCase):
         self.assertEqual(len(result['requirements']), 18)
         self.assertEqual(sum(r['status']=='PASS' for r in result['requirements']), 7)
         self.assertEqual(sum(r['status']=='NOT_RUN' for r in result['requirements']), 11)
-        self.assertEqual(result['legacy_inventory_count'], 34)
+        self.assertEqual(result['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(result['full_story_status'], 'NOT_MIGRATED')
         self.assertEqual(result['remote_validation'], 'NOT_RUN')
         self.assertFalse(result['ready_to_execute'])

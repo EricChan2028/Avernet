@@ -63,7 +63,7 @@ class TrustReportingTests(unittest.TestCase):
         result=self.publish();self.assertEqual(result['status'],'LOCAL_SUITE_PASS')
         self.assertEqual(set(result['outputs']),{'json','junit','markdown'})
         summary=build_report(self.profile,self.root)
-        self.assertEqual(summary['scope']['legacy_inventory_count'],34)
+        self.assertEqual(summary['scope']['legacy_inventory_count'], len(current_manifest('owned-local-trusted-team-v1')['legacy_inventory']))
         self.assertEqual(summary['scope']['full_release_status'],'NOT_QUALIFIED')
         self.assertEqual(summary['reports']['expected_assertion_count'],58)
         self.assertEqual(summary['cases'][0]['resource_disposition'],'RETAINED_LOCAL_DATABASE')

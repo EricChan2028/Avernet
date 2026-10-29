@@ -15,7 +15,7 @@ from .collaboration_team_contract import (
     SUITE,
     collaboration_team_source_binding,
 )
-from .inventory import executor_digest
+from .inventory import current_manifest, executor_digest
 from .local_operator_cli_contract import COLLABORATION_TEAM_PARENT
 from .profile import fingerprint
 from .run_state import RunStateError, read
@@ -84,8 +84,8 @@ def _bound(root: Path):
              and source['parent'] == COLLABORATION_TEAM_PARENT
              and [row['id'] for row in source['requirements']] == list(REQUIREMENT_IDS)
              and isinstance(binding.get('legacy_inventory'), list)
-             and len(binding['legacy_inventory']) == 34
-             and len({row.get('id') for row in binding['legacy_inventory']}) == 34
+             and len(binding['legacy_inventory']) == len(current_manifest()['legacy_inventory'])
+             and len({row.get('id') for row in binding['legacy_inventory']}) == len(current_manifest()['legacy_inventory'])
              and isinstance(binding.get('executor_digest'), str)
              and len(binding['executor_digest']) == 64
              and isinstance(binding.get('bcs_binary_sha256'), str)
@@ -236,7 +236,7 @@ def _summary(binding: dict, projected: dict, issues: list[str]):
             'status': 'LOCAL_SUITE_PASS' if status == 'PASS' else status,
             'target': {'tier': 'local', 'environment_id': binding['run_id']},
             'scope': {'suite': SUITE, 'selected_cases': [CASE_ID],
-                      'legacy_inventory_count': 34,
+                      'legacy_inventory_count': len(binding['legacy_inventory']),
                       'full_release_status': 'NOT_QUALIFIED',
                       'full_story_status': 'LOCAL_INTEGRATED' if status == 'PASS' else 'NOT_QUALIFIED',
                       'manifest_digest': fingerprint(binding)},

@@ -157,6 +157,7 @@ class SerialRetainedTests(unittest.TestCase):
 # Exercise the actual CLI and remote composition; only HTTP/MCP replies are
 # synthetic. Reuse fixtures without inheriting their entire test class.
 import test_retained_remote as remote_fixtures
+from bcs_e2e.inventory import current_manifest
 
 
 class SerialRemoteCompositionTests(unittest.TestCase):
@@ -287,7 +288,7 @@ class SerialReportingTests(unittest.TestCase):
         self.assertEqual(summary['integrity']['status'], 'PASS')
         self.assertEqual(summary['scope']['selected_cases'], ['RETAIN-GROUP-01'])
         self.assertEqual(summary['scope']['full_release_status'], 'NOT_QUALIFIED')
-        self.assertEqual(summary['scope']['legacy_inventory_count'], 34)
+        self.assertEqual(summary['scope']['legacy_inventory_count'], len(current_manifest('preprod-retained-v1')['legacy_inventory']))
         self.assertEqual(summary['reports']['declared_case_count'], 2)
         case = next(c for c in summary['cases'] if c['id']=='RETAIN-GROUP-01')
         self.assertEqual(case['execution_status'], 'UNCONFIRMED')

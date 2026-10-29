@@ -21,6 +21,7 @@ from bcs_e2e.local_channel_http import OwnedLocalChannelHttp
 from bcs_e2e.local_channel_run import local_channel_http_run
 from bcs_e2e.local_channel_reporting import build_channel_http_report, _business_evidence
 from bcs_e2e.run_state import RunStateError, read
+from bcs_e2e.inventory import current_manifest
 BINARY = os.environ.get('BCS_E2E_TEST_BINARY','')
 SHA = os.environ.get('BCS_E2E_TEST_BINARY_SHA256','')
 
@@ -52,7 +53,7 @@ class ChannelGuards(unittest.TestCase):
         row = next(r for r in plan['local_registered_executors'] if r['case_id'] == CASE_ID)
         self.assertEqual(row['requirement_ids'],list(REQUIREMENTS))
         self.assertFalse(row['grants_release_credit'])
-        self.assertEqual(plan['legacy_inventory_count'],34)
+        self.assertEqual(plan['legacy_inventory_count'],len(current_manifest()['legacy_inventory']))
         self.assertEqual(plan['migrated_story_count'],0)
         self.assertNotEqual(row['legacy_id'],'story_cli_operator_validates_channel_management')
 

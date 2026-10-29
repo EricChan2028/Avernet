@@ -14,6 +14,7 @@ import re
 from .local_structured_core_contract import structured_core_adaptability
 from .run_state import RunStateError, read
 from .trust_registration import PROGRAMMATIC_EXECUTION_CONTRACT
+from .inventory import current_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCES = {'stories.sh', 'group.sh', 'friends.sh', 'session_files.sh', 'common.sh'}

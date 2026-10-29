@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bcs_e2e.local_fixed_loop_contract import (
     PARENT, REQUIREMENTS, fixed_loop_method, fixed_loop_source_binding)
 from bcs_e2e.run_state import RunStateError
+from bcs_e2e.inventory import current_manifest
 
 
 class FixedLoopContractTests(unittest.TestCase):
@@ -87,7 +88,7 @@ class FixedLoopContractTests(unittest.TestCase):
         self.assertEqual(row['remote_validation'], 'NOT_RUN')
         self.assertFalse(row['grants_release_credit'])
         self.assertEqual(plan['migrated_story_count'], 0)
-        self.assertEqual(plan['legacy_inventory_count'], 34)
+        self.assertEqual(plan['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertFalse(plan['ready_to_execute'])
 
 

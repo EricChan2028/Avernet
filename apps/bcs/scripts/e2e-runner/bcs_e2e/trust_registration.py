@@ -10,6 +10,7 @@ import os
 
 from .profile import fingerprint
 from .run_state import RunStateError, read, write
+from .inventory import current_manifest
 
 SUITE = 'owned-local-trusted-team-v1'
 CASE_ID = 'LOCAL-TRUST-API-CLI-01'
@@ -74,7 +75,7 @@ def validate_registration(manifest: dict) -> None:
                 or case['registration_status'] != 'LOCAL_EXECUTOR_ONLY'
                 or fingerprint(manifest['legacy_inventory']) != fingerprint(reference['legacy_inventory'])
                 or manifest['baseline_commit'] != reference['baseline_commit']
-                or len(reference['legacy_inventory']) != 34
+                or len(reference['legacy_inventory']) != len(current_manifest()['legacy_inventory'])
                 or {r['id'] for r in parent['requirements']} != set(requirements)
                 or parent['migration_status'] != 'NOT_MIGRATED'):
             raise ValueError

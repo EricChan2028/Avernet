@@ -19,6 +19,7 @@ from bcs_e2e.edge_friend_mutation_case import (
 )
 from bcs_e2e.migration_inventory import migration_plan
 from bcs_e2e.run_state import RunStateError
+from bcs_e2e.inventory import current_manifest
 
 MAPPED = (
     ('LOCAL-EDGE-FRIEND-ACCEPT-REJECT-CANCEL-01',
@@ -134,7 +135,7 @@ class EdgeFriendMutationContractTests(unittest.TestCase):
                     row['report_command'], 'local-edge-friend-mutations-report')
                 self.assertEqual(row['remote_validation'], 'NOT_RUN')
                 self.assertFalse(row['grants_release_credit'])
-        self.assertEqual(plan['legacy_inventory_count'], 34)
+        self.assertEqual(plan['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(plan['migrated_story_count'], 0)
         self.assertEqual(plan['passed_assertion_count'], 0)
 

@@ -19,6 +19,7 @@ from bcs_e2e.cli import main
 from bcs_e2e.local_provider_contract import CASE_ID, REQUIREMENTS
 from bcs_e2e.local_provider_run import local_provider_run
 from bcs_e2e.run_state import RunStateError, read
+from bcs_e2e.inventory import current_manifest
 BINARY = os.environ.get('BCS_E2E_TEST_BINARY', '')
 DIGEST = os.environ.get('BCS_E2E_TEST_BINARY_SHA256', '')
 
@@ -63,7 +64,7 @@ class ProviderFlowLiveTests(unittest.TestCase):
         self.assertEqual(summary['requirements'], [{'id': x, 'status': 'PASS'} for x in REQUIREMENTS])
         self.assertEqual(summary['reports'], {'expected_assertion_count': 32, 'observed_assertion_count': 32})
         self.assertEqual(summary['scope']['full_release_status'], 'NOT_QUALIFIED')
-        self.assertEqual(summary['scope']['legacy_inventory_count'], 34)
+        self.assertEqual(summary['scope']['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(summary['cases'][0]['cleanup'], 'RETAINED')
         self.assertEqual(result['shutdown']['status'], 'STOPPED')
         self.assertEqual(result['downstream']['state'], 'CLOSED')

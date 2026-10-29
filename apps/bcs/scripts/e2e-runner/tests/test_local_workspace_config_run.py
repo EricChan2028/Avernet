@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT))
 from bcs_e2e.cli import main
 from bcs_e2e.local_workspace_run import REQUIREMENTS, CLI_REQUIREMENTS, INCIDENT_REQUIREMENTS
 from bcs_e2e.run_state import read, write
+from bcs_e2e.inventory import current_manifest
 
 BINARY = os.environ.get('BCS_E2E_TEST_BINARY', '')
 DIGEST = os.environ.get('BCS_E2E_TEST_BINARY_SHA256', '')
@@ -69,7 +70,7 @@ class ConfigRunLiveTests(unittest.TestCase):
             {'id':'WORKSPACE.messages','status':'NOT_RUN'},
             {'id':'WORKSPACE.incident-delete','status':'NOT_RUN'}])
         self.assertEqual(result['parent_requirement_count'], 17)
-        self.assertEqual(result['legacy_inventory_count'], 34)
+        self.assertEqual(result['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(result['full_story_status'], 'NOT_MIGRATED')
         self.assertFalse(result['automatic_delete'])
         self.assertEqual(result['incident_case'], read(self.root/'local-workspace-incident.json'))

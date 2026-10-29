@@ -11,6 +11,7 @@ from bcs_e2e.edge_search_case import CASE_ID
 from bcs_e2e.edge_search_contract import PARENT, REQUIREMENTS, bot_search_source_binding
 from bcs_e2e.migration_inventory import migration_plan
 from bcs_e2e.run_state import RunStateError
+from bcs_e2e.inventory import current_manifest
 
 
 class BotSearchContractTests(unittest.TestCase):
@@ -75,7 +76,7 @@ class BotSearchContractTests(unittest.TestCase):
                          if row['legacy_id'] == PARENT)
         self.assertEqual(candidate['status'], 'PENDING')
         self.assertFalse(candidate['grants_release_credit'])
-        self.assertEqual(plan['legacy_inventory_count'], 34)
+        self.assertEqual(plan['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(plan['migrated_story_count'], 0)
         self.assertEqual(plan['passed_assertion_count'], 0)
         self.assertFalse(plan['ready_to_execute'])

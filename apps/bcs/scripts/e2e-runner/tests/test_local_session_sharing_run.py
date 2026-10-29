@@ -19,6 +19,7 @@ from bcs_e2e.cli import main
 from bcs_e2e.local_session_contract import REQUIREMENTS
 from bcs_e2e.local_session_run import local_session_public_run
 from bcs_e2e.run_state import RunStateError, read
+from bcs_e2e.inventory import current_manifest
 BINARY = os.environ.get('BCS_E2E_TEST_BINARY', '')
 DIGEST = os.environ.get('BCS_E2E_TEST_BINARY_SHA256', '')
 CLI = os.environ.get('BCS_E2E_TEST_CLI_BINARY', '')
@@ -81,7 +82,7 @@ class SharingLifecycleLiveTests(unittest.TestCase):
         self.assertEqual(summary['reports']['parent_requirement_count'], 9)
         self.assertEqual(summary['requirements'], [{'id': name, 'status': 'PASS' if i < 6 else 'NOT_RUN'}
                                                    for i, name in enumerate(REQUIREMENTS)])
-        self.assertEqual(summary['scope']['legacy_inventory_count'], 34)
+        self.assertEqual(summary['scope']['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(summary['scope']['full_story_status'], 'NOT_MIGRATED')
         tree = ET.parse(self.root/'sharing-reports/junit.xml').getroot()
         self.assertEqual(tree.attrib['name'], 'bcs-e2e-session-sharing')

@@ -82,7 +82,7 @@ def _bound(root: Path):
              and binding.get('case_id') == CASE_ID and type(binding.get('case_version')) is int
              and binding['case_version'] == 1 and binding.get('runtime_dir') == str(root)
              and binding.get('required_assertions') == ['CLI-FILE.'+r for r in REQUIREMENTS]
-             and binding.get('cli_leaves') == list(LEAVES) and len(binding.get('legacy_inventory', [])) == 34,
+             and binding.get('cli_leaves') == list(LEAVES) and len(binding.get('legacy_inventory', [])) == len(current_manifest()['legacy_inventory']),
              'CLI-file frozen source inventory is invalid')
     return binding
 
@@ -197,7 +197,7 @@ def _summary(binding: dict, case: dict, issues: list):
     return {'schema_version': 1, 'run_id': binding['run_id'],
         'status': 'LOCAL_SUITE_PASS' if status == 'PASS' else status,
         'target': {'tier': 'local', 'environment_id': binding['run_id']},
-        'scope': {'suite': SUITE, 'selected_cases': [CASE_ID], 'legacy_inventory_count': 34,
+        'scope': {'suite': SUITE, 'selected_cases': [CASE_ID], 'legacy_inventory_count': len(binding['legacy_inventory']),
                   'full_release_status': 'NOT_QUALIFIED', 'manifest_digest': fingerprint(binding),
                   'file_observation_contract': binding.get('contract')},
         'runner': {'executor_digest': binding['executor_digest']},

@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import stat
 
-from .inventory import executor_digest
+from .inventory import current_manifest, executor_digest
 from .profile import fingerprint
 from .run_state import RunStateError, read
 
@@ -90,8 +90,8 @@ def _bound(root: Path):
              and binding.get('expected_assertion_count')
                  == sum(len(binding['selected_requirement_ids'][parent]) for parent in parents)
              and set(binding.get('source_bindings', {})) == set(parents)
-             and len(binding.get('legacy_inventory', [])) == 34
-             and len({row['id'] for row in binding['legacy_inventory']}) == 34,
+             and len(binding.get('legacy_inventory', [])) == len(current_manifest()['legacy_inventory'])
+             and len({row['id'] for row in binding['legacy_inventory']}) == len(current_manifest()['legacy_inventory']),
              'Edge read frozen complete binding is invalid')
     for parent in parents:
         plan = plans[parent]
@@ -195,7 +195,7 @@ def _summary(binding: dict, projected: dict, issues: list[str]):
         'status': 'LOCAL_SUITE_PASS' if status == 'PASS' else status,
         'target': {'tier': 'local', 'environment_id': binding['run_id']},
         'scope': {'suite': SUITE, 'selected_cases': list(binding['case_ids']),
-                  'legacy_inventory_count': 34,
+                  'legacy_inventory_count': len(binding['legacy_inventory']),
                   'full_release_status': 'NOT_QUALIFIED',
                   'full_story_status': 'LOCAL_READ_ONLY_INTEGRATED' if status == 'PASS' else 'NOT_QUALIFIED',
                   'remote_validation': 'NOT_RUN', 'manifest_digest': fingerprint(binding)},

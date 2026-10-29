@@ -17,6 +17,7 @@ from bcs_e2e.local_caller_execution_run import (BINARY_KIND, STORY_ERR_LOG_NAME,
                                                 _parse_story_markers, local_caller_execution_run,
                                                 validate_caller_execution_binary)
 from bcs_e2e.run_state import RunStateError, read
+from bcs_e2e.inventory import current_manifest
 
 GOOD_STDOUT = (b'booting owned child\n'
                b'Caller HTTP/queue/provider E2E: 27 HTTP assertions passed\n'
@@ -183,7 +184,7 @@ class CallerExecutionRunTests(unittest.TestCase):
         summary = build_caller_execution_report(state)
         self.assertEqual(summary, result['canonical_summary'])
         self.assertEqual(summary['status'], 'LOCAL_SUITE_PASS')
-        self.assertEqual(summary['scope']['legacy_inventory_count'], 34)
+        self.assertEqual(summary['scope']['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(summary['scope']['independent_slice'], True)
         self.assertEqual(summary['scope']['release_parent_denominator'], False)
         self.assertEqual(summary['reports']['observed_assertion_count'], 9)

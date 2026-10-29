@@ -70,7 +70,7 @@ REVIEWED_RELEASE_PARENT_COUNT = 29
 
 
 def reviewed_release_inventory(manifest: dict | None = None) -> list[dict]:
-    """Return the reviewed 29-Story release denominator from the current 34.
+    """Return the reviewed 29-Story release denominator from the current 41-row legacy inventory.
 
     Twelve legacy parents sit outside the reviewed release denominator: the
     pre-existing five backlog rows plus seven registered 2026-10-29 during the

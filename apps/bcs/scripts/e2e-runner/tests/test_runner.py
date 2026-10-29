@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 import re
 import sys
+
+from bcs_e2e.inventory import current_manifest
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -127,7 +129,7 @@ class ManifestTests(unittest.TestCase):
         edges = re.findall(r'"(test_ep_[^\"]+)"', edge.split('E2E_TESTS_EDGE_PERMISSION=(')[1].split(')')[0])
         inventory = json.loads((ROOT / "manifest.json").read_text())["legacy_inventory"]
         self.assertEqual([i["id"] for i in inventory], regular + conditional + edges)
-        self.assertEqual(len(inventory), 34)
+        self.assertEqual(len(inventory), len(current_manifest()['legacy_inventory']))
         for item in inventory:
             self.assertRegex((legacy / item["source"]).read_text(), r"(?m)^" + item["id"] + r"\(\)")
             self.assertEqual(item["conditional"], item["id"] in conditional)

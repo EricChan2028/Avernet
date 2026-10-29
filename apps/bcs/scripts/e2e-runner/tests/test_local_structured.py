@@ -21,6 +21,7 @@ from bcs_e2e.local_structured_contract import REQUIREMENTS, CASE_ID
 from bcs_e2e.local_structured_run import local_structured_run
 from bcs_e2e.local_structured_reporting import build_structured_report, _business_evidence
 from bcs_e2e.run_state import read, RunStateError
+from bcs_e2e.inventory import current_manifest
 from tests.test_local_template_runtime import approved_asset
 
 BINARY=os.environ.get('BCS_E2E_TEST_BINARY','');SHA=os.environ.get('BCS_E2E_TEST_BINARY_SHA256','')
@@ -120,7 +121,7 @@ class StructuredLive(unittest.TestCase):
         summary=build_structured_report(self.root)
         self.assertEqual(summary['status'],'LOCAL_SUITE_PASS')
         self.assertEqual(summary,self.result['canonical_summary'])
-        self.assertEqual(summary['scope']['legacy_inventory_count'],34)
+        self.assertEqual(summary['scope']['legacy_inventory_count'],len(current_manifest()['legacy_inventory']))
         self.assertEqual(summary['scope']['full_release_status'],'NOT_QUALIFIED')
         self.assertEqual(summary['reports']['observed_assertion_count'],17)
         self.assertEqual(summary['cases'][0]['cleanup'],'RETAINED')

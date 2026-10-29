@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import stat
 
-from .inventory import executor_digest
+from .inventory import current_manifest, executor_digest
 from .profile import fingerprint
 from .run_state import RunStateError, read
 
@@ -65,8 +65,8 @@ def _bound(root):
              and binding.get('selected_requirement_ids') == list(V1_REQUIREMENTS)
              and binding.get('source_binding', {}).get('parent') == 'story_user_validates_external_channel_setup'
              and [r['id'] for r in binding['source_binding']['requirements']] == list(V1_REQUIREMENTS)
-             and len(binding.get('legacy_inventory', [])) == 34
-             and len({r['id'] for r in binding['legacy_inventory']}) == 34,
+             and len(binding.get('legacy_inventory', [])) == len(current_manifest()['legacy_inventory'])
+             and len({r['id'] for r in binding['legacy_inventory']}) == len(current_manifest()['legacy_inventory']),
              'Channel HTTP frozen complete binding is invalid')
     return binding
 
@@ -154,7 +154,7 @@ def _summary(binding, projected, issues):
     return {'schema_version': 1, 'run_id': binding['run_id'],
             'status': 'LOCAL_SUITE_PASS' if status == 'PASS' else status,
             'target': {'tier': 'local', 'environment_id': binding['run_id']},
-            'scope': {'suite': SUITE, 'selected_cases': [CASE_ID], 'legacy_inventory_count': 34,
+            'scope': {'suite': SUITE, 'selected_cases': [CASE_ID], 'legacy_inventory_count': len(binding['legacy_inventory']),
                       'full_release_status': 'NOT_QUALIFIED',
                       'full_story_status': 'LOCAL_INTEGRATED' if status == 'PASS' else 'NOT_QUALIFIED',
                       'manifest_digest': fingerprint(binding)},

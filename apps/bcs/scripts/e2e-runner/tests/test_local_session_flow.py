@@ -19,6 +19,7 @@ from bcs_e2e.cli import main
 from bcs_e2e.local_session_contract import REQUIREMENTS
 from bcs_e2e.local_session_run import local_session_public_run
 from bcs_e2e.run_state import RunStateError, read
+from bcs_e2e.inventory import current_manifest
 BINARY = os.environ.get('BCS_E2E_TEST_BINARY', '')
 DIGEST = os.environ.get('BCS_E2E_TEST_BINARY_SHA256', '')
 CLI = os.environ.get('BCS_E2E_TEST_CLI_BINARY', '')
@@ -51,7 +52,7 @@ class SessionFlowAdmissionTests(unittest.TestCase):
         superseded = {'LOCAL-SESSION-PUBLIC-01', 'LOCAL-SESSION-SHARING-01'}
         self.assertFalse(any(row['case_id'] in superseded
                              for row in plan['local_partial_executors']))
-        self.assertEqual(plan['legacy_inventory_count'], 34)
+        self.assertEqual(plan['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(plan['migrated_story_count'], 0)
 
     def test_cli_full_entry_keeps_permission_gate_without_remote_profile(self):
@@ -83,7 +84,7 @@ class SessionFlowLiveTests(unittest.TestCase):
         self.assertEqual(summary['requirements'], [{'id': name, 'status': 'PASS'} for name in REQUIREMENTS])
         self.assertEqual(summary['scope']['full_story_status'], 'LOCAL_INTEGRATED')
         self.assertEqual(summary['scope']['full_release_status'], 'NOT_QUALIFIED')
-        self.assertEqual(summary['scope']['legacy_inventory_count'], 34)
+        self.assertEqual(summary['scope']['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         tree = ET.parse(self.root/'session-reports/junit.xml').getroot()
         self.assertEqual(tree.attrib['name'], 'bcs-e2e-session-flow')
         self.assertEqual([tree.attrib[k] for k in ('tests', 'failures', 'errors', 'skipped')], ['1', '0', '0', '0'])

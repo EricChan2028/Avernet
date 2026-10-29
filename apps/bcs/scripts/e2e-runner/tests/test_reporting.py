@@ -60,7 +60,7 @@ class ReportingTests(unittest.TestCase):
             summary = build_report(self.profile(), state, self.manifest())
             self.assertEqual(summary["status"], "PILOT_PASS")
             self.assertEqual(summary["scope"]["full_release_status"], "NOT_QUALIFIED")
-            self.assertEqual(summary["scope"]["legacy_inventory_count"], 34)
+            self.assertEqual(summary["scope"]["legacy_inventory_count"], len(self.manifest()["legacy_inventory"]))
             self.assertEqual(summary["mock_boundary"]["local_mock"], True)
             self.assertNotIn("must-not-appear", json.dumps(summary))
             self.assertIn("not a performance benchmark", summary["timing"]["interpretation"])

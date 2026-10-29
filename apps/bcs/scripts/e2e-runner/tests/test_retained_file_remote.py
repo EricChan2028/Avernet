@@ -25,6 +25,7 @@ from bcs_e2e.retention_quota_v2 import CONTRACT as QUOTA_CONTRACT, COSTS
 from bcs_e2e.run_state import read, write
 from test_file_transport import Reply, envelope
 import test_retained_remote as fixtures
+from bcs_e2e.inventory import current_manifest
 
 
 class RetainedFileRemoteTests(unittest.TestCase):
@@ -218,7 +219,7 @@ class RetainedFileRemoteTests(unittest.TestCase):
         summary = read(self.state / 'reports/summary.json')
         self.assertEqual(summary['status'], 'RETAINED_CASE_PASS')
         self.assertEqual(summary['scope']['suite'], 'preprod-retained-file-v1')
-        self.assertEqual(summary['scope']['legacy_inventory_count'], 34)
+        self.assertEqual(summary['scope']['legacy_inventory_count'], len(current_manifest('preprod-retained-file-v1')['legacy_inventory']))
         self.assertEqual(result['case_version'], 2)
         queries = [call for call in self.calls if call[2].endswith('.db_query')]
         self.assertEqual(len(queries), 1)

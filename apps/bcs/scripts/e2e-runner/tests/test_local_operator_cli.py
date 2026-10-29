@@ -31,6 +31,7 @@ from bcs_e2e.local_operator_cli_reporting import (
 )
 from bcs_e2e.local_operator_cli_run import local_operator_cli_run
 from bcs_e2e.run_state import RunStateError, read
+from bcs_e2e.inventory import current_manifest
 
 BINARY = os.environ.get('BCS_E2E_TEST_BINARY', '')
 SHA = os.environ.get('BCS_E2E_TEST_BINARY_SHA256', '')
@@ -80,7 +81,7 @@ class OperatorGuards(unittest.TestCase):
         self.assertEqual(row['report_command'], 'local-operator-cli-report')
         self.assertFalse(row['grants_release_credit'])
         self.assertEqual(row['legacy_id'], PARENT)
-        self.assertEqual(plan['legacy_inventory_count'], 34)
+        self.assertEqual(plan['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(plan['migrated_story_count'], 0)
         self.assertTrue(any(m.get('parent') == PARENT for m in plan['additional_source_maps']))
 

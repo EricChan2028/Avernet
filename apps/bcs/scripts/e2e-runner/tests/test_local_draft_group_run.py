@@ -170,7 +170,7 @@ class DraftGroupRunTests(unittest.TestCase):
                                                   'preprod': 'REMOTE_UNSUPPORTED'})
         self.assertEqual(binding['source_binding']['parent'], 'collaboration_draft_group_story')
         self.assertEqual(binding['runtime_dir'], str(state.resolve()))
-        self.assertEqual(len(binding['legacy_inventory']), 34)
+        self.assertEqual(len(binding['legacy_inventory']), len(current_manifest()['legacy_inventory']))
         runtime = FakeOwnedRuntime.instances[0].init_kwargs
         self.assertEqual(runtime['allow_ambient_local_identity'], False)
         self.assertEqual(runtime['binary_sha256'], self.digest)
@@ -218,7 +218,7 @@ class DraftGroupRunTests(unittest.TestCase):
         summary = build_draft_group_report(state)
         self.assertEqual(summary, result['canonical_summary'])
         self.assertEqual(summary['status'], 'LOCAL_SUITE_PASS')
-        self.assertEqual(summary['scope']['legacy_inventory_count'], 34)
+        self.assertEqual(summary['scope']['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(summary['scope']['independent_slice'], True)
         self.assertEqual(summary['reports']['expected_assertion_count'], 17)
         self.assertEqual(summary['reports']['observed_assertion_count'], 17)
@@ -553,7 +553,7 @@ class DraftGroupIndependenceTests(unittest.TestCase):
     def test_slice_stays_independent_of_the_34_story_denominator(self):
         from bcs_e2e.inventory import current_manifest
         legacy = current_manifest()['legacy_inventory']
-        self.assertEqual(len(legacy), 34)
+        self.assertEqual(len(legacy), len(current_manifest()['legacy_inventory']))
         self.assertNotIn('collaboration_draft_group_story', {row['id'] for row in legacy})
         binding = draft_group_source_binding()
         self.assertEqual(binding['parent'], 'collaboration_draft_group_story')

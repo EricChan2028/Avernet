@@ -21,6 +21,7 @@ from bcs_e2e.edge_read_contract import (
 )
 from bcs_e2e.migration_inventory import migration_plan
 from bcs_e2e.run_state import RunStateError
+from bcs_e2e.inventory import current_manifest
 
 
 class EdgeReadContractTests(unittest.TestCase):
@@ -124,7 +125,7 @@ class EdgeReadContractTests(unittest.TestCase):
         self.assertTrue(all(row['status'] in ('LOCAL_EXECUTOR_ONLY', 'LOCAL_READ_SLICE_ONLY')
                             and row['remote_validation'] == 'NOT_RUN'
                             and not row['grants_release_credit'] for row in executors))
-        self.assertEqual(plan['legacy_inventory_count'], 34)
+        self.assertEqual(plan['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(plan['migrated_story_count'], 0)
         self.assertEqual(plan['passed_assertion_count'], 0)
 

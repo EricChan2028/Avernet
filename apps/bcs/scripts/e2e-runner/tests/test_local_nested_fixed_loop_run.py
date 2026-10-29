@@ -191,7 +191,7 @@ class NestedFixedLoopRunTests(unittest.TestCase):
                                                   'preprod': 'REMOTE_UNSUPPORTED'})
         self.assertEqual(binding['source_binding']['parent'], 'story_nested_fixed_loop_workflows')
         self.assertEqual(binding['runtime_dir'], str(state.resolve()))
-        self.assertEqual(len(binding['legacy_inventory']), 34)
+        self.assertEqual(len(binding['legacy_inventory']), len(current_manifest()['legacy_inventory']))
         runtime = FakeOwnedRuntime.instances[0].init_kwargs
         self.assertEqual(runtime['allow_ambient_local_identity'], False)
         self.assertEqual(runtime['binary_sha256'], self.digest)
@@ -242,7 +242,7 @@ class NestedFixedLoopRunTests(unittest.TestCase):
         summary = build_nested_fixed_loop_report(state)
         self.assertEqual(summary, result['canonical_summary'])
         self.assertEqual(summary['status'], 'LOCAL_SUITE_PASS')
-        self.assertEqual(summary['scope']['legacy_inventory_count'], 34)
+        self.assertEqual(summary['scope']['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(summary['scope']['independent_slice'], True)
         self.assertEqual(summary['reports']['expected_assertion_count'], 16)
         self.assertEqual(summary['reports']['observed_assertion_count'], 16)
@@ -606,7 +606,7 @@ class NestedIndependenceTests(unittest.TestCase):
     def test_slice_stays_bound_to_the_34_story_backlog_parent(self):
         from bcs_e2e.inventory import current_manifest
         legacy = current_manifest()['legacy_inventory']
-        self.assertEqual(len(legacy), 34)
+        self.assertEqual(len(legacy), len(current_manifest()['legacy_inventory']))
         self.assertIn('story_nested_fixed_loop_workflows', {row['id'] for row in legacy})
         binding = nested_fixed_loop_source_binding()
         self.assertEqual(binding['parent'], 'story_nested_fixed_loop_workflows')

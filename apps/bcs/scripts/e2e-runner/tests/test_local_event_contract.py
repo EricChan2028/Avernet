@@ -8,6 +8,7 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from bcs_e2e.local_event_contract import ROOT,PARENT,REQUIREMENTS,event_source_binding,source_body
 from bcs_e2e.run_state import RunStateError
+from bcs_e2e.inventory import current_manifest
 
 
 class EventContractTests(unittest.TestCase):
@@ -53,4 +54,4 @@ class EventContractTests(unittest.TestCase):
         registered=next(r for r in plan['local_registered_executors'] if r['legacy_id']==PARENT)
         self.assertFalse(registered['grants_release_credit'])
         self.assertEqual(registered['required_assertion_count'],20)
-        self.assertEqual(plan['legacy_inventory_count'],34);self.assertEqual(plan['migrated_story_count'],0)
+        self.assertEqual(plan['legacy_inventory_count'],len(current_manifest()['legacy_inventory']));self.assertEqual(plan['migrated_story_count'],0)

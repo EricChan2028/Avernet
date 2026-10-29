@@ -88,7 +88,7 @@ class RetainedFileTests(unittest.TestCase):
         summary=build_report(self.profile,self.root/'file-one')
         self.assertEqual(summary['status'],'RETAINED_CASE_PASS')
         self.assertEqual(summary['scope']['suite'],'preprod-retained-file-v1')
-        self.assertEqual(summary['scope']['legacy_inventory_count'],34)
+        self.assertEqual(summary['scope']['legacy_inventory_count'], len(current_manifest('preprod-retained-file-v1')['legacy_inventory']))
         self.assertEqual([c['id'] for c in summary['cases']],['RETAIN-FILE-01'])
         self.assertEqual(summary['retention']['quota']['status'],'NOT_RECORDED')
         junit=render_junit(summary);markdown=render_markdown(summary)
@@ -212,7 +212,7 @@ class RetainedFileTests(unittest.TestCase):
         self.assertEqual([c['id'] for c in old['cases']],['RETAIN-GROUP-01','RETAIN-SESSION-01'])
         self.assertEqual([c['id'] for c in file['cases']],['RETAIN-FILE-01'])
         self.assertEqual(file['legacy_inventory'],old['legacy_inventory'])
-        self.assertEqual(len(file['legacy_inventory']),34)
+        self.assertEqual(len(file['legacy_inventory']), len(current_manifest('preprod-retained-file-v1')['legacy_inventory']))
 
 
 if __name__=='__main__':unittest.main()
