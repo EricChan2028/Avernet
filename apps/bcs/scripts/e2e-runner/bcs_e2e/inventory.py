@@ -63,20 +63,17 @@ KNOWN_UNMAPPED_LEGACY_IDS = frozenset({
     'story_provider_operator_manages_subbots',
     'story_collaboration_draft_delivery',
     'story_collaboration_draft_group_launch',
-    # Upstream #3173 (0873001b6) added this story after the freeze:
-    'story_retired_service_policy',
 })
-REVIEWED_RELEASE_PARENT_COUNT = 29
+REVIEWED_RELEASE_PARENT_COUNT = 30
 
 
 def reviewed_release_inventory(manifest: dict | None = None) -> list[dict]:
-    """Return the reviewed 29-Story release denominator from the current 41-row legacy inventory.
+    """Return the reviewed 30-Story release denominator from the current 41-row legacy inventory.
 
-    Twelve legacy parents sit outside the reviewed release denominator: the
-    pre-existing five backlog rows plus seven registered 2026-10-29 during the
-    harness re-freeze (six long-unregistered upstream stories and the #3173
-    retirement story). They are known backlog, not silently missing or absorbed
-    into this release denominator.
+    Eleven legacy parents sit outside the reviewed release denominator: the
+    pre-existing backlog rows plus six registered 2026-10-29 during the
+    harness re-freeze (long-unregistered upstream stories). They are known
+    backlog, not silently missing or absorbed into this release denominator.
     """
     value = current_manifest() if manifest is None else manifest
     legacy = value['legacy_inventory']
@@ -84,7 +81,7 @@ def reviewed_release_inventory(manifest: dict | None = None) -> list[dict]:
     reviewed = [row for row in legacy if row['id'] not in KNOWN_UNMAPPED_LEGACY_IDS]
     if len(ids) != len(set(ids)) or len(reviewed) != REVIEWED_RELEASE_PARENT_COUNT:
         raise RunStateError(
-            'reviewed release denominator changed; review the five known '
+            'reviewed release denominator changed; review the known '
             'unmapped stories separately')
     return reviewed
 
@@ -93,7 +90,7 @@ def assert_reviewed_parent(parent_id: str, *, family: str) -> str:
     """Fail closed unless a dual parent is a reviewed release parent.
 
     Known unmapped backlog parents stay executable and are named explicitly;
-    anything outside the reviewed 29-story denominator or the unmapped backlog
+    anything outside the reviewed release denominator or the unmapped backlog
     is rejected before any binding is frozen.
     """
     reviewed = {row['id'] for row in reviewed_release_inventory()}

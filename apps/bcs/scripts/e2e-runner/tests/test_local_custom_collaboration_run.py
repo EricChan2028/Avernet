@@ -95,7 +95,7 @@ class CustomCollaborationLifecycleTests(unittest.TestCase):
             {'id': 'story_cli_operator_creates_custom_collaboration'}
         ] + [{'id': f'other-{index}'} for index in range(28)]
         # The frozen binding keeps the raw 41-row manifest; only the release
-        # denominator guards read the reviewed 29-row inventory.
+        # denominator guards read the reviewed reviewed-release-row inventory.
         raw_legacy = list(reviewed_legacy) + [
             {'id': legacy_id} for legacy_id in KNOWN_UNMAPPED_LEGACY_IDS]
         self.raw_legacy = raw_legacy
@@ -276,7 +276,7 @@ class CustomCollaborationLifecycleTests(unittest.TestCase):
         self.assertEqual(len(canonical['requirements']), 3)
 
     def test_release_parent_guard_reads_reviewed_denominator_not_the_raw_freeze(self):
-        without_parent = [{'id': f'other-{index}'} for index in range(29)]
+        without_parent = [{'id': f'other-{index}'} for index in range(30)]
         with patch('bcs_e2e.local_custom_collaboration_run.reviewed_release_inventory',
                    return_value=without_parent):
             with self.assertRaisesRegex(RunStateError, 'parent is missing'):

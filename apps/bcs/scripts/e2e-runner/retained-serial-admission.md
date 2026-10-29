@@ -122,7 +122,7 @@ observer binding and report integrity are still checked.
 A successful selected Case emits `status=PASS` in its new Case report and
 `status=RETAINED_CASE_PASS` in JSON/JUnit/Markdown summary, with exit 0 from both
 `retained-run` and `report`. The summary explicitly names the one selected Case;
-the other retained Case is unexecuted/skipped, the 29-parent legacy denominator is
+the other retained Case is unexecuted/skipped, the reviewed legacy denominator is
 unchanged and `full_release_status=NOT_QUALIFIED`. This is not PILOT_PASS or a
 full-suite release result. Required Bot completion assertions in other Stories
 are not reclassified as diagnostic.
@@ -186,7 +186,7 @@ isolation remained based on the existing owner attestation.
 
 Private IDs, credentials, endpoint bindings and raw runtime evidence remain in
 ignored local Run/batch directories. JSON/JUnit/Markdown reports retain the
-unexecuted retained Session Case and the original 29-parent release denominator;
+unexecuted retained Session Case and the original reviewed release denominator;
 full release remains NOT_QUALIFIED. These two Group rounds do not qualify
 RETAIN-SESSION-01, PRE-01/02/03, omitted deletion assertions, model quality, remote
 coverage or production/cloud execution. Session/WS is the next distinct slice.

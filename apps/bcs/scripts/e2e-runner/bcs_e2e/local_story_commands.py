@@ -68,6 +68,8 @@ LOCAL_STORY_COMMANDS = frozenset({
     'local-result-queue-report',
     'local-nested-fixed-loop-run',
     'local-nested-fixed-loop-report',
+    'local-service-policy-run',
+    'local-service-policy-report',
 })
 
 
@@ -277,7 +279,7 @@ def register_local_story_commands(commands) -> None:
     file_report.add_argument('--state-dir', type=Path, required=True)
     file_report.add_argument('--output-dir', type=Path)
 
-    # Independent local-only slice; intentionally outside the 29-case coverage registry.
+    # Independent local-only slice; intentionally outside the reviewed release coverage registry.
     caller_run = commands.add_parser('local-caller-execution-run', help='Run the complete owned-local caller-execution Story as one black-box child')
     for name in ('binary', 'state-dir'):
         caller_run.add_argument('--' + name, type=Path, required=True)
@@ -289,7 +291,7 @@ def register_local_story_commands(commands) -> None:
     caller_report.add_argument('--state-dir', type=Path, required=True)
     caller_report.add_argument('--output-dir', type=Path)
 
-    # Independent local-only slice; intentionally outside the 29-case coverage registry.
+    # Independent local-only slice; intentionally outside the reviewed release coverage registry.
     draft_run = commands.add_parser('local-draft-group-run', help='Run the complete owned-local Draft group Story as black-box children beside one owned BCS runtime')
     for name in ('binary', 'state-dir'):
         draft_run.add_argument('--' + name, type=Path, required=True)
@@ -301,7 +303,7 @@ def register_local_story_commands(commands) -> None:
     draft_report.add_argument('--state-dir', type=Path, required=True)
     draft_report.add_argument('--output-dir', type=Path)
 
-    # Independent local-only slice; intentionally outside the 29-case coverage registry.
+    # Independent local-only slice; intentionally outside the reviewed release coverage registry.
     result_run = commands.add_parser('local-result-queue-run', help='Run the complete owned-local Result queue Story as black-box children beside one owned BCS runtime')
     for name in ('binary', 'state-dir'):
         result_run.add_argument('--' + name, type=Path, required=True)
@@ -313,7 +315,7 @@ def register_local_story_commands(commands) -> None:
     result_report.add_argument('--state-dir', type=Path, required=True)
     result_report.add_argument('--output-dir', type=Path)
 
-    # Independent local-only slice; intentionally outside the 29-case coverage registry.
+    # Independent local-only slice; intentionally outside the reviewed release coverage registry.
     nested_run = commands.add_parser('local-nested-fixed-loop-run', help='Run the complete owned-local Nested fixed-loop Story as black-box children beside one owned BCS runtime')
     for name in ('binary', 'cli-binary', 'state-dir'):
         nested_run.add_argument('--' + name, type=Path, required=True)
@@ -324,6 +326,19 @@ def register_local_story_commands(commands) -> None:
     nested_report = commands.add_parser('local-nested-fixed-loop-report', help='Verify frozen owned-local Nested fixed-loop evidence offline')
     nested_report.add_argument('--state-dir', type=Path, required=True)
     nested_report.add_argument('--output-dir', type=Path)
+
+    # Promoted 30th reviewed release parent slice: the retired service policy
+    # Story runs as one black-box child beside one owned BCS runtime.
+    policy_run = commands.add_parser('local-service-policy-run', help='Run the complete upstream Retired service policy Story as one black-box child beside one owned BCS runtime')
+    for name in ('binary', 'state-dir'):
+        policy_run.add_argument('--' + name, type=Path, required=True)
+    for name in ('binary-sha256', 'run-id', 'confirm-run-id'):
+        policy_run.add_argument('--' + name, required=True)
+    for name in ('allow-local-processes', 'allow-fixture-write', 'allow-write'):
+        policy_run.add_argument('--' + name, action='store_true')
+    policy_report = commands.add_parser('local-service-policy-report', help='Verify frozen retired service policy evidence offline')
+    policy_report.add_argument('--state-dir', type=Path, required=True)
+    policy_report.add_argument('--output-dir', type=Path)
 
 
 def dispatch_local_story_command(args, *, write_reports: Callable) -> tuple[dict, int]:
@@ -716,6 +731,23 @@ def dispatch_local_story_command(args, *, write_reports: Callable) -> tuple[dict
         outputs = write_reports(summary, args.output_dir, {'all'}) if args.output_dir is not None else {}
         report = {'status': summary['status'], 'summary': summary, 'outputs': outputs, 'ready_to_execute': False}
         rc = 0 if summary['status'] == 'LOCAL_SUITE_PASS' else 130 if summary['status'] == 'CANCELLED' else 2
+    elif args.command == 'local-service-policy-run':
+        from .local_service_policy_run import local_service_policy_run
+        report = local_service_policy_run(binary=args.binary, binary_sha256=args.binary_sha256,
+            state_dir=args.state_dir, run_id=args.run_id, confirm_run_id=args.confirm_run_id,
+            allow_local_processes=args.allow_local_processes, allow_fixture_write=args.allow_fixture_write,
+            allow_write=args.allow_write)
+        rc = 0 if report['status'] == 'LOCAL_SERVICE_POLICY_PASS' else 130 if report['status'] == 'CANCELLED' else 2
+    elif args.command == 'local-service-policy-report':
+        from .local_service_policy_reporting import build_service_policy_report
+        summary = build_service_policy_report(args.state_dir)
+        if args.output_dir is not None:
+            source_root, destination = args.state_dir.resolve(), args.output_dir.resolve()
+            if destination == source_root or source_root in destination.parents:
+                raise RunStateError('Offline service policy rendering cannot overwrite original evidence')
+        outputs = write_reports(summary, args.output_dir, {'all'}) if args.output_dir is not None else {}
+        report = {'status': summary['status'], 'summary': summary, 'outputs': outputs, 'ready_to_execute': False}
+        rc = 0 if summary['status'] == 'LOCAL_SUITE_PASS' else 130 if summary['status'] == 'CANCELLED' else 2
     return report, rc
 
 
@@ -765,6 +797,7 @@ CASES = (
     CaseBinding('LOCAL-EDGE-FRIEND-MUTUAL-AUTO-APPROVE-01', 'local-edge-friend-mutations-run', function='case_executor.execute_case'),
     CaseBinding('LOCAL-EDGE-ERROR-ADMISSION-BRANCHES-01', 'local-edge-friend-mutations-run', function='case_executor.execute_case'),
     CaseBinding('LOCAL-EDGE-CONNECT-PRIVATE-DISCOVER-01', 'local-edge-friend-mutations-run', function='case_executor.execute_case'),
+    CaseBinding('LOCAL-SERVICE-POLICY-01', 'local-service-policy-run'),
 )
 DEFAULT_PANEL = Path(__file__).resolve().parents[3] / 'assets/panel/dist/index.umd.js'
 DEFAULT_TEMPLATES = Path(__file__).resolve().parents[3] / 'seeds/collaboration-templates'

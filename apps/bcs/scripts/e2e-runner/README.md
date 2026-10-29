@@ -251,7 +251,7 @@ python3 runner.py gate \
 Expected pilot result is `PILOT_PASS` with all three cases `PASS`,
 `LOCAL_SURROGATE` evidence, and `cleanup=PASS`. The qualification command
 still returns non-zero with `NOT_QUALIFIED`: local surrogate evidence is not
-real BCS/Gateway/WS/BaaS/OB evidence and does not cover the frozen 29-entry
+real BCS/Gateway/WS/BaaS/OB evidence and does not cover the frozen reviewed
 release inventory. The repository integration test
 `test_local_pilot_integration.py` runs this lifecycle with a temporary pool
 registry and verifies that distinction.
@@ -345,7 +345,7 @@ proof.
 ## Report generation
 
 After case reports exist, render the three report forms without claiming that
-the full 29-entry release inventory passed:
+the full reviewed release inventory passed:
 
 ```bash
 python3 runner.py report \
@@ -1758,7 +1758,7 @@ This is an accidental-misuse guard, not a sandbox for hostile Python code.
 Historical report parsing remains structural and reads the frozen inventory;
 new execution policy does not rewrite old snapshots or retroactively qualify
 them. Executing/preparing with unreviewed effects fails closed, while the existing
-three Case versions and all 29 legacy inventory entries remain unchanged.
+three Case versions and all legacy inventory entries remain unchanged.
 
 ### Runtime Case resource scope
 
@@ -2256,7 +2256,7 @@ The ordinary offline `plan` command includes `next_story_migrations`, backed by
 It preserves the full workspace, trusted-team and CLI-file parent boundaries,
 required roles, business obligations, known soft-pass corrections and capability
 gaps. It never executes Shell or repairs fixtures. All three remain NOT_MIGRATED;
-33 declared obligations are not 33 passing tests, and the 29-entry release
+33 declared obligations are not 33 passing tests, and the reviewed release
 inventory remains unchanged. See `next-story-migrations.md` for the source audit
 and implementation prerequisites. A changed legacy source requires explicit
 review and map update rather than automatic rebaselining.
@@ -2567,13 +2567,13 @@ It covers the trusted-team parent's local legacy business operations, but leaves
 `full_story_status=NOT_MIGRATED` and `ready_to_execute=false`: remote adapter/effect
 admission, release manifest integration, edge permission graph/notification
 qualification and the old all-module coverage gate are not supplied by this
-command. The 29-entry migration denominator is not reduced.
+command. The reviewed migration denominator is not reduced.
 
 #### Versioned trusted-team registration
 
 The CLI opt-in now loads `trusted-team-manifest.json` as suite
 `owned-local-trusted-team-v1`. It registers the full parent against all five
-`FRIEND.*` obligations while retaining the unchanged 29-entry legacy denominator
+`FRIEND.*` obligations while retaining the unchanged legacy release denominator
 and zero full-migration/release credit. Ordinary offline `plan` exposes this as
 `local_registered_executors`; it grants no execution or remote authority.
 
@@ -2661,7 +2661,7 @@ Successful local completion is `LOCAL_SUITE_PASS`, with 5 requirement results,
 runtime shutdown, not deletion of friendship/request history. CLI/network
 instrumentation, local mock Human identity and SQLite remain distinct from
 Gateway/SSO, Bot model behavior, edge/notification validation and remote OB.
-The original 29-parent inventory and full release `NOT_QUALIFIED` remain visible.
+The reviewed parent inventory and full release `NOT_QUALIFIED` remain visible.
 
 Failures and cancellation after context binding also attempt a canonical Case
 report, without overwriting the original journal or hiding the primary outcome.
@@ -2766,7 +2766,7 @@ It starts one private owned BCS process, provisions fresh CEO/PM/ENG/QA roles,
 and executes create/detail/patch/list/member/label/visibility business checks.
 The frozen parent mapping retains all 17 obligations: seven selected API
 obligations and ten CLI/incident/messaging/deletion obligations not run here. The
-original 29-Story release inventory and all remote admission gates remain unchanged.
+reviewed release inventory and all remote admission gates remain unchanged.
 
 ```bash
 python3 runner.py local-workspace-api \
@@ -2945,7 +2945,7 @@ record and cannot be silently promoted to a canonical PASS. Integrity hashes
 detect drift; they are not an anti-forgery boundary against the filesystem owner.
 
 `local_registered_executors` lists Workspace as `INTEGRATED_LOCAL` alongside
-trusted-team and CLI File. The original 29-Story migration denominator and
+trusted-team and CLI File. The reviewed migration denominator and
 remote release gaps remain unchanged.
 
 ### Optional real panel asset in the owned Local Adapter
@@ -3006,7 +3006,7 @@ in private Run evidence. Credentials stay in memory and references are cleared;
 this is not secure erasure or remote token revocation. Owned fixtures and local
 history remain for inspection, and only the owned child process is stopped.
 
-JSON, JUnit and Markdown reports preserve all eight obligations and all29 original
+JSON, JUnit and Markdown reports preserve all eight obligations and the original reviewed
 release entries, with independent functional/evidence/cleanup results. Offline
 verification binds the original outputs and journals and refuses incomplete or
 changed publication; optional export must be outside the original Run tree.
@@ -3109,7 +3109,7 @@ absence. Prior public and sharing reports stay unchanged at `reports/` and
 only after the owned child stops. All three stages remain offline-verifiable.
 A later-stage failure cannot become full-flow PASS or overwrite earlier evidence.
 Full local parent coverage does not qualify remote execution, remote cleanup,
-all29 release Stories, or the shared-stack coverage gate.
+all reviewed release Stories, or the shared-stack coverage gate.
 
 ### Development regression cadence
 
@@ -3134,7 +3134,7 @@ repeated triggers rather than deleting coverage or soft-passing failures.
   report checks when no live behavior changed; never relabel old execution as new.
 - Run the complete runner regression and all-module Singlebox/artifact gates at
   integration/release milestones. This cadence does not change repository CI,
-  coverage thresholds, release acceptance or the original29-Story denominator.
+  coverage thresholds, release acceptance or the reviewed release denominator.
 - Workers own focused validation of their disjoint changes. The main process
   runs integration validation after review; it does not reflexively repeat an
   unchanged worker selection. Any shared-dependency change invalidates relevant
@@ -3171,7 +3171,7 @@ receiver closure, credential-reference clearing and unchanged workspace fixtures
 JSON/JUnit/Markdown reports freeze the31-operation/18-observation evidence and
 ledger. Offline report verification never contacts the previous runtime or
 rewrites original artifacts. Local parent success does not qualify remote
-execution, all29 release Stories, or the shared-stack coverage gate.
+execution, all reviewed release Stories, or the shared-stack coverage gate.
 
 ### Complete disabled-channel HTTP parent
 
@@ -3348,7 +3348,7 @@ service Sessions (`error_message=aborted`) in owned SQLite, then executes the
 original Group DELETE. Group/Session/runtime-binding removal is verified while
 Run/Node/definition history is retained. Canonical cleanup is **RETAINED**, not
 physical database erasure. JSON/JUnit/Markdown and independent offline projection
-cover17requirements,22HTTP operations and the original29parent release denominator.
+cover17requirements,22HTTP operations and the reviewed release parent denominator.
 No remote authentication, external engine completion, production/aliyun or full
 release qualification follows from this local result.
 
@@ -3429,7 +3429,7 @@ and message row remain: cleanup is **RETAINED**, not physical data erasure.
 
 No Bot receiver/engine is started. Actual Webhook HTTP delivery is verified, not
 Bot reasoning or successful delivery to an engine. Local Principal signing is a
-local test boundary, not SSO or production Gateway qualification. Original29parent
+local test boundary, not SSO or production Gateway qualification. Reviewed parent
 release scope, remote gaps and all CI/release gates remain unchanged.
 
 ### Slow-Judge owned sandbox prerequisite
@@ -3508,7 +3508,7 @@ outside the state directory is rejected.
 
 This is an independent local-only slice: `release_parent_denominator=false`,
 `independent_slice=true`, `remote_validation=NOT_RUN`, `grants_release_credit=false`,
-evidence granularity `SHARED_CHILD_RECEIPT`. It is not part of the 29-case coverage
+evidence granularity `SHARED_CHILD_RECEIPT`. It is not part of the reviewed case coverage
 registry, it does not touch the pilot inventory or trusted-team manifest, and it starts
 no OpenClaw/engine-adapter process of its own.
 
@@ -3556,7 +3556,7 @@ rejected.
 
 This is an independent local-only slice: `release_parent_denominator=false`,
 `independent_slice=true`, `remote_validation=NOT_RUN`,
-`grants_release_credit=false`; it is outside the 29-case coverage registry and
+`grants_release_credit=false`; it is outside the reviewed case coverage registry and
 both pilot manifests, and it starts no OpenClaw or engine-adapter process of
 its own.
 
@@ -3604,7 +3604,7 @@ This is an independent local-only slice bound to the already unmapped
 `story_state_machine_result_queue` backlog parent:
 `release_parent_denominator=false`, `independent_slice=true`,
 `remote_validation=NOT_RUN`, `grants_release_credit=false`; it is outside the
-29-case coverage registry and both pilot manifests, and it starts no OpenClaw
+reviewed case coverage registry and both pilot manifests, and it starts no OpenClaw
 or engine-adapter process of its own.
 
 ### Complete owned-local Nested fixed-loop Story
@@ -3648,5 +3648,5 @@ This is an independent local-only slice bound to the already unmapped
 `story_nested_fixed_loop_workflows` backlog parent:
 `release_parent_denominator=false`, `independent_slice=true`,
 `remote_validation=NOT_RUN`, `grants_release_credit=false`; it is outside the
-29-case coverage registry and both pilot manifests, and it starts no OpenClaw
+reviewed case coverage registry and both pilot manifests, and it starts no OpenClaw
 or engine-adapter process of its own.

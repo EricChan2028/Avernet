@@ -1,4 +1,4 @@
-"""The two backlog Edge TestCase adapters kept out of the reviewed 29-parent set.
+"""The two backlog Edge TestCase adapters kept out of the reviewed reviewed-release-parent set.
 
 They live in the same owned runtime and journal shape as the release parent
 cases, but remain independent slices: they do not enlarge the reviewed

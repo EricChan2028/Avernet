@@ -31,12 +31,12 @@ class LocalEntrySwitchReviewTests(unittest.TestCase):
         self.assertEqual(result["schema_version"], 1)
         self.assertEqual(result["status"], "READY")
         self.assertTrue(result["ready_to_execute"])
-        self.assertEqual(result["executor_count"], 29)
+        self.assertEqual(result["executor_count"], 30)
         self.assertEqual(result["partial_executor_count"], 0)
         self.assertEqual(result["blockers"], [])
         self.assertEqual(
             [row["status"] for row in result["executors"]],
-            ["READY"] * 29,
+            ["READY"] * 30,
         )
         self.assertEqual(result["entry_switch"], "PERFORMED_LOCAL_SHELL_DEFAULT")
         self.assertEqual(result["remote_validation"], "NOT_RUN")
@@ -56,9 +56,9 @@ class LocalEntrySwitchReviewTests(unittest.TestCase):
             result = review_local_entry_switch()
         self.assertEqual(result["status"], "BLOCKED")
         self.assertFalse(result["ready_to_execute"])
-        self.assertEqual(result["executor_count"], 28)
+        self.assertEqual(result["executor_count"], 29)
         self.assertEqual(result["partial_executor_count"], 1)
-        self.assertIn("executor.count:28 expected 29", result["blockers"])
+        self.assertIn("executor.count:29 expected 30", result["blockers"])
         self.assertIn(
             "parents.missing:story_user_builds_trusted_team",
             result["blockers"],
@@ -68,7 +68,7 @@ class LocalEntrySwitchReviewTests(unittest.TestCase):
             result["blockers"],
         )
 
-    def test_wrong_parent_keeps_the_review_from_claiming_the_original_29(self):
+    def test_wrong_parent_keeps_the_review_from_claiming_the_reviewed_denominator(self):
         mutated = plan()
         mutated["local_registered_executors"][0]["legacy_id"] = "unknown-parent"
         with patch("bcs_e2e.local_entry_switch.migration_plan", return_value=mutated):
@@ -79,7 +79,7 @@ class LocalEntrySwitchReviewTests(unittest.TestCase):
             result["blockers"],
         )
         self.assertIn("parents.unexpected:unknown-parent", result["blockers"])
-        self.assertNotIn("executor.count:29 expected 29", result["blockers"])
+        self.assertNotIn("executor.count:30 expected 30", result["blockers"])
 
     def test_non_integrated_reporting_is_an_exact_blocker(self):
         mutated = plan()

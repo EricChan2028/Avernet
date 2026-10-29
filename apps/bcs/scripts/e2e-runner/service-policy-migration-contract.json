@@ -1,0 +1,132 @@
+{
+  "case_id": "LOCAL-SERVICE-POLICY-01",
+  "environment": {
+    "local": "LOCAL_EXECUTOR_ONLY",
+    "preprod": "REMOTE_UNSUPPORTED"
+  },
+  "evidence_granularity": "OWNED_CHILD_RECEIPT",
+  "grants_release_credit": false,
+  "independent_slice": false,
+  "owned_runtime_binary": {
+    "auto_build": false,
+    "build_command": "cargo build -p bcs --bin bcs",
+    "hash_algorithm": "sha256",
+    "opt_in_env": [
+      "BCS_E2E_TEST_BINARY",
+      "BCS_E2E_TEST_BINARY_SHA256"
+    ],
+    "package": "bcs",
+    "required_arguments": [
+      "--binary",
+      "--binary-sha256"
+    ]
+  },
+  "parent": "story_retired_service_policy",
+  "release_parent_denominator": true,
+  "remote_validation": "NOT_RUN",
+  "requirements": [
+    {
+      "expectation": "Mock-admission loopback bootstrap: the fixture ensures the local Human principal endpoint answers and reads a one-time registration token before any business request; every later call carries the Human mock identity headers.",
+      "id": "SERVICE-POLICY.mock-human-bootstrap",
+      "markers": [
+        "retired-service-policy-compliance"
+      ],
+      "story_lines": [
+        57,
+        58
+      ]
+    },
+    {
+      "expectation": "The story registers the disposable Policy-story-driver Bot with the one-time token and onboards it with testing domain, review skill and local scope; the lifetime is provider-free with no scripted Provider or Judge mock.",
+      "id": "SERVICE-POLICY.provider-free-bot-registration",
+      "markers": [
+        "retired-service-policy-compliance"
+      ],
+      "story_lines": [
+        59,
+        67
+      ]
+    },
+    {
+      "expectation": "Both legacy service_spec encodings (a disabled policy object and a null compatibility shim) stay accepted at group creation while persisting nothing: the created group, the read-back group and every response payload are free of service_spec and retired_service_spec.",
+      "id": "SERVICE-POLICY.legacy-encoding-ignored",
+      "markers": [
+        "retired-service-policy-compliance"
+      ],
+      "story_lines": [
+        68,
+        78
+      ]
+    },
+    {
+      "expectation": "Patching group settings with a legacy service_spec is rejected as Gone with status 410 and the exact service_policy_retired error; the retirement is observable instead of silently ignored.",
+      "id": "SERVICE-POLICY.retired-settings-gone",
+      "markers": [
+        "retired-service-policy-compliance"
+      ],
+      "story_lines": [
+        80,
+        83
+      ]
+    },
+    {
+      "expectation": "Neither the retired disabled flag nor max_concurrency=1 gates service invocation: two distinct service_invocation Sessions return 202 running with session_kind service_invocation, each persists its submitted input, and the two invocations never share a Session id.",
+      "id": "SERVICE-POLICY.invocation-lifecycle",
+      "markers": [
+        "retired-service-policy-compliance"
+      ],
+      "story_lines": [
+        84,
+        95
+      ]
+    },
+    {
+      "expectation": "Retirement does not allow reactivating a running invocation: posting the session_id of a running invocation is refused with 409 and a running-shaped error while the stored input stays unmodified.",
+      "id": "SERVICE-POLICY.running-reactivation-denied",
+      "markers": [
+        "retired-service-policy-compliance"
+      ],
+      "story_lines": [
+        97,
+        102
+      ]
+    },
+    {
+      "expectation": "A completed chat Session cannot be converted into a service invocation (400 with a not-service_invocation error), and the completed chat Session keeps its completed status and output intact after the refused conversion.",
+      "id": "SERVICE-POLICY.chat-session-guard",
+      "markers": [
+        "retired-service-policy-compliance"
+      ],
+      "story_lines": [
+        104,
+        115
+      ]
+    },
+    {
+      "expectation": "Teardown deletes every Session with the bot_id query, both Groups with the bot_id query and the disposable Bot; any cleanup failure fails the whole story instead of leaking state.",
+      "id": "SERVICE-POLICY.cleanup-disposition",
+      "markers": [
+        "retired-service-policy-compliance"
+      ],
+      "story_lines": [
+        118,
+        129
+      ]
+    }
+  ],
+  "schema_version": 1,
+  "source_file_revisions": {
+    "service_policy_story.py": "9dfc6c2a226c67a3537105e5d9c5c2fd2e69220b",
+    "service_policy_story.sh": "fbec4aadd1aa747e5d2e2f80136d8a884c594e76"
+  },
+  "source_revision": "31bbfdc933ebf5e9361a273ea16b668326092b48",
+  "sources": {
+    "service_policy_story.py": "66aa329bf8e3ca31e563f244514098203cfd1bfc68fbefa7ed865aa7f1c722f9",
+    "service_policy_story.sh": "be1c8bbc2f7d37d69cdab2f77f77fffcd78ca61be720b4a0341fdb72e6a145c5"
+  },
+  "story_checks": 23,
+  "story_markers": [
+    "Retired service policy story: {checks} HTTP/response checks passed"
+  ],
+  "suite": "owned-local-service-policy-v1"
+}

@@ -257,9 +257,9 @@ class MigrationInventoryTests(unittest.TestCase):
         self.assertFalse(slow_judge['grants_release_credit'])
         self.assertFalse(result['ready_to_execute'])
 
-    def test_local_migration_set_covers_the_29_reviewed_release_parent_stories(self):
+    def test_local_migration_set_covers_the_reviewed_release_parent_stories(self):
         result = migration_plan()
-        self.assertEqual(len(result['local_registered_executors']), 29)
+        self.assertEqual(len(result['local_registered_executors']), 30)
         self.assertEqual(result['local_partial_executors'], [])
         all_inventory = {row['id'] for row in current_manifest()['legacy_inventory']}
         known_unmapped = set(KNOWN_UNMAPPED_LEGACY_IDS)
@@ -358,7 +358,7 @@ class MigrationInventoryTests(unittest.TestCase):
 
     def test_caller_execution_is_one_independent_local_slice_with_no_release_credit(self):
         result = migration_plan()
-        self.assertEqual(len(result['local_registered_executors']), 29)
+        self.assertEqual(len(result['local_registered_executors']), 30)
         slices = result['local_independent_slices']
         self.assertEqual(len(slices), 4)
         row = slices[0]
@@ -397,7 +397,7 @@ class MigrationInventoryTests(unittest.TestCase):
                                     'environment', 'release_parent_denominator',
                                     'independent_slice', 'remote_validation',
                                     'grants_release_credit', 'source_map'})
-        # The slice never joins the 29-case release coverage registry.
+        # The slice never joins the reviewed-release-case release coverage registry.
         self.assertNotIn('LOCAL-CALLER-EXEC-01', {case.case_id for case in CASES})
         for suite in ('preprod-pilot-v1', 'owned-local-trusted-team-v1'):
             manifest = current_manifest(suite)
@@ -458,7 +458,7 @@ class MigrationInventoryTests(unittest.TestCase):
                                     'environment', 'release_parent_denominator',
                                     'independent_slice', 'remote_validation',
                                     'grants_release_credit', 'source_map'})
-        # The slice never joins the 29-case release coverage registry.
+        # The slice never joins the reviewed-release-case release coverage registry.
         self.assertNotIn('LOCAL-DRAFT-GROUP-01', {case.case_id for case in CASES})
         for suite in ('preprod-pilot-v1', 'owned-local-trusted-team-v1'):
             manifest = current_manifest(suite)
@@ -520,7 +520,7 @@ class MigrationInventoryTests(unittest.TestCase):
                                     'environment', 'release_parent_denominator',
                                     'independent_slice', 'remote_validation',
                                     'grants_release_credit', 'source_map'})
-        # The slice never joins the 29-case release coverage registry; its parent stays a
+        # The slice never joins the reviewed-release-case release coverage registry; its parent stays a
         # known unmapped backlog row inside the 41-story legacy inventory.
         self.assertNotIn('LOCAL-RESULT-QUEUE-01', {case.case_id for case in CASES})
         for suite in ('preprod-pilot-v1', 'owned-local-trusted-team-v1'):

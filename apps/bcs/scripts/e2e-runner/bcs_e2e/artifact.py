@@ -110,7 +110,11 @@ def disk_digest() -> str:
     # This session's Direct-chat and Custom-collaboration leaf splits consume
     # the staged headroom and add two further focused leaf modules, so the
     # allowance grows by exactly those two leaf files.
-    if len(paths) > 321:
+    # The owned-local Retired service policy black-box slice adds its focused
+    # source binding contract, run lifecycle and offline report projection
+    # modules, so the allowance grows by exactly those three files plus one
+    # slot of headroom for a future adapter split.
+    if len(paths) > 324:
         raise ValueError('executor artifact exceeds its source-file budget')
     digest = hashlib.sha256()
     for path in paths:

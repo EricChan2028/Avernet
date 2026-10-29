@@ -511,3 +511,42 @@ Previous freeze generations: `48b23001e` (umbrella + 15 families) and `71860eae`
   +    local debug_bin="$repo_root/apps/bcs/target/debug/bcs-cli"
        if [[ -x "$debug_bin" ]]; then
 
+
+## Post-freeze disposition (2026-10-30)
+
+- Promoted `story_retired_service_policy` out of `KNOWN_UNMAPPED_LEGACY_IDS` and raised
+  `REVIEWED_RELEASE_PARENT_COUNT` 29→30: the retired Story (#3173 legs adopted 2026-10-29)
+  becomes the 30th reviewed release parent slice (`LOCAL-SERVICE-POLICY-01`,
+  `owned-local-service-policy-v1`). The source binding registry entries use freeze-content
+  sha1 (`service-policy-migration-contract.json`: py `9dfc6c2a226c67a3537105e5d9c5c2fd2e69220b`,
+  sh `fbec4aadd1aa747e5d2e2f80136d8a884c594e76`); drift-gate sha256 anchors are untouched.
+- Artifact allowance grows 321→324 (three new slice modules plus one headroom slot).
+- `render_markdown` falls back to `verification_boundary.not_proven` when `mock_boundary` is
+  absent (mock-free promoted slices); existing slice output is unchanged.
+- 27 focused tests for the slice (9 contract + 18 run-lifecycle, including promotion,
+  registration-order and independent-slice negatives).
+- Truthful-run bug found and fixed: `OwnedBcsProcess`'s stop path resets `ready=false`, so
+  `child_pass`/`runtime_complete` demanding `ready is True` made every genuine run BLOCKED
+  (live-1: `STOPPED/rc=0`, 23/23 HTTP checks, marker and redaction gates all PASS, yet the
+  case was BLOCKED). The two unsatisfiable `ready` clauses were dropped; STOPPED + rc0 +
+  frozen binary/executor digests + 23 observed checks + marker + redaction remain the gate.
+  Live rerun `20261030-service-policy-live-2` → `LOCAL_SERVICE_POLICY_PASS` (8/8
+  requirements, `http_checks=23`, `LOCAL_SUITE_PASS`, integrity PASS; evidence under
+  `~/.codex/bcs-e2e/e2e-dev-fresh-service-policy-live-2/`; credentials `NOT_CAPTURED`).
+- Count-free wording sweep: 45 standing-invariant replacements across README.md (19),
+  next-story-migrations.md (22), retained-file.md (1), retained-serial-admission.md (2) and
+  trusted-team-acceptance.md (1). The 2026-10-29 pin tables and dated log events keep their
+  historical facts; only standing denominator claims became count-free. Acceptance grep for
+  `29-case|29-entry|29-parent|29-Story|all29|original29|Original29` across the runner docs
+  is empty.
+- Test follow-through: `COMMAND_ORDER` +2 (`local-service-policy-run/-report`), the
+  entry-switch absorbing case moved `executor.count` 28→29 with its blocker string, and the
+  coverage-suite literal counts became `REVIEWED_RELEASE_PARENT_COUNT - 2 / - 1` dynamics.
+- Regression (strict-subset gate): pytest at frozen base `eda01324d` = 20 failed / 2988
+  passed / 220 skipped; working tree = 20 failed / 3015 passed / 220 skipped; failure ID
+  sets identical (13 unique, zero new). unittest: base `failures=5, errors=15, skipped=220`;
+  working tree identical counts and identical failure name set.
+- Standalone fixture hygiene: six orphan processes (five OpenClaw profile daemons plus one
+  `target/debug/bcs`, all `ppid=1`, started 2026-10-29 20:37–22:45 inside this worktree's
+  `.standalone-openclaw/`) were terminated; they pinned load ~6 on this box and produced
+  timing flakes in the judge-sandbox suite (green twice after cleanup).

@@ -575,7 +575,9 @@ def render_markdown(summary: dict) -> str:
               f"- Physical data erasure: {summary.get('cleanup', {}).get('physical_data_erasure', 'NOT_VERIFIED')}",
               f"- Associated history purge: {summary.get('cleanup', {}).get('associated_history_purge', 'NOT_VERIFIED')}",
               "- Retained data needs an environment-owner disposition; expiry labels are not deletion evidence.",
-              f"- Mock boundaries: {', '.join(summary['mock_boundary']['not_proven'])}",
+              f"- Mock boundaries: {', '.join(
+                  (summary.get('mock_boundary') or summary.get('verification_boundary')
+                   or {'not_proven': []})['not_proven'])}",
               f"- Timing interpretation: {summary['timing']['interpretation']}", ""]
     if summary.get('scope', {}).get('suite') in {'owned-local-trusted-team-v1', 'owned-local-cli-file-v1', 'owned-local-workspace-v1', 'owned-local-network-v1', 'owned-local-session-public-v1', 'owned-local-session-sharing-v1', 'owned-local-session-flow-v1', 'owned-local-provider-v1', 'owned-local-channel-http-v1', 'owned-local-channel-cli-v1', 'owned-local-delivery-policy-v1', 'owned-local-direct-chat-v1', 'owned-local-edge-read-v1', 'owned-local-operator-cli-v1'}:
         lines += ['## Parent Story requirements', '',

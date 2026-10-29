@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bcs_e2e import local_story_commands as suite
 from bcs_e2e.cli import main
 from bcs_e2e.run_state import RunStateError
+from bcs_e2e.inventory import REVIEWED_RELEASE_PARENT_COUNT
 from tests.test_local_template_runtime import approved_asset
 
 
@@ -58,15 +59,15 @@ class CoverageSuiteTests(unittest.TestCase):
         (path / 'sentinel.txt').write_text(case.case_id)
         return {'status': 'PASS'}, 0
 
-    def test_all_29_summary_report_and_unique_directories(self):
+    def test_all_reviewed_release_parents_summary_report_and_unique_directories(self):
         result, call = self.run_suite()
         self.assertEqual(result['status'], 'LOCAL_COVERAGE_SUITE_PASS')
         self.assertEqual(result['exit_code'], 0)
-        self.assertEqual(result['counts']['PASS'], 29)
-        self.assertEqual(call.call_count, 29)
+        self.assertEqual(result['counts']['PASS'], REVIEWED_RELEASE_PARENT_COUNT)
+        self.assertEqual(call.call_count, REVIEWED_RELEASE_PARENT_COUNT)
         self.assertEqual([row['case_id'] for row in result['cases']], [case.case_id for case in suite.CASES])
-        self.assertEqual(len({row['state_dir'] for row in result['cases']}), 29)
-        self.assertEqual(len({row['run_id'] for row in result['cases']}), 29)
+        self.assertEqual(len({row['state_dir'] for row in result['cases']}), REVIEWED_RELEASE_PARENT_COUNT)
+        self.assertEqual(len({row['run_id'] for row in result['cases']}), REVIEWED_RELEASE_PARENT_COUNT)
         for row in result['cases']:
             self.assertEqual((Path(row['state_dir']) / 'sentinel.txt').read_text(), row['case_id'])
         self.assertEqual(result['binaries']['bcs']['sha256'], self.digest)
@@ -85,9 +86,9 @@ class CoverageSuiteTests(unittest.TestCase):
                 return {'status': 'BLOCKED', 'error_type': 'AssertionError'}, 2
             return outcome
         result, call = self.run_suite(execute)
-        self.assertEqual(call.call_count, 29)
+        self.assertEqual(call.call_count, REVIEWED_RELEASE_PARENT_COUNT)
         self.assertEqual(result['exit_code'], 2)
-        self.assertEqual(result['counts']['PASS'], 27)
+        self.assertEqual(result['counts']['PASS'], REVIEWED_RELEASE_PARENT_COUNT - 2)
         self.assertEqual(result['counts']['FAILED'], 1)
         self.assertEqual(result['counts']['BLOCKED'], 1)
         self.assertEqual(result['cases'][-1]['status'], 'PASS')
@@ -105,7 +106,7 @@ class CoverageSuiteTests(unittest.TestCase):
         self.assertEqual(call.call_count, 1)
         self.assertEqual(result['status'], 'CANCELLED')
         self.assertEqual(result['exit_code'], 130)
-        self.assertEqual(result['counts']['CANCELLED'], 29)
+        self.assertEqual(result['counts']['CANCELLED'], REVIEWED_RELEASE_PARENT_COUNT)
         self.assertTrue(Path(result['cases'][0]['state_dir']).exists())
         self.assertFalse(result['cases'][1]['attempted'])
         self.assertFalse(Path(result['cases'][1]['state_dir']).exists())
@@ -147,7 +148,7 @@ class CoverageSuiteTests(unittest.TestCase):
                 (collision / 'sentinel').write_text('preexisting')
             return self.pass_case(case, kwargs, panel)
         result, call = self.run_suite(execute)
-        self.assertEqual(call.call_count, 28)
+        self.assertEqual(call.call_count, REVIEWED_RELEASE_PARENT_COUNT - 1)
         self.assertEqual(result['cases'][1]['status'], 'BLOCKED')
         self.assertEqual(result['cases'][1]['failure_reason'], 'case_state_dir_already_exists')
         self.assertEqual((collision / 'sentinel').read_text(), 'preexisting')
@@ -160,7 +161,7 @@ class CoverageSuiteTests(unittest.TestCase):
                 target.symlink_to(kwargs['state_dir'], target_is_directory=True)
             return self.pass_case(case, kwargs, panel)
         result, call = self.run_suite(execute)
-        self.assertEqual(call.call_count, 28)
+        self.assertEqual(call.call_count, REVIEWED_RELEASE_PARENT_COUNT - 1)
         self.assertEqual(result['cases'][1]['status'], 'BLOCKED')
         self.assertEqual((Path(result['cases'][0]['state_dir']) / 'sentinel.txt').read_text(), suite.CASES[0].case_id)
 
@@ -185,14 +186,14 @@ class CoverageSuiteTests(unittest.TestCase):
     def test_missing_cli_only_blocks_cli_cases_and_continues(self):
         result, call = self.run_suite(cli_binary=None, cli_binary_sha256=None)
         cli_count = sum(case.cli for case in suite.CASES)
-        self.assertEqual(call.call_count, 29 - cli_count)
+        self.assertEqual(call.call_count, REVIEWED_RELEASE_PARENT_COUNT - cli_count)
         self.assertEqual(result['counts']['BLOCKED'], cli_count)
         self.assertEqual(result['cases'][-1]['status'], 'PASS')
 
     def test_wrong_bcs_sha_starts_nothing_and_reports_every_case(self):
         result, call = self.run_suite(binary_sha256='0' * 64)
         call.assert_not_called()
-        self.assertEqual(result['counts']['BLOCKED'], 29)
+        self.assertEqual(result['counts']['BLOCKED'], REVIEWED_RELEASE_PARENT_COUNT)
         self.assertEqual(result['exit_code'], 2)
         self.assertIn('sha256_mismatch', result['cases'][0]['failure_reason'])
 
@@ -203,7 +204,7 @@ class CoverageSuiteTests(unittest.TestCase):
                     state_dir=self.root / mode,
                     panel_asset=self.root / 'absent.js' if mode == 'missing' else self.panel,
                     panel_sha256=None if mode == 'missing' else '0' * 64)
-                self.assertEqual(call.call_count, 28)
+                self.assertEqual(call.call_count, REVIEWED_RELEASE_PARENT_COUNT - 1)
                 self.assertEqual(result['counts']['BLOCKED'], 1)
                 self.assertEqual(result['cases'][3]['status'], 'BLOCKED')
                 self.assertEqual(result['cases'][-1]['status'], 'PASS')
@@ -219,14 +220,14 @@ class CoverageSuiteTests(unittest.TestCase):
             publish(root, summary, finished=finished)
         with patch.object(suite, '_publish', side_effect=checkpoint):
             result, call = self.run_suite()
-        self.assertEqual(call.call_count, 29)
+        self.assertEqual(call.call_count, REVIEWED_RELEASE_PARENT_COUNT)
         self.assertEqual(result['status'], 'CANCELLED')
         self.assertEqual(result['exit_code'], 130)
         self.assertTrue(result['cancellation_requested'])
 
     def test_missing_templates_are_blocked_not_skipped(self):
         result, call = self.run_suite(template_manifest=None, template_manifest_sha256=None)
-        self.assertEqual(call.call_count, 28)
+        self.assertEqual(call.call_count, REVIEWED_RELEASE_PARENT_COUNT - 1)
         self.assertEqual(result['cases'][14]['status'], 'BLOCKED')
         self.assertEqual(result['cases'][-1]['status'], 'PASS')
         self.assertIn('approved_template_manifest', result['cases'][14]['failure_reason'])
@@ -237,7 +238,7 @@ class CoverageSuiteTests(unittest.TestCase):
                 raise ModuleNotFoundError('not available')
             return self.pass_case(case, kwargs, panel)
         result, call = self.run_suite(execute)
-        self.assertEqual(call.call_count, 29)
+        self.assertEqual(call.call_count, REVIEWED_RELEASE_PARENT_COUNT)
         self.assertEqual(result['cases'][0]['status'], 'BLOCKED')
         self.assertEqual(result['cases'][-1]['status'], 'PASS')
 
@@ -254,7 +255,7 @@ class CoverageSuiteTests(unittest.TestCase):
             rc = main(['local-coverage-suite', '--list-cases'])
         execute.assert_not_called()
         self.assertEqual(rc, 0)
-        self.assertEqual(len(json.loads(output.getvalue())['cases']), 29)
+        self.assertEqual(len(json.loads(output.getvalue())['cases']), REVIEWED_RELEASE_PARENT_COUNT)
         self.assertFalse(self.kwargs['state_dir'].exists())
 
     def test_cli_run_parameter_forwarding_and_exit_code(self):
@@ -282,8 +283,8 @@ class BindingTests(unittest.TestCase):
     def test_live_inventory_exact_mapping(self):
         listing = suite.list_cases()
         self.assertEqual(listing['status'], 'READY')
-        self.assertEqual(listing['case_count'], 29)
-        self.assertEqual(len({case.case_id for case in suite.CASES}), 29)
+        self.assertEqual(listing['case_count'], REVIEWED_RELEASE_PARENT_COUNT)
+        self.assertEqual(len({case.case_id for case in suite.CASES}), REVIEWED_RELEASE_PARENT_COUNT)
         for row in listing['cases']:
             self.assertEqual(row['status'], 'READY')
             self.assertTrue(row['command'])

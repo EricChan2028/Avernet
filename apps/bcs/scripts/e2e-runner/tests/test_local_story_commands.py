@@ -69,6 +69,8 @@ COMMAND_ORDER = (
     'local-result-queue-report',
     'local-nested-fixed-loop-run',
     'local-nested-fixed-loop-report',
+    'local-service-policy-run',
+    'local-service-policy-report',
 )
 
 

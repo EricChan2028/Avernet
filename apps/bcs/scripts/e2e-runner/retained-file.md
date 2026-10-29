@@ -5,7 +5,7 @@
 The next file slice is `RETAIN-FILE-01` in a separate
 `preprod-retained-file-v1` inventory. The existing two-Case
 `preprod-retained-v1` inventory and all frozen historical Run files remain
-unchanged. Both inventories retain the original 29-parent release denominator.
+unchanged. Both inventories retain the original reviewed release denominator.
 This is a PRE-03 Web API subset, not CLI-file, notification-delivery, deletion,
 physical-erasure or full-release qualification.
 

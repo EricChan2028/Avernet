@@ -47,7 +47,7 @@ contracts; their lack of qualification is not a sixth trusted-team helper.
 
 1. **Local registration and requirement binding are implemented.** The separate
    `owned-local-trusted-team-v1` suite registers this Case and all five requirement
-   mappings, with 58 required assertions and the unchanged 29-parent denominator.
+   mappings, with 58 required assertions and the unchanged reviewed denominator.
    Its manifest/executor/source/binary binding is frozen before fixture writes and
    checked through the lifecycle. The offline plan exposes LOCAL_EXECUTOR_ONLY,
    not migrated count or PASS credit. The existing pilot and retained suites do

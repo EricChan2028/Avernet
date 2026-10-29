@@ -13,7 +13,7 @@ explicit review; there is no automatic checksum update or Story remapping.
 The map contains **23 direct business steps and 33 migration obligations**. These
 are planning declarations, **not executed assertions or a replacement for the
 legacy runtime test denominator**. All three parents remain `NOT_MIGRATED`, with
-zero migrated Stories and zero passed assertions. The existing 29-entry release
+zero migrated Stories and zero passed assertions. The existing reviewed release
 inventory, PRE-01/02/03 Case versions and existing execution contracts are unchanged.
 The map covers only the next three parents, not all of task 6.1.
 
@@ -350,7 +350,7 @@ public after participant admission; this is an explicit retained fixture mutatio
 not restoration or a change to a borrowed/remote Bot. No engine runtime or remote service is started.
 
 A create-once `file-story-binding.json` freezes the parent obligations, original
-29-Story denominator, executor/binary digests and Run root before fixture writes.
+reviewed denominator, executor/binary digests and Run root before fixture writes.
 A source-bound completion receipt is published after owned process shutdown.
 `local-file-report` uses those artifacts offline and the shared JSON/JUnit/Markdown
 renderers; a pending publication, missing completion, changed source, missing
@@ -526,7 +526,7 @@ initial Sessions/four participant rows/four ledger resources, owned child
 STOPPED and credential references CLEARED. Its private local JSON report SHA256
 is `240a2f06753fa06f1074cdebf224fd18ad34a16e358e317e49295bc6995e9f87`.
 Generated runtime data remains ignored and is not committed. No PRE call,
-remote fixture mutation, full 29-Story migration claim or all-module Singlebox
+remote fixture mutation, full reviewed migration claim or all-module Singlebox
 coverage run occurred. OpenSpec remains 38/54; task 6.1 is still incomplete.
 
 
@@ -649,7 +649,7 @@ original message/cleanup assertions or replace them with configuration PASS.
 Independent subprocess invocation of `local-workspace-run --with-incident-config`
 completed as `workspace-config-20261015-113436-173e3e`, exit 0. It selected fifteen
 of the original eighteen obligations: fifteen PASS; messages, incident deletion
-and proposal NOT_RUN. Original 29-Story inventory, NOT_MIGRATED parent status and
+and proposal NOT_RUN. Original reviewed inventory, NOT_MIGRATED parent status and
 NOT_QUALIFIED release status remain unchanged.
 
 Private retained artifacts are under
@@ -1029,7 +1029,7 @@ The unittest summary and final counters were parsed independently because
 some existing tests flush JSON stdout after the unittest summary.
 
 This is complete **runner** regression, not the all-module Singlebox coverage
-gate, production/preproduction release acceptance or all29 Story migration.
+gate, production/preproduction release acceptance or all reviewed Story migration.
 OpenSpec remains38/54; proceed with remaining network/Session Story work.
 
 ## Formal owned panel input and manifest readback (2026-10-15)
@@ -1058,7 +1058,7 @@ child-directory contract, not a guard bypass.
 
 This only closes the real manifest asset prerequisite. The Agent-network
 identity/directory/onboarding/delete business Story is still NOT_MIGRATED;
-original29 denominator and OpenSpec38/54 remain unchanged. The previous1552-test
+the original reviewed denominator and OpenSpec38/54 remain unchanged. The previous1552-test
 full runner result predates this increment; focused regression below is its own
 evidence rather than reusing the older full-suite claim.
 
@@ -1083,7 +1083,7 @@ Bot-token onboarding, browser URL validation without visiting it, Human review,
 capability readback and exact owner deletion/404. No broad cleanup or POST retry.
 
 Canonical publication waits for owned-process shutdown and cleared credential
-references, preserves all eight obligations and original29 release denominator,
+references, preserves all eight obligations and the original reviewed release denominator,
 and binds JSON/JUnit/Markdown outputs plus original sources. This implementation
 entry is not acceptance: live regression and independent CLI evidence are still
 pending. Task6.1 and OpenSpec38/54 remain incomplete; remote and release gates
@@ -1116,7 +1116,7 @@ response, lost deletion response, and denied CEO restoration. The111-test run
 above is the final evidence; the initial failed log is retained separately.
 
 This is complete **owned-local Agent-network** acceptance, not remote onboarding,
-all29 migration, all-module Singlebox coverage or full release qualification.
+all reviewed migration, all-module Singlebox coverage or full release qualification.
 OpenSpec stays38/54. Continue the original complete Session parent next.
 
 ## Session public API/JWT/WS migration (2026-10-15)
@@ -1171,7 +1171,7 @@ Storage observations use bounded exact-Run/role queries in the owned local DB,
 with at most eight SELECTs per snapshot transaction and explicit row limits.
 No remote DB, schema change, SQL deletion, generic Bot stop, or history purge.
 The parent denominator stays9, selected helper1 passes and remaining8 are NOT_RUN;
-all29 release entries remain unqualified. OpenSpec remains38/54, task6.1 open.
+all reviewed release entries remain unqualified. OpenSpec remains38/54, task6.1 open.
 
 ## Session CLI/invitation sequence (2026-10-15)
 
@@ -1280,7 +1280,7 @@ Evidence:
   Log SHA256:`a2840a557093cc4105e44d1aa6f45f3620212f53467f559f40874549f8312457`.
 
 This completes only the local Session parent, not task6.1 or remote/full-release
-qualification. OpenSpec remains38/54; original29 release Stories and pending
+qualification. OpenSpec remains38/54; the original reviewed release Stories and pending
 all-module Singlebox/coverage/remote obligations remain unchanged.
 
 ## Early Session failure identity correction (2026-10-15)
@@ -1342,7 +1342,7 @@ Validation was batched under D50:
 
 Provider/organization/credential/admin-run retention still needs the full executor
 and canonical report. No direct DB deletion, remote operation or Cookie access.
-Task6.1 remains open; OpenSpec38/54 and original29release denominator unchanged.
+Task6.1 remains open; OpenSpec38/54 and the original reviewed release denominator unchanged.
 
 ## Complete owned-local Provider/Organization parent (2026-10-15)
 
@@ -1392,7 +1392,7 @@ Independent new-entry acceptance:
  independent log:`/private/tmp/e2e-provider-independent-20261015.log`.
 
 Task6.1 remains open,OpenSpec38/54. Provider full local parent is now registered;
-original29release migration qualification remains unchanged. No Cookie,remote
+the original reviewed release migration qualification remains unchanged. No Cookie,remote
 DB,preprod/prod request,wide cleanup or product API modification was performed.
 
 ## Complete disabled-channel HTTP parent (2026-10-15)
@@ -1427,7 +1427,7 @@ log:`/private/tmp/e2e-channel-independent-20261015.log`.
 
 Default disabled wiring is deliberately the behavior under test, not a mock
 standing in for enabled channels. This does not prove external IM integration,
-remote authentication, the separate CLI parent, or full29-Story release coverage.
+remote authentication, the separate CLI parent, or full reviewed release coverage.
 No Cookie/remote request/DB write/product API change. Task6.1 and OpenSpec38/54
 remain open, with original release denominator intact.
 
@@ -1485,7 +1485,7 @@ log:`/private/tmp/e2e-channel-cli-independent-20261015.log`.
 Worker model gpt-5.6-sol wrote the bounded executor/driver/storage/tests; main
 reviewed and integrated, no worker broad test duplication. No remote/Cookie,
 product API change,engine execution,physical history purge or fullrelease credit.
-Task6.1 remains open; OpenSpec38/54,original29-Story release denominator unchanged.
+Task6.1 remains open; OpenSpec38/54,the original reviewed Story release denominator unchanged.
 
 ## Local Story command extraction before further migration (2026-10-15)
 
@@ -1674,7 +1674,7 @@ not a claim of latest master or deployed code. Final log:
 `/private/tmp/e2e-template-final-20261015.log`.
 No new CLI entrypoint was added, so no redundant independent command run was
 needed. Full runner/Singlebox remain integration milestones. Task6.1 remains
-open, OpenSpec38/54 and original29parent release scope unchanged.
+open, OpenSpec38/54 and the original reviewed parent release scope unchanged.
 
 ## Complete Structured collaboration local parent (2026-10-15)
 
@@ -1751,7 +1751,7 @@ must not stand in for actual group/session/message delivery.
 
 Validation: `tests.test_local_event_contract tests.test_migration_inventory`,
 **14tests/0.551s/OK**, zero skips. This map grants no executor or release credit;
-Task6.1/6.2 remain open, OpenSpec38/54 and all29parent obligations unchanged.
+Task6.1/6.2 remain open, OpenSpec38/54 and all reviewed parent obligations unchanged.
 No BCS process, remote request, credential read or business mutation was needed
 for this source-only increment.
 
@@ -1794,7 +1794,7 @@ actual BCS callback or deployment was involved. Real Eventing startup and full
 20-obligation parent acceptance are intentionally deferred to one coherent Story
 integration, not mislabeled as passed by these loopback-fixture tests.
 Task6.2 remains incomplete (Webhook parent/slow-Judge/fixed-loop acceptance),
-Task6.1 remains open, and OpenSpec38/54 / original29parents are unchanged.
+Task6.1 remains open, and OpenSpec38/54 / the original reviewed parents are unchanged.
 
 ## Complete Event Webhook local parent (2026-10-15)
 
@@ -1879,7 +1879,7 @@ or user credentials are needed. The complete original parent is not yet register
 Validation:13tests/0.475s/OK for new source-map plus migration inventory; after
 adding explicit callback/poll path tamper checks,only3affected source-map tests
 were rerun. All passed,no skips; no runtime or remote action. Task6.1/6.2 and
-OpenSpec38/54 remain incomplete with all29parents in scope.
+OpenSpec38/54 remain incomplete with all reviewed parents in scope.
 
 ## Isolated blocking Judge/positive Provider sandbox prerequisite (2026-10-15)
 
@@ -1918,7 +1918,7 @@ Worker tests were not rerun by main. The process regression uses local helper
 children,not productBCS. No actualBCS start,remote request,Cookie,paidmodel or
 full-parent callback qualification occurred. Complete22-obligation execution,
 canonical reporting and independent CLI acceptance remain next. Task6.1/6.2
-remain open,OpenSpec38/54 and original29parent scope unchanged.
+remain open,OpenSpec38/54 and the original reviewed parent scope unchanged.
 
 ## Slow-Judge complete owned-local runner and canonical report (2026-10-18)
 
@@ -1930,7 +1930,7 @@ uses one fresh state directory. It binds the owned BCS debug binary SHA256, the
 owned Provider/Judge loopback sandbox, the four-role local fixture/identity set
 and message storage before any business intent.
 
-Success is granted only when all 22 obligations pass, the 29-parent legacy
+Success is granted only when all 22 obligations pass, the reviewed parent legacy
 denominator and original source binding remain bound, credentials are cleared,
 the owned child exits normally and the Judge listener closes without failure.
 The run writes persistent binding/execution/runtime files, then publishes a
@@ -3941,7 +3941,7 @@ during this command-lifecycle increment.
   load-dependent judge-sandbox timing flake (`test_scripted_outcomes_are_consumed_in_order`;
   passes isolated: module 17/17 OK, single test OK); after the dispatch fix the
   authoritative discovery rerun is fully green.
-- Boundary: independent local-only slice — outside the 29-case release denominator, the case
+- Boundary: independent local-only slice — outside the reviewed case release denominator, the case
   registry and both pilot manifests; `remote_validation=NOT_RUN`, `grants_release_credit=false`,
   binary `auto_build=false` (`cargo build -p bcs --features test-utils --bin bcs-caller-e2e`
   runs explicitly by the owner). No live Singlebox or preprod request was made for this
@@ -4219,6 +4219,6 @@ policy.
 
 Live closure remains the separate gate: DM live r4 against the preprod station
 with the refreshed trio Cookie/token material and the reviewed convergence
-budgets, the ledger rebuild for the retained 29 parent stories, and
+budgets, the ledger rebuild for the retained parent stories, and
 `remote_validation=NOT_RUN` / `grants_release_credit=false` stay in force until
 that evidence lands.
