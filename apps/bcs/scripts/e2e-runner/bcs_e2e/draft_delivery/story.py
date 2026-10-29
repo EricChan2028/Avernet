@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import http.client
 import json
+import os
 from pathlib import Path
 import sys
 import urllib.parse
@@ -313,7 +314,11 @@ def main(argv=None) -> int:
     evidence_path = Path(args.evidence_file)
     if evidence_path.exists() or evidence_path.is_symlink():
         raise StoryFailure('evidence file must be fresh')
-    evidence_path.write_bytes(payload)
+    fd = os.open(evidence_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'wb') as stream:
+        stream.write(payload)
+        stream.flush()
+        os.fsync(stream.fileno())
     print(MARKER_PREFIX + str(story.checks) + MARKER_SUFFIX, flush=True)
     return 0
 
