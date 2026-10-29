@@ -15,10 +15,10 @@ from bcs_e2e.file_transport import FileTransportError, RemoteFileClient
 
 
 class Reply:
-    def __init__(self, body, code=200):
+    def __init__(self, body, code=200, headers=None):
         self.body = body if isinstance(body, bytes) else json.dumps(body).encode()
         self.code = code
-        self.headers = {}
+        self.headers = headers or {}
         self.closed = False
 
     def read(self, _limit=-1):
@@ -212,6 +212,100 @@ class FileTransportTests(unittest.TestCase):
         self.assertEqual(calls[0].full_url, calls[1].full_url)
         self.assertNotIn("Cookie", calls[0].headers)
         self.assertEqual(calls[1].headers["Cookie"], "private-cookie")
+
+    def test_preprod_public_share_is_token_only_and_reuses_its_access_mode(self):
+        profile = self.profile()
+        profile["environment"]["tier"] = "preprod"
+        profile["entrypoint"]["kind"] = "gateway"
+        profile["entrypoint"]["origin"] = "https://gateway.example.test"
+        profile["file_transfer"] = {
+            "allowed_share_origins": ["https://share.example.test"],
+            "allowed_storage_origins": ["https://storage.example.test"],
+        }
+        metadata = {
+            "file_id": "f-1", "file_name": "x.txt", "mime_type": "text/plain",
+            "size": 7, "sha256": None, "status": "Ready",
+        }
+        file_headers = {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Content-Disposition": 'attachment; filename="x.txt"',
+        }
+        missing = {"error": "NOT_FOUND", "message": "shared file not found"}
+        opener = Mock()
+        opener.open.side_effect = [
+            Reply(b"payload", headers=file_headers),
+            Reply(metadata),
+            Reply(b"payload", headers=file_headers),
+            Reply(missing, 404),
+            Reply(missing, 404),
+        ]
+        with patch.dict(os.environ, {"BCS_E2E_LOCAL_COOKIE": "private-cookie"}), \
+                patch("bcs_e2e.file_transport.build_opener", return_value=opener):
+            client = RemoteFileClient(profile)
+            target = ("https://share.example.test/sessions/shared-file/content"
+                      "?token=issued-secret")
+            client.register_share_target("issued-secret", target)
+            shared_metadata, metadata_record = client.shared_metadata("issued-secret")
+            body, content_record = client.shared_download("issued-secret")
+            absent_metadata, metadata_absence = \
+                client.shared_metadata_verify_deleted("issued-secret")
+            absent_content, content_absence = client.verify_shared_deleted("issued-secret")
+
+        self.assertEqual(shared_metadata, metadata)
+        self.assertEqual(body, b"payload")
+        self.assertIsNone(absent_metadata)
+        self.assertIsNone(absent_content)
+        for record in (metadata_record, content_record, metadata_absence, content_absence):
+            self.assertEqual(record["response_projection"]["share_access_contract"],
+                             "public-share-token-v1")
+            self.assertEqual(record["response_projection"]["auth_mode"],
+                             "SHARE_TOKEN_ONLY")
+        self.assertEqual(
+            metadata_record["access_checks"][0]["response_projection"],
+            {"share_access_contract": "public-share-token-v1",
+             "unauthenticated_access": "ALLOWED",
+             "access_kind": "CONTENT_BYTES", "content_length": 7,
+             "content_disposition": "ATTACHMENT", "content_type": "text/plain"},
+        )
+        calls = [call.args[0] for call in opener.open.call_args_list]
+        self.assertEqual(len(calls), 5)
+        for request in calls:
+            self.assertNotIn("Cookie", request.headers)
+            self.assertNotIn("Authorization", request.headers)
+            self.assertTrue(request.full_url.startswith(
+                "https://share.example.test/sessions/shared-file"))
+        self.assertNotIn("issued-secret", json.dumps(
+            [metadata_record, content_record, metadata_absence, content_absence]))
+
+    def test_public_share_probe_rejects_empty_control_json_and_html_responses(self):
+        profile = self.profile()
+        profile["environment"]["tier"] = "preprod"
+        profile["entrypoint"]["kind"] = "gateway"
+        profile["entrypoint"]["origin"] = "https://gateway.example.test"
+        profile["file_transfer"] = {
+            "allowed_share_origins": ["https://share.example.test"],
+            "allowed_storage_origins": ["https://storage.example.test"],
+        }
+        target = ("https://share.example.test/sessions/shared-file/content"
+                  "?token=issued-secret")
+        responses = (
+            Reply(b"", headers={"Content-Type": "text/plain"}),
+            Reply(b'{"actionType":"LOGIN","buserviceErrorCode":"USER_NOT_LOGIN"}',
+                  headers={"Content-Type": "application/json"}),
+            Reply(b"<html><body>login</body></html>",
+                  headers={"Content-Type": "text/html"}),
+        )
+        for response in responses:
+            opener = Mock()
+            opener.open.return_value = response
+            with self.subTest(status=response.code, body=response.body[:20]), \
+                    patch.dict(os.environ, {"BCS_E2E_LOCAL_COOKIE": "private-cookie"}), \
+                    patch("bcs_e2e.file_transport.build_opener", return_value=opener):
+                client = RemoteFileClient(profile)
+                client.register_share_target("issued-secret", target)
+                with self.assertRaises(FileTransportError):
+                    client.probe_share_access("issued-secret")
+                opener.open.assert_called_once()
 
     def test_preprod_shared_deletion_verification_uses_cookie(self):
         profile = self.profile()

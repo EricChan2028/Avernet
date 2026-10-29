@@ -27,6 +27,7 @@ class FileTransportError(RequestFailure):
 
 
 PREPROD_SHARE_SSO = "preprod-sso-share-token-v2"
+PUBLIC_SHARE_TOKEN = "public-share-token-v1"
 
 
 @dataclass
@@ -35,6 +36,8 @@ class _FileResponse:
     record: dict
     location: str  # Empty for non-redirect responses; never exposed in reports.
     sensitive_values: tuple[str, ...] = field(default=(), repr=False)
+    content_type: str = ""
+    content_disposition: str = ""
 
 
 def _segment(value: str) -> str:
@@ -78,6 +81,7 @@ class RemoteFileClient:
         }
         self.prepared: dict[tuple[str, str], dict] = {}
         self.share_targets: dict[str, str] = {}
+        self.share_accesses: dict[str, tuple[dict, dict]] = {}
 
     def _path(self, session_id: str, suffix: str = "") -> str:
         return f"{self.file_path_prefix}/sessions/{_segment(session_id)}/files{suffix}"
@@ -168,8 +172,13 @@ class RemoteFileClient:
             raw = response.read(self.max_bytes + 1)
             if len(raw) > self.max_bytes:
                 raise FileTransportError("file response exceeds configured size limit")
-            return _FileResponse(raw, record, response.headers.get("Location", "") or response.headers.get("location", ""),
-                                 sensitive_values)
+            return _FileResponse(
+                raw, record,
+                response.headers.get("Location", "") or response.headers.get("location", ""),
+                sensitive_values,
+                response.headers.get("Content-Type", "") or "",
+                response.headers.get("Content-Disposition", "") or "",
+            )
         except FileTransportError as error:
             raise error.with_record(record)
         except (OSError, URLError, UnicodeError):
@@ -270,7 +279,7 @@ class RemoteFileClient:
         except FileTransportError as error:
             raise error.with_record(response.record)
 
-    def _share_sso_required(self) -> bool:
+    def _preprod_share_access_profile(self) -> bool:
         return (self.profile["environment"]["tier"] == "preprod"
                 and self.profile["entrypoint"]["kind"] == "gateway"
                 and set(self.profile["auth"].get("header_env", {})) == {"Cookie"}
@@ -291,41 +300,146 @@ class RemoteFileClient:
             result["decision_by"] = "ACE"
         return result
 
-    def probe_share_login_required(self, token: str) -> tuple[dict, dict]:
-        if not self._share_sso_required():
-            raise FileTransportError("preprod shared file SSO requires a gateway Cookie profile")
+    @staticmethod
+    def _control_json_envelope(raw: bytes) -> bool:
+        try:
+            payload = json.loads(raw)
+        except (UnicodeError, json.JSONDecodeError):
+            return False
+        if not isinstance(payload, dict):
+            return False
+        return (
+            payload.get("actionType") == "LOGIN"
+            or ("code" in payload and
+                ("message" in payload or "data" in payload))
+            or ("error" in payload and "message" in payload)
+        )
+
+    @classmethod
+    def _public_share_content_projection(cls, response: _FileResponse) -> dict:
+        """Accept a token-only share response only when it carries file bytes."""
+        if not response.body:
+            raise FileTransportError(
+                "no-Cookie share request returned an empty body").with_record(response.record)
+        if cls._control_json_envelope(response.body):
+            raise FileTransportError(
+                "no-Cookie share request returned a control JSON envelope").with_record(response.record)
+        content_type = response.content_type.strip().lower()
+        media_type = content_type.partition(";")[0].strip()
+        disposition = response.content_disposition.strip().lower()
+        if "attachment" in disposition:
+            disposition_kind = "ATTACHMENT"
+        elif "inline" in disposition:
+            disposition_kind = "INLINE"
+        elif disposition:
+            disposition_kind = "PRESENT"
+        else:
+            disposition_kind = "ABSENT"
+        body_prefix = response.body.lstrip()[:256].lower()
+        html_page = (media_type in {"text/html", "application/xhtml+xml"}
+                     or body_prefix.startswith((b"<!doctype html", b"<html", b"<head", b"<body")))
+        if html_page:
+            raise FileTransportError(
+                "no-Cookie share request returned an HTML page").with_record(response.record)
+        positive_content_type = media_type.startswith((
+            "text/", "image/", "audio/", "video/", "application/octet-stream",
+            "application/pdf", "application/zip",
+        ))
+        if disposition_kind not in {"ATTACHMENT", "INLINE"} and not positive_content_type:
+            raise FileTransportError(
+                "no-Cookie share response did not identify file content").with_record(response.record)
+        return {
+            "share_access_contract": PUBLIC_SHARE_TOKEN,
+            "unauthenticated_access": "ALLOWED",
+            "access_kind": "CONTENT_BYTES",
+            "content_length": len(response.body),
+            "content_disposition": disposition_kind,
+            "content_type": media_type or "ABSENT",
+        }
+
+    def probe_share_access(self, token: str) -> tuple[dict, dict]:
+        if not self._preprod_share_access_profile():
+            raise FileTransportError(
+                "preprod shared file access probe requires a gateway Cookie profile")
         response = self._send(
             "GET", self._share_url(token),
-            operation="file.share_login_required",
+            operation="file.share_access_probe",
             expected=(200, 401, 403), include_auth=False, share=True,
         )
         status = response.record["http_status"]
-        if status == 200 and self._login_required_projection(response.body) != {
-            "anonymous_route": "LOGIN_REQUIRED", "decision_by": "ACE",
-        }:
-            raise FileTransportError("no-Cookie share request did not prove the reviewed login denial").with_record(response.record)
-        denial_kind = {200: "ACE_LOGIN", 401: "HTTP_401", 403: "HTTP_403"}[status]
+        if status == 200:
+            login = self._login_required_projection(response.body)
+            if login == {"anonymous_route": "LOGIN_REQUIRED", "decision_by": "ACE"}:
+                response.record["response_projection"] = {
+                    "share_access_contract": PREPROD_SHARE_SSO,
+                    "unauthenticated_access": "DENIED",
+                    "denial_kind": "ACE_LOGIN",
+                }
+                return {
+                    "status": "EXPECTED_LOGIN_DENIAL",
+                    "file_access": "DENIED",
+                    "access_mode": "SSO",
+                }, response.record
+            projection = self._public_share_content_projection(response)
+            response.record["response_projection"] = projection
+            return {
+                "status": "PUBLIC_CONTENT_ALLOWED",
+                "file_access": "ALLOWED",
+                "access_mode": "PUBLIC",
+                "content_length": projection["content_length"],
+            }, response.record
+        denial_kind = {401: "HTTP_401", 403: "HTTP_403"}[status]
         response.record["response_projection"] = {
             "share_access_contract": PREPROD_SHARE_SSO,
             "unauthenticated_access": "DENIED",
             "denial_kind": denial_kind,
         }
-        return {"status": "EXPECTED_LOGIN_DENIAL", "file_access": "DENIED"}, response.record
+        return {
+            "status": "EXPECTED_LOGIN_DENIAL",
+            "file_access": "DENIED",
+            "access_mode": "SSO",
+        }, response.record
 
-    def shared_download_sso(self, token: str) -> tuple[bytes, dict]:
-        if not self._share_sso_required():
-            raise FileTransportError("preprod shared file SSO requires a gateway Cookie profile")
-        if token not in self.share_targets:
-            raise FileTransportError("SSO shared download requires this client's issued share token")
-        _, denial = self.probe_share_login_required(token)
-        data, record = self._download(self._share_url(token), operation="file.shared_download",
-                                      include_auth=True, share=True)
-        record["access_checks"] = [denial]
-        record["response_projection"] = {
+    def _resolve_share_access(self, token: str) -> tuple[dict, dict]:
+        cached = self.share_accesses.get(token)
+        if cached is not None:
+            return cached
+        access, check = self.probe_share_access(token)
+        self.share_accesses[token] = (access, check)
+        return access, check
+
+    def _verification_share_access(self, token: str) -> tuple[dict, dict | None]:
+        # Deletion probes are too late to classify a token: the content route
+        # is already 404. Reuse the successful access classification, or retain
+        # the historical Cookie-backed SSO default when verification is called
+        # directly in a fresh client.
+        return self.share_accesses.get(token, ({"access_mode": "SSO"}, None))
+
+    @staticmethod
+    def _share_projection(access: dict) -> dict:
+        if access["access_mode"] == "PUBLIC":
+            return {
+                "share_access_contract": PUBLIC_SHARE_TOKEN,
+                "unauthenticated_access": "ALLOWED",
+                "auth_mode": "SHARE_TOKEN_ONLY",
+            }
+        return {
             "share_access_contract": PREPROD_SHARE_SSO,
             "unauthenticated_access": "DENIED",
             "auth_mode": "SSO_AND_SHARE_TOKEN",
         }
+
+    def shared_download_preprod(self, token: str) -> tuple[bytes, dict]:
+        if not self._preprod_share_access_profile():
+            raise FileTransportError("preprod shared file access requires a gateway Cookie profile")
+        if token not in self.share_targets:
+            raise FileTransportError("shared download requires this client's issued share token")
+        access, probe = self._resolve_share_access(token)
+        data, record = self._download(self._share_url(token), operation="file.shared_download",
+                                      include_auth=access["access_mode"] == "SSO",
+                                      share=True)
+        record["access_checks"] = [probe]
+        record["response_projection"] = self._share_projection(access)
         return data, record
 
     def list(self, session_id: str):
@@ -426,8 +540,8 @@ class RemoteFileClient:
         return self.file_path_prefix + "/sessions/shared-file/content?token=" + quote(token, safe="")
 
     def shared_download(self, token: str):
-        if self._share_sso_required():
-            return self.shared_download_sso(token)
+        if self._preprod_share_access_profile():
+            return self.shared_download_preprod(token)
         return self._download(self._share_url(token), operation="file.shared_download",
                                include_auth=False, share=True)
 
@@ -447,11 +561,12 @@ class RemoteFileClient:
         return self._url(metadata.geturl(), share=True)
 
     def shared_metadata(self, token: str):
-        if self._share_sso_required():
-            _, denial = self.probe_share_login_required(token)
+        if self._preprod_share_access_profile():
+            access, access_check = self._resolve_share_access(token)
             response = self._send(
                 "GET", self._shared_metadata_url(token),
-                operation="file.shared_metadata", include_auth=True, share=True,
+                operation="file.shared_metadata",
+                include_auth=access["access_mode"] == "SSO", share=True,
             )
             try:
                 data = json.loads(response.body, object_pairs_hook=unique_keys)
@@ -459,12 +574,8 @@ class RemoteFileClient:
                 raise FileTransportError("shared metadata response is not valid JSON").with_record(response.record) from None
             if not isinstance(data, dict) or "session_id" in data:
                 raise FileTransportError("shared metadata must be a dictionary without session_id").with_record(response.record)
-            response.record["access_checks"] = [denial]
-            response.record["response_projection"] = {
-                "share_access_contract": PREPROD_SHARE_SSO,
-                "unauthenticated_access": "DENIED",
-                "auth_mode": "SSO_AND_SHARE_TOKEN",
-            }
+            response.record["access_checks"] = [access_check]
+            response.record["response_projection"] = self._share_projection(access)
             return data, response.record
         response = self._send(
             "GET", self._shared_metadata_url(token),
@@ -479,13 +590,15 @@ class RemoteFileClient:
         return data, response.record
 
     def shared_metadata_verify_deleted(self, token: str):
-        denial = None
-        if self._share_sso_required():
-            _, denial = self.probe_share_login_required(token)
+        access, access_check = (self._verification_share_access(token)
+                                if self._preprod_share_access_profile()
+                                else ({"access_mode": "PUBLIC"}, None))
         response = self._send(
             "GET", self._shared_metadata_url(token),
             operation="file.shared_metadata_verify_deleted",
-            expected=(404,), include_auth=self._share_sso_required(), share=True,
+            expected=(404,),
+            include_auth=access["access_mode"] == "SSO",
+            share=True,
         )
         try:
             data = json.loads(response.body, object_pairs_hook=unique_keys)
@@ -493,13 +606,9 @@ class RemoteFileClient:
             raise FileTransportError("deleted shared metadata response is not valid JSON").with_record(response.record) from None
         if data != {"error": "NOT_FOUND", "message": "shared file not found"}:
             raise FileTransportError("deleted shared metadata did not reach the exact not-found response").with_record(response.record)
-        if denial is not None:
-            response.record["access_checks"] = [denial]
-            response.record["response_projection"] = {
-                "share_access_contract": PREPROD_SHARE_SSO,
-                "unauthenticated_access": "DENIED",
-                "auth_mode": "SSO_AND_SHARE_TOKEN",
-            }
+        if self._preprod_share_access_profile() and access_check is not None:
+            response.record["access_checks"] = [access_check]
+            response.record["response_projection"] = self._share_projection(access)
         return None, response.record
 
     def delete(self, session_id: str, file_id: str):
@@ -541,16 +650,22 @@ class RemoteFileClient:
                                    operation="file.verify_deleted", include_auth=True)
 
     def verify_shared_deleted(self, token: str):
-        if self._share_sso_required():
+        if self._preprod_share_access_profile():
+            access, access_check = self._verification_share_access(token)
             path = self._share_url(token)
             response = self._send("GET", path, operation="file.shared_verify_deleted",
-                                  expected=(404,), include_auth=True, share=True)
+                                  expected=(404,),
+                                  include_auth=access["access_mode"] == "SSO",
+                                  share=True)
             try:
                 data = json.loads(response.body, object_pairs_hook=unique_keys)
             except (UnicodeError, json.JSONDecodeError):
                 raise FileTransportError("deleted shared content did not return exact JSON").with_record(response.record) from None
             if data != {"error": "NOT_FOUND", "message": "shared file not found"}:
                 raise FileTransportError("not-found response does not prove the exact shared outcome").with_record(response.record)
+            if access_check is not None:
+                response.record["access_checks"] = [access_check]
+            response.record["response_projection"] = self._share_projection(access)
             return None, response.record
         return self._verify_absent(self._share_url(token), "shared_file_not_found",
                                    operation="file.shared_verify_deleted", include_auth=False,

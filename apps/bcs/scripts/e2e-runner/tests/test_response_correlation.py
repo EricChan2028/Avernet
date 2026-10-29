@@ -229,8 +229,8 @@ class ResponseIdTests(unittest.TestCase):
             reply = FileReply(b'payload', status)
             reply.headers = {'x-request-id': 'test-share-token'}
             client.opener.open.return_value = reply
-            with patch.object(client, 'probe_share_login_required',
-                              return_value=({'status': 'EXPECTED_LOGIN_DENIAL'}, {})):
+            with patch.object(client, 'probe_share_access',
+                              return_value=({'access_mode': 'SSO'}, {})):
                 if status == 200:
                     _, record = client.shared_download('test-share-token')
                 else:
