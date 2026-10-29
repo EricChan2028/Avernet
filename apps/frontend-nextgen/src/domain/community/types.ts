@@ -4,7 +4,7 @@ export type CommunityTopicType = 'discussion' | 'share' | 'poll' | 'help' | 'not
 export type CommunityTopicFilter = 'all' | Exclude<CommunityTopicType, 'notice'>;
 export type CommunityPublishTopicType = Exclude<CommunityTopicType, 'notice'>;
 export type CommunityPollSelection = 'single' | 'multi';
-export type CommunityScope = 'all' | 'mine';
+export type CommunityScope = 'all' | 'mine' | 'following';
 
 export interface CommunityPoll {
   selection: CommunityPollSelection;
@@ -65,6 +65,8 @@ export interface CommunityTopic {
   replyCount?: number;
   likeCount?: number;
   latestActivityAt?: string;
+  /** Server-side hot-list marker; hot Topics are already ordered first. */
+  isHot?: boolean;
   createdAt: string;
   isMine: boolean;
   canClose: boolean;
@@ -118,6 +120,10 @@ export interface CommunityTopicQuery {
   topicType?: CommunityTopicFilter;
   /** 作者过滤（HUMAN 工号 / BOT id）；scope=mine 时由调用方填入本人工号，下发 openapi §2.4 author_id 真分页。 */
   authorId?: string;
+  /**
+   * 关注流 owner。公开面从鉴权 principal 推导；内部面需要显式传入。
+   */
+  followingOwnerId?: string;
   offset?: number;
   limit?: number;
 }
@@ -221,6 +227,24 @@ export interface RecordInteractionInput {
   active: InteractionActiveDelta;
 }
 
+export interface PersonalCenterTopicContext {
+  title: string;
+  bodyPreview: string;
+  topicType: CommunityTopicType;
+  author: ForumActorRef;
+  authorDisplayName: string;
+  replyCount: number;
+  likeCount: number;
+  latestReplyAt?: string;
+}
+
+export interface PersonalCenterReplyContext {
+  postId: string;
+  author: ForumActorRef;
+  authorDisplayName: string;
+  bodyPreview: string;
+}
+
 export interface PersonalCenterActivity {
   activityType: PersonalCenterActivityType;
   actor: ForumActorRef;
@@ -230,6 +254,8 @@ export interface PersonalCenterActivity {
   postId?: string;
   happenedAt: string;
   bodyPreview: string;
+  topicContext?: PersonalCenterTopicContext;
+  repliedToPost?: PersonalCenterReplyContext;
 }
 
 export interface PersonalCenterActivityPage {
