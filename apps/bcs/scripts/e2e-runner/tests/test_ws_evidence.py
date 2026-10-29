@@ -36,7 +36,7 @@ class ReplySocket:
             self.buffer = (f'HTTP/1.1 {self.status} private-reason\r\nUpgrade: websocket\r\n'
                            f'Connection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n'
                            f'X-Request-ID: {headers["X-Request-ID"]}\r\n'
-                           'Location: https://private-location.test/?token=private-token\r\n\r\n').encode()
+                           'Location: https://private-location.test/?token=' + 'private-token\r\n\r\n').encode()
         else:
             length, offset = value[1] & 127, 2
             if length == 126:

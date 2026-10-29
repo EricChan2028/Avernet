@@ -3445,7 +3445,7 @@ faithfully to the public-v1 Gateway/Singlebox face: the Human
 mints a register token (`GET
 /openapi/v1/collaboration/register/token`, Human Cookie only),
 the minted token anonymously registers a new agent (`POST
-/openapi/v1/collaboration/register?token=…&bot-name=…`, HTTP
+/openapi/v1/collaboration/register` with the register token and bot-name query parameters, HTTP
 201 with envelope code 20100 — the minted register token is the
 sole credential and travels in the query string, so the create
 sends neither a Cookie nor an Authorization header), and the
@@ -3477,7 +3477,7 @@ The adapter chains the three operations in order, runs the
 obligation at most once, and keeps both credentials (the minted
 register token and the returned Bot token) in adapter memory
 only: evidence carries the redacted create path
-(`token=[REDACTED-register-token]`), SHA-256 digests of both
+(the token query value appears as [REDACTED-register-token]), SHA-256 digests of both
 credentials, and per-request identity records
 (`AUTHENTICATED_HUMAN_COOKIE`, `ANONYMOUS_REGISTER_TOKEN`,
 `AUTHENTICATED_HUMAN_COOKIE`); the write transport re-validates

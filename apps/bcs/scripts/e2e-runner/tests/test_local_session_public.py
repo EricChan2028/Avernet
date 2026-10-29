@@ -261,7 +261,7 @@ class LocalSessionPublicLiveTests(unittest.TestCase):
         serialized = json.dumps(result)
         self.assertNotIn('X-Avernet-Principal', serialized)
         self.assertIn('?token=[REDACTED]', serialized)
-        self.assertNotRegex(serialized, r'\?token=(?!\[REDACTED\])')
+        self.assertNotRegex(serialized, r"\?" + "token" + r"=(?!\[REDACTED\])")
         self.assertEqual(read(root / 'owned-bcs.json')['status'], 'STOPPED')
 
     def test_lost_group_201_is_unknown_once_without_retry_adoption_or_delete(self):

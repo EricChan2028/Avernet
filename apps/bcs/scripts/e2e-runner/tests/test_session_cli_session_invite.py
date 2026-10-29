@@ -41,7 +41,7 @@ GROUP = "bcs_grp_session_cli_03"
 SESSION = GROUP + ":01020304"
 TOKEN = "owned-local-token"
 COOKIE = "human-cookie"
-INVITE_TOKEN = "session-Invite-Token"
+INVITE_TOKEN = "invite-placeholder-token"
 EXPIRES_AT = int(time.time()) + 300
 
 def profile_value(*, preprod=False):

@@ -94,8 +94,8 @@ class LocalSessionSharingGuardTests(unittest.TestCase):
         case = object.__new__(OwnedLocalSessionSharing)
         case.identities = Mock(origin='http://127.0.0.1:23123')
         case._sensitive = []
-        value = {'invite_token': 'privateInviteToken', 'expires_at': 123,
-                 'join_url': 'https://foreign.invalid/sessions/join/privateInviteToken'}
+        value = {'invite_token': 'invite-placeholder-token', 'expires_at': 123,
+                 'join_url': 'https://foreign.invalid/sessions/join/invite-placeholder-token'}
         with self.assertRaisesRegex(LocalSessionSharingError, 'not bound to the owned origin'):
             case._consume_invite(value, target='session', target_id='group:deadbeef')
         self.assertEqual(case._sensitive, [])

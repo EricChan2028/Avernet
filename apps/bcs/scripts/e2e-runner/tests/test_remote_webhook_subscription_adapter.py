@@ -52,6 +52,7 @@ COOKIE = 'human-cookie-private-value'
 TOKEN = 'driver-bot-token'
 PRINCIPAL_KEY_ENV = 'BCS_E2E_PRINCIPAL_SIGNING_KEY_VALUE'
 PRINCIPAL_KEY = 'operator-provisioned-gateway-principal-key-material'
+PRINCIPAL_HEADER = 'X-avernet-principal'
 RECEIVER_ORIGIN = 'http://127.0.0.1:45555'
 GROUP_ID = 'grp-webhook-e2e'
 SUBSCRIPTION_ID = 'sub-webhook-e2e'
@@ -429,7 +430,7 @@ class WebhookExecutionTests(LocalWebhookTests):
         # Every request authenticates with the runtime-minted principal
         # and never sends a Cookie or a Bot token.
         for request in requests:
-            token = request.headers.get('X-avernet-principal')
+            token = request.headers.get(PRINCIPAL_HEADER)
             self.assertTrue(token)
             self.assertIsNone(request.headers.get('Cookie'))
             self.assertIsNone(request.headers.get('Authorization'))
@@ -599,7 +600,7 @@ class WebhookExecutionTests(LocalWebhookTests):
         state = {}
 
         def open(request, timeout=None):
-            token = request.headers.get('X-avernet-principal')
+            token = request.headers.get(PRINCIPAL_HEADER)
             self.assertTrue(token)
             replies.append(token)
             request_id = request.headers.get('X-Request-ID',

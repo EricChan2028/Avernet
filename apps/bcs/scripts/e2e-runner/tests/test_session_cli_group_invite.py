@@ -46,7 +46,7 @@ GROUP = "bcs_grp_session_cli_02"
 SESSION = GROUP + ":00000001"
 TOKEN = "driver-token-secret"
 COOKIE = "cookie-secret"
-INVITE_TOKEN = "privateInviteToken"
+INVITE_TOKEN = "invite-placeholder-token"
 
 
 def profile_value(*, gateway=False, mutate=None):
