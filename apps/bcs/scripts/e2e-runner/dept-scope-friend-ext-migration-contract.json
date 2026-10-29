@@ -1,0 +1,793 @@
+{
+  "schema_version": 1,
+  "source_revision": "e395ff4f203cd4fb0a7396230240c2542a8caadd0675eaa8b9dc5a8294986983",
+  "source_git_revision": "71860eae99c62d7bf1349a0f46562f6395acbf1e",
+  "parent": "test_ep_dept_scope_parses_object_friend_ext_entries",
+  "suite": "owned-local-edge-friend-mutations-v1",
+  "case_id": "LOCAL-EDGE-DEPT-SCOPE-FRIEND-EXT-01",
+  "function_name": "test_ep_dept_scope_parses_object_friend_ext_entries",
+  "sources": {
+    "edge_permission.sh": "e395ff4f203cd4fb0a7396230240c2542a8caadd0675eaa8b9dc5a8294986983"
+  },
+  "environment": {
+    "local": {
+      "adapter_family": "OwnedLocalEdgeBacklogAdapter",
+      "entrypoint_kind": "owned-local",
+      "status": "LOCAL_MODEL_READY"
+    },
+    "remote": {
+      "adapter_family": "RemoteEdgeBacklogAdapter",
+      "entrypoint_kind": "preprod-public-v1",
+      "status": "REMOTE_PLACEHOLDER",
+      "remote_validation": "NOT_RUN"
+    }
+  },
+  "route_profiles": {
+    "owned-local": {
+      "entrypoint_kind": "owned-local",
+      "routes": {
+        "ensure": {
+          "method": "POST",
+          "path": "/admin/bots/{bot_uuid}/ensure",
+          "success_statuses": [
+            200
+          ],
+          "actor": "SERVICE_KEY"
+        },
+        "mixed_patch": {
+          "method": "PATCH",
+          "path": "/openapi/v1/collaboration/bots/{bot_id}",
+          "success_statuses": [
+            200
+          ],
+          "actor": "BOT_OWNER"
+        },
+        "no_check_create": {
+          "method": "POST",
+          "path": "/collaboration/friend-connections/requests",
+          "success_statuses": [
+            200
+          ],
+          "actor": "HUMAN_APPLICANT"
+        },
+        "scoped_patch": {
+          "method": "PATCH",
+          "path": "/openapi/v1/collaboration/bots/{bot_id}",
+          "success_statuses": [
+            200
+          ],
+          "actor": "BOT_OWNER"
+        },
+        "human_scoped_create": {
+          "method": "POST",
+          "path": "/collaboration/friend-connections/requests",
+          "success_statuses": [
+            200,
+            403
+          ],
+          "actor": "HUMAN_APPLICANT"
+        },
+        "bot_scoped_create": {
+          "method": "POST",
+          "path": "/collaboration/friend-connections/requests",
+          "success_statuses": [
+            200,
+            403
+          ],
+          "actor": "BOT_CALLER"
+        }
+      }
+    },
+    "remote-public": {
+      "entrypoint_kind": "preprod-public-v1",
+      "routes": {
+        "ensure": {
+          "method": "POST",
+          "path": "/admin/bots/{bot_uuid}/ensure",
+          "success_statuses": [
+            200
+          ],
+          "actor": "SERVICE_KEY",
+          "availability": "STATION_NATIVE_ONLY"
+        },
+        "mixed_patch": {
+          "method": "PATCH",
+          "path": "/openapi/v1/collaboration/bots/{bot_id}",
+          "success_statuses": [
+            200
+          ],
+          "actor": "BOT_OWNER"
+        },
+        "no_check_create": {
+          "method": "POST",
+          "path": "/openapi/v1/collaboration/friend-connections/requests",
+          "success_statuses": [
+            201
+          ],
+          "actor": "HUMAN_APPLICANT"
+        },
+        "scoped_patch": {
+          "method": "PATCH",
+          "path": "/openapi/v1/collaboration/bots/{bot_id}",
+          "success_statuses": [
+            200
+          ],
+          "actor": "BOT_OWNER"
+        },
+        "human_scoped_create": {
+          "method": "POST",
+          "path": "/openapi/v1/collaboration/friend-connections/requests",
+          "success_statuses": [
+            201,
+            403
+          ],
+          "actor": "HUMAN_APPLICANT"
+        },
+        "bot_scoped_create": {
+          "method": "POST",
+          "path": "/openapi/v1/collaboration/friend-connections/requests",
+          "success_statuses": [
+            201,
+            403
+          ],
+          "actor": "BOT_CALLER"
+        }
+      }
+    }
+  },
+  "station_path_evidence": [
+    {
+      "operation": "ensure",
+      "profile": "owned-local",
+      "method": "POST",
+      "path": "/admin/bots/{bot_uuid}/ensure",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-http/src/router.rs",
+          "line_start": 180,
+          "line_end": 183,
+          "contains": [
+            "/admin/bots/{bot_uuid}/ensure",
+            "post(routes::ensure::ensure_bot)"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-http/src/routes/ensure.rs",
+          "line_start": 19,
+          "line_end": 33,
+          "contains": [
+            "X-BCS-Service-Key",
+            "verify_service_credential"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "ensure",
+      "profile": "remote-public",
+      "method": "POST",
+      "path": "/admin/bots/{bot_uuid}/ensure",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-http/src/router.rs",
+          "line_start": 180,
+          "line_end": 183,
+          "contains": [
+            "/admin/bots/{bot_uuid}/ensure",
+            "post(routes::ensure::ensure_bot)"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "mixed_patch",
+      "profile": "owned-local",
+      "method": "PATCH",
+      "path": "/openapi/v1/collaboration/bots/{bot_id}",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/mod.rs",
+          "line_start": 15,
+          "line_end": 28,
+          "contains": [
+            "\"/openapi/v1/collaboration\"",
+            "routes::bot::router()"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/bot.rs",
+          "line_start": 21,
+          "line_end": 31,
+          "contains": [
+            "\"/bots/{bot_id}\"",
+            "patch(update_bot)"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/bot.rs",
+          "line_start": 140,
+          "line_end": 161,
+          "contains": [
+            "async fn update_bot",
+            "StatusCode::OK"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "mixed_patch",
+      "profile": "remote-public",
+      "method": "PATCH",
+      "path": "/openapi/v1/collaboration/bots/{bot_id}",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/mod.rs",
+          "line_start": 15,
+          "line_end": 28,
+          "contains": [
+            "\"/openapi/v1/collaboration\"",
+            "routes::bot::router()"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/bot.rs",
+          "line_start": 21,
+          "line_end": 31,
+          "contains": [
+            "\"/bots/{bot_id}\"",
+            "patch(update_bot)"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/bot.rs",
+          "line_start": 140,
+          "line_end": 161,
+          "contains": [
+            "async fn update_bot",
+            "StatusCode::OK"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "no_check_create",
+      "profile": "owned-local",
+      "method": "POST",
+      "path": "/collaboration/friend-connections/requests",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-http/src/router.rs",
+          "line_start": 208,
+          "line_end": 211,
+          "contains": [
+            "/collaboration/friend-connections/requests",
+            "post(routes::friend_connections::create_friend_request)"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-http/src/routes/friend_connections.rs",
+          "line_start": 62,
+          "line_end": 90,
+          "contains": [
+            "POST /collaboration/friend-connections/requests",
+            "create_friend_request",
+            "Ok(Json(envelope(&CreateFriendRequestResponse"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "no_check_create",
+      "profile": "remote-public",
+      "method": "POST",
+      "path": "/openapi/v1/collaboration/friend-connections/requests",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/mod.rs",
+          "line_start": 15,
+          "line_end": 28,
+          "contains": [
+            "\"/openapi/v1/collaboration\"",
+            "routes::bot::router()"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/friend_connection.rs",
+          "line_start": 72,
+          "line_end": 77,
+          "contains": [
+            "\"/friend-connections/requests\"",
+            "post(create_friend_connection_request)"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/friend_connection.rs",
+          "line_start": 110,
+          "line_end": 127,
+          "contains": [
+            "create_friend_connection_request",
+            "StatusCode::CREATED"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "scoped_patch",
+      "profile": "owned-local",
+      "method": "PATCH",
+      "path": "/openapi/v1/collaboration/bots/{bot_id}",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/mod.rs",
+          "line_start": 15,
+          "line_end": 28,
+          "contains": [
+            "\"/openapi/v1/collaboration\"",
+            "routes::bot::router()"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/bot.rs",
+          "line_start": 21,
+          "line_end": 31,
+          "contains": [
+            "\"/bots/{bot_id}\"",
+            "patch(update_bot)"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/bot.rs",
+          "line_start": 140,
+          "line_end": 161,
+          "contains": [
+            "async fn update_bot",
+            "StatusCode::OK"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "human_scoped_create",
+      "profile": "owned-local",
+      "method": "POST",
+      "path": "/collaboration/friend-connections/requests",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-http/src/router.rs",
+          "line_start": 208,
+          "line_end": 211,
+          "contains": [
+            "/collaboration/friend-connections/requests",
+            "post(routes::friend_connections::create_friend_request)"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-http/src/routes/friend_connections.rs",
+          "line_start": 62,
+          "line_end": 90,
+          "contains": [
+            "POST /collaboration/friend-connections/requests",
+            "create_friend_request",
+            "Ok(Json(envelope(&CreateFriendRequestResponse"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "human_scoped_create",
+      "profile": "remote-public",
+      "method": "POST",
+      "path": "/openapi/v1/collaboration/friend-connections/requests",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/mod.rs",
+          "line_start": 15,
+          "line_end": 28,
+          "contains": [
+            "\"/openapi/v1/collaboration\"",
+            "routes::bot::router()"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/friend_connection.rs",
+          "line_start": 72,
+          "line_end": 77,
+          "contains": [
+            "\"/friend-connections/requests\"",
+            "post(create_friend_connection_request)"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/friend_connection.rs",
+          "line_start": 110,
+          "line_end": 127,
+          "contains": [
+            "create_friend_connection_request",
+            "StatusCode::CREATED"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "bot_scoped_create",
+      "profile": "owned-local",
+      "method": "POST",
+      "path": "/collaboration/friend-connections/requests",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-http/src/router.rs",
+          "line_start": 208,
+          "line_end": 211,
+          "contains": [
+            "/collaboration/friend-connections/requests",
+            "post(routes::friend_connections::create_friend_request)"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-http/src/routes/friend_connections.rs",
+          "line_start": 62,
+          "line_end": 90,
+          "contains": [
+            "POST /collaboration/friend-connections/requests",
+            "create_friend_request",
+            "Ok(Json(envelope(&CreateFriendRequestResponse"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "bot_scoped_create",
+      "profile": "remote-public",
+      "method": "POST",
+      "path": "/openapi/v1/collaboration/friend-connections/requests",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/mod.rs",
+          "line_start": 15,
+          "line_end": 28,
+          "contains": [
+            "\"/openapi/v1/collaboration\"",
+            "routes::bot::router()"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/friend_connection.rs",
+          "line_start": 72,
+          "line_end": 77,
+          "contains": [
+            "\"/friend-connections/requests\"",
+            "post(create_friend_connection_request)"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/friend_connection.rs",
+          "line_start": 110,
+          "line_end": 127,
+          "contains": [
+            "create_friend_connection_request",
+            "StatusCode::CREATED"
+          ]
+        }
+      ]
+    }
+  ],
+  "implementation_evidence": [
+    {
+      "operation": "friend-ext-entry-label",
+      "profile": "owned-local",
+      "method": "PATCH",
+      "path": "/openapi/v1/collaboration/bots/{bot_id}",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/services/bcs-edge-permission/src/connect.rs",
+          "line_start": 203,
+          "line_end": 225,
+          "contains": [
+            "friend_ext_scope_entry_match_label",
+            "trimmed",
+            "[\"deptName\", \"dept_name\", \"name\", \"deptNo\", \"dept_no\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "friend-ext-scope-parser",
+      "profile": "owned-local",
+      "method": "PATCH",
+      "path": "/openapi/v1/collaboration/bots/{bot_id}",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/services/bcs-edge-permission/src/connect.rs",
+          "line_start": 227,
+          "line_end": 269,
+          "contains": [
+            "bot_friend_ext_scope_friend_deps",
+            "warn!",
+            "no_check_scope_friend_deps",
+            "view_scope_user_friend_deps",
+            "view_scope_agent_friend_deps"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "friend-ext-scope-use",
+      "profile": "owned-local",
+      "method": "PATCH",
+      "path": "/openapi/v1/collaboration/bots/{bot_id}",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/services/bcs-edge-permission/src/connect.rs",
+          "line_start": 374,
+          "line_end": 397,
+          "contains": [
+            "bot_friend_ext_view_scope_user_friend_deps",
+            "bot_friend_ext_view_scope_agent_friend_deps"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/services/bcs-edge-permission/src/connect.rs",
+          "line_start": 1052,
+          "line_end": 1085,
+          "contains": [
+            "caller_department_matches_friend_allowlist",
+            "bot_friend_ext_no_check_scope_friend_deps",
+            "actor_department_matches_friend_scope"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "friend-ext-parser-tests",
+      "profile": "owned-local",
+      "method": "PATCH",
+      "path": "/openapi/v1/collaboration/bots/{bot_id}",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/services/bcs-edge-permission/src/tests/dept_scope.rs",
+          "line_start": 146,
+          "line_end": 171,
+          "contains": [
+            "friend_scope_deps_accepts_department_reference_objects",
+            "{\"deptNo\": \"L3480\", \"deptName\": \"蚂蚁集团-信贷事业群\"}",
+            "\"蚂蚁集团-信贷事业群\""
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/services/bcs-edge-permission/src/tests/dept_scope.rs",
+          "line_start": 173,
+          "line_end": 202,
+          "contains": [
+            "friend_scope_deps_view_scope_accepts_objects_and_ignores_garbage",
+            "{\"deptNo\": \"F4858\"}",
+            "\"F4858\""
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "upstream-mixed-scope",
+      "profile": "owned-local",
+      "method": "PATCH",
+      "path": "/openapi/v1/collaboration/bots/{bot_id}",
+      "sources": [
+        {
+          "file": "apps/bcs/scripts/e2e-test/edge_permission.sh",
+          "line_start": 840,
+          "line_end": 864,
+          "contains": [
+            "\"friend_check_in_strategy\": \"DEPT_FREE\"",
+            "\"deptNo\": \"L3480\", \"deptName\": \"蚂蚁集团-信贷事业群\"",
+            "\"F4858\"",
+            "\"priority\": 7"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "upstream-scoped-applications",
+      "profile": "owned-local",
+      "method": "POST",
+      "path": "/collaboration/friend-connections/requests",
+      "sources": [
+        {
+          "file": "apps/bcs/scripts/e2e-test/edge_permission.sh",
+          "line_start": 877,
+          "line_end": 969,
+          "contains": [
+            "human request parses object/string exemption scopes into the allowlist",
+            "scoped friend_ext re-patch accepted",
+            "X-Mock-User-Id: 511488",
+            "bot request runs agent-scope parser incl. garbage drop"
+          ]
+        }
+      ]
+    }
+  ],
+  "requirements": [
+    {
+      "id": "EDGE_FRIEND_MUTATIONS.dept-scope-friend-ext",
+      "method": "PATCH",
+      "path": "/openapi/v1/collaboration/bots/{bot_id}",
+      "actor": "BOT_OWNER",
+      "expectation": "The owned-local owner patch writes mixed friend_ext scope entries and both Human and Bot application paths execute the shared parser."
+    }
+  ],
+  "source_anchors": [
+    "/admin/bots/e2e-friend-ext-bot/ensure",
+    "openapi/v1/collaboration/bots/e2e-friend-ext-bot",
+    "\"friend_check_in_strategy\": \"DEPT_FREE\"",
+    "\"deptNo\": \"L3480\", \"deptName\": \"蚂蚁集团-信贷事业群\"",
+    "\"F4858\"",
+    "\"view_scope_user_friend_deps\"",
+    "\"view_scope_agent_friend_deps\"",
+    "X-Mock-User-Id: 511488",
+    "\"priority\": 7",
+    "no_check_scope_friend_deps",
+    "bot request runs agent-scope parser"
+  ],
+  "obligations": [
+    {
+      "id": "dept-scope-friend-ext.ensure",
+      "method": "POST",
+      "path": "/admin/bots/{bot_uuid}/ensure",
+      "expectation": "Ensure the protected dedicated bot e2e-friend-ext-bot under X-BCS-Service-Key and require 200.",
+      "failure_codes": [
+        "ENSURE_STATUS_MISMATCH"
+      ]
+    },
+    {
+      "id": "dept-scope-friend-ext.mixed-patch",
+      "method": "PATCH",
+      "path": "/openapi/v1/collaboration/bots/{bot_id}",
+      "expectation": "The owner writes mixed object, legacy-string and garbage scope entries through the OpenAPI Bot update route and requires 200.",
+      "failure_codes": [
+        "PATCH_STATUS_MISMATCH",
+        "FRIEND_EXT_SHAPE_INVALID",
+        "FRIEND_EXT_PARSE_MISMATCH"
+      ]
+    },
+    {
+      "id": "dept-scope-friend-ext.human-no-check",
+      "method": "POST",
+      "path": "/collaboration/friend-connections/requests",
+      "expectation": "A Human application runs the no_check object and legacy-string parser arms and lands pending with 200.",
+      "failure_codes": [
+        "HUMAN_REQUEST_STATUS_MISMATCH"
+      ]
+    },
+    {
+      "id": "dept-scope-friend-ext.scoped-patch",
+      "method": "PATCH",
+      "path": "/openapi/v1/collaboration/bots/{bot_id}",
+      "expectation": "A non-empty user and agent scope re-patch in object shape is accepted with 200 and parses garbage entries out.",
+      "failure_codes": [
+        "SCOPED_PATCH_STATUS_MISMATCH",
+        "FRIEND_EXT_PARSE_MISMATCH"
+      ]
+    },
+    {
+      "id": "dept-scope-friend-ext.human-scoped-application",
+      "method": "POST",
+      "path": "/collaboration/friend-connections/requests",
+      "expectation": "A different Human applicant runs the user view-scope object and garbage-drop arms and answers 200 or 403.",
+      "failure_codes": [
+        "SCOPED_REQUEST_STATUS_MISMATCH"
+      ]
+    },
+    {
+      "id": "dept-scope-friend-ext.bot-scoped-application",
+      "method": "POST",
+      "path": "/collaboration/friend-connections/requests",
+      "expectation": "A Bot caller runs the agent view-scope object and garbage-drop arms and answers 200 or 403.",
+      "failure_codes": [
+        "BOT_SCOPE_STATUS_MISMATCH"
+      ]
+    },
+    {
+      "id": "dept-scope-friend-ext.local-receipt",
+      "method": "MODEL",
+      "path": "owned-local-transcript",
+      "expectation": "Validate the complete owned-local transcript shape before judging any parser obligation.",
+      "failure_codes": [
+        "TRANSCRIPT_INVALID"
+      ]
+    }
+  ],
+  "failure_semantics": [
+    {
+      "code": "TRANSCRIPT_INVALID",
+      "stage": "local-receipt",
+      "expected": "one owned-local transcript with ensure/patch/scope/application fields",
+      "observed_if_mismatch": "missing, extra or non-object transcript fields"
+    },
+    {
+      "code": "ENSURE_STATUS_MISMATCH",
+      "stage": "ensure-friend-ext-bot",
+      "expected": "HTTP 200 from the service-key ensure route",
+      "observed_if_mismatch": "non-200 ensure response or transport failure"
+    },
+    {
+      "code": "PATCH_STATUS_MISMATCH",
+      "stage": "patch-mixed-scope",
+      "expected": "HTTP 200 from PATCH /openapi/v1/collaboration/bots/{bot_id}",
+      "observed_if_mismatch": "non-200 object-scope patch response"
+    },
+    {
+      "code": "FRIEND_EXT_SHAPE_INVALID",
+      "stage": "parse-friend-ext",
+      "expected": "friend_ext and each requested scope list have their declared JSON shapes",
+      "observed_if_mismatch": "non-object friend_ext, unknown key or non-array scope list"
+    },
+    {
+      "code": "FRIEND_EXT_PARSE_MISMATCH",
+      "stage": "parse-friend-ext",
+      "expected": "deptName wins, legacy strings remain, garbage is dropped, object deptNo falls back",
+      "observed_if_mismatch": "different normalized labels or garbage retained as a scope"
+    },
+    {
+      "code": "HUMAN_REQUEST_STATUS_MISMATCH",
+      "stage": "human-no-check-application",
+      "expected": "HTTP 200 for the first Human application on the owned-local profile",
+      "observed_if_mismatch": "non-200 status before the parser obligation is observed"
+    },
+    {
+      "code": "SCOPED_PATCH_STATUS_MISMATCH",
+      "stage": "patch-scoped-user-and-agent-scope",
+      "expected": "HTTP 200 for the non-empty object-shaped scope re-patch",
+      "observed_if_mismatch": "non-200 re-patch response"
+    },
+    {
+      "code": "SCOPED_REQUEST_STATUS_MISMATCH",
+      "stage": "human-scoped-application",
+      "expected": "HTTP 200 or 403 after the Human object/garbage scope parser runs",
+      "observed_if_mismatch": "any other status"
+    },
+    {
+      "code": "BOT_SCOPE_STATUS_MISMATCH",
+      "stage": "bot-scoped-application",
+      "expected": "HTTP 200 or 403 after the Bot object/garbage agent-scope parser runs",
+      "observed_if_mismatch": "any other status"
+    }
+  ],
+  "expected_values": {
+    "bot_id": "e2e-friend-ext-bot",
+    "owner_staff_no": "85020",
+    "second_human_staff_no": "511488",
+    "mixed_no_check_scope_friend_deps": [
+      "F4858",
+      "蚂蚁集团-信贷事业群"
+    ],
+    "mixed_view_scope_user_friend_deps": [],
+    "mixed_view_scope_agent_friend_deps": [
+      "L3480"
+    ],
+    "scoped_view_scope_user_friend_deps": [
+      "L3480"
+    ],
+    "scoped_view_scope_agent_friend_deps": [
+      "L3480"
+    ],
+    "dropped_garbage": "{\"priority\": 7}",
+    "owned_local_statuses": {
+      "ensure": 200,
+      "mixed_patch": 200,
+      "no_check_create": 200,
+      "scoped_patch": 200,
+      "human_scoped_create": [
+        200,
+        403
+      ],
+      "bot_scoped_create": [
+        200,
+        403
+      ]
+    },
+    "upstream_failure": "friend_ext object entries are not parsed into the expected scope labels"
+  },
+  "remote_validation": "NOT_RUN",
+  "grants_release_credit": false,
+  "release_parent_denominator": false,
+  "independent_slice": true,
+  "evidence_granularity": "OWNED_LOCAL_RECEIPT"
+}

@@ -1,0 +1,578 @@
+{
+  "schema_version": 1,
+  "source_revision": "e395ff4f203cd4fb0a7396230240c2542a8caadd0675eaa8b9dc5a8294986983",
+  "source_git_revision": "71860eae99c62d7bf1349a0f46562f6395acbf1e",
+  "parent": "test_ep_tc_friend_auth_sync_readdressed_principal",
+  "suite": "owned-local-edge-friend-mutations-v1",
+  "case_id": "LOCAL-EDGE-TC-FRIEND-AUTH-SYNC-01",
+  "function_name": "test_ep_tc_friend_auth_sync_readdressed_principal",
+  "sources": {
+    "edge_permission.sh": "e395ff4f203cd4fb0a7396230240c2542a8caadd0675eaa8b9dc5a8294986983"
+  },
+  "environment": {
+    "local": {
+      "adapter_family": "OwnedLocalEdgeBacklogAdapter",
+      "entrypoint_kind": "owned-local",
+      "status": "LOCAL_MODEL_READY"
+    },
+    "remote": {
+      "adapter_family": "RemoteEdgeBacklogAdapter",
+      "entrypoint_kind": "preprod-public-v1",
+      "status": "REMOTE_PLACEHOLDER",
+      "remote_validation": "NOT_RUN"
+    }
+  },
+  "route_profiles": {
+    "owned-local": {
+      "entrypoint_kind": "owned-local",
+      "routes": {
+        "ensure": {
+          "method": "POST",
+          "path": "/admin/bots/{bot_uuid}/ensure",
+          "success_statuses": [
+            200
+          ],
+          "actor": "SERVICE_KEY"
+        },
+        "create": {
+          "method": "POST",
+          "path": "/collaboration/friend-connections/requests",
+          "success_statuses": [
+            200
+          ],
+          "actor": "FORWARDED_HUMAN"
+        },
+        "accept": {
+          "method": "POST",
+          "path": "/collaboration/friend-connections/requests/{request_id}/accept",
+          "success_statuses": [
+            200
+          ],
+          "actor": "FORWARDED_HUMAN"
+        },
+        "revoke": {
+          "method": "DELETE",
+          "path": "/collaboration/friend-connections/{actor}",
+          "success_statuses": [
+            200
+          ],
+          "actor": "FORWARDED_HUMAN"
+        },
+        "sync_control_clear": {
+          "method": "POST",
+          "path": "/control/friend-auth-sync/clear",
+          "success_statuses": [
+            200
+          ],
+          "actor": "MOCK_CONTROL"
+        },
+        "sync_control_view": {
+          "method": "GET",
+          "path": "/control/friend-auth-sync/requests",
+          "success_statuses": [
+            200
+          ],
+          "actor": "MOCK_CONTROL"
+        }
+      }
+    },
+    "remote-public": {
+      "entrypoint_kind": "preprod-public-v1",
+      "routes": {
+        "ensure": {
+          "method": "POST",
+          "path": "/admin/bots/{bot_uuid}/ensure",
+          "success_statuses": [
+            200
+          ],
+          "actor": "SERVICE_KEY",
+          "availability": "STATION_NATIVE_ONLY"
+        },
+        "create": {
+          "method": "POST",
+          "path": "/openapi/v1/collaboration/friend-connections/requests",
+          "success_statuses": [
+            201
+          ],
+          "actor": "FORWARDED_HUMAN"
+        },
+        "accept": {
+          "method": "POST",
+          "path": "/openapi/v1/collaboration/friend-connections/requests/{request_id}/accept",
+          "success_statuses": [
+            200
+          ],
+          "actor": "FORWARDED_HUMAN"
+        }
+      }
+    }
+  },
+  "station_path_evidence": [
+    {
+      "operation": "ensure",
+      "profile": "owned-local",
+      "method": "POST",
+      "path": "/admin/bots/{bot_uuid}/ensure",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-http/src/router.rs",
+          "line_start": 180,
+          "line_end": 183,
+          "contains": [
+            "/admin/bots/{bot_uuid}/ensure",
+            "post(routes::ensure::ensure_bot)"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-http/src/routes/ensure.rs",
+          "line_start": 19,
+          "line_end": 33,
+          "contains": [
+            "X-BCS-Service-Key",
+            "verify_service_credential"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "ensure",
+      "profile": "remote-public",
+      "method": "POST",
+      "path": "/admin/bots/{bot_uuid}/ensure",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-http/src/router.rs",
+          "line_start": 180,
+          "line_end": 183,
+          "contains": [
+            "/admin/bots/{bot_uuid}/ensure",
+            "post(routes::ensure::ensure_bot)"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "create",
+      "profile": "owned-local",
+      "method": "POST",
+      "path": "/collaboration/friend-connections/requests",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-http/src/router.rs",
+          "line_start": 208,
+          "line_end": 211,
+          "contains": [
+            "/collaboration/friend-connections/requests",
+            "post(routes::friend_connections::create_friend_request)"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-http/src/routes/friend_connections.rs",
+          "line_start": 62,
+          "line_end": 90,
+          "contains": [
+            "POST /collaboration/friend-connections/requests",
+            "create_friend_request",
+            "Ok(Json(envelope(&CreateFriendRequestResponse"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "create",
+      "profile": "remote-public",
+      "method": "POST",
+      "path": "/openapi/v1/collaboration/friend-connections/requests",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/mod.rs",
+          "line_start": 15,
+          "line_end": 28,
+          "contains": [
+            "\"/openapi/v1/collaboration\"",
+            "friend_connection::router()"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/friend_connection.rs",
+          "line_start": 72,
+          "line_end": 77,
+          "contains": [
+            "\"/friend-connections/requests\"",
+            "post(create_friend_connection_request)"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/friend_connection.rs",
+          "line_start": 110,
+          "line_end": 127,
+          "contains": [
+            "create_friend_connection_request",
+            "StatusCode::CREATED"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "accept",
+      "profile": "owned-local",
+      "method": "POST",
+      "path": "/collaboration/friend-connections/requests/{request_id}/accept",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-http/src/router.rs",
+          "line_start": 212,
+          "line_end": 212,
+          "contains": [
+            "/collaboration/friend-connections/requests/{id}/accept",
+            "accept_friend_request"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-http/src/routes/friend_connections.rs",
+          "line_start": 92,
+          "line_end": 104,
+          "contains": [
+            "POST /collaboration/friend-connections/requests/{id}/accept",
+            "accept_friend_request",
+            "Ok(Json(envelope(&AcceptFriendRequestResponse"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "accept",
+      "profile": "remote-public",
+      "method": "POST",
+      "path": "/openapi/v1/collaboration/friend-connections/requests/{request_id}/accept",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/mod.rs",
+          "line_start": 15,
+          "line_end": 28,
+          "contains": [
+            "\"/openapi/v1/collaboration\"",
+            "friend_connection::router()"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/friend_connection.rs",
+          "line_start": 78,
+          "line_end": 81,
+          "contains": [
+            "\"/friend-connections/requests/{request_id}/accept\"",
+            "post(accept_friend_connection_request)"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/friend_connection.rs",
+          "line_start": 148,
+          "line_end": 170,
+          "contains": [
+            "accept_friend_connection_request",
+            "StatusCode::OK"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "revoke",
+      "profile": "owned-local",
+      "method": "DELETE",
+      "path": "/collaboration/friend-connections/{actor}",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-http/src/router.rs",
+          "line_start": 215,
+          "line_end": 215,
+          "contains": [
+            "/collaboration/friend-connections/{actor}",
+            "delete(routes::friend_connections::revoke_friend)"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-http/src/routes/friend_connections.rs",
+          "line_start": 174,
+          "line_end": 190,
+          "contains": [
+            "DELETE /collaboration/friend-connections/{actor}",
+            "revoke_friend"
+          ]
+        }
+      ]
+    }
+  ],
+  "implementation_evidence": [
+    {
+      "operation": "friend-auth-sync-payload",
+      "profile": "owned-local",
+      "method": "POST",
+      "path": "/api/internal/bot-friend-auth/sync",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/bootstrap/bcs/src/friend_auth_sync.rs",
+          "line_start": 20,
+          "line_end": 20,
+          "contains": [
+            "SYNC_PATH",
+            "/api/internal/bot-friend-auth/sync"
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/bootstrap/bcs/src/friend_auth_sync.rs",
+          "line_start": 96,
+          "line_end": 150,
+          "contains": [
+            "FriendAuthSyncRequest",
+            "bot_id: String",
+            "owner_work_no: String",
+            "action: &'static str",
+            "resigner.readdress"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "principal-readdress",
+      "profile": "owned-local",
+      "method": "POST",
+      "path": "/api/internal/bot-friend-auth/sync",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/gateway_principal/resign.rs",
+          "line_start": 28,
+          "line_end": 40,
+          "contains": [
+            "ADDRESSED_ISSUER: &str = \"bcs\"",
+            "ADDRESSED_AUDIENCE: &str = \"backend\"",
+            "ADDRESSED_KEY_ID: &str = \"bare\""
+          ]
+        },
+        {
+          "file": "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/gateway_principal/resign.rs",
+          "line_start": 128,
+          "line_end": 131,
+          "contains": [
+            "object.insert(\"iss\"",
+            "ADDRESSED_ISSUER",
+            "object.insert(\"aud\"",
+            "ADDRESSED_AUDIENCE"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "sync-contract-test",
+      "profile": "owned-local",
+      "method": "POST",
+      "path": "/api/internal/bot-friend-auth/sync",
+      "sources": [
+        {
+          "file": "apps/bcs/crates/bootstrap/bcs/src/friend_auth_sync_tests.rs",
+          "line_start": 184,
+          "line_end": 215,
+          "contains": [
+            "work_order_callback_principal_is_readdressed_to_bcs_for_backend",
+            "assert_eq!(data.claims[\"iss\"], \"bcs\")",
+            "assert_eq!(data.claims[\"aud\"], \"backend\")"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "sync-control-view",
+      "profile": "owned-local",
+      "method": "GET",
+      "path": "/control/friend-auth-sync/requests",
+      "sources": [
+        {
+          "file": "apps/bcs/scripts/e2e-runner/bcs_e2e/local_edge_friend_mutation_extras.py",
+          "line_start": 192,
+          "line_end": 210,
+          "contains": [
+            "/control/friend-auth-sync/requests",
+            "claims.get('iss') != 'bcs'",
+            "subject.get('id') != approver"
+          ]
+        }
+      ]
+    },
+    {
+      "operation": "upstream-expectation",
+      "profile": "owned-local",
+      "method": "POST",
+      "path": "/control/friend-auth-sync/requests",
+      "sources": [
+        {
+          "file": "apps/bcs/scripts/e2e-test/edge_permission.sh",
+          "line_start": 746,
+          "line_end": 789,
+          "contains": [
+            "expected exactly 1 sync call",
+            "(\"iss\", \"bcs\"),",
+            "(\"aud\", \"backend\"),",
+            "subject.get(\"id\") != \"153998\""
+          ]
+        }
+      ]
+    }
+  ],
+  "requirements": [
+    {
+      "id": "EDGE_FRIEND_MUTATIONS.tc-friend-auth-sync-readdress",
+      "method": "POST",
+      "path": "/collaboration/friend-connections/requests/{request_id}/accept",
+      "actor": "FORWARDED_HUMAN",
+      "expectation": "The owned-local accept obligation carries the forwarded Human principal and produces exactly one re-addressed TC grant sync."
+    }
+  ],
+  "source_anchors": [
+    "local tc_bot=\"2026e2e-tc-bot:85020\"",
+    "/admin/bots/${tc_bot}/ensure",
+    "X-Avernet-Principal: $principal",
+    "/collaboration/friend-connections/requests",
+    "/collaboration/friend-connections/requests/${request_id}/accept",
+    "control/friend-auth-sync/requests",
+    "(\"iss\", \"bcs\"),",
+    "(\"aud\", \"backend\"),",
+    "if subject.get(\"id\") != \"153998\":",
+    "expected exactly 1 sync call",
+    "(\"owner_work_no\", owner_work_no),",
+    "(\"action\", \"grant\"),"
+  ],
+  "obligations": [
+    {
+      "id": "tc-friend-auth-sync.ensure",
+      "method": "POST",
+      "path": "/admin/bots/{bot_uuid}/ensure",
+      "expectation": "Ensure the protected TC-shaped bot id 2026e2e-tc-bot:85020 under X-BCS-Service-Key and require 200.",
+      "failure_codes": [
+        "ENSURE_STATUS_MISMATCH"
+      ]
+    },
+    {
+      "id": "tc-friend-auth-sync.create",
+      "method": "POST",
+      "path": "/collaboration/friend-connections/requests",
+      "expectation": "Forward the iss=backend approver principal on create and require exactly one pending row.",
+      "failure_codes": [
+        "CREATE_STATUS_MISMATCH",
+        "PENDING_ROW_MISSING"
+      ]
+    },
+    {
+      "id": "tc-friend-auth-sync.accept",
+      "method": "POST",
+      "path": "/collaboration/friend-connections/requests/{request_id}/accept",
+      "expectation": "Accept the pending row with the same forwarded principal and require a built edge.",
+      "failure_codes": [
+        "ACCEPT_STATUS_MISMATCH",
+        "EDGE_NOT_BUILT"
+      ]
+    },
+    {
+      "id": "tc-friend-auth-sync.observe-sync",
+      "method": "GET",
+      "path": "/control/friend-auth-sync/requests",
+      "expectation": "Observe exactly one grant sync with the TC identity and the approver re-addressed as iss=bcs/aud=backend.",
+      "failure_codes": [
+        "SYNC_CALL_COUNT_MISMATCH",
+        "SYNC_BODY_MISMATCH",
+        "SYNC_PRINCIPAL_UNDECODABLE",
+        "SYNC_PRINCIPAL_MISMATCH"
+      ]
+    },
+    {
+      "id": "tc-friend-auth-sync.local-receipt",
+      "method": "MODEL",
+      "path": "owned-local-transcript",
+      "expectation": "Validate the complete owned-local transcript shape before judging any obligation.",
+      "failure_codes": [
+        "TRANSCRIPT_INVALID"
+      ]
+    }
+  ],
+  "failure_semantics": [
+    {
+      "code": "TRANSCRIPT_INVALID",
+      "stage": "local-receipt",
+      "expected": "one owned-local transcript with ensure/create/accept/sync fields",
+      "observed_if_mismatch": "missing, extra or non-object transcript fields"
+    },
+    {
+      "code": "ENSURE_STATUS_MISMATCH",
+      "stage": "ensure-tc-bot",
+      "expected": "HTTP 200 from the service-key ensure route",
+      "observed_if_mismatch": "non-200 ensure response or transport failure"
+    },
+    {
+      "code": "CREATE_STATUS_MISMATCH",
+      "stage": "create-forwarded-request",
+      "expected": "HTTP 200 from the owned-local legacy friend request route",
+      "observed_if_mismatch": "non-200 create response on the selected profile"
+    },
+    {
+      "code": "PENDING_ROW_MISSING",
+      "stage": "create-forwarded-request",
+      "expected": "exactly one pending request id for the TC bot",
+      "observed_if_mismatch": "missing request_ids, non-pending status or wrong row count"
+    },
+    {
+      "code": "ACCEPT_STATUS_MISMATCH",
+      "stage": "accept-forwarded-request",
+      "expected": "HTTP 200 from the owned-local legacy accept route",
+      "observed_if_mismatch": "non-200 accept response on the selected profile"
+    },
+    {
+      "code": "EDGE_NOT_BUILT",
+      "stage": "accept-forwarded-request",
+      "expected": "at least one non-empty edge id after accept",
+      "observed_if_mismatch": "empty or malformed edge_ids"
+    },
+    {
+      "code": "SYNC_CALL_COUNT_MISMATCH",
+      "stage": "observe-readdressed-sync",
+      "expected": "exactly one friend-auth-sync call",
+      "observed_if_mismatch": "zero, multiple or malformed sync records"
+    },
+    {
+      "code": "SYNC_BODY_MISMATCH",
+      "stage": "observe-readdressed-sync",
+      "expected": "bot_id=2026e2e-tc-bot, owner_work_no=85020, action=grant",
+      "observed_if_mismatch": "missing or different sync body fields"
+    },
+    {
+      "code": "SYNC_PRINCIPAL_UNDECODABLE",
+      "stage": "observe-readdressed-sync",
+      "expected": "a three-segment decodable principal JWT",
+      "observed_if_mismatch": "missing or malformed principal token"
+    },
+    {
+      "code": "SYNC_PRINCIPAL_MISMATCH",
+      "stage": "observe-readdressed-sync",
+      "expected": "iss=bcs, aud=backend and approver subject id 153998",
+      "observed_if_mismatch": "different issuer, audience or approver subject"
+    }
+  ],
+  "expected_values": {
+    "tc_bot": "2026e2e-tc-bot:85020",
+    "tc_bot_api_id": "2026e2e-tc-bot",
+    "owner_work_no": "85020",
+    "approver_subject_id": "153998",
+    "sync_action": "grant",
+    "sync_call_count": 1,
+    "readdressed_issuer": "bcs",
+    "readdressed_audience": "backend",
+    "owned_local_statuses": {
+      "ensure": 200,
+      "create": 200,
+      "accept": 200
+    },
+    "upstream_failure": "re-addressed principal subject/claims differ from the expected approver identity"
+  },
+  "remote_validation": "NOT_RUN",
+  "grants_release_credit": false,
+  "release_parent_denominator": false,
+  "independent_slice": true,
+  "evidence_granularity": "OWNED_LOCAL_RECEIPT"
+}
