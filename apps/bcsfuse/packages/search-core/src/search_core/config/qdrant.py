@@ -33,19 +33,55 @@ class QdrantConnection:
                 )
 
     @classmethod
-    def from_mapping(cls, values: Mapping, *, default_mode: str = "local"):
-        grpc = str(values.get("QDRANT_PREFER_GRPC", "true")).lower()
+    def from_mapping(
+        cls,
+        values: Mapping,
+        *,
+        default_mode: str = "local",
+        prefix: str = "QDRANT",
+    ):
+        grpc = str(values.get(f"{prefix}_PREFER_GRPC", "true")).lower()
         if grpc not in {"true", "false", "1", "0"}:
-            raise ValueError("QDRANT_PREFER_GRPC must be true or false")
-        auth_value = str(values.get("QDRANT_API_KEY", ""))
+            raise ValueError(f"{prefix}_PREFER_GRPC must be true or false")
+        auth_value = str(values.get(f"{prefix}_API_KEY", ""))
         return cls(
-            mode=str(values.get("QDRANT_MODE", default_mode)).lower(),
-            url=str(values.get("QDRANT_URL", "")),
-            grpc_port=int(values.get("QDRANT_GRPC_PORT", 6334)),
+            mode=str(values.get(f"{prefix}_MODE", default_mode)).lower(),
+            url=str(values.get(f"{prefix}_URL", "")),
+            grpc_port=int(values.get(f"{prefix}_GRPC_PORT", 6334)),
             prefer_grpc=grpc in {"true", "1"},
-            timeout=float(values.get("QDRANT_TIMEOUT_SECONDS", 10)),
+            timeout=float(values.get(f"{prefix}_TIMEOUT_SECONDS", 10)),
             api_key=auth_value,
         )
+
+    @classmethod
+    def keyword_from_mapping(
+        cls, values: Mapping, *, fallback: "QdrantConnection"
+    ) -> "QdrantConnection":
+        """Resolve an optional keyword cluster while preserving the dense mode.
+
+        Omitting every ``QDRANT_KEYWORD_*`` setting keeps the existing one
+        cluster pair. An explicit keyword cluster may have another URL or
+        credential, but must not silently turn a Server deployment into an
+        ephemeral Local sparse index.
+        """
+
+        keys = {
+            "QDRANT_KEYWORD_MODE",
+            "QDRANT_KEYWORD_URL",
+            "QDRANT_KEYWORD_GRPC_PORT",
+            "QDRANT_KEYWORD_PREFER_GRPC",
+            "QDRANT_KEYWORD_TIMEOUT_SECONDS",
+            "QDRANT_KEYWORD_API_KEY",
+        }
+        if not any(key in values for key in keys):
+            return fallback
+
+        keyword = cls.from_mapping(
+            values, default_mode=fallback.mode, prefix="QDRANT_KEYWORD"
+        )
+        if keyword.mode != fallback.mode:
+            raise ValueError("QDRANT_KEYWORD_MODE must match QDRANT_MODE")
+        return keyword
 
 
 LOCAL_QDRANT = QdrantConnection()

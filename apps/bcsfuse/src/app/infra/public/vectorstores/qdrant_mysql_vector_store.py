@@ -69,12 +69,16 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         mysql_database: Optional[str] = None,
         persistence_backend: VectorPersistenceBackend | None = None,
         connection: QdrantConnection = LOCAL_QDRANT,
+        keyword_connection: QdrantConnection | None = None,
     ):
         self.collection_name = collection_name
         self.dimension = dimension
         self.distance = distance
 
         self.connection = connection
+        self.keyword_connection = keyword_connection or connection
+        if self.keyword_connection.mode != self.connection.mode:
+            raise ValueError("dense and keyword Qdrant connections must use the same mode")
         if connection.mode == "server":
             self._qdrant = QdrantServerVectorStore(
                 connection=connection, collection_name=collection_name,
@@ -110,7 +114,7 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
 
     def _new_keyword_index(self):
         return QdrantKeywordIndex(
-            connection=self.connection,
+            connection=self.keyword_connection,
             collection_name=self.collection_name + "_keywords",
         )
 
@@ -322,8 +326,9 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
                 raise RuntimeError("keyword index requires rebuild")
             if self.connection.mode == "server":
                 self._ensure_client()
-                self._keywords._ensure_client()
                 self._qdrant._client.get_collection(self.collection_name)
+            if self.keyword_connection.mode == "server":
+                self._keywords._ensure_client()
                 self._keywords._client.get_collection(self._keywords.collection_name)
 
     def size(self) -> int:
@@ -364,7 +369,9 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         filters: Optional[dict] = None,
     ) -> List[VectorSearchHit]:
         """Search the derived sparse index with filters applied before top-k."""
-        with qdrant_search_metrics("keyword", self.connection.mode) as call:
+        with qdrant_search_metrics(
+            "keyword", self.keyword_connection.mode
+        ) as call:
             lock_started_at = time.perf_counter()
             with self._index_lock.read():
                 call.lock_wait_seconds = time.perf_counter() - lock_started_at

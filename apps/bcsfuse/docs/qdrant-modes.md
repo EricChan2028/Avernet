@@ -41,6 +41,12 @@ these volumes contain records you need to keep.
 | `QDRANT_TIMEOUT_SECONDS` | `10`; finite positive transport timeout |
 | `QDRANT_API_KEY` | Optional external Server authentication; supply as a secret |
 | `QDRANT_LOCAL_PATH` | Local mode only |
+| `QDRANT_KEYWORD_URL` | Optional dedicated keyword/sparse Qdrant Server endpoint; omit it to use the dense endpoint |
+| `QDRANT_KEYWORD_MODE` | Optional keyword cluster mode; defaults to `QDRANT_MODE` and must match it |
+| `QDRANT_KEYWORD_PREFER_GRPC` | `true` for the optional keyword cluster |
+| `QDRANT_KEYWORD_GRPC_PORT` | `6334` for the optional keyword cluster |
+| `QDRANT_KEYWORD_TIMEOUT_SECONDS` | `10`; finite positive keyword transport timeout |
+| `QDRANT_KEYWORD_API_KEY` | Optional keyword Server authentication; supply as a secret |
 
 Common package callers pass `QdrantConnection` explicitly. Application adapters
 own environment/config loading. The same candidate filtering and sparse token
@@ -54,14 +60,22 @@ Worker-ID lookup; the TC adapter retains its existing exact Worker-ID priority.
   Existing Local index files are not copied into Server; stored vectors are reused
   without calling Embedding again.
 - Dense vectors use the configured collection; sparse keywords use
-  `<collection>_keywords`. Keep the two collections under the same owner.
+  `<collection>_keywords`. By default both collections use the same Qdrant
+  service. Setting `QDRANT_KEYWORD_URL` (or the other `QDRANT_KEYWORD_*`
+  settings) may move the sparse collection to a separate Server cluster. The
+  optional keyword cluster must use the same Local/Server mode as the dense
+  cluster; it may have a different URL, transport timeout, gRPC setting and
+  credential. The durable lease still owns the logical dense/keyword collection
+  pair, so both clusters publish one shared `index_version`.
 - Server queries may overlap. Writes and rebuilds remain exclusive within the
   process, so a full rebuild can still delay queries. This change does not add
   lock-free rebuilds, cross-process synchronization or automatic version rollback.
 - A failed durable write or index update is returned as an error. TC index update
   failure marks the keyword index unready until reconstruction succeeds.
-- `/health` reports process liveness. `/ready` probes both Server collections and
-  reports 503 on failure. Server connection failures never switch storage modes.
+- `/health` reports process liveness. `/ready` probes the dense and keyword
+  Server collections separately and reports 503 if either logical index cannot
+  be served. It exposes `qdrant_mode` and `keyword_qdrant_mode`, but never
+  endpoint URLs or credentials. Server connection failures never switch storage modes.
 - Generic `QdrantRetrievalIndex` retains its Server collections across reopen;
   its owning application must replay failed writes and manage recovery. It does
   not implement a durable catalog or update scheduler itself.

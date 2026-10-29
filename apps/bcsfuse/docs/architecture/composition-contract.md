@@ -326,6 +326,14 @@ reader-only 403. A successful lease read clears the condition.
 Read replicas clear staleness only after reconstruction or sync reaches the
 shared revision.
 
+An explicit `QDRANT_KEYWORD_URL` may move the sparse collection to a separate
+Qdrant Server while keeping the same collection-name, owner lease and shared
+`index_version`. All other `QDRANT_KEYWORD_*` settings resolve independently,
+but Local/Server mode must match the dense connection. Without a keyword
+override, the existing single Qdrant Server and collection-pair behavior is
+unchanged. Readiness reports both `qdrant_mode` and `keyword_qdrant_mode`
+without exposing endpoints or credentials.
+
 A lease owner may execute `rebuild_from_backend` or `sync_incremental`. A
 read-only replica must not: both direct operations raise
 `IndexStateWriteForbidden` before reaching Qdrant or another mutable index; HTTP

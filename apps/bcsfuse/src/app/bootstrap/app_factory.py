@@ -100,6 +100,9 @@ async def _index_readiness(context: ApplicationContext) -> tuple[bool, dict]:
     vector_store_info = {
         "vector_store_available": True,
         "qdrant_mode": getattr(connection, "mode", None),
+        "keyword_qdrant_mode": getattr(
+            getattr(vector_store, "keyword_connection", None), "mode", None
+        ),
         "vector_store_type": type(vector_store).__name__,
         "vector_store_instance_id": id(vector_store),
         "qdrant_collection_name": getattr(vector_store, "collection_name", None),
