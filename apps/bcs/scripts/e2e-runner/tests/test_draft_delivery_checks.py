@@ -8,7 +8,8 @@ sys.path.insert(0, str(ROOT))
 
 from bcs_e2e.draft_delivery.checks import (DraftDeliveryViolation,
                                            check_client_selected_idempotent_create,
-                                           check_immutable_revision_append)
+                                           check_immutable_revision_append,
+                                           check_stale_update_conflict)
 from bcs_e2e.run_state import RunStateError
 
 DRAFT_ID = '750c52c6-60e2-4249-8ee5-1fb8cb9402ab'
@@ -103,6 +104,48 @@ class ImmutableRevisionAppendTests(unittest.TestCase):
         value['append']['new_content_hash'] = CONTENT_HASH
         with self.assertRaisesRegex(RunStateError, 'did not change content'):
             check_immutable_revision_append(value)
+
+
+def stale_evidence():
+    return {
+        'stale': {
+            'status': 409,
+            'expected_revision': 1,
+            'head_after': 2,
+            'new_content_hash': UPDATED_HASH,
+            'original_content_hash': CONTENT_HASH,
+            'latest_after': {'status': 200, 'revision': 2, 'content_hash': UPDATED_HASH},
+        },
+    }
+
+
+class StaleUpdateConflictTests(unittest.TestCase):
+    def test_accepts_409_without_head_or_content_change(self):
+        check_stale_update_conflict(stale_evidence())
+
+    def test_rejects_nonconflicting_stale_write(self):
+        value = stale_evidence()
+        value['stale']['status'] = 200
+        with self.assertRaisesRegex(RunStateError, 'HTTP 409'):
+            check_stale_update_conflict(value)
+
+    def test_rejects_head_advance_or_replacement(self):
+        for mutation in ('head_after', 'latest_after_content', 'latest_after_status',
+                         'latest_after_revision', 'latest_after_hash'):
+            with self.subTest(mutation=mutation):
+                value = stale_evidence()
+                if mutation == 'head_after':
+                    value['stale']['head_after'] = 3
+                elif mutation == 'latest_after_content':
+                    value['stale']['original_content_hash'] = UPDATED_HASH
+                elif mutation == 'latest_after_status':
+                    value['stale']['latest_after']['status'] = 404
+                elif mutation == 'latest_after_revision':
+                    value['stale']['latest_after']['revision'] = 3
+                else:
+                    value['stale']['latest_after']['content_hash'] = CONTENT_HASH
+                with self.assertRaises(DraftDeliveryViolation):
+                    check_stale_update_conflict(value)
 
 
 if __name__ == '__main__':

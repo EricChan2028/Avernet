@@ -12,6 +12,7 @@ from ..run_state import RunStateError
 
 OBLIGATION_CLIENT_ID = 'DRAFT-DELIVERY.client-selected-idempotent-create'
 OBLIGATION_APPEND = 'DRAFT-DELIVERY.immutable-revision-append'
+OBLIGATION_STALE = 'DRAFT-DELIVERY.stale-update-conflict'
 _UUID = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')
 
 
@@ -98,3 +99,23 @@ def check_immutable_revision_append(evidence: dict) -> None:
             or _integer(updated.get('revision'), 'updated revision', OBLIGATION_APPEND) != 2
             or updated.get('content_hash') != new_hash):
         _fail(OBLIGATION_APPEND, 'revision 2 does not bind the appended content')
+
+
+def check_stale_update_conflict(evidence: dict) -> None:
+    """A stale expected_revision returns 409 without advancing or replacing head."""
+    stale = _mapping(evidence.get('stale'), 'stale update', OBLIGATION_STALE)
+    if _integer(stale.get('status'), 'stale status', OBLIGATION_STALE) != 409:
+        _fail(OBLIGATION_STALE, 'stale update must return HTTP 409')
+    if stale.get('expected_revision') != 1:
+        _fail(OBLIGATION_STALE, 'stale observation did not use revision 1 as expected head')
+    if _integer(stale.get('head_after'), 'head after stale update', OBLIGATION_STALE) != 2:
+        _fail(OBLIGATION_STALE, 'stale update advanced the head')
+    latest = _mapping(stale.get('latest_after'), 'latest revision after stale update', OBLIGATION_STALE)
+    if _integer(latest.get('status'), 'latest status', OBLIGATION_STALE) != 200:
+        _fail(OBLIGATION_STALE, 'newer revision became unreadable after stale update')
+    if _integer(latest.get('revision'), 'latest revision', OBLIGATION_STALE) != 2:
+        _fail(OBLIGATION_STALE, 'stale update renumbered the newer revision')
+    if latest.get('content_hash') != stale.get('new_content_hash'):
+        _fail(OBLIGATION_STALE, 'stale update replaced the newer revision')
+    if latest.get('content_hash') == stale.get('original_content_hash'):
+        _fail(OBLIGATION_STALE, 'stale observation cannot distinguish original and newer content')
