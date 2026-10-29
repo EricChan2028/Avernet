@@ -79,6 +79,27 @@ pub struct QueuedGroupProjection {
     /// association material itself never persists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     caller_lineage: Option<String>,
+    /// Trusted ordinary sender facts of the original channel message —
+    /// the envelope `from` zone's source on protected dispatch (queue
+    /// admission, human P2C admission and the delegated task_assign edge
+    /// all write it; the protected caller subject never substitutes). A
+    /// typed passthrough field: non-secret actor ids only, absent on
+    /// ordinary rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    caller_channel: Option<serde_json::Value>,
+    /// Protected-dispatch runtime CAS passthrough (managed_delivery): the
+    /// StartSend CommitCallerDispatch facts, the typed terminal arbitration
+    /// and the cancel intent all park nested objects on this same top-level
+    /// map — request bodies can never write them. Declared so the strict
+    /// decode accepts rows that have been through real dispatch; the
+    /// Manager-facing result/notice projections strip them. Non-secret
+    /// control facts only, absent on ordinary rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    caller_dispatch: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    caller_terminal: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    caller_cancel: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     task: Option<crate::queued_task::TaskIntent>,
     /// Initialization context must survive ordinary history TTL/count limits.
@@ -166,11 +187,30 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
     /// Provider webhook (spec §10.8); anything else (unregistered bot,
     /// WebSocket-only target, dead flow handle) refuses and the runtime
     /// keeps the anti-downgrade guard fail-closed.
+    ///
+    /// Dispatch-time access parity (review P1): BEFORE any of that, the
+    /// row passes the SAME revalidation the ordinary prepare runs at
+    /// pickup — session scope+Running, group Active, session participant
+    /// scope, task association, BOTH actors' membership, target hidden —
+    /// and the outbound interceptor chain over the protected task text
+    /// with the channel's trusted ordinary sender facts (never the
+    /// protected subject). Queue dwell is a live revocation window; a
+    /// removed member or a deployed policy must refuse HERE, before any
+    /// identity is claimed or a wire touched.
     async fn resolve_caller_dispatch(
         &self,
         delivery: &PersistedMessageDelivery,
     ) -> Option<bcs_service_api::CallerDispatchContext> {
         let flow = self.flow.upgrade()?;
+        if let Err(reason) = revalidate_queued_access(&flow, delivery).await {
+            tracing::warn!(
+                delivery_id = %delivery.delivery_id,
+                bot_id = %delivery.target_bot_id,
+                reason = %reason,
+                "CALLER_ACCESS_REVOKED: the queued caller row failed dispatch-time access revalidation, staying closed"
+            );
+            return None;
+        }
         let target = flow
             .registry
             .resolve_delivery_target(&delivery.target_bot_id)
@@ -184,6 +224,57 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
         } = &target else {
             return None;
         };
+        // The protected task text and the trusted channel facts the
+        // interceptor candidate carries — same shape the runtime's claim
+        // guard demands. Missing facts are a misbuilt row: fail closed.
+        let caller_task = delivery
+            .semantic_projection_json
+            .get("caller_task")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())?;
+        let channel = delivery.semantic_projection_json.get("caller_channel")?;
+        let channel_actor_id = channel
+            .get("actor_id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty())?;
+        let channel_actor_name = channel
+            .get("actor_name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let candidate = GroupMessage {
+            id: delivery.run_id.clone().unwrap_or_else(|| delivery.delivery_id.clone()),
+            timestamp: bcs_protocol::now_ms(),
+            sender: channel_actor_id.to_string(),
+            content: caller_task.to_string(),
+            message_type: GroupMessageType::Bot,
+            bot_name: Some(channel_actor_name),
+            role: MessageRole::User,
+            run_id: String::new(),
+            history_meta: None,
+            metadata: None,
+            attachments: None,
+        };
+        let routing_target = RoutingTarget {
+            bot_uuid: delivery.target_bot_id.clone(),
+            url: String::new(),
+            is_driver: false,
+            delivery_type: DeliveryType::Send,
+        };
+        if let Err(reason) = apply_outbound_interceptors(
+            &flow, &delivery.group_id, &candidate, &routing_target,
+        ).await {
+            tracing::warn!(
+                delivery_id = %delivery.delivery_id,
+                bot_id = %delivery.target_bot_id,
+                interceptor = %reason.interceptor_id,
+                code = %reason.code,
+                "CALLER_ACCESS_REVOKED: the queued caller row failed the outbound policy chain, staying closed"
+            );
+            return None;
+        }
         Some(bcs_service_api::CallerDispatchContext {
             service_credential: bcs_to_provider_token.clone(),
             provider_id: provider_id.clone(),
@@ -463,7 +554,19 @@ fn invalid(message: &str) -> ServiceError {
 impl QueuedGroupProjection {
     pub(crate) fn timeout_notice(row: &PersistedMessageDelivery, manager: &str) -> ServiceResult<Self> {
         let mut projection = Self::decode(row).map_err(|e| invalid(&e))?;
+        // The notice rides the ordinary lifecycle toward the Manager: a
+        // timed-out caller dispatched row hands over NONE of its caller
+        // marks — caller_required would make the system notice permanently
+        // un-preparable under the §15.4 guard.
         projection.caller_execution = None;
+        projection.caller_required = false;
+        projection.caller_task = String::new();
+        projection.caller_delegation = None;
+        projection.caller_lineage = None;
+        projection.caller_channel = None;
+        projection.caller_dispatch = None;
+        projection.caller_terminal = None;
+        projection.caller_cancel = None;
         projection.task = None;
         projection.mentions = vec![manager.to_string()];
         projection.target_tags.clear();
@@ -493,6 +596,10 @@ impl QueuedGroupProjection {
         projection.caller_required = false;
         projection.caller_task = String::new();
         projection.caller_delegation = None;
+        projection.caller_channel = None;
+        projection.caller_dispatch = None;
+        projection.caller_terminal = None;
+        projection.caller_cancel = None;
         // The result leg is also never a lineage carrier (§7.2.1): the
         // Manager's own Owner association never rides onto the Worker's
         // result delivery.
@@ -512,7 +619,8 @@ impl QueuedGroupProjection {
         let snapshot = crate::protocol_context::group_context_input(group);
         Ok(Self {
             caller_execution: None,
-            version: 1, caller_required: false, caller_task: String::new(), caller_delegation: None, caller_lineage: None,
+            version: 1, caller_required: false, caller_task: String::new(), caller_delegation: None, caller_lineage: None, caller_channel: None,
+            caller_dispatch: None, caller_terminal: None, caller_cancel: None,
             task: None, required_context, drain_context: false, policy_version: None,
             driver_bot: snapshot.driver_bot, originator: snapshot.originator,
             participants: snapshot.participants.into_iter().map(|p| ParticipantProjection {
@@ -575,6 +683,10 @@ impl QueuedGroupProjection {
             caller_task: String::new(),
             caller_delegation: None,
             caller_lineage: None,
+            caller_channel: None,
+            caller_dispatch: None,
+            caller_terminal: None,
+            caller_cancel: None,
             task: None,
             required_context: false,
             drain_context: false,
@@ -666,13 +778,18 @@ pub async fn prepare_queued_group(
     prepare_queued_group_bounded(flow, row, contexts, contexts.len() as u64).await
 }
 
-async fn prepare_queued_group_bounded(
+/// Dispatch-time access revalidation shared by the ordinary prepare and the
+/// protected caller branch (review P1): the queue dwell between admission
+/// and the scheduler's pick is a live revocation window — sessions
+/// complete, groups close, members get removed, targets get hidden. Both
+/// dispatch surfaces must refuse on the SAME facts before anything reaches
+/// a wire or an identity handoff. Returns the session-scoped group plus the
+/// canonical source message for the callers' downstream needs (payload
+/// reads, sender identity, interceptor candidates).
+pub(crate) async fn revalidate_queued_access(
     flow: &BcsMessageFlow,
     row: &PersistedMessageDelivery,
-    contexts: &[PersistedMessageDelivery],
-    total: u64,
-) -> ServiceResult<PreparedManagedDelivery> {
-    let projection = QueuedGroupProjection::decode(row).map_err(|e| invalid(&e))?;
+) -> ServiceResult<(Group, bcs_domain::PersistedMessage)> {
     let repo = flow
         .message_repo
         .as_ref()
@@ -728,6 +845,21 @@ async fn prepare_queued_group_bounded(
     if bot.status == ActorStatus::Hidden {
         return Err(invalid("queue target is hidden"));
     }
+    Ok((group, source))
+}
+
+async fn prepare_queued_group_bounded(
+    flow: &BcsMessageFlow,
+    row: &PersistedMessageDelivery,
+    contexts: &[PersistedMessageDelivery],
+    total: u64,
+) -> ServiceResult<PreparedManagedDelivery> {
+    let projection = QueuedGroupProjection::decode(row).map_err(|e| invalid(&e))?;
+    let repo = flow
+        .message_repo
+        .as_ref()
+        .ok_or_else(|| invalid("queue message repository unavailable"))?;
+    let (mut group, source) = revalidate_queued_access(flow, row).await?;
     let limits = match &flow.delivery_policy { Some(p) => p.snapshot.read().await.policy.clone(), None => Default::default() };
     let payload = read_bounded_queued_payload(repo.as_ref(), row, contexts, total, limits.max_context_messages, limits.max_context_bytes, |d, text| {
         let projection = QueuedGroupProjection::decode(d)?;
@@ -1032,6 +1164,79 @@ mod task_result_caller_marks_tests {
             semantic_projection_json: serde_json::Value::Null,
             transport_context_json: None,
             context_selection_json: None,
+        }
+    }
+
+    /// The runtime-stage caller facts EXACTLY as the managed-delivery CAS
+    /// transitions write them: CommitCallerDispatch (StartSend), the typed
+    /// terminal arbitration and the cancel intent — plus the task edge's
+    /// trusted sender channel facts.
+    fn dispatch_committed_worker_projection() -> serde_json::Value {
+        let mut projection = serialized_worker_projection();
+        projection["caller_channel"] = serde_json::json!({
+            "actor_id": "bot-driver", "actor_name": "Driver",
+        });
+        projection["caller_dispatch"] = serde_json::json!({
+            "version": 1i64,
+            "caller_request_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "caller_not_after_ms": 300_000i64,
+            "caller_control_revision": 0u64,
+        });
+        projection["caller_terminal"] = serde_json::json!({
+            "version": 1i64,
+            "outcome": "completed",
+            "event_seq": 7u64,
+            "caller_control_revision": 0u64,
+        });
+        projection["caller_cancel"] = serde_json::json!({
+            "version": 1i64,
+            "cancel_request_id": "cancel-1",
+            "caller_control_revision": 0u64,
+            "reason": "user",
+            "not_after_ms": 300_000i64,
+        });
+        projection
+    }
+
+    #[test]
+    fn runtime_stage_facts_decode_and_never_travel_to_result_or_notice_projections() {
+        // A row that has been through the REAL protected dispatch carries
+        // the CAS-parked runtime facts; the strict decode must accept it
+        // (deny_unknown_fields otherwise rejects the row as "invalid queued
+        // group projection"), and every caller fact must be stripped from
+        // the Manager-facing result and timeout-notice projections.
+        let mut row = worker_row();
+        row.semantic_projection_json = dispatch_committed_worker_projection();
+        row.semantic_projection_json["task"]["leg"] = serde_json::json!("result");
+        let task = crate::queued_task::TaskIntent {
+            leg: crate::queued_task::TaskLeg::Result,
+            task_id: "t1".into(), manager: "bot-driver".into(), worker: "bot-worker".into(),
+            worker_name: "Worker".into(),
+            response_mode: bcs_service_api::ChatResponseMode::Full,
+            assignment_intent_id: None, summary: String::new(),
+        };
+        let projection = QueuedGroupProjection::task_result(&row, task, Vec::new())
+            .expect("a dispatch-committed row decodes for the result leg");
+        let out = serde_json::to_value(&projection).unwrap();
+        for key in [
+            "caller_channel", "caller_dispatch", "caller_terminal", "caller_cancel",
+            "caller_execution", "caller_required", "caller_task", "caller_delegation",
+            "caller_lineage",
+        ] {
+            assert!(out.get(key).is_none(), "the result projection leaks {key}");
+        }
+        // The timeout notice rides the same ordinary lifecycle: a timed-out
+        // caller dispatched row must not hand the Manager a caller-required
+        // (forever un-preparable) system notice.
+        let notice = QueuedGroupProjection::timeout_notice(&row, "bot-driver")
+            .expect("a dispatch-committed row decodes for the timeout notice");
+        let notice_out = serde_json::to_value(&notice).unwrap();
+        for key in [
+            "caller_channel", "caller_dispatch", "caller_terminal", "caller_cancel",
+            "caller_execution", "caller_required", "caller_task", "caller_delegation",
+            "caller_lineage",
+        ] {
+            assert!(notice_out.get(key).is_none(), "the timeout notice leaks {key}");
         }
     }
 

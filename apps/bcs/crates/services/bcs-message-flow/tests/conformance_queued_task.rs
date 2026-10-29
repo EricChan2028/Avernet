@@ -700,6 +700,32 @@ async fn delegated_task_terminal_uses_existing_delivery_without_child_registry()
         deadline_at_ms: Some(i64::MAX),
     }).await.unwrap();
     assert!(started.run_id.is_some(), "the real downstream identity is in flight");
+    // Production faithfulness (review: 用经过真实 dispatch commit 的记录验证
+    // 终态): the protected dispatch pipeline parks the typed CAS facts on the
+    // row BEFORE the worker settles — the terminal commit's task_result
+    // decode must accept a dispatch-committed row, not only commit-free ones.
+    let committed = f.service.commit_caller_dispatch(
+        bcs_service_api::application::message_delivery::CommitCallerDispatchCommand {
+            delivery_id: started.delivery_id.clone(),
+            expected_state_version: started.state.state_version,
+            now_ms: now,
+            dispatch: bcs_service_api::port::CallerDispatchAssociation {
+                environment: started.env.clone(),
+                target_bot_id: started.target_bot_id.clone(),
+                provider_id: String::new(),
+                provider_bot_ref: String::new(),
+                session_id: started.session_id.clone(),
+                run_id: started.run_id.clone().unwrap(),
+                attempt: started.attempt_no,
+                dispatch_id: started.request_id.clone().unwrap(),
+            },
+            commit: bcs_service_api::application::message_delivery::CallerDispatchCommit {
+                request_digest: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".into(),
+                not_after_ms: now + 300_000,
+                control_revision: 0,
+            },
+        }).await.unwrap();
+    assert!(committed, "the typed dispatch commit parks its facts on the row");
 
     // Identity expiry closes future inheritance, not the existing result path.
     assert!(lineage_index.current("run-manager", now + 600_001).is_none());
@@ -712,6 +738,55 @@ async fn delegated_task_terminal_uses_existing_delivery_without_child_registry()
         bcs_message_flow::task_store::TaskLedgerStatus::Replied,
         "the task ledger marks the delegated task replied"
     );
+}
+
+#[tokio::test]
+async fn a_delegated_dispatch_commits_the_manager_sender_channel_facts() {
+    // The REAL task_assign entrance — not the admit_caller fixture, which
+    // pre-populates caller_channel through the human admission seam — must
+    // write the sender facts the runtime's protected dispatch guard reads
+    // BEFORE choosing the delegate branch (DeliveryRuntime::attempt_caller_
+    // protected_dispatch → caller_channel_facts → PreparationFailed when
+    // absent). Without them every caller-chain manager→worker assign dies in
+    // preparation before the Provider wire is ever touched.
+    let lineage_index = Arc::new(bcs_message_flow::caller_lineage::RootLineageIndex::new(8));
+    let f = delegate_fixture(lineage_index.clone()).await;
+    let now = chrono::Utc::now().timestamp_millis();
+    assert!(lineage_index.register(
+        "run-manager",
+        bcs_message_flow::caller_lineage::RootLineage {
+            root_run_id: "root-run".into(),
+            environment: "env-caller".into(),
+            delegation_depth: 0,
+            attempt: 1,
+            message_turn_id: "canonical-turn".into(),
+            group_id: "group-1".into(),
+            session_id: SESSION.into(),
+            history_cutoff_seq: 0,
+            expires_at_ms: now + 600_000,
+            identity_subject: "root-pseudonym".into(),
+            identity_subject_type: bcs_service_api::application::caller_identity::CallerSubjectRefType::BcsEphemeral,
+            delegate_subject: "root-pseudonym".into(),
+            parent_execution: false,
+        },
+        now,
+    ));
+    let mut cmd = dispatch_command();
+    cmd.caller_delegation = Some(bcs_service_api::CallerDelegationAssignment {
+        parent_run_id: "run-manager".into(),
+        parent_attempt: 1,
+        parent_bot_id: "bot-driver".into(),
+        invocation_id: "tool-call-channel".into(),
+    });
+    let outcome = bcs_test_support::contract::application::queued_task::queued_task_dispatch_contract_tests(
+        f.flow.as_ref(), cmd).await;
+    let row = f.rows().await.into_iter()
+        .find(|r| r.semantic_projection_json["task"]["task_id"] == outcome.task_id).unwrap();
+    // The worker row's projection carries the trusted ordinary sender
+    // facts: the MANAGER that issued the assign, same position the queued
+    // admission seam uses (event.bot_id + resolved participant name).
+    assert_eq!(row.semantic_projection_json["caller_channel"]["actor_id"], "bot-driver");
+    assert_eq!(row.semantic_projection_json["caller_channel"]["actor_name"], "Driver");
 }
 
 #[tokio::test]

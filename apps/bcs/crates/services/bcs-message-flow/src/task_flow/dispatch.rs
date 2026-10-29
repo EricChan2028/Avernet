@@ -149,6 +149,17 @@ pub async fn handle_task_dispatch(
                 if let Value::Object(map) = &mut target.semantic_projection_json {
                     map.insert("caller_required".into(), Value::Bool(true));
                     map.insert("caller_task".into(), Value::String(message.clone()));
+                    // Trusted ordinary sender facts of the assign's own
+                    // sender (the Manager): the protected dispatch guard reads
+                    // them BEFORE choosing the delegate branch, and the
+                    // delegate wire derives its envelope `from` from them.
+                    // Same position and trust level as the queued admission
+                    // seam's `caller_channel` (canonical sender id + resolved
+                    // participant name) — never the protected subject.
+                    map.insert("caller_channel".into(), serde_json::json!({
+                        "actor_id": cmd.driver_bot_id.clone(),
+                        "actor_name": name.clone(),
+                    }));
                     // Nested under the DECLARED caller_delegation field: the
                     // strict projection decode (deny_unknown_fields) accepts
                     // the row on every task path (run this line through
