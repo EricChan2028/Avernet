@@ -315,11 +315,19 @@ async def test_only_the_platform_shape_closes_an_apply() -> None:
     platform = TeclawPlatformDelivery(
         ports=lambda: _ports("s"), redeliver=redeliver
     )
-    assert await platform.finish(object(), object()) == "note"
+    from datetime import datetime, timezone
+    from agentclaw.community.core.apply_engine.outcomes import ApplyReport, ApplyStatus
+    from tests.community.core.apply_engine._fakes import make_context
+
+    ctx = make_context(engine_type="teclaw")
+    report = ApplyReport(apply_id="apply_delivery", bot_id=ctx.bot_id, trigger="explicit", status=ApplyStatus.SUCCEEDED, started_at=datetime.now(timezone.utc))
+    assert await platform.finish(ctx, report) == "note"
     # Neither other strategy takes a redeliver at all, so neither can run one.
-    assert await _device().finish(object(), object()) is None
-    assert await _arca().finish(object(), object()) is None
+    assert await _device().finish(ctx, report) is None
+    assert await _arca().finish(ctx, report) is None
     assert len(calls) == 1
+    assert calls[0].applied_identity_files == frozenset()
+    assert ctx.applied_identity_files is None
 
 
 # ── what a built strategy has, and has not, reached ───────────────────────

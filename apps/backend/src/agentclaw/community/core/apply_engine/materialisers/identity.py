@@ -200,7 +200,10 @@ class IdentityMaterialiser(Materialiser):
                 current = await self._identity.read_identity_file(
                     entity_type, entity_id, ctx.bot_id, intent.identity, ctx.owner_id
                 )
-            if presence.get(intent.identity) and current == intent.value:
+            # DEVICE lists known empty files as False; those already equal
+            # empty text. PLATFORM omits names without a stored representation,
+            # so a missing zero-byte profile ref still needs creation.
+            if intent.identity in presence and current == intent.value:
                 outcome = EntryOutcome.UNCHANGED.value
             elif not current:
                 outcome = EntryOutcome.CREATED.value

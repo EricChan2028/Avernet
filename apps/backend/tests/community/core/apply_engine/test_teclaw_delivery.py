@@ -69,8 +69,10 @@ class _Sync:
     def __init__(self, result: Any) -> None:
         self.result = result
         self.calls: list[str] = []
+        self.applied_identity_files = None
 
-    def deliver_manifest_apply(self):
+    def deliver_manifest_apply(self, *, applied_identity_files=None):
+        self.applied_identity_files = applied_identity_files
         self.calls.append("deliver_manifest_apply")
         return self.result
 
@@ -257,3 +259,27 @@ def test_record_only_activation_passes_project_false_on_every_write() -> None:
     assert all(kw["project"] is False for _, kw in writes)
     reads = [kw for name, kw in inner.calls if name in ("list_installed_mcps", "platform_default_mcp_codes")]
     assert all("project" not in kw for kw in reads)
+
+
+@pytest.mark.parametrize("outcome", ["created", "updated", "unchanged", "failed", "skipped"])
+def test_platform_delivery_selects_profile_only_from_this_apply_facts(outcome):
+    from dataclasses import replace
+    from agentclaw.community.core.apply_engine.capabilities import Category
+    from agentclaw.community.core.apply_engine.outcomes import CategoryResult, EntryResult, EntryOutcome
+
+    redeliver, sync, _ = _redeliver(bound=True)
+    strategy = TeclawPlatformDelivery(ports=lambda: _ports("store"), redeliver=redeliver)
+    report = replace(_report(), categories=(CategoryResult(
+        construct=Category.IDENTITY,
+        entries=(EntryResult(Category.IDENTITY, "IDENTITY.md", EntryOutcome(outcome)),),
+    ),))
+    assert _run(strategy.finish(make_context(engine_type="teclaw"), report)) is None
+    expected = frozenset({"IDENTITY.md"}) if outcome in {"created", "updated", "unchanged"} else frozenset()
+    assert sync.applied_identity_files == expected
+
+
+def test_other_category_redelivery_has_explicit_empty_identity_selection():
+    redeliver, sync, _ = _redeliver(bound=True)
+    strategy = TeclawPlatformDelivery(ports=lambda: _ports("store"), redeliver=redeliver)
+    assert _run(strategy.finish(make_context(engine_type="teclaw"), _report())) is None
+    assert sync.applied_identity_files == frozenset()

@@ -36,7 +36,7 @@ ResolveDeviceContext = Callable[[str, str], Any]
 #: ``dispatch``, which answers the teclaw sync service for a teclaw device.
 #: The redeliver then calls that service's ``deliver_manifest_apply()``::
 #:
-#:     dispatch(device).deliver_manifest_apply()
+#:     dispatch(device).deliver_manifest_apply(applied_identity_files=ctx.applied_identity_files)
 #:     # -> {"success": True} | {"success": False, "message": "..."}
 DispatchDeviceSync = Callable[[Any], Any]
 
@@ -85,7 +85,9 @@ class TeclawRedeliver:
         # Blocking HTTP to the container, off the event loop like every other
         # device write the materialisers make.
         result = await asyncio.to_thread(
-            lambda: self._dispatch(device).deliver_manifest_apply()
+            lambda: self._dispatch(device).deliver_manifest_apply(
+                applied_identity_files=ctx.applied_identity_files
+            )
         )
         if isinstance(result, dict) and result.get("success") is False:
             message = str(result.get("message") or "delivery failed")

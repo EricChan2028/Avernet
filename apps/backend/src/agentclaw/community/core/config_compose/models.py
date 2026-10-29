@@ -70,8 +70,8 @@ class ComposeRequest:
     """Identifies the bot + engine context a single compose runs for.
 
     One request object serves exactly one ``ConfigComposer.compose`` pass, and
-    that is what makes the two non-identity fields at the end safe: they are
-    per-compose carry-alongs, scoped by the request's own lifetime. Both are
+    that is what makes the non-identity carry fields safe: they are
+    per-compose values, scoped by the request's own lifetime. They are
     excluded from equality — they are *derived from* the identity above, never
     part of it, so two requests naming the same bot are the same request
     whether or not one of them arrived with its MCP set already resolved.
@@ -88,6 +88,14 @@ class ComposeRequest:
     request's identity, unlike the two carry-alongs below: the same bot
     composed for a manifest apply and for a skill upload yields different
     artifacts."""
+
+    applied_identity_files: frozenset[str] | None = field(default=None, compare=False)
+    """Only for MANIFEST_APPLY: successful identity names from that execution.
+
+    None means the caller has no execution selection (runtime/provision); an
+    empty set means the current Apply selected none. Other occasions ignore it.
+    This carries facts, never a fresh read of a stored Manifest.
+    """
 
     effective_mcps: tuple[dict[str, Any], ...] | None = field(
         default=None, compare=False

@@ -112,6 +112,7 @@ from agentclaw.community.core.apply_engine.order import (
 from agentclaw.community.core.apply_engine.outcomes import (
     ApplyConstruct,
     ApplyReport,
+    EntryOutcome,
 )
 from agentclaw.community.core.apply_engine.capabilities import Section
 from agentclaw.community.core.apply_engine.delivery_mode import (
@@ -526,7 +527,18 @@ class TeclawPlatformDelivery(_PhaseTableDelivery):
         return self._ports()
 
     async def finish(self, ctx: ApplyContext, report: ApplyReport) -> Optional[str]:
-        return await self._redeliver(ctx)
+        # Use this execution's facts, including its phase/only selection. A
+        # second read of the stored declaration could select a different input.
+        selected = frozenset(
+            entry.identity
+            for category in report.categories
+            if category.construct is Category.IDENTITY
+            for entry in category.entries
+            if entry.outcome in (
+                EntryOutcome.CREATED, EntryOutcome.UPDATED, EntryOutcome.UNCHANGED
+            )
+        )
+        return await self._redeliver(replace(ctx, applied_identity_files=selected))
 
 
 class TeclawDeviceDelivery(_PhaseTableDelivery):

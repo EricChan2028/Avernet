@@ -597,3 +597,18 @@ def test_the_git_road_files_its_bytes_with_the_store():
     assert content.store_calls[-1]["source_url"] == (
         f"git+https://git.corp/id.git@{'a' * 40}:files/rules.md"
     )
+
+
+@pytest.mark.parametrize("original", [None, "old profile"])
+def test_empty_profile_converges_with_device_empty_presence_semantics(original):
+    files = {} if original is None else {"IDENTITY.md": original}
+    materialiser, identity, _, _ = identity_rig(files)
+    entries = [{"type": "IDENTITY.md", "content": ""}]
+    _, _, first = _run(_apply(materialiser, _ctx(), entries))
+    writes_after_first = len(identity.writes)
+    _, _, second = _run(_apply(materialiser, _ctx(), entries))
+    assert [entry.outcome.value for entry in second] == ["unchanged"]
+    assert len(identity.writes) == writes_after_first
+    if original is None:
+        assert [entry.outcome.value for entry in first] == ["unchanged"]
+        assert identity.writes == []

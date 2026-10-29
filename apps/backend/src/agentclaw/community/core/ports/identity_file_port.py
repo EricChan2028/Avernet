@@ -52,7 +52,13 @@ class IdentityFilePort(Protocol):
         *,
         engine_type: str | None = None,
         stage: str = "draft",
-    ) -> list[tuple[str, bool]]: ...
+    ) -> list[tuple[str, bool]]:
+        """Known file states. A listed False is known empty/absent and equals
+        empty text; an omitted name has no materialised representation yet.
+        Device ports enumerate the whitelist (bool(content)); a platform port
+        enumerates stored objects, including explicit zero-byte profiles.
+        """
+        ...
 
     @abstractmethod
     async def read_identity_file(
