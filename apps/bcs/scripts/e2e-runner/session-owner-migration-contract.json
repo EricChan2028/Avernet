@@ -1,0 +1,143 @@
+{
+  "case_id": "LOCAL-SESSION-OWNER-01",
+  "environment": {
+    "local": "LOCAL_EXECUTOR_ONLY",
+    "preprod": "REMOTE_UNSUPPORTED"
+  },
+  "evidence_granularity": "OWNED_SESSION_OWNER_JOURNAL",
+  "grants_release_credit": false,
+  "independent_slice": true,
+  "owned_runtime_binary": {
+    "auto_build": false,
+    "build_command": "cargo build -p bcs --bin bcs",
+    "hash_algorithm": "sha256",
+    "opt_in_env": [
+      "BCS_E2E_TEST_BINARY",
+      "BCS_E2E_TEST_BINARY_SHA256"
+    ],
+    "package": "bcs",
+    "required_arguments": [
+      "--binary",
+      "--binary-sha256"
+    ]
+  },
+  "parent": "story_session_owner_permissions",
+  "release_parent_denominator": false,
+  "remote_validation": "NOT_RUN",
+  "requirements": [
+    {
+      "expectation": "Each Human principal is ensured through the station ensure-human leg, mints a one-time register token from the station, registers its disposable Bot with that token, and onboards it with the testing domain, review skill and local scope; the owner alone marks its Bot public afterwards. All bootstrap and visibility legs carry per-request mock admission on the station face only; the ownership ledger records the two Bot uuid/owner pairs.",
+      "id": "SESSION-OWNER.bootstrap-ownership",
+      "markers": [
+        "session-owner-permissions-compliance"
+      ],
+      "story_lines": [
+        73,
+        101
+      ]
+    },
+    {
+      "expectation": "The manager creates a normal Group driven by its registered driver Bot, narrows the Group to private visibility, and opens exactly one Session titled for session-only participation; creation acknowledges 201 and the Group and Session ids join the ownership journal.",
+      "id": "SESSION-OWNER.group-session-creation",
+      "markers": [
+        "session-owner-permissions-compliance"
+      ],
+      "story_lines": [
+        102,
+        112
+      ]
+    },
+    {
+      "expectation": "Before any invitation the owner is refused Group reads with 403 forbidden; once the manager adds the owned Bot as a Session-only participant the owner reads the Group while its participant projection still hides the Session-only Bot; the stranger Human stays refused.",
+      "id": "SESSION-OWNER.group-read-boundary",
+      "markers": [
+        "session-owner-permissions-compliance"
+      ],
+      "story_lines": [
+        113,
+        117
+      ]
+    },
+    {
+      "expectation": "The owner flips its own Bot Session mode between muted and auto with exact echo and read-back; patching the manager driver Bot, selecting an invalid bot mode, widening the message view scope to full as non-manager, or selecting an invalid message view scope is refused with forbidden, invalid_participant_mode, message_view_scope_forbidden or invalid_message_view_scope and no denied patch partially writes.",
+      "id": "SESSION-OWNER.bot-mode-ownership",
+      "markers": [
+        "session-owner-permissions-compliance"
+      ],
+      "story_lines": [
+        119,
+        131
+      ]
+    },
+    {
+      "expectation": "The owner cannot retitle or delete the manager Session, rename or delete the manager Group, invite the driver Bot into the Session, or patch a participant that never existed: foreign Session and Group mutations and the foreign invite answer forbidden, the manager missing-target read answers participant_not_found while the owner missing-target read answers forbidden.",
+      "id": "SESSION-OWNER.foreign-mutation-denied",
+      "markers": [
+        "session-owner-permissions-compliance"
+      ],
+      "story_lines": [
+        132,
+        143
+      ]
+    },
+    {
+      "expectation": "A Human self-joins only through its owned active Bot: the owner Human joins present with full view scope by exact echo, bot modes and manager-absent writes are refused, a stranger cannot self-add or widen its scope, the manager may narrow the Human scope to participant, and the loopback pairs (participant/absent, full/present) echo and read back exactly.",
+      "id": "SESSION-OWNER.human-self-service-scope",
+      "markers": [
+        "session-owner-permissions-compliance"
+      ],
+      "story_lines": [
+        145,
+        168
+      ]
+    },
+    {
+      "expectation": "Session listing scoped by view_bot_id answers 200 only for a Bot the requester owns and forbidden for the manager driver Bot; message history reads, collect add and collect remove succeed for the participating owner while collect add answers forbidden for the stranger.",
+      "id": "SESSION-OWNER.collection-history-actor-scope",
+      "markers": [
+        "session-owner-permissions-compliance"
+      ],
+      "story_lines": [
+        170,
+        178
+      ]
+    },
+    {
+      "expectation": "Manager revocation of the owned Bot leaves the Human relation intact and the owner keeps Group reads while Bot-mode patches are refused; revoking the Human relation too denies the owner both Group and Session reads while the manager retains its Group read.",
+      "id": "SESSION-OWNER.membership-revocation-isolation",
+      "markers": [
+        "session-owner-permissions-compliance"
+      ],
+      "story_lines": [
+        180,
+        188
+      ]
+    },
+    {
+      "expectation": "Teardown deletes the Session and the Group through the manager public face and both owned Bots through their station owners; every disposition failure fails the whole story instead of leaking owned state.",
+      "id": "SESSION-OWNER.cleanup-disposition",
+      "markers": [
+        "session-owner-permissions-compliance"
+      ],
+      "story_lines": [
+        190,
+        200
+      ]
+    }
+  ],
+  "schema_version": 1,
+  "source_file_revisions": {
+    "session_owner_story.py": "3fad5eec948cf094f284c42aff4b9b655e60f518",
+    "session_owner_story.sh": "7169b7286306267bff710595984819e1b8171391"
+  },
+  "source_revision": "4191d2b7171798514944bf7e493c48e94578987a",
+  "sources": {
+    "session_owner_story.py": "303d734dc595a16980adad2955016ca8c9e988a5418df1875cfa6dd3857859ed",
+    "session_owner_story.sh": "e630a4b8bb730d2838da570f30319a1edcaeca92a9507a1657ff1a6a9e0f1681"
+  },
+  "story_checks": 60,
+  "story_markers": [
+    "Session owner story: {checks} HTTP assertions passed"
+  ],
+  "suite": "owned-local-session-owner-v1"
+}
