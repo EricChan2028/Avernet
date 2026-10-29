@@ -279,6 +279,9 @@ HTTP outcome. These metrics describe admission health, not dependency health.
 
 The composed v1 search route stores a successful, fully projected search
 response in the same bounded result cache used by the unified application core.
+The stable v1 search projection is owned by the transport projection helper;
+the route supplies authentication, timing, and cache bindings without
+reconstructing result schemas inline.
 The key covers the normalized query, topK, retrieval mode, minimum score,
 effective default filters, reranker model, embedding-index flag, and the
 durable `index_version`. Authentication runs before the middleware reads or

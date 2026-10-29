@@ -369,6 +369,19 @@ def test_v1_search_route_delegates_to_agent_search_service(monkeypatch) -> None:
         RouteAgentSearchService,
     )
 
+    projection_calls: list[tuple[Any, AgentSearchOutcome, float]] = []
+
+    def isolated_projection(
+        request: Any, outcome: AgentSearchOutcome, *, elapsed_ms: float
+    ) -> dict[str, Any]:
+        projection_calls.append((request, outcome, elapsed_ms))
+        return {"projection": "isolated"}
+
+    monkeypatch.setattr(
+        "app.adapters.http.search_response_projection.build_v1_search_response",
+        isolated_projection,
+    )
+
     registry = ProviderRegistry()
     registry.register("config", object())
     registry.register("secret_provider", object())
@@ -387,10 +400,12 @@ def test_v1_search_route_delegates_to_agent_search_service(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert RouteAgentSearchService.commands[0].top_k == 1
-    body = response.json()
-    assert body["results"][0]["profile_key"] == "bot:reader:default"
-    assert body["results"][0]["short_profile"] == "reader"
-    assert body["config_applied"] == {"reranker_model": None}
+    assert len(projection_calls) == 1
+    projected_request, projected_outcome, elapsed_ms = projection_calls[0]
+    assert projected_request.query == " 支付 风险 "
+    assert projected_outcome is not None
+    assert elapsed_ms >= 0
+    assert response.json() == {"projection": "isolated"}
 
 
 def test_v1_recommend_route_delegates_to_agent_search_service(monkeypatch) -> None:
@@ -542,3 +557,66 @@ def test_search_copies_delegate_diagnostics_into_outcome_metadata() -> None:
     assert outcome.metadata["keyword_unavailable"] is False
     assert outcome.metadata["literal_fallback_used"] is True
     assert outcome.metadata["score_source"] == "regex_fallback"
+
+
+
+def test_v1_search_projection_preserves_colon_worker_ids_and_bounded_evidence() -> None:
+    from types import SimpleNamespace
+
+    from app.adapters.http.search_response_projection import (
+        build_v1_search_response,
+    )
+    from app.bootstrap.oss_business_routes import SearchRequestOSS
+
+    fragments = [
+        SimpleNamespace(
+            fragment_type=f"fragment-{index}",
+            score=0.1 + index,
+            weighted_score=0.2 + index,
+            content_preview=f"preview-{index}",
+            content=f"content-{index}",
+        )
+        for index in range(7)
+    ]
+    result = SimpleNamespace(
+        profile_key="team:bot:finance:default",
+        score=0.91,
+        aggregated_score=0.88,
+        fragment_matches=fragments,
+        metadata=SimpleNamespace(
+            payload={"short_profile": "finance agent"}, short_profile="finance agent"
+        ),
+    )
+    outcome = AgentSearchOutcome(
+        query="支付 风险",
+        normalized_query="支付 风险",
+        top_k=3,
+        mode="auto",
+        results=(result,),
+        metadata={},
+        config_applied={"reranker_model": None},
+        elapsed_ms=12.5,
+    )
+    response = build_v1_search_response(
+        SearchRequestOSS(query="支付 风险", top_k=3),
+        outcome,
+        elapsed_ms=13.2,
+    )
+
+    assert response["query"] == "支付 风险"
+    assert response["top_k"] == 3
+    assert response["mode"] == "auto"
+    assert response["results_count"] == 1
+    assert response["timing_ms"] == 13.2
+    assert response["config_applied"] == {"reranker_model": None}
+    projected = response["results"][0]
+    assert projected["profile_key"] == "team:bot:finance:default"
+    assert projected["worker_id"] == "team:bot:finance"
+    assert projected["profile_id"] == "default"
+    assert projected["score"] == 0.91
+    assert projected["aggregated_score"] == 0.88
+    assert projected["short_profile"] == "finance agent"
+    assert projected["source"] == "vector"
+    assert len(projected["fragment_matches"]) == 5
+    assert projected["fragment_matches"][0]["fragment_type"] == "fragment-0"
+    assert projected["fragment_matches"][-1]["content"] == "content-4"

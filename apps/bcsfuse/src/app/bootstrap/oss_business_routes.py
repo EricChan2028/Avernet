@@ -1438,6 +1438,9 @@ def include_oss_business_routes(app) -> None:
                 len(search_req.query), search_req.top_k,
             )
 
+            from app.adapters.http.search_response_cache import (
+                store_v1_search_response,
+            )
             from app.adapters.http.search_threadpool import (
                 run_search_in_threadpool,
             )
@@ -1483,64 +1486,18 @@ def include_oss_business_routes(app) -> None:
                     reranker_model=os.getenv("RERANKER_MODEL"),
                 )
             )
-            results = outcome.results
             logger.info(
-                "[Search OSS] match returned %d results", len(results),
+                "[Search OSS] match returned %d results", len(outcome.results),
+            )
+            elapsed_ms = (time.time() - start_time) * 1000
+            from app.adapters.http.search_response_projection import (
+                build_v1_search_response,
             )
 
-            # --- Format results (aligned with internal SearchResultItem) ---
-            formatted_results = []
-            for result in results:
-                parts = result.profile_key.split(":")
-
-                # Extract fragment_matches (aligned with internal)
-                fragment_matches = []
-                if hasattr(result, "fragment_matches") and result.fragment_matches:
-                    for fm in result.fragment_matches[:5]:
-                        fragment_matches.append({
-                            "fragment_type": getattr(fm, "fragment_type", "unknown"),
-                            "score": getattr(fm, "score", 0.0),
-                            "weighted_score": getattr(fm, "weighted_score", 0.0),
-                            "content_preview": getattr(fm, "content_preview", "")[:100],
-                            "content": getattr(fm, "content", "") or getattr(fm, "content_preview", ""),
-                        })
-
-                # Extract short_profile from metadata
-                short_profile = ""
-                if hasattr(result, "metadata") and result.metadata:
-                    short_profile = getattr(result.metadata, "short_profile", "")
-                    if not short_profile and hasattr(result.metadata, "payload"):
-                        short_profile = result.metadata.payload.get("short_profile", "")
-
-                # worker_id may contain colons, so profile_id is the last part
-                formatted_results.append({
-                    "profile_key": result.profile_key,
-                    "worker_id": ":".join(parts[:-1]) if len(parts) > 1 else result.profile_key,
-                    "profile_id": parts[-1] if len(parts) > 1 else "default",
-                    "score": result.score,
-                    "aggregated_score": getattr(result, "aggregated_score", None),
-                    "fragment_matches": fragment_matches,
-                    "short_profile": short_profile,
-                    "source": "vector",
-                })
-
-            # --- Build config_applied from the application outcome ---
-            config_applied = outcome.config_applied
-
-            elapsed_ms = (time.time() - start_time) * 1000
-
-            response = {
-                "query": search_req.query,
-                "top_k": search_req.top_k,
-                "mode": getattr(search_req, "mode", "auto"),
-                "results_count": len(formatted_results),
-                "results": formatted_results,
-                "timing_ms": round(elapsed_ms, 2),
-                "config_applied": config_applied,
-            }
-
-            from app.adapters.http.search_response_cache import (
-                store_v1_search_response,
+            response = build_v1_search_response(
+                search_req,
+                outcome,
+                elapsed_ms=elapsed_ms,
             )
 
             store_v1_search_response(
