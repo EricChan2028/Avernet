@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import time
 from typing import Any
 
 from .case_adapters import AdapterCall
@@ -53,9 +54,17 @@ _PREPROD_BLOCKED_METHODS = {
     "run_dept_scope_friend_ext": "mock Provider and internal department headers require the user-credential batch",
 }
 
+# Bounded retry budget for idempotent projection reads only. Live bcs-pre
+# projects friend-request decisions and connection grants asynchronously, so a
+# first read can miss state the write already committed. Writes, decisions and
+# admission probes never retry; every waiter preserves the reviewed single-read
+# error text when the budget is exhausted.
+_EDGE_PROJECTION_ATTEMPTS = 6
+_EDGE_PROJECTION_DELAY_SECONDS = 1.0
+
 
 class RemoteEdgeFriendMutationAdapter:
-    def __init__(self, gateway_profile: dict, station_profile: dict):
+    def __init__(self, gateway_profile: dict, station_profile: dict, *, projection_attempts: int = _EDGE_PROJECTION_ATTEMPTS, projection_delay: float = _EDGE_PROJECTION_DELAY_SECONDS):
         if not isinstance(gateway_profile, dict) or not isinstance(station_profile, dict):
             raise RunStateError("Edge friend mutations require admitted Gateway and station profiles")
         gateway_entrypoint = gateway_profile.get("entrypoint", {})
@@ -94,6 +103,12 @@ class RemoteEdgeFriendMutationAdapter:
         except (ConfigError, ValueError) as error:
             raise RunStateError(str(error)) from None
 
+        if isinstance(projection_attempts, bool) or not isinstance(projection_attempts, int) or projection_attempts < 1:
+            raise RunStateError("edge projection convergence budget must be a positive integer attempt count")
+        if isinstance(projection_delay, bool) or not isinstance(projection_delay, (int, float)) or projection_delay < 0:
+            raise RunStateError("edge projection convergence delay must be a non-negative second count")
+        self._projection_attempts = projection_attempts
+        self._projection_delay = float(projection_delay)
         self.gateway_profile = gateway_profile
         self.station_profile = station_profile
         self.driver_actor_id = gateway_profile["actors"]["driver"]["bot_id"]
@@ -253,29 +268,115 @@ class RemoteEdgeFriendMutationAdapter:
 
     def _pending_pair_absent(self, *, member: str, actor_id: str,
                              requests: list[dict]) -> None:
-        for operation, sender, receiver in (
-                ("friend.mutation.requests_sent.read", actor_id, member),
-                ("friend.mutation.requests_received.read", member, actor_id)):
-            data, record = self._read(self.reader, operation, actor_id=actor_id)
-            requests.append(record)
-            if self._request_row(data=data, candidates=set(),
-                                 sender=sender, receiver=receiver) is not None:
-                raise RunStateError("friend pair still has a visible pending request")
+        # Idempotent projection read: the decision write commits synchronously
+        # while the sent/received inboxes may still project the decided pair for
+        # a bounded window, so poll the published contract instead of failing
+        # the obligation on the first sight of a stale projection.
+        for attempt in range(self._projection_attempts):
+            visible = False
+            for operation, sender, receiver in (
+                    ("friend.mutation.requests_sent.read", actor_id, member),
+                    ("friend.mutation.requests_received.read", member, actor_id)):
+                data, record = self._read(self.reader, operation, actor_id=actor_id)
+                requests.append(record)
+                if self._request_row(data=data, candidates=set(),
+                                     sender=sender, receiver=receiver) is not None:
+                    visible = True
+                    break
+            if not visible:
+                return
+            if attempt + 1 < self._projection_attempts:
+                time.sleep(self._projection_delay)
+        raise RunStateError("friend pair still has a visible pending request")
 
     def _pending_absent(self, *, candidates: set[str], actor_id: str, requests: list[dict]) -> None:
-        for operation, sender, receiver in (
-            ("friend.mutation.requests_sent.read", actor_id, None),
-            ("friend.mutation.requests_received.read", None, actor_id),
-        ):
-            data, record = self._read(self.reader, operation, actor_id=actor_id)
-            requests.append(record)
-            if self._request_row(data=data, candidates=candidates, sender=sender, receiver=receiver) is not None:
-                raise RunStateError("friend pair still has a visible pending request")
+        # Same bounded projection convergence as _pending_pair_absent; the
+        # pending-row candidates are exact request IDs from the create/decision
+        # response, never a guessed family.
+        for attempt in range(self._projection_attempts):
+            visible = False
+            for operation, sender, receiver in (
+                ("friend.mutation.requests_sent.read", actor_id, None),
+                ("friend.mutation.requests_received.read", None, actor_id),
+            ):
+                data, record = self._read(self.reader, operation, actor_id=actor_id)
+                requests.append(record)
+                if self._request_row(data=data, candidates=candidates, sender=sender, receiver=receiver) is not None:
+                    visible = True
+            if not visible:
+                return
+            if attempt + 1 < self._projection_attempts:
+                time.sleep(self._projection_delay)
+        raise RunStateError("friend pair still has a visible pending request")
 
     def _connections(self, *, actor_id: str, peer: str, requests: list[dict]) -> bool:
         data, record = self._read(self.reader, "friend.mutation.connections.read", actor_id=actor_id)
         requests.append(record)
         return any(row.get("actor") == self._actor(peer) for row in self._page_rows(data))
+
+    def _wait_for_connection(self, *, actor_id: str, peer: str, expect: bool, requests: list[dict]) -> bool:
+        # Bounded convergence for the idempotent connections projection. The
+        # first read is immediate (fast path keeps the single-read call matrix);
+        # exhaustion returns the last observed value so the reviewed obligation
+        # error fires at the call site with its original text.
+        visible = self._connections(actor_id=actor_id, peer=peer, requests=requests)
+        for _ in range(self._projection_attempts - 1):
+            if visible is expect:
+                return visible
+            time.sleep(self._projection_delay)
+            visible = self._connections(actor_id=actor_id, peer=peer, requests=requests)
+        return visible
+
+    def _project_pending_pair(self, *, member: str, candidates: set[str], requests: list[dict]) -> tuple[dict | None, dict | None]:
+        sent_data, sent_record = self._read(self.reader, "friend.mutation.requests_sent.read", actor_id=self.driver_actor_id)
+        received_data, received_record = self._read(self.reader, "friend.mutation.requests_received.read", actor_id=self.driver_actor_id)
+        requests.extend([sent_record, received_record])
+        return (
+            self._request_row(data=sent_data, candidates=candidates, sender=self.driver_actor_id, receiver=member),
+            self._request_row(data=received_data, candidates=candidates, sender=member, receiver=self.driver_actor_id),
+        )
+
+    def _wait_for_pending_pair(self, *, member: str, candidates: set[str], requests: list[dict],
+                               forward_missing: str, reverse_missing: str, distinct: str) -> tuple[dict, dict]:
+        forward: dict | None = None
+        reverse: dict | None = None
+        for attempt in range(self._projection_attempts):
+            if attempt:
+                time.sleep(self._projection_delay)
+            forward, reverse = self._project_pending_pair(member=member, candidates=candidates, requests=requests)
+            if forward is not None and reverse is not None and forward.get("request_id") != reverse.get("request_id"):
+                return forward, reverse
+        if forward is None:
+            raise RunStateError(forward_missing)
+        if reverse is None:
+            raise RunStateError(reverse_missing)
+        raise RunStateError(distinct)
+
+    def _wait_for_unique_pending_row(self, *, member: str, candidates: set[str], requests: list[dict], action: str) -> dict:
+        row: dict | None = None
+        for attempt in range(self._projection_attempts):
+            if attempt:
+                time.sleep(self._projection_delay)
+            for operation, sender, receiver in (
+                ("friend.mutation.requests_sent.read", self.driver_actor_id, member),
+                ("friend.mutation.requests_received.read", member, self.driver_actor_id),
+            ):
+                data, record = self._read(self.reader, operation, actor_id=self.driver_actor_id)
+                requests.append(record)
+                row = self._request_row(data=data, candidates=candidates, sender=sender, receiver=receiver)
+                if row is not None:
+                    return row
+        raise RunStateError(f"single friend request was not uniquely visible before {action}")
+
+    def _wait_for_requests_all_absent(self, *, candidates: set[str], requests: list[dict]) -> None:
+        for attempt in range(self._projection_attempts):
+            data, record = self._read(self.reader, "friend.mutation.requests_all.read", actor_id=self.driver_actor_id)
+            requests.append(record)
+            if self._request_row(data=data, candidates=candidates) is None:
+                return
+            if attempt + 1 < self._projection_attempts:
+                time.sleep(self._projection_delay)
+        raise RunStateError("accepted friend request remains pending in all-direction read")
 
     def _admission(self, *, bot_id: str, actor_id: str, requests: list[dict]) -> dict:
         data, record = self._read(self.station_reader, "station.admission.read", bot_id=bot_id, actor_id=actor_id)
@@ -324,13 +425,13 @@ class RemoteEdgeFriendMutationAdapter:
     def _accept_pair(self, *, member: str, requests: list[dict]) -> tuple[str, int]:
         create_data, create_record = self._create(self.driver_actor_id, member, expected=(201,))
         candidates = set(self._valid_pending_create(create_data))
-        sent_data, sent_record = self._read(self.reader, "friend.mutation.requests_sent.read", actor_id=self.driver_actor_id)
-        received_data, received_record = self._read(self.reader, "friend.mutation.requests_received.read", actor_id=self.driver_actor_id)
-        requests.extend([create_record, sent_record, received_record])
-        forward = self._request_row(data=sent_data, candidates=candidates, sender=self.driver_actor_id, receiver=member)
-        reverse = self._request_row(data=received_data, candidates=candidates, sender=member, receiver=self.driver_actor_id)
-        if forward is None or reverse is None or forward.get("request_id") == reverse.get("request_id"):
-            raise RunStateError("friend pair did not expose two distinct pending rows")
+        requests.append(create_record)
+        forward, reverse = self._wait_for_pending_pair(
+            member=member, candidates=candidates, requests=requests,
+            forward_missing="friend pair did not expose two distinct pending rows",
+            reverse_missing="friend pair did not expose two distinct pending rows",
+            distinct="friend pair did not expose two distinct pending rows",
+        )
         decision_data, decision_record = self._decide(
             action="accept", sender=member, receiver=self.driver_actor_id,
             request_id=reverse["request_id"], expected=(200,)
@@ -348,8 +449,8 @@ class RemoteEdgeFriendMutationAdapter:
         request_id, edge_id = self._accept_pair(member=member, requests=requests)
         self._pending_absent(candidates={request_id}, actor_id=self.driver_actor_id, requests=requests)
         self._pending_absent(candidates={request_id}, actor_id=member, requests=requests)
-        driver_visible = self._connections(actor_id=self.driver_actor_id, peer=member, requests=requests)
-        member_visible = self._connections(actor_id=member, peer=self.driver_actor_id, requests=requests)
+        driver_visible = self._wait_for_connection(actor_id=self.driver_actor_id, peer=member, expect=True, requests=requests)
+        member_visible = self._wait_for_connection(actor_id=member, peer=self.driver_actor_id, expect=True, requests=requests)
         if not driver_visible or not member_visible:
             raise RunStateError("mutual friend pair is not visible from both vantages")
         admissions = {}
@@ -372,18 +473,8 @@ class RemoteEdgeFriendMutationAdapter:
             create_data, create_record = self._create(self.driver_actor_id, member, expected=(201,))
             candidates = set(self._valid_pending_create(create_data))
             requests.append(create_record)
-            row = None
-            for operation, sender, receiver in (
-                ("friend.mutation.requests_sent.read", self.driver_actor_id, member),
-                ("friend.mutation.requests_received.read", member, self.driver_actor_id),
-            ):
-                data, record = self._read(self.reader, operation, actor_id=self.driver_actor_id)
-                requests.append(record)
-                row = self._request_row(data=data, candidates=candidates, sender=sender, receiver=receiver)
-                if row is not None:
-                    break
-            if row is None:
-                raise RunStateError(f"single friend request was not uniquely visible before {action}")
+            row = self._wait_for_unique_pending_row(
+                member=member, candidates=candidates, requests=requests, action=action)
             status = {"cancel": "cancelled", "reject": "rejected", "accept": "approved"}[action]
             decision_data, decision_record = self._decide(
                 action=action, sender=self.driver_actor_id, receiver=member,
@@ -403,8 +494,9 @@ class RemoteEdgeFriendMutationAdapter:
         for member, requests, candidates in adapters:
             self._pending_absent(candidates=candidates, actor_id=self.driver_actor_id, requests=requests)
             self._pending_absent(candidates=candidates, actor_id=member, requests=requests)
-            visible = self._connections(actor_id=self.driver_actor_id, peer=member, requests=requests)
-            if visible is not (member == adapters[2][0]):
+            expected_visible = member == adapters[2][0]
+            visible = self._wait_for_connection(actor_id=self.driver_actor_id, peer=member, expect=expected_visible, requests=requests)
+            if visible is not expected_visible:
                 raise RunStateError("friend decision did not update the connection pair")
         accepted = next(row for row in outcomes if row["action"] == "accept")
         admission = self._admission(bot_id=adapters[2][0], actor_id=self.driver_actor_id, requests=adapters[2][1])
@@ -621,9 +713,9 @@ class RemoteEdgeFriendMutationAdapter:
     def run_revoke(self) -> AdapterCall:
         member, requests = self._provision_member("revoke", visibility="protected", strategy="APPROVAL")
         self._accept_pair(member=member, requests=requests)
-        if not self._connections(actor_id=self.driver_actor_id, peer=member, requests=requests):
+        if not self._wait_for_connection(actor_id=self.driver_actor_id, peer=member, expect=True, requests=requests):
             raise RunStateError("pre-revocation driver connection is missing")
-        if not self._connections(actor_id=member, peer=self.driver_actor_id, requests=requests):
+        if not self._wait_for_connection(actor_id=member, peer=self.driver_actor_id, expect=True, requests=requests):
             raise RunStateError("pre-revocation member connection is missing")
         gateway_revoke, gateway_revoke_record = self.writer.revoke_edge_friend_connection(member)
         if gateway_revoke.get("deleted") is not False:
@@ -631,20 +723,19 @@ class RemoteEdgeFriendMutationAdapter:
         legacy_revoke, legacy_record = self._station_write_client().station_legacy_revoke(self.driver_actor_id)
         revoked_edges = legacy_revoke.get("data", {}).get("revoked_edges")
         if legacy_revoke.get("success") is not True or not isinstance(revoked_edges, list) or len(revoked_edges) != 2 or any(type(value) is not int for value in revoked_edges):
-            raise RunStateError("station legacy revoke did not revoke exactly both edges")
+            raise RunStateError("station legacy revoke did not revoke exactly both edges; response: " + repr(legacy_revoke)[:400])
         requests.extend([gateway_revoke_record, legacy_record])
-        if self._connections(actor_id=self.driver_actor_id, peer=member, requests=requests) or self._connections(actor_id=member, peer=self.driver_actor_id, requests=requests):
+        if self._wait_for_connection(actor_id=self.driver_actor_id, peer=member, expect=False, requests=requests) or self._wait_for_connection(actor_id=member, peer=self.driver_actor_id, expect=False, requests=requests):
             raise RunStateError("revoked friendship remains visible")
         fresh_data, fresh_record = self._create(self.driver_actor_id, member, expected=(201,))
         fresh_ids = set(self._valid_pending_create(fresh_data))
         requests.append(fresh_record)
-        sent_data, sent_record = self._read(self.reader, "friend.mutation.requests_sent.read", actor_id=self.driver_actor_id)
-        received_data, received_record = self._read(self.reader, "friend.mutation.requests_received.read", actor_id=self.driver_actor_id)
-        requests.extend([sent_record, received_record])
-        if self._request_row(data=sent_data, candidates=fresh_ids, sender=self.driver_actor_id, receiver=member) is None:
-            raise RunStateError("fresh forward pending recreation was incomplete")
-        if self._request_row(data=received_data, candidates=fresh_ids, sender=member, receiver=self.driver_actor_id) is None:
-            raise RunStateError("fresh reverse pending recreation was incomplete")
+        self._wait_for_pending_pair(
+            member=member, candidates=fresh_ids, requests=requests,
+            forward_missing="fresh forward pending recreation was incomplete",
+            reverse_missing="fresh reverse pending recreation was incomplete",
+            distinct="fresh mutual pending recreation did not expose two distinct directions",
+        )
         admission = self._admission(bot_id=member, actor_id=self.driver_actor_id, requests=requests)
         if admission.get("allowed") is not False or admission.get("reason") != "no_edge":
             raise RunStateError("member admission did not return to no_edge after revoke")
@@ -659,11 +750,8 @@ class RemoteEdgeFriendMutationAdapter:
         accepted_request, edge_id = self._accept_pair(member=member, requests=requests)
         self._pending_absent(candidates={accepted_request}, actor_id=self.driver_actor_id, requests=requests)
         self._pending_absent(candidates={accepted_request}, actor_id=member, requests=requests)
-        all_data, all_record = self._read(self.reader, "friend.mutation.requests_all.read", actor_id=self.driver_actor_id)
-        requests.append(all_record)
-        if self._request_row(data=all_data, candidates={accepted_request}) is not None:
-            raise RunStateError("accepted friend request remains pending in all-direction read")
-        if not self._connections(actor_id=self.driver_actor_id, peer=member, requests=requests) or not self._connections(actor_id=member, peer=self.driver_actor_id, requests=requests):
+        self._wait_for_requests_all_absent(candidates={accepted_request}, requests=requests)
+        if not self._wait_for_connection(actor_id=self.driver_actor_id, peer=member, expect=True, requests=requests) or not self._wait_for_connection(actor_id=member, peer=self.driver_actor_id, expect=True, requests=requests):
             raise RunStateError("full-lifecycle connection is not visible from both vantages")
         admission = self._admission(bot_id=member, actor_id=self.driver_actor_id, requests=requests)
         if admission.get("allowed") is not True or admission.get("reason") != "ok" or admission.get("source") != "edge_grant":
@@ -672,7 +760,7 @@ class RemoteEdgeFriendMutationAdapter:
         if legacy_revoke.get("success") is not True or legacy_revoke.get("data", {}).get("revoked_edges") is None:
             raise RunStateError("full-lifecycle station revoke failed")
         requests.append(legacy_record)
-        if self._connections(actor_id=self.driver_actor_id, peer=member, requests=requests) or self._connections(actor_id=member, peer=self.driver_actor_id, requests=requests):
+        if self._wait_for_connection(actor_id=self.driver_actor_id, peer=member, expect=False, requests=requests) or self._wait_for_connection(actor_id=member, peer=self.driver_actor_id, expect=False, requests=requests):
             raise RunStateError("full-lifecycle friendship was not revoked")
         _, restore_record = self.writer.patch_bot_friend_profile(member, visibility="public")
         fresh_data, fresh_record = self._create(self.driver_actor_id, member, expected=(201,))

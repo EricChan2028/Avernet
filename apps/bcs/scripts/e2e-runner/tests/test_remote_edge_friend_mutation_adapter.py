@@ -152,6 +152,15 @@ class Harness:
         self.sequence = 1000
         self.reads: list[tuple[str, dict]] = []
         self.writes: list[tuple[str, dict]] = []
+        # Mutable projection-lag simulation: presence lags hide fresh rows for
+        # the next N reads of that kind; stale lags keep decided/revoked rows
+        # projected for a bounded TTL window. All default to 0, which keeps the
+        # single-read fast path byte-identical.
+        self.projection_lag = {"connections": 0, "pending": 0}
+        self.connections_stale_lag = 0
+        self.pending_stale_lag = 0
+        self.stale_pending: list[tuple[dict, int]] = []
+        self.stale_pending_ttl = 3
 
     def _ids(self) -> list[str]:
         self.sequence += 1
@@ -205,6 +214,9 @@ class Harness:
         self.writes.append((action, {"request_id": request_id, "from": from_actor, "to": to_actor}))
         row = next(row for row in self.pending if row["request_id"] == request_id)
         self.pending.remove(row)
+        if self.pending_stale_lag:
+            self.pending_stale_lag -= 1
+            self.stale_pending.append((row, self.stale_pending_ttl))
         status = {"accept": "approved", "reject": "rejected", "cancel": "cancelled"}[action]
         if action == "accept":
             pair = (row["from_actor"]["id"], row["to_actor"]["id"])
@@ -227,7 +239,11 @@ class Harness:
             return self.bot_detail(kwargs["bot_id"]), record
         if operation in {"friend.mutation.requests_sent.read", "friend.mutation.requests_received.read", "friend.mutation.requests_all.read"}:
             actor = kwargs["actor_id"]
-            rows = list(self.pending)
+            rows = [row for row, _ in self.stale_pending] + list(self.pending)
+            self.stale_pending = [(row, ttl - 1) for row, ttl in self.stale_pending if ttl > 1]
+            if self.projection_lag["pending"]:
+                self.projection_lag["pending"] -= 1
+                rows = []
             if operation.endswith("sent.read"):
                 rows = [row for row in rows if row["from_actor"]["id"] == actor]
             elif operation.endswith("received.read"):
@@ -236,6 +252,12 @@ class Harness:
         if operation == "friend.mutation.connections.read":
             actor = kwargs["actor_id"]
             peer = self.current_member if actor == DRIVER else DRIVER
+            if self.projection_lag["connections"]:
+                self.projection_lag["connections"] -= 1
+                return {"items": [], "total": 0, "page": 1, "page_size": 20}, record
+            if self.connections_stale_lag:
+                self.connections_stale_lag -= 1
+                return {"items": [{"actor": {"type": "bot", "id": peer}}], "total": 1, "page": 1, "page_size": 20}, record
             visible = (actor, peer) in self.edges
             rows = [{"actor": {"type": "bot", "id": peer}}] if visible else []
             return {"items": rows, "total": len(rows), "page": 1, "page_size": 20}, record
@@ -345,7 +367,8 @@ class ClientFactory:
 
 
 class AdapterTest(unittest.TestCase):
-    def adapter(self, *, pair_count=2, gateway=None, station=None, owner=HUMAN):
+    def adapter(self, *, pair_count=2, gateway=None, station=None, owner=HUMAN,
+                projection_attempts=6, projection_delay=0.0):
         harness = Harness(pair_count=pair_count, owner_id=owner)
         if gateway is None:
             default_gateway, default_station = base_profiles()
@@ -355,7 +378,9 @@ class AdapterTest(unittest.TestCase):
         write_factory = ClientFactory(FakeWrite, harness)
         with patch("bcs_e2e.remote_edge_friend_mutation_adapter.ReadClient", read_factory), \
              patch("bcs_e2e.remote_edge_friend_mutation_adapter.WriteClient", write_factory):
-            adapter = RemoteEdgeFriendMutationAdapter(gateway, station)
+            adapter = RemoteEdgeFriendMutationAdapter(
+                gateway, station,
+                projection_attempts=projection_attempts, projection_delay=projection_delay)
         return adapter, harness
 
     def test_constructor_validates_profiles_before_clients(self):
@@ -392,13 +417,26 @@ class AdapterTest(unittest.TestCase):
             owner = kwargs.pop("owner")
         else:
             owner = HUMAN
+        if "projection_attempts" in kwargs:
+            projection_attempts = kwargs.pop("projection_attempts")
+        else:
+            projection_attempts = 6
+        if "projection_delay" in kwargs:
+            projection_delay = kwargs.pop("projection_delay")
+        else:
+            projection_delay = 0.0
+        harness_setup = kwargs.pop("harness_setup", None)
         harness = Harness(pair_count=pair_count, owner_id=owner)
+        if harness_setup is not None:
+            harness_setup(harness)
         default_gateway, default_station = base_profiles()
         read_factory = ClientFactory(FakeRead, harness)
         write_factory = ClientFactory(FakeWrite, harness)
         with patch("bcs_e2e.remote_edge_friend_mutation_adapter.ReadClient", read_factory), \
              patch("bcs_e2e.remote_edge_friend_mutation_adapter.WriteClient", write_factory):
-            adapter = RemoteEdgeFriendMutationAdapter(default_gateway, default_station)
+            adapter = RemoteEdgeFriendMutationAdapter(
+                default_gateway, default_station,
+                projection_attempts=projection_attempts, projection_delay=projection_delay)
             result = getattr(adapter, name)()
         self.assertTrue(result.evidence["remote_validation"] == "NOT_RUN")
         self.assertFalse(result.evidence["grants_release_credit"])
@@ -478,6 +516,67 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(result.data["role_no_org_drift"]["data"]["params"]["message"], "role_requires_organization_code")
         self.assertEqual(result.data["organization_no_requester_drift"]["code"], "forbidden")
         self.assertEqual(result.data["gateway_human_discover"]["code"], 401000)
+
+    def test_constructor_rejects_invalid_projection_budget(self):
+        for kwargs in ({"projection_attempts": 0}, {"projection_attempts": True}, {"projection_delay": -1.0}):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(RunStateError):
+                    self.adapter(**kwargs)
+
+    def test_mutual_auto_approve_converges_connection_projection_lag(self):
+        def setup(harness):
+            harness.projection_lag["connections"] = 3
+        result, adapter, harness = self.run_method("run_mutual_auto_approve", projection_attempts=4, harness_setup=setup)
+        self.assertTrue(result.data["mutual"])
+        self.assertGreaterEqual(
+            sum(1 for name, _ in harness.reads if name == "friend.mutation.connections.read"), 4)
+
+    def test_mutual_auto_approve_converges_pending_projection_lag(self):
+        def setup(harness):
+            harness.projection_lag["pending"] = 2
+        result, adapter, harness = self.run_method("run_mutual_auto_approve", projection_attempts=4, harness_setup=setup)
+        self.assertTrue(result.data["mutual"])
+
+    def test_mutual_auto_approve_pending_pair_exhaustion_keeps_reviewed_text(self):
+        def setup(harness):
+            harness.projection_lag["pending"] = 5
+        with self.assertRaisesRegex(RunStateError, "friend pair did not expose two distinct pending rows"):
+            self.run_method("run_mutual_auto_approve", projection_attempts=2, harness_setup=setup)
+
+    def test_mutual_auto_approve_connection_exhaustion_keeps_reviewed_text(self):
+        def setup(harness):
+            harness.projection_lag["connections"] = 5
+        with self.assertRaisesRegex(RunStateError, "mutual friend pair is not visible from both vantages"):
+            self.run_method("run_mutual_auto_approve", projection_attempts=2, harness_setup=setup)
+
+    def test_accept_reject_cancel_converges_pending_projection_lag(self):
+        def setup(harness):
+            harness.projection_lag["pending"] = 2
+        result, adapter, harness = self.run_method(
+            "run_accept_reject_cancel", pair_count=1, projection_attempts=4, harness_setup=setup)
+        self.assertEqual([row["status"] for row in result.data["branches"]], ["cancelled", "rejected", "approved"])
+
+    def test_revoke_converges_stale_connection_projection(self):
+        def setup(harness):
+            harness.connections_stale_lag = 3
+        result, adapter, harness = self.run_method("run_revoke", projection_attempts=5, harness_setup=setup)
+        self.assertEqual(result.data["station_revoked_edges"], [7001, 7002])
+
+    def test_revoke_exhaustion_keeps_visible_error_text(self):
+        def setup(harness):
+            harness.connections_stale_lag = 4
+        with self.assertRaisesRegex(RunStateError, "revoked friendship remains visible"):
+            self.run_method("run_revoke", projection_attempts=2, harness_setup=setup)
+
+    def test_full_lifecycle_converges_stale_pending_and_connection_projection(self):
+        def setup(harness):
+            harness.pending_stale_lag = 1
+            harness.projection_lag["connections"] = 1
+        result, adapter, harness = self.run_method(
+            "run_full_lifecycle", projection_attempts=6, harness_setup=setup)
+        self.assertEqual(result.data["accepted_request_id"], "101001")
+        self.assertEqual(result.data["station_revoked_edges"], [7001, 7002])
+        self.assertEqual(result.data["fresh_request_ids"], ["1002", "101002"])
 
     def test_three_service_scope_cases_block_with_structured_gap(self):
         adapter, _ = self.adapter()
