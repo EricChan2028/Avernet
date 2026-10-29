@@ -377,3 +377,68 @@ def test_large_live_inline_rejects_before_reading_bytes(tmp_path, monkeypatch):
     monkeypatch.setattr(registration, "_source", no_read)
     with pytest.raises(SessionFileError, match="resource_preview_too_large"):
         service.open_content(session_key="a", resource_id=view.resource_id, disposition="inline")
+
+
+def test_registration_lock_concurrent_creator_uses_existing_pinned_lock(tmp_path, monkeypatch):
+    (tmp_path / "report").write_bytes(b"current")
+    original_open = os.open
+    collided = False
+
+    def competing_open(path, flags, *args, **kwargs):
+        nonlocal collided
+        if path == ".registration.lock" and not collided:
+            collided = True
+            # Another process creates the lock before this process's lookup.
+            competitor = original_open(
+                path, os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_NOFOLLOW,
+                0o600, dir_fd=kwargs["dir_fd"],
+            )
+            os.close(competitor)
+            if flags & os.O_CREAT and not flags & os.O_EXCL:
+                # Observed on this host: nonexclusive concurrent creation can
+                # return ENOENT despite the directory and winner's lock existing.
+                raise FileNotFoundError(2, "concurrent nonexclusive create", path)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", competing_open)
+    service = _service(tmp_path)
+    first = service.register_file(session_key="a", workspace_relative_path="report")
+    assert collided
+    assert service.list_files(session_key="a") == [first]
+    assert (tmp_path / ".teamclaw/session-files/.registration.lock").is_file()
+    assert service.register_file(session_key="a", workspace_relative_path="report") == first
+
+
+def test_deleted_pinned_registration_directory_still_fails_closed(tmp_path, monkeypatch):
+    (tmp_path / "report").write_bytes(b"current")
+    original_open = os.open
+
+    def delete_directory(path, flags, *args, **kwargs):
+        if path == ".registration.lock":
+            (tmp_path / ".teamclaw/session-files").rmdir()
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", delete_directory)
+    with pytest.raises(SessionFileError):
+        _service(tmp_path).register_file(session_key="a", workspace_relative_path="report")
+    assert ManifestStore(tmp_path).list_entries() == []
+
+
+@pytest.mark.parametrize("kind", ["symlink", "fifo", "directory"])
+def test_existing_registration_lock_must_be_ordinary_file(tmp_path, kind):
+    (tmp_path / "report").write_bytes(b"current")
+    directory = tmp_path / ".teamclaw/session-files"
+    directory.mkdir(parents=True)
+    lock = directory / ".registration.lock"
+    secret = tmp_path / "private"
+    secret.write_bytes(b"private-bytes")
+    if kind == "symlink":
+        lock.symlink_to(secret)
+    elif kind == "fifo":
+        os.mkfifo(lock)
+    else:
+        lock.mkdir()
+    with pytest.raises(SessionFileError):
+        _service(tmp_path).register_file(session_key="a", workspace_relative_path="report")
+    assert ManifestStore(tmp_path).list_entries() == []
+    assert secret.read_bytes() == b"private-bytes"

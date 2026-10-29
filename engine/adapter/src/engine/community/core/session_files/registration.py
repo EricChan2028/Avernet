@@ -164,11 +164,24 @@ def register_workspace_file(
         store = _PinnedManifestStore(root, directory)
         # COSEC: serialize manifest merges across threads and Engine processes.
         with store._lock_for(store.path):
-            lock_fd = os.open(
-                ".registration.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
-                0o600, dir_fd=directory,
-            )
+            # Use one exclusive creator; contenders open the existing no-follow
+            # inode without another O_CREAT lookup. Missing/deleted directories
+            # still fail closed.
+            try:
+                lock_fd = os.open(
+                    ".registration.lock",
+                    os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_NOFOLLOW,
+                    0o600, dir_fd=directory,
+                )
+            except FileExistsError:
+                lock_fd = os.open(
+                    ".registration.lock", os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK,
+                    dir_fd=directory,
+                )
             with os.fdopen(lock_fd, "a") as lock:
+                # COSEC: a preexisting lock must be an ordinary no-follow file.
+                if not stat.S_ISREG(os.fstat(lock.fileno()).st_mode):
+                    raise SessionFileError("registration_failed")
                 fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
                 existing = store.get(resource_id)
                 entry = ManifestEntry(
