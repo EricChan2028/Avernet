@@ -1460,16 +1460,17 @@ def include_oss_business_routes(app) -> None:
             # --- Execute the unified application search service ---
             # Query normalization, default filters, bounded execution, and
             # embedding degradation are application policy, not route policy.
+            result_cache = getattr(
+                getattr(
+                    getattr(request, "app", None), "state", None
+                ),
+                "agent_search_result_cache",
+                None,
+            )
             agent_search_service = AgentSearchService(
                 embedding_generator=embedding_gen,
                 vector_match_service=match_service,
-                result_cache=getattr(
-                    getattr(
-                        getattr(request, "app", None), "state", None
-                    ),
-                    "agent_search_result_cache",
-                    None,
-                ),
+                result_cache=result_cache,
                 offload=run_search_in_threadpool,
             )
             outcome = await agent_search_service.search(
@@ -1528,7 +1529,7 @@ def include_oss_business_routes(app) -> None:
 
             elapsed_ms = (time.time() - start_time) * 1000
 
-            return {
+            response = {
                 "query": search_req.query,
                 "top_k": search_req.top_k,
                 "mode": getattr(search_req, "mode", "auto"),
@@ -1537,6 +1538,18 @@ def include_oss_business_routes(app) -> None:
                 "timing_ms": round(elapsed_ms, 2),
                 "config_applied": config_applied,
             }
+
+            from app.adapters.http.search_response_cache import (
+                store_v1_search_response,
+            )
+
+            store_v1_search_response(
+                result_cache=result_cache,
+                request=search_req,
+                response=response,
+                metadata=outcome.metadata,
+            )
+            return response
         except HTTPException:
             raise
         except Exception as e:

@@ -29,7 +29,7 @@ class TestBotRecommendationRequest:
         assert request.topK == 5
         assert request.driver_bot_id is None
         assert request.min_score == 0.01
-        assert request.expand_factor == 10
+        assert request.expand_factor == 3
         assert request.enable_rerank is True
         assert request.type == "recommend"  # 默认值
 

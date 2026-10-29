@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import threading
 from types import SimpleNamespace
 from typing import Any, Callable
@@ -228,6 +229,22 @@ def test_degraded_embedding_results_are_never_cached() -> None:
     assert result_cache.stats["hits"] == 0
 
 
+def test_recommendation_cache_uses_the_bound_effective_expand_factor() -> None:
+    core = RecordingCore()
+    result_cache = cache(lambda: 7)
+    agent_service = service(core, result_cache)
+
+    requested_large = recommend_command()
+    bounded = dataclasses.replace(requested_large, expand_factor=3)
+
+    first = asyncio.run(agent_service.recommend(requested_large))
+    second = asyncio.run(agent_service.recommend(bounded))
+
+    assert len(core.recommend_calls) == 1
+    assert first.config_applied["expand_factor"] == 3
+    assert second.metadata["cache_hit"] is True
+
+
 def test_recommendation_results_are_cached_and_singleflighted() -> None:
     core = RecordingCore()
     result_cache = cache(lambda: 7)
@@ -323,11 +340,14 @@ def test_composed_apps_share_one_v1_result_cache_with_routes(monkeypatch) -> Non
 
     class RouteAgentSearchService:
         caches = []
+        search_calls = 0
+        recommend_calls = 0
 
         def __init__(self, **kwargs: Any) -> None:
             RouteAgentSearchService.caches.append(kwargs.get("result_cache"))
 
         async def search(self, command: AgentSearchCommand) -> Any:
+            RouteAgentSearchService.search_calls += 1
             return SimpleNamespace(
                 query=command.query,
                 normalized_query=command.query,
@@ -340,6 +360,7 @@ def test_composed_apps_share_one_v1_result_cache_with_routes(monkeypatch) -> Non
             )
 
         async def recommend(self, command: AgentRecommendationCommand) -> Any:
+            RouteAgentSearchService.recommend_calls += 1
             return SimpleNamespace(
                 question=command.question,
                 response=CandidateRecommendationResponse(
@@ -379,15 +400,25 @@ def test_composed_apps_share_one_v1_result_cache_with_routes(monkeypatch) -> Non
 
     with TestClient(app) as client:
         search = client.post("/api/v1/search", json={"query": "支付", "top_k": 1})
+        search_hit = client.post("/api/v1/search", json={"query": "支付", "top_k": 1})
         recommend = client.post(
+            "/api/v1/recommend",
+            json={"question": "支付", "topK": 1, "enable_rerank": False},
+        )
+        recommend_hit = client.post(
             "/api/v1/recommend",
             json={"question": "支付", "topK": 1, "enable_rerank": False},
         )
 
     assert search.status_code == 200, search.text
+    assert search_hit.status_code == 200, search_hit.text
     assert recommend.status_code == 200, recommend.text
+    assert recommend_hit.status_code == 200, recommend_hit.text
+    assert RouteAgentSearchService.search_calls == 1
+    assert RouteAgentSearchService.recommend_calls == 1
     shared_cache = app.state.agent_search_result_cache
     assert shared_cache is not None
+    assert shared_cache.stats["entries"] >= 1
     assert shared_cache.stats["max_entries"] == 17
     assert shared_cache.stats["ttl_seconds"] == 25.0
     assert RouteAgentSearchService.caches == [shared_cache, shared_cache]

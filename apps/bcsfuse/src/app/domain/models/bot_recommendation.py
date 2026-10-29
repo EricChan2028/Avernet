@@ -65,10 +65,10 @@ class BotRecommendationRequest(BaseModel):
 
     # 向量搜索高级参数
     expand_factor: int = Field(
-        default=10,
+        default=3,
         ge=1,
         le=10,
-        description="扩大召回倍数（向量搜索），默认为 10",
+        description="扩大召回倍数（向量搜索），默认为 3",
     )
 
     enable_rerank: bool = Field(

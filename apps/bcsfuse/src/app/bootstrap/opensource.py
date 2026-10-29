@@ -297,6 +297,9 @@ def _build_runtime_providers(registry: "ProviderRegistry", config: "YamlEnvConfi
     from app.infra.public.stores.mysql_worker_profile_binding_store import MySQLWorkerProfileBindingStore
     from app.infra.public.stores.mysql_fused_profile_store import MySQLFusedProfileStore
     from app.infra.public.audit.mysql_worker_audit_log_store import MySQLWorkerAuditLogStore
+    from app.infra.public.stores.mysql_shared_response_cache_store import (
+        MySQLSharedResponseCacheStore,
+    )
     from app.infra.public.vectorstores.qdrant_mysql_vector_store import QdrantMySQLVectorStore
 
     # R12-Pool-2 Fix: Create shared MySQL connection pool for thread-safe access
@@ -310,6 +313,13 @@ def _build_runtime_providers(registry: "ProviderRegistry", config: "YamlEnvConfi
         pool_size=15,
     )
     registry.register("mysql_connection_pool", mysql_pool)
+
+    # Shared L2 final-response cache. All runtime pods use this provider and
+    # durable index-bound cache keys, while each pod keeps its L1 cache local.
+    shared_response_cache = MySQLSharedResponseCacheStore(
+        connection_pool=mysql_pool
+    )
+    registry.register("shared_response_cache", shared_response_cache)
 
     # MySQL stores (inject shared connection pool)
     worker_registry_store = MySQLWorkerRegistryStore(connection_pool=mysql_pool)

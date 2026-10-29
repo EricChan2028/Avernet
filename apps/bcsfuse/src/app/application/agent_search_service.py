@@ -21,6 +21,24 @@ from app.domain.models.candidate_recommendation import CandidateRecommendationRe
 from app.domain.models.retrieval_mode import RetrievalMode
 
 
+def default_search_filters(
+    filters: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Merge request filters with the v1 search and recommendation defaults."""
+
+    merged: dict[str, Any] = {}
+    for key, value in (filters or {}).items():
+        # Copy mutable filter arrays without corrupting valid V1 scalar
+        # aliases such as worker_id; ``list("bot:owner")`` would become a
+        # character array and no longer match a payload value.
+        merged[key] = (
+            list(value) if isinstance(value, (list, tuple, set)) else value
+        )
+    merged.setdefault("availability", ["protected", "public"])
+    merged.setdefault("runtime_state", ["online"])
+    return merged
+
+
 @dataclass(frozen=True, slots=True)
 class AgentSearchCommand:
     """Transport-independent v1 search command."""
@@ -31,6 +49,9 @@ class AgentSearchCommand:
     min_score: float = 0.0
     filters: Mapping[str, Any] | None = None
     reranker_model: str | None = None
+
+
+MAX_RECOMMEND_EXPAND_FACTOR = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,17 +209,7 @@ class AgentSearchService:
     def _default_filters(
         self, filters: Mapping[str, Any] | None
     ) -> dict[str, Any]:
-        merged: dict[str, Any] = {}
-        for key, value in (filters or {}).items():
-            # Copy mutable filter arrays without corrupting valid V1 scalar
-            # aliases such as worker_id; ``list("bot:owner")`` would become a
-            # character array and no longer match a payload value.
-            merged[key] = (
-                list(value) if isinstance(value, (list, tuple, set)) else value
-            )
-        merged.setdefault("availability", ["protected", "public"])
-        merged.setdefault("runtime_state", ["online"])
-        return merged
+        return default_search_filters(filters)
 
     async def _run(self, operation: Callable[[], Any]) -> Any:
         return await self._offload(operation)
@@ -242,6 +253,10 @@ class AgentSearchService:
 
             config_applied = dict(runtime_config)
             config_applied["filters"] = filters
+            # The delegate records retrieval degradation in runtime_config
+            # because it is transport-independent. Publish it here as outcome
+            # metadata so projection and cache policy can reject degraded data.
+            metadata.update(config_applied.get("_retrieval", {}))
 
             return AgentSearchOutcome(
                 query=command.query,
@@ -283,8 +298,9 @@ class AgentSearchService:
             command.question, field_name="question"
         )
         filters = self._default_filters(command.filters)
+        effective_expand_factor = min(command.expand_factor, MAX_RECOMMEND_EXPAND_FACTOR)
         runtime_config = {
-            "expand_factor": command.expand_factor,
+            "expand_factor": effective_expand_factor,
             "reranker_model": None
             if not command.enable_rerank
             else command.reranker_model,
@@ -329,7 +345,7 @@ class AgentSearchService:
                 "top_k": command.top_k,
                 "enable_rerank": command.enable_rerank,
                 "reranker_model": command.reranker_model,
-                "expand_factor": command.expand_factor,
+                "expand_factor": effective_expand_factor,
                 "vector_min_score": command.vector_min_score,
                 "rerank_min_score": command.rerank_min_score,
                 "filters": filters,
@@ -345,5 +361,6 @@ __all__ = [
     "AgentSearchCommand",
     "AgentSearchOutcome",
     "AgentSearchService",
+    "MAX_RECOMMEND_EXPAND_FACTOR",
     "normalize_query",
 ]

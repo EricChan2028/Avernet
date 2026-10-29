@@ -34,7 +34,7 @@ def test_tc_union_keeps_profiles_fragments_exact_priority_and_threshold():
 
 def test_bcn_and_backend_request_shapes_keep_existing_defaults():
     bcn = BotRecommendationRequest(question="数据分析", topK=10, min_score=0.01)
-    assert bcn.expand_factor == 10
+    assert bcn.expand_factor == 3
     assert bcn.enable_rerank is True
     assert bcn.type == "recommend"
     assert "min_score" in bcn.model_fields_set

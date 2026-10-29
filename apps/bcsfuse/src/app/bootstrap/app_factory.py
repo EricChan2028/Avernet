@@ -353,9 +353,29 @@ def create_bcsfuse_app(
     app.state.search_capacity_max_inflight = capacity_settings.max_inflight
 
     from app.application.agent_search_cache import AgentSearchResultCache
+    from app.adapters.http.recommend_response_cache import (
+        RecommendationResponseCacheMiddleware,
+    )
+    from app.adapters.http.search_response_cache import (
+        SearchResponseCacheMiddleware,
+    )
+    from app.bootstrap.oss_business_routes import require_oss_auth
 
-    app.state.agent_search_result_cache = (
-        AgentSearchResultCache.from_context(context)
+    result_cache = AgentSearchResultCache.from_context(context)
+    shared_response_cache = context.registry.get("shared_response_cache")
+    app.state.agent_search_result_cache = result_cache
+    app.state.shared_response_cache = shared_response_cache
+    app.add_middleware(
+        SearchResponseCacheMiddleware,
+        result_cache=result_cache,
+        require_auth=require_oss_auth,
+        shared_response_cache=shared_response_cache,
+    )
+    app.add_middleware(
+        RecommendationResponseCacheMiddleware,
+        result_cache=result_cache,
+        require_auth=require_oss_auth,
+        shared_response_cache=shared_response_cache,
     )
     app.add_middleware(TraceIdMiddleware)
 

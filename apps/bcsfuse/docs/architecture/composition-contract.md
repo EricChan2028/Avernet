@@ -89,16 +89,25 @@ payload prefilter rejection, or a fragment outside the initial search limit.
 
 ### Bounded fragment rerank candidate selection (HTTP v1 compatible)
 
-The existing fragment search limit, eligibility filters, aggregation formula,
-weights and thresholds are unchanged. For rerank budget
-`N = topK * expand_factor`, select the top `ceil(N/2)` eligible profiles by
-highest **raw** fragment similarity and top `floor(N/2)` by existing aggregate
-score. Deduplicate by complete `profile_key`, then alternate through the max
-and aggregate tails, skipping already selected keys, until N unique profiles
-or all available profiles are selected. Ties use ascending `profile_key`.
-For topK=10 and expand_factor=10, the initial quotas are 50/50, not 100/100.
-This dense selection operates only within the initially recalled fragment pool,
-not the whole database. Keyword recall is a separate route described below.
+The eligibility filters, aggregation formula, weights and thresholds are
+unchanged. To bound tail amplification, the initially recalled dense prefix is
+capped by `max(64, 2 * topK * expand_factor)` before legacy fragment-type and
+filter compensation. For example, the bounded default
+`topK=3, expand_factor=3` fetches a 64-fragment prefix. A retained large
+explicit budget such as
+`topK=10, expand_factor=10` keeps the legacy 100-profile selection contract.
+
+For rerank budget `N = topK * expand_factor`, select the top `ceil(N/2)`
+eligible profiles by highest **raw** fragment similarity and top `floor(N/2)`
+by existing aggregate score. Deduplicate by complete `profile_key`, then
+alternate through the max and aggregate tails, skipping already selected keys,
+until N unique profiles or all available profiles are selected. Ties use
+ascending `profile_key`. The dense selection operates only within the bounded
+fragment prefix, not the whole database.
+
+Keyword recall uses the same profile budget `N`, not the dense fragment search
+prefix. The keyword provider still counts physical fragments internally and
+must refill only until N eligible unique profiles are found.
 
 Selected candidates are supplied in aggregate-score order to preserve existing
 no-provider/error fallback ordering when there are no keyword matches.
@@ -261,6 +270,74 @@ Prometheus exposes request count, rejection count, inflight, configured
 capacity and request duration. The labels identify operation, API version and
 HTTP outcome. These metrics describe admission health, not dependency health.
 
+### V1 search response cache
+
+The composed v1 search route stores a successful, fully projected search
+response in the same bounded result cache used by the unified application core.
+The key covers the normalized query, topK, retrieval mode, minimum score,
+effective default filters, reranker model, embedding-index flag, and the
+durable `index_version`. Authentication runs before the middleware reads or
+returns cached response data. A warmed response is returned before search
+capacity admission, so a hit does not take a worker, embedding, Qdrant, rerank,
+or other admission permit.
+
+Semantic- and keyword-unavailable responses, declared literal fallback, regex
+fallback, rerank-degraded responses, and responses without a valid durable
+index version are never stored. A miss, an invalid or oversized undeclared
+body, or an index-version change replays the original request body downstream
+through admission, parsing, and business execution unchanged. Miss replay is
+bounded by the same request-body limit as capacity admission.
+
+Concurrent authenticated misses with the same effective cache key are
+coalesced before admission: one request executes the downstream projection,
+and the other same-key requests return the stored final projection as soon as
+the first successful response is cached. If the first result cannot be cached,
+coalescing does not invent a success; the downstream path executes again for
+the request under the same original admission semantics. Preflight search
+requests are visible in the search request, duration, and inflight metrics by
+HTTP outcome; cached successes and authentication failures do not consume
+downstream capacity metrics.
+
+In runtime composition BCSFuse adds the MySQL-backed shared response cache L2.
+It uses the identical operation key and durable `index_version`; a shared hit is
+promoted into process-local L1 and returned before admission. L2 reads and
+writes are offloaded off the event loop, are bounded by the provider payload
+policy, and never block a response on a failed optional write. Invalid or
+unavailable L2 data is an observable metric and miss, not a fabricated empty
+success. A payload is published only after the v1 route explicitly stores a
+non-degraded projection in L1.
+
+### V1 recommendation response cache
+
+The composed v1 recommendation route stores a successful, fully projected
+`BotRecommendationResponse` in the same bounded result cache used by the unified
+application core. The key covers the normalized question, topK, driver/type,
+effective score thresholds and rerank settings, validated filters, embedding
+index flag, and the durable `index_version`. A warmed response is returned by
+middleware after authentication but before search capacity admission, so a hit
+does not take a worker, embedding, Qdrant, or rerank permit. The current trace
+identifier is rewritten before the response is sent.
+
+Group-context requests are not stored or answered from this response projection
+because LLM question rewriting can change the effective query. Semantic- and
+keyword-unavailable responses, declared literal fallback, regex fallback, and
+responses without a valid durable index version are never stored. A miss replays
+the original request body downstream through admission, parsing, and business
+execution unchanged.
+
+Authenticated non-group misses with the same effective cache key are coalesced
+before admission: one request executes downstream and the other same-key
+requests return the stored final projection with their own current trace
+identifier. Group requests never use this coalescing. If the first response is
+not cacheable, coalescing does not manufacture success; the downstream path
+runs again under the original admission and business semantics.
+
+The runtime MySQL L2 applies the same recommendation restriction. It never
+reads or writes group-context requests. A valid non-group L2 hit is promoted
+into L1, the current trace identifier is rewritten for the caller, and the
+response is returned before admission. L2 read, write, and payload-validation
+errors are visible as metrics and replay the original downstream semantics.
+
 ### Search dependency metrics
 
 The public adapters expose the two dependencies that directly determine search
@@ -276,6 +353,16 @@ latency and availability without log mining:
 - The real HTTP reranker records `bcsfuse_rerank_calls_total` and
   `bcsfuse_rerank_duration_seconds` with `success` or `error` outcomes. Errors
   remain exceptions, leaving policy-owned fallback to the retrieval service.
+- Shared L2 response-cache health uses
+  `bcsfuse_search_shared_response_cache_hits_total`, `..._misses_total`,
+  `..._stores_total`, and `..._errors_total` with an `operation` label. An error
+  does not change HTTP semantics; the request proceeds through the declared L1
+  miss and downstream admission path.
+- Shared L2 response-cache health uses
+  `bcsfuse_search_shared_response_cache_hits_total`, `..._misses_total`,
+  `..._stores_total`, and `..._errors_total` with an `operation` label. An error
+  does not change HTTP semantics; the request proceeds through the declared L1
+  miss and downstream admission path.
 - The real embedding provider records `bcsfuse_embedding_calls_total`,
   `bcsfuse_embedding_duration_seconds` and, on the final failed call,
   `bcsfuse_embedding_errors_total`. Empty batches record nothing because they do

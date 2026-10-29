@@ -21,6 +21,9 @@ from app.application.services.keyword_candidate_selection import (
 
 logger = logging.getLogger("app.application.services.worker_vector_match_service")
 
+MIN_DENSE_FRAGMENT_SEARCH_K = 64
+
+
 class FragmentMatchingMixin:
     def _match_with_fragments(
         self,
@@ -195,8 +198,8 @@ class FragmentMatchingMixin:
                            excluded_by_set, excluded_by_meta)
 
         keyword_outcome = keyword_candidates_with_status(
-            self._vector_store, query, search_k, filters, excluded_set,
-            candidate_keys, enabled_fragment_types,
+            self._vector_store, query, effective_expand_factor * top_k,
+            filters, excluded_set, candidate_keys, enabled_fragment_types,
         )
         lexical = keyword_outcome.candidates
         diagnostics = {
@@ -384,10 +387,12 @@ class FragmentMatchingMixin:
         )
 
         min_search_k = top_k * num_enabled_types
-        max_search_k = top_k * 50
+        # Small request budgets keep a stable 64-fragment dense prefix; larger
+        # budgets retain a 2x margin for fragment-to-profile aggregation.
+        dense_search_cap = max(MIN_DENSE_FRAGMENT_SEARCH_K, top_k * expand_factor * 2)
 
-        search_k = max(min_search_k, min(search_k, max_search_k))
-        search_k = ((search_k + 9) // 10) * 10
+        search_k = max(min_search_k, min(search_k, dense_search_cap))
+        search_k = min(((search_k + 9) // 10) * 10, dense_search_cap)
 
         logger.debug(
             "[FRAGMENT-MATCH] search_k | top_k=%d, types=%d, expand=%d, "

@@ -291,15 +291,16 @@ async def recommend_bots(
         f"rerank_min_score={rerank_min_score}"
     )
 
+    result_cache = getattr(
+        getattr(
+            getattr(http_request, "app", None), "state", None
+        ),
+        "agent_search_result_cache",
+        None,
+    )
     agent_search_service = AgentSearchService(
         candidate_recommendation_service=candidate_service,
-        result_cache=getattr(
-            getattr(
-                getattr(http_request, "app", None), "state", None
-            ),
-            "agent_search_result_cache",
-            None,
-        ),
+        result_cache=result_cache,
         offload=run_search_in_threadpool,
     )
     try:
@@ -380,6 +381,16 @@ async def recommend_bots(
 
     # 从 Worker Registry 补充 trust_level
     _enrich_trust_level(response)
+
+    from app.adapters.http.recommend_response_cache import (
+        store_v1_recommendation_response,
+    )
+
+    store_v1_recommendation_response(
+        result_cache=result_cache,
+        request=request,
+        response=response,
+    )
 
     # Response metadata describes configuration, not proof a stage ran.
     # Use the real stage counters for execution diagnostics.

@@ -61,7 +61,7 @@ class BotRecommendationRequest(BaseModel):
     )
 
     expand_factor: int = Field(
-        default=10,
+        default=3,
         ge=1,
         le=10,
         description="Expansion factor for vector search retrieval",

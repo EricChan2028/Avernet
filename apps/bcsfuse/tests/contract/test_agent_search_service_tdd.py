@@ -221,6 +221,32 @@ def test_search_failure_reports_unavailable_without_provider_details() -> None:
     assert FailingMatch.match_calls != []
 
 
+def test_recommendation_candidate_budget_is_capped_at_three() -> None:
+    """A large request factor cannot amplify the default recommendation chain."""
+
+    core = RecordingCore([], [], [])
+    service = _service(core)
+
+    outcome = asyncio.run(
+        service.recommend(
+            AgentRecommendationCommand(
+                question="支付",
+                top_k=3,
+                enable_rerank=False,
+                reranker_model=None,
+                expand_factor=10,
+                vector_min_score=0.01,
+                rerank_min_score=0.6,
+                min_score_explicit=False,
+            )
+        )
+    )
+
+    assert core.recommend_calls[0]["max_candidates"] == 3
+    assert core.recommend_calls[0]["runtime_config"]["expand_factor"] == 3
+    assert outcome.config_applied["expand_factor"] == 3
+
+
 def test_recommendation_use_one_service_entrypoint_with_request_config() -> None:
     core = RecordingCore([], [], [])
     service = _service(core)
@@ -244,7 +270,7 @@ def test_recommendation_use_one_service_entrypoint_with_request_config() -> None
     call = core.recommend_calls[0]
     assert call["max_candidates"] == 8
     assert call["runtime_config"] == {
-        "expand_factor": 10,
+        "expand_factor": 3,
         "reranker_model": "bge-reranker-v2-m3",
     }
     assert call["filters"] == {
@@ -491,3 +517,28 @@ def test_search_preserves_scalar_v1_filter_values() -> None:
     )
 
     assert core.match_calls[0]["filters"]["worker_id"] == worker_id
+
+
+def test_search_copies_delegate_diagnostics_into_outcome_metadata() -> None:
+    """Vector-match degradation is visible to response-cache policy."""
+
+    class DiagnosticCore(RecordingCore):
+        def match(self, **kwargs: Any) -> list[Any]:
+            kwargs["runtime_config"]["_retrieval"] = {
+                "semantic_unavailable": True,
+                "keyword_unavailable": False,
+                "literal_fallback_used": True,
+                "score_source": "regex_fallback",
+            }
+            return []
+
+    core = DiagnosticCore([], [], [])
+    service = _service(core)
+    outcome = asyncio.run(
+        service.search(AgentSearchCommand(query="支付", top_k=1))
+    )
+
+    assert outcome.metadata["semantic_unavailable"] is True
+    assert outcome.metadata["keyword_unavailable"] is False
+    assert outcome.metadata["literal_fallback_used"] is True
+    assert outcome.metadata["score_source"] == "regex_fallback"

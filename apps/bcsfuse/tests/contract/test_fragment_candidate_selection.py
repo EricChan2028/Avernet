@@ -121,6 +121,54 @@ def test_odd_and_small_budgets_and_exhaustion(pipeline, top_k, expand, expected)
     assert len(model.inputs) <= top_k * expand
 
 
+def test_keyword_profile_budget_follows_topk_and_expand_factor(pipeline, caplog):
+    """Keyword recall is profile-budgeted, not fragment-search-K budgeted."""
+
+    service, _ = pipeline([
+        ("keyword1", "full", .90), ("keyword2", "full", .85),
+        ("keyword3", "full", .80), ("keyword4", "full", .75),
+    ])
+    caplog.set_level(
+        logging.INFO,
+        logger="app.application.services.worker_vector_match_service",
+    )
+
+    run(service, top_k=2, expand=2, rerank=False)
+
+    keyword_logs = [
+        record
+        for record in caplog.records
+        if getattr(record, "retrieval_stage", "") == "keyword_search"
+    ]
+    assert keyword_logs[0].profile_budget == 4
+
+
+def test_small_dense_recall_prefix_is_capped_at_sixty_four(pipeline, caplog):
+    """Small dense requests cannot be amplified without bound by legacy factors."""
+
+    service, _ = pipeline([
+        ("dense", "full", .99),
+    ])
+    caplog.set_level(
+        logging.INFO,
+        logger="app.application.services.worker_vector_match_service",
+    )
+
+    assert service._calculate_search_k(
+        top_k=3,
+        has_filters=True,
+        has_excluded=True,
+        expand_factor=10,
+    ) == 64
+    run(service, top_k=3, expand=10, rerank=False)
+    vector_logs = [
+        record
+        for record in caplog.records
+        if getattr(record, "retrieval_stage", "") == "vector_search"
+    ]
+    assert vector_logs[0].search_k == 64
+
+
 @pytest.mark.parametrize("rerank,fail", [(False, False), (True, True)])
 def test_no_rerank_or_failure_keeps_weighted_descending_order(pipeline, caplog, rerank, fail):
     service, model = pipeline([
