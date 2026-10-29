@@ -155,6 +155,7 @@ def local_draft_delivery_run(*, binary: Path, binary_sha256: str, state_dir: Pat
     }
     error = None
     root = None
+    startup_record = None
     story = None
     story_argv = None
     previous = signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
@@ -165,6 +166,7 @@ def local_draft_delivery_run(*, binary: Path, binary_sha256: str, state_dir: Pat
                                      root=state_dir, run_id=run_id,
                                      allow_ambient_local_identity=False) as owned_runtime:
                     root = owned_runtime.root
+                    startup_record = read(root / 'owned-bcs.json')
                     binding['human_id'] = owned_runtime.inputs.human_id
                     write(root / BINDING_NAME, binding)
                     evidence_path = root / EVIDENCE_NAME
@@ -262,9 +264,11 @@ def local_draft_delivery_run(*, binary: Path, binary_sha256: str, state_dir: Pat
                           'error_type': type(failure).__name__}
         child_pass = (error is None and child_exit_ok and isinstance(evidence, dict)
                       and redaction_ok and checks.get('status') == 'PASS'
+                      and startup_record is not None
+                      and startup_record.get('status') == 'RUNNING'
+                      and startup_record.get('ready') is True
                       and owned_record.get('status') == 'STOPPED'
                       and owned_record.get('returncode') == 0
-                      and owned_record.get('ready') is True
                       and executor_digest() == source
                       and read(root / BINDING_NAME) == binding
                       and file_sha256(binary) == binary_sha256)

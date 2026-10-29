@@ -100,13 +100,17 @@ class FakeOwnedBcs:
         self.root.mkdir(parents=True)
         self.root.joinpath('console.log').write_text('owned runtime console clean\n', encoding='utf-8')
         self.state = 'RUNNING'
+        (self.root / 'owned-bcs.json').write_text(json.dumps({
+            'schema_version': 1, 'run_id': self.run_id, 'status': 'RUNNING',
+            'returncode': None, 'ready': True, 'forced_stop': False,
+        }), encoding='utf-8')
         return self
 
     def __exit__(self, *_args):
         self.state = 'STOPPED'
         (self.root / 'owned-bcs.json').write_text(json.dumps({
             'schema_version': 1, 'run_id': self.run_id, 'status': 'STOPPED',
-            'returncode': 0, 'ready': True, 'forced_stop': False,
+            'returncode': 0, 'ready': False, 'forced_stop': False,
         }), encoding='utf-8')
         return False
 
@@ -157,6 +161,7 @@ class DraftDeliveryRunTests(unittest.TestCase):
         self.assertEqual(result['remote_validation'], 'NOT_RUN')
         self.assertFalse(result['canonical_summary']['verification_boundary']['grants_release_credit'])
         self.assertEqual(read(self.state / 'owned-bcs.json')['status'], 'STOPPED')
+        self.assertFalse(result['runtime_shutdown']['ready'])
         self.assertEqual(result['child_receipt']['observed_checks'], STORY_CHECKS)
         for name in ('reports/summary.json', 'reports/junit.xml', 'reports/summary.md'):
             self.assertTrue((self.state / name).is_file())
