@@ -1,33 +1,30 @@
 #!/bin/bash
 # cli_error_paths_story.sh — Terminal-mode read flows and CLI-side
 # validation/error contracts, all through the public bcs-cli entry:
-#
-#   story_cli_operator_runs_a_session_in_terminal_mode
-#       Whole chat-session lifecycle in the documented human-readable output
-#       mode (plain bcs-cli, --json unset) plus malformed --input/--meta.
-#   story_cli_operator_validates_group_and_collaboration_config
-#       Collaboration YAML, participant tags, role bindings, and
-#       group-context policy JSON validated before anything is persisted.
-#   story_cli_operator_uses_channel_contracts_in_terminal
-#       Channel binding payload guards, the redacted disabled-bridge
-#       contract, and terminal-mode channel listings.
-#   story_cli_operator_diagnoses_service_and_registration_in_terminal
-#       Terminal service summaries, sid inference rules, bounded waits, and
-#       a temporary agent pair (connect session contract, protected
-#       visibility, friend exchange, endpoint diagnostics).
-#   story_cli_operator_chats_and_shares_files_in_terminal
-#       Chat contracts (delivered, wait-until, unknown-bot submit failure),
-#       collaboration preview panels, and a session-file lifecycle.
-#
+#   ...runs_a_session_in_terminal_mode      — human-readable session
+#       lifecycle plus malformed --input/--meta contracts.
+#   ...validates_group_and_collaboration_config — collaboration YAML,
+#       participant tags, role bindings, group-context policy JSON.
+#   ...uses_channel_contracts_in_terminal   — binding payload guards, the
+#       redacted disabled-bridge contract, terminal listings.
+#   ...diagnoses_service_and_registration_in_terminal — service summaries,
+#       sid inference, bounded waits, temp agents, endpoint diagnostics.
+#   ...chats_and_shares_files_in_terminal    — chat contracts, collaboration
+#       preview panels, session-file lifecycle.
 # Assertion style: follow cli-stories.sh (bcs_cli/bcs_cli_json wrappers,
 # assert_* tally helpers, cleanup of every fixture via the API helpers).
+
+# Render a bcs-cli invocation for logging; `token:` credentials are redacted.
+_cli_story_redact_args() {
+    [[ "$#" -gt 0 ]] && printf '%s' "$*" | sed -E 's/token:[^ ]+/token:<redacted>/g'
+}
 
 # Terminal-mode sibling of cli-stories.sh's _cli_story_run: same logging and
 # tally contract, but through plain bcs_cli so commands render their
 # documented human-readable output (the --json flag stays unset).
 _cli_story_run_terminal() {
     local desc="$1"; shift
-    info "CLI story: bcs-cli $*"
+    info "CLI story: bcs-cli $(_cli_story_redact_args "$@")"
     if bcs_cli "$@"; then
         pass "$desc"
         TESTS_PASSED=$((TESTS_PASSED + 1))
@@ -46,7 +43,7 @@ _cli_story_run_terminal() {
 _cli_story_expect_fail() {
     local desc="$1" needle="$2"
     shift 2
-    info "CLI story: bcs-cli $* (expected failure)"
+    info "CLI story: bcs-cli $(_cli_story_redact_args "$@") (expected failure)"
     if bcs_cli "$@" 2>/dev/null; then
         fail "$desc (unexpected success)"
         TESTS_FAILED=$((TESTS_FAILED + 1))
@@ -64,11 +61,9 @@ _cli_story_expect_fail() {
     return 0
 }
 
-# Run bcs_cli with temporary environment variables. A bash env-prefix on a
-# FUNCTION call keeps the assignment in scope after the call returns, which
-# would leak into later stories running in the same e2e shell, so snapshot
-# and restore every variable explicitly. Usage:
-#   _cli_story_with_env VAR=value... -- <bot> <args...>
+# Run bcs_cli with temporary environment variables; a bash env-prefix on a
+# FUNCTION call persists after the call, so snapshot and restore each variable
+# (otherwise the overrides leak into later stories in the same e2e shell).
 # Bash 3.2 compatible: plain arrays and ${!var} indirection only.
 _cli_story_with_env() {
     local assigns=() names=() saved=() kv name i rc=0
@@ -97,9 +92,8 @@ _cli_story_with_env() {
     return "$rc"
 }
 
-# Best-effort API cleanup used on failed story arms: removing fixtures must
-# never mask the assert we are about to record. Optional args: session id =d
-# first, then any temp files.
+# Best-effort scrub for failed story arms (never masks pending asserts).
+# Optional args after the group id: a session id, then any temp files.
 _cli_story_scrub_group() {
     local group_id="$1" session_id="${2:-}"; shift 2 2>/dev/null || shift "$#"
     [[ -n "$session_id" ]] && api_delete "/sessions/${session_id}?bot_id=${BOT_PM_UUID}" >/dev/null 2>&1
@@ -107,10 +101,17 @@ _cli_story_scrub_group() {
     for f in "$@"; do [[ -n "$f" ]] && rm -f "$f" 2>/dev/null; done
 }
 
-# Register one temporary agent through the public /register flow; sets
-# CLI_STORY_AGENT_UUID / CLI_STORY_AGENT_TOKEN for the caller (they are NOT
-# echoed: assert helpers write to stdout and would corrupt a captured value).
-# Fails the story when registration is refused.
+# Best-effort scrub of a detached service-invocation session (service sessions
+# resolve their principal via the `bot:` id form, so they need their own delete)
+# plus the enclosing PM group. _cli_story_scrub_service_session <sid> <group>.
+_cli_story_scrub_service_session() {
+    [[ -n "${1:-}" ]] && api_delete "/sessions/$1?bot_id=$(urlencode "bot:${BOT_PM_UUID}")" >/dev/null 2>&1
+    [[ -n "${2:-}" ]] && _cli_story_scrub_group "$2"
+}
+
+# Register one temporary agent through the public /register flow into
+# CLI_STORY_AGENT_UUID / CLI_STORY_AGENT_TOKEN (globals, not stdout: assert
+# helpers print and would corrupt a captured value).
 _cli_story_register_agent() {
     local name="$1"
     api_get "/register/token"
@@ -124,13 +125,11 @@ _cli_story_register_agent() {
     [[ -n "$CLI_STORY_AGENT_UUID" && -n "$CLI_STORY_AGENT_TOKEN" ]]
 }
 
-# Best-effort scrub for the two-agent story: both agents share a journey, so
-# every failure arm removes them (and the temp dir) together.
+# Best-effort scrub of the two-agent story's temp dir and both agent bots.
 _cli_story_scrub_agents() {
-    local temp_dir="${1:-}" a="${2:-}" b="${3:-}"
-    [[ -n "$temp_dir" ]] && rm -rf "$temp_dir"
-    [[ -n "$a" ]] && api_delete "/bots/${a}" >/dev/null 2>&1
-    [[ -n "$b" ]] && api_delete "/bots/${b}" >/dev/null 2>&1
+    [[ -n "${1:-}" ]] && rm -rf "$1"
+    [[ -n "${2:-}" ]] && api_delete "/bots/$2" >/dev/null 2>&1
+    [[ -n "${3:-}" ]] && api_delete "/bots/$3" >/dev/null 2>&1
 }
 
 # Extract the session id from the terminal-mode `session create` line.
@@ -177,12 +176,8 @@ runtime:
 }
 
 #
-# Flow: create group -> create/read/list sessions in terminal mode -> patch ->
-# chat -> read messages -> membership add/mute/remove -> invite link ->
-# complete (twice, incl. the "already completed" acknowledgement) -> feed
-# malformed --input/--meta literals -> observe a clear not-found error ->
-# clean up.
-#
+# Flow: group -> sessions in terminal mode through every mutation ->
+# complete (twice) -> malformed --input/--meta literals -> unknown session.
 # Critical assertions:
 #   - Every terminal-mode print line matches the documented human contract.
 #   - JSON read-back (bcs_cli_json) reflects the patched title.
@@ -194,7 +189,7 @@ story_cli_operator_runs_a_session_in_terminal_mode() {
 
     _cli_story_run_terminal "operator creates a session in terminal mode" PM session create \
         --group "$group_id" --title "Terminal session story" \
-        --input '{"source":"terminal"}' || return 1
+        --input '{"source":"terminal"}' || { _cli_story_scrub_group "$group_id"; return 1; }
     local session_id
     session_id=$(_cli_story_terminal_sid)
     assert_not_empty "terminal session creation prints its id" "$session_id"
@@ -203,67 +198,67 @@ story_cli_operator_runs_a_session_in_terminal_mode() {
         "$BCS_CLI_STDOUT" "(kind=chat, status=running)"
 
     _cli_story_run_terminal "operator lists sessions in terminal mode" PM session list \
-        --group "$group_id" --limit 10 || return 1
+        --group "$group_id" --limit 10 || { _cli_story_scrub_group "$group_id" "$session_id"; return 1; }
     assert_contains "terminal session list header names the group" \
         "$BCS_CLI_STDOUT" "Sessions in group $group_id ("
     assert_contains "terminal session list shows the created session" \
         "$BCS_CLI_STDOUT" "$session_id [running]"
 
     _cli_story_run_terminal "operator reads the session in terminal mode" PM session get \
-        "$session_id" || return 1
+        "$session_id" || { _cli_story_scrub_group "$group_id" "$session_id"; return 1; }
     assert_contains "terminal session get pretty-prints the id" \
         "$BCS_CLI_STDOUT" "\"session_id\": \"$session_id\""
 
     _cli_story_run_terminal "operator patches the session title in terminal mode" PM session patch \
-        "$session_id" --title "Terminal story retitled" || return 1
+        "$session_id" --title "Terminal story retitled" || { _cli_story_scrub_group "$group_id" "$session_id"; return 1; }
     assert_contains "terminal session patch echoes the new title" \
         "$BCS_CLI_STDOUT" "✓ Patched: $session_id title=\"Terminal story retitled\""
 
     _cli_story_run "operator confirms the patch through structured read-back" PM \
-        session get "$session_id" || return 1
+        session get "$session_id" || { _cli_story_scrub_group "$group_id" "$session_id"; return 1; }
     assert_contains "structured read-back confirms the terminal patch" \
         "$BCS_CLI_STDOUT" "Terminal story retitled"
 
     local chat_line="Terminal readiness check $$"
     _cli_story_run_terminal "operator chats in terminal mode" PM session chat \
-        --session "$session_id" --message "$chat_line" || return 1
+        --session "$session_id" --message "$chat_line" || { _cli_story_scrub_group "$group_id" "$session_id"; return 1; }
     assert_contains "terminal session chat reports delivery counts" \
         "$BCS_CLI_STDOUT" "✓ Delivered to 2 (failed 0)"
 
     _cli_story_run_terminal "operator reads session history in terminal mode" PM session messages \
-        "$session_id" --limit 20 || return 1
+        "$session_id" --limit 20 || { _cli_story_scrub_group "$group_id" "$session_id"; return 1; }
     assert_contains "terminal history header names the session" \
         "$BCS_CLI_STDOUT" "Messages in session $session_id ("
     assert_contains "terminal history contains the submitted message" \
         "$BCS_CLI_STDOUT" "$chat_line"
 
     _cli_story_run_terminal "operator adds verification in terminal mode" PM session add-member \
-        "$session_id" --bot-uuid "$BOT_QA_UUID" --role consultant || return 1
+        "$session_id" --bot-uuid "$BOT_QA_UUID" --role consultant || { _cli_story_scrub_group "$group_id" "$session_id"; return 1; }
     assert_contains "terminal add-member reports the effective role" \
         "$BCS_CLI_STDOUT" "✓ Added member $BOT_QA_UUID to $session_id (role=consultant)"
 
     _cli_story_run_terminal "operator mutes verification in terminal mode" PM session set-member-mode \
-        "$session_id" "$BOT_QA_UUID" --mode muted || return 1
+        "$session_id" "$BOT_QA_UUID" --mode muted || { _cli_story_scrub_group "$group_id" "$session_id"; return 1; }
     assert_contains "terminal set-member-mode reports the transition" \
         "$BCS_CLI_STDOUT" "✓ Mode set $BOT_QA_UUID@$session_id -> muted"
 
     _cli_story_run_terminal "operator creates an invite link in terminal mode" PM session invite-link \
-        "$session_id" --ttl-seconds 60 || return 1
+        "$session_id" --ttl-seconds 60 || { _cli_story_scrub_group "$group_id" "$session_id"; return 1; }
     assert_contains "terminal invite link exposes a token payload" \
         "$BCS_CLI_STDOUT" "invite_token"
 
     _cli_story_run_terminal "operator removes verification in terminal mode" PM session remove-member \
-        "$session_id" "$BOT_QA_UUID" || return 1
+        "$session_id" "$BOT_QA_UUID" || { _cli_story_scrub_group "$group_id" "$session_id"; return 1; }
     assert_contains "terminal remove-member reports the removal" \
         "$BCS_CLI_STDOUT" "✓ Removed member $BOT_QA_UUID from $session_id"
 
     _cli_story_run_terminal "operator completes the session in terminal mode" PM session complete \
-        "$session_id" --output '{"summary":"terminal approval"}' || return 1
+        "$session_id" --output '{"summary":"terminal approval"}' || { _cli_story_scrub_group "$group_id" "$session_id"; return 1; }
     assert_contains "terminal completion reports the completed status" \
         "$BCS_CLI_STDOUT" "✓ Completed: $session_id status=completed"
 
     _cli_story_run_terminal "operator re-completes the terminal session" PM session complete \
-        "$session_id" || return 1
+        "$session_id" || { _cli_story_scrub_group "$group_id" "$session_id"; return 1; }
     assert_contains "terminal re-completion follows the already-completed contract" \
         "$BCS_CLI_STDOUT" "↺ Already completed: $session_id"
 
@@ -290,11 +285,9 @@ story_cli_operator_runs_a_session_in_terminal_mode() {
 }
 
 #
-# Critical assertions:
-#   - All client-side validation errors surface with their documented message.
-#   - The manager-worker group keeps manager/worker roles and participant tags.
-#   - Invalid definitions print server validation errors and exit non-zero.
-#   - Validity windows (unix and RFC3339 forms) round-trip through get.
+# Critical assertions: documented client-side validation messages everywhere,
+# manager-worker roles plus tags, invalid definitions rejected, validity
+# windows round-tripping through get.
 story_cli_operator_validates_group_and_collaboration_config() {
     info "Story: an operator validates collaboration and context inputs before persisting them"
     local yaml_file
@@ -332,7 +325,7 @@ story_cli_operator_validates_group_and_collaboration_config() {
         return 1
     }
     local manager_group_id
-    manager_group_id=$(printf '%s\n' "$BCS_CLI_STDOUT" | sed -n 's/^  ID: //p')
+    manager_group_id=$(printf '%s\n' "$BCS_CLI_STDOUT" | sed -n 's/^  ID: //p' | head -1)
     assert_not_empty "manager-worker group creation prints its id" "$manager_group_id"
     assert_contains "manager-worker group keeps its manager" "$BCS_CLI_STDOUT" "Driver: $BOT_PM_UUID"
     if [[ -n "$manager_group_id" ]]; then
@@ -399,10 +392,12 @@ story_cli_operator_validates_group_and_collaboration_config() {
         rm -f "$invalid_yaml_file" "$yaml_file"
         return 1
     fi
+    pass "invalid collaboration definition is refused"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
     assert_contains "invalid definition surfaces server validation errors" \
         "$BCS_CLI_STDOUT" '"valid":false'
     assert_contains "invalid definition names the failing path" "$BCS_CLI_STDOUT" '"errors"'
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
     rm -f "$invalid_yaml_file"
 
     _cli_story_run "operator persists the validated collaboration" PM collaboration create \
@@ -415,12 +410,16 @@ story_cli_operator_validates_group_and_collaboration_config() {
     local collab_group_id
     collab_group_id=$(json_path "$BCS_CLI_STDOUT" "id")
     assert_not_empty "validated collaboration create returns a group id" "$collab_group_id"
+    [[ -n "$collab_group_id" ]] || return 1
     rm -f "$yaml_file"
 
     # Group-context policy validation before any persistence.
     _cli_story_create_pm_group "CLI context validation $$" || return 1
     local group_id="$CLI_STORY_GROUP_ID"
     local ctx_name="cli_terminal_ctx_$$"
+    # RFC3339 window end relative to the run date (python3: BSD/GNU date differ).
+    local window_valid_to
+    window_valid_to="$(python3 -c 'import datetime; print((datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
 
     _cli_story_expect_fail \
         "group-context visible-to must be JSON" \
@@ -480,7 +479,7 @@ story_cli_operator_validates_group_and_collaboration_config() {
         --content "terminal window content" \
         --visible-to "{\"userIds\":[\"$BOT_PM_UUID\"]}" \
         --collect-from "{\"userIds\":[\"$BOT_ENG_UUID\"]}" \
-        --valid-from 123 --valid-to "2026-10-29T23:59:00Z" || {
+        --valid-from 123 --valid-to "$window_valid_to" || {
         _cli_story_scrub_group "$group_id"
         return 1
     }
@@ -489,7 +488,7 @@ story_cli_operator_validates_group_and_collaboration_config() {
     _cli_story_run_terminal "operator updates the context and rewrites its window" PM group-context update \
         --group-id "$group_id" --name "$ctx_name" --scope-level group \
         --content "terminal window updated" --change-reason "window drill" \
-        --valid-from 456 --valid-to "2026-11-30T23:59:00Z" || {
+        --valid-from 456 --valid-to "$window_valid_to" || {
         _cli_story_scrub_group "$group_id"
         return 1
     }
@@ -514,10 +513,8 @@ story_cli_operator_validates_group_and_collaboration_config() {
 }
 
 #
-# Critical assertions:
-#   - Impossible payloads are rejected client-side with documented messages.
-#   - The server's disabled-bridge refusal never leaks the client secret.
-#   - Terminal listings match the documented human output.
+# Critical assertions: client-side payload guards, the disabled-bridge
+# refusal never leaking the client secret, terminal listing output.
 story_cli_operator_uses_channel_contracts_in_terminal() {
     info "Story: an operator prepares and validates channel bindings in terminal mode"
     local channel_secret="cli-terminal-secret-not-real"
@@ -651,7 +648,7 @@ story_cli_operator_diagnoses_service_and_registration_in_terminal() {
     }
     rm -f "$good_json_file" "$bad_json_file"
     local service_sid
-    service_sid=$(printf '%s' "$BCS_CLI_STDOUT" | sed -n 's/^Invocation submitted: //p')
+    service_sid=$(printf '%s' "$BCS_CLI_STDOUT" | sed -n 's/^Invocation submitted: //p' | head -1)
     assert_not_empty "terminal service invocation prints its sid" "$service_sid"
     assert_contains "terminal invocation summary names the group" \
         "$BCS_CLI_STDOUT" "Group:    $group_id"
@@ -663,12 +660,12 @@ story_cli_operator_diagnoses_service_and_registration_in_terminal() {
     }
 
     _cli_story_run_terminal "operator reads the service summary in terminal mode" PM service status \
-        "$service_sid" || return 1
+        "$service_sid" || { _cli_story_scrub_service_session "$service_sid" "$group_id"; return 1; }
     assert_contains "terminal service status names the session" \
         "$BCS_CLI_STDOUT" "Service session: $service_sid"
 
     _cli_story_run_terminal "operator resolves the service with an explicit --group" PM service status \
-        "$service_sid" --group "$group_id" || return 1
+        "$service_sid" --group "$group_id" || { _cli_story_scrub_service_session "$service_sid" "$group_id"; return 1; }
     assert_contains "explicit --group keeps the canonical service identity" \
         "$BCS_CLI_STDOUT" "Service session: $service_sid"
 
@@ -704,19 +701,20 @@ story_cli_operator_diagnoses_service_and_registration_in_terminal() {
         "token:totally-bogus-token-$$" update-status --status active
 
     _cli_story_run_terminal "operator idles the status in terminal mode" PM update-status \
-        --status idle --summary "terminal story idle" || return 1
+        --status idle --summary "terminal story idle" || { _cli_story_scrub_service_session "$service_sid" "$group_id"; return 1; }
     assert_eq "terminal status update is acknowledged" "$BCS_CLI_STDOUT" "✓ Status updated"
 
-    _cli_story_run_terminal "operator reads the CEO profile in terminal mode" PM get "$BOT_CEO_UUID" || return 1
+    _cli_story_run_terminal "operator reads the CEO profile in terminal mode" PM get "$BOT_CEO_UUID" || { _cli_story_scrub_service_session "$service_sid" "$group_id"; return 1; }
     assert_contains "terminal bot profile names the bot" "$BCS_CLI_STDOUT" "Bot: $BOT_CEO_UUID"
     assert_contains "terminal bot profile lists domains" "$BCS_CLI_STDOUT" "  Domains: "
 
     local agent_a_uuid agent_a_token agent_b_uuid agent_b_token temp_dir
-    _cli_story_register_agent "cli-terminal-agent-$$-a" || return 1
+    _cli_story_register_agent "cli-terminal-agent-$$-a" || { _cli_story_scrub_service_session "$service_sid" "$group_id"; return 1; }
     agent_a_uuid="$CLI_STORY_AGENT_UUID"
     agent_a_token="$CLI_STORY_AGENT_TOKEN"
     _cli_story_register_agent "cli-terminal-agent-$$-b" || {
-        api_delete "/bots/${agent_a_uuid}" >/dev/null 2>&1
+        _cli_story_scrub_service_session "$service_sid" "$group_id"
+        _cli_story_scrub_agents "" "$agent_a_uuid"
         return 1
     }
     agent_b_uuid="$CLI_STORY_AGENT_UUID"
@@ -728,6 +726,7 @@ story_cli_operator_diagnoses_service_and_registration_in_terminal() {
         fail "connect accepted a bot id that does not match BCN_ACTOR_BOT_ID"
         TESTS_FAILED=$((TESTS_FAILED + 1))
         TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        _cli_story_scrub_service_session "$service_sid" "$group_id"
         _cli_story_scrub_agents "" "$agent_a_uuid" "$agent_b_uuid"
         return 1
     fi
@@ -750,6 +749,7 @@ story_cli_operator_diagnoses_service_and_registration_in_terminal() {
         fail "connect failed for a registered agent: $(printf '%s' "${BCS_CLI_STDERR:-}" | head -c 200)"
         TESTS_FAILED=$((TESTS_FAILED + 1))
         TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        _cli_story_scrub_service_session "$service_sid" "$group_id"
         _cli_story_scrub_agents "$temp_dir" "$agent_a_uuid" "$agent_b_uuid"
         return 1
     fi
@@ -770,42 +770,47 @@ story_cli_operator_diagnoses_service_and_registration_in_terminal() {
     fi
 
     _cli_story_run_terminal "operator protects the agent in terminal mode" \
-        "token:$agent_a_token" visibility set --value protected || { _cli_story_scrub_agents "$temp_dir" "$agent_a_uuid" "$agent_b_uuid"; return 1; }
+        "token:$agent_a_token" visibility set --value protected || { _cli_story_scrub_service_session "$service_sid" "$group_id"; _cli_story_scrub_agents "$temp_dir" "$agent_a_uuid" "$agent_b_uuid"; return 1; }
     assert_contains "terminal visibility change is acknowledged" \
         "$BCS_CLI_STDOUT" "✓ Visibility set to 'protected'"
 
-    _cli_story_run_terminal "fresh agent has no friends yet" "token:$agent_b_token" friend list || { _cli_story_scrub_agents "$temp_dir" "$agent_a_uuid" "$agent_b_uuid"; return 1; }
+    _cli_story_run_terminal "fresh agent has no friends yet" "token:$agent_b_token" friend list || { _cli_story_scrub_service_session "$service_sid" "$group_id"; _cli_story_scrub_agents "$temp_dir" "$agent_a_uuid" "$agent_b_uuid"; return 1; }
     assert_contains "terminal friend list renders an empty roster" \
         "$BCS_CLI_STDOUT" "Friends (0):"
 
     _cli_story_run_terminal "peer requests friendship through the terminal" \
-        "token:$agent_b_token" friend request --bot-uuid "$agent_a_uuid" || { _cli_story_scrub_agents "$temp_dir" "$agent_a_uuid" "$agent_b_uuid"; return 1; }
+        "token:$agent_b_token" friend request --bot-uuid "$agent_a_uuid" || { _cli_story_scrub_service_session "$service_sid" "$group_id"; _cli_story_scrub_agents "$temp_dir" "$agent_a_uuid" "$agent_b_uuid"; return 1; }
     assert_contains "terminal friend request reports the target" \
         "$BCS_CLI_STDOUT" "✓ Friend request sent to $agent_a_uuid"
     local request_id
-    request_id=$(printf '%s' "$BCS_CLI_STDOUT" | sed -n 's/^  Request ID: //p')
+    request_id=$(printf '%s' "$BCS_CLI_STDOUT" | sed -n 's/^  Request ID: //p' | head -1)
     assert_not_empty "terminal friend request prints its Request ID" "$request_id"
+    [[ -n "$request_id" ]] || {
+        _cli_story_scrub_service_session "$service_sid" "$group_id"
+        _cli_story_scrub_agents "$temp_dir" "$agent_a_uuid" "$agent_b_uuid"
+        return 1
+    }
 
     _cli_story_run_terminal "protected agent sees the pending request" "token:$agent_a_token" \
-        friend requests --direction received || { _cli_story_scrub_agents "$temp_dir" "$agent_a_uuid" "$agent_b_uuid"; return 1; }
+        friend requests --direction received || { _cli_story_scrub_service_session "$service_sid" "$group_id"; _cli_story_scrub_agents "$temp_dir" "$agent_a_uuid" "$agent_b_uuid"; return 1; }
     assert_contains "terminal pending list shows the request pair" \
         "$BCS_CLI_STDOUT" "$agent_b_uuid → $agent_a_uuid [pending] (id: $request_id)"
     assert_contains "terminal pending list carries the count header" \
         "$BCS_CLI_STDOUT" "Friend requests (1):"
 
     _cli_story_run_terminal "protected agent accepts the request in terminal mode" \
-        "token:$agent_a_token" friend accept --request-id "$request_id" || { _cli_story_scrub_agents "$temp_dir" "$agent_a_uuid" "$agent_b_uuid"; return 1; }
+        "token:$agent_a_token" friend accept --request-id "$request_id" || { _cli_story_scrub_service_session "$service_sid" "$group_id"; _cli_story_scrub_agents "$temp_dir" "$agent_a_uuid" "$agent_b_uuid"; return 1; }
     assert_contains "terminal friend acceptance is acknowledged" \
         "$BCS_CLI_STDOUT" "✓ Friend request accepted"
 
     _cli_story_run_terminal "protected agent sees its new friend in terminal mode" \
-        "token:$agent_a_token" friend list || { _cli_story_scrub_agents "$temp_dir" "$agent_a_uuid" "$agent_b_uuid"; return 1; }
+        "token:$agent_a_token" friend list || { _cli_story_scrub_service_session "$service_sid" "$group_id"; _cli_story_scrub_agents "$temp_dir" "$agent_a_uuid" "$agent_b_uuid"; return 1; }
     assert_contains "terminal friend list shows the accepted peer" \
         "$BCS_CLI_STDOUT" "($agent_b_uuid)"
 
     # Endpoint diagnostics. _cli_story_with_env isolates the overrides so they
     # cannot leak into later stories in the same e2e shell.
-    _cli_story_run_terminal "operator checks endpoint health" "" health || { _cli_story_scrub_agents "$temp_dir" "$agent_a_uuid" "$agent_b_uuid"; return 1; }
+    _cli_story_run_terminal "operator checks endpoint health" "" health || { _cli_story_scrub_service_session "$service_sid" "$group_id"; _cli_story_scrub_agents "$temp_dir" "$agent_a_uuid" "$agent_b_uuid"; return 1; }
     assert_contains "health reports the structured healthy status" \
         "$BCS_CLI_STDOUT" '"status":"healthy"'
 
@@ -947,7 +952,7 @@ story_cli_operator_chats_and_shares_files_in_terminal() {
     printf '%s' "$file_tail" > "$upload_file"
     _cli_story_run_terminal "operator uploads a session file" PM session file upload \
         --session "$session_id" --path "$upload_file" --mime text/plain || { _cli_story_scrub_group "$group_id" "$session_id" "$upload_file"; return 1; }
-    file_id=$(printf '%s' "$BCS_CLI_STDOUT" | sed -n 's/.*Uploaded: \([^ ]*\) (.*$/\1/p')
+    file_id=$(printf '%s' "$BCS_CLI_STDOUT" | sed -n 's/.*Uploaded: \([^ ]*\) (.*$/\1/p' | head -1)
     assert_not_empty "terminal upload prints a file id" "$file_id"
     [[ -n "$file_id" ]] || { _cli_story_scrub_group "$group_id" "$session_id" "$upload_file"; return 1; }
 
