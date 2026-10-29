@@ -73,6 +73,8 @@ COMMAND_ORDER = (
     'local-service-policy-report',
     'local-authority-run',
     'local-authority-report',
+    'local-session-owner-run',
+    'local-session-owner-report',
 )
 
 

@@ -316,6 +316,12 @@ def migration_plan() -> dict:
                                             REQUIREMENTS as AUTHORITY_REQUIREMENTS,
                                             SUITE as AUTHORITY_SUITE,
                                             authority_source_binding)
+    from .session_owner.session_owner_contract import (
+        CASE_ID as SESSION_OWNER_CASE_ID,
+        REQUIREMENTS as SESSION_OWNER_REQUIREMENTS,
+        SUITE as SESSION_OWNER_SUITE,
+        session_owner_source_binding,
+    )
     draft_group = draft_group_source_binding()
     caller_execution_slice = {'suite': CALLER_SUITE, 'case_id': CALLER_CASE, 'case_version': 1,
         'legacy_id': 'caller_execution_story', 'status': 'LOCAL_EXECUTOR_ONLY',
@@ -397,6 +403,24 @@ def migration_plan() -> dict:
         'source_map': 'authority-migration-contract.json'}
     service_policy = service_policy_source_binding()
     authority = authority_source_binding()
+    session_owner = session_owner_source_binding()
+    session_owner_slice = {
+        'suite': SESSION_OWNER_SUITE, 'case_id': SESSION_OWNER_CASE_ID, 'case_version': 1,
+        'legacy_id': session_owner['parent'], 'status': 'LOCAL_EXECUTOR_ONLY_BACKLOG',
+        'required_assertion_count': len(SESSION_OWNER_REQUIREMENTS),
+        'requirement_ids': list(SESSION_OWNER_REQUIREMENTS),
+        'canonical_reporting': 'INTEGRATED_LOCAL',
+        'execution_command': 'local-session-owner-run',
+        'report_command': 'local-session-owner-report',
+        'required_parameters': ['binary', 'binary_sha256', 'state_dir', 'run_id',
+                                'confirm_run_id', 'allow_local_processes',
+                                'allow_fixture_write', 'allow_write'],
+        'binary_kind': 'bcs', 'auto_build': False,
+        'environment': session_owner['environment'],
+        'release_parent_denominator': False, 'independent_slice': True,
+        'remote_validation': 'NOT_RUN', 'grants_release_credit': False,
+        'source_map': 'session-owner-migration-contract.json',
+    }
     admission = admission_source_binding()
     friend_requests = friend_requests_list_source_binding()
     friend_connections = friend_connections_list_source_binding()
@@ -538,26 +562,27 @@ def migration_plan() -> dict:
               for plan in edge_friend_release_plans.values()],
             service_policy_slice, authority_slice],
             'local_backlog_case_slices': [
-                {'suite': 'owned-local-edge-friend-mutations-v1',
-                 'case_id': plan.case_id, 'case_version': 1,
-                 'legacy_id': plan.parent_id, 'status': 'LOCAL_EXECUTOR_ONLY_BACKLOG',
-                 'required_assertion_count': len(plan.requirements),
-                 'requirement_ids': list(plan.requirement_ids),
-                 'canonical_reporting': 'INTEGRATED_LOCAL',
-                 'execution_command': 'local-edge-friend-mutations-run',
-                 'report_command': 'local-edge-friend-mutations-report',
-                 'remote_validation': 'NOT_RUN',
-                 'release_parent_denominator': False,
-                 'independent_slice': True,
-                 'grants_release_credit': False}
-                for plan in edge_friend_backlog_plans.values()],
+                *[{'suite': 'owned-local-edge-friend-mutations-v1',
+                   'case_id': plan.case_id, 'case_version': 1,
+                   'legacy_id': plan.parent_id, 'status': 'LOCAL_EXECUTOR_ONLY_BACKLOG',
+                   'required_assertion_count': len(plan.requirements),
+                   'requirement_ids': list(plan.requirement_ids),
+                   'canonical_reporting': 'INTEGRATED_LOCAL',
+                   'execution_command': 'local-edge-friend-mutations-run',
+                   'report_command': 'local-edge-friend-mutations-report',
+                   'remote_validation': 'NOT_RUN',
+                   'release_parent_denominator': False,
+                   'independent_slice': True,
+                   'grants_release_credit': False}
+                  for plan in edge_friend_backlog_plans.values()],
+                session_owner_slice],
             'local_partial_executors': [],
             'status': 'PLANNED_NOT_EXECUTABLE', 'ready_to_execute': False,
             'source_revision': contract['source_revision'], 'source_integrity': 'MATCHED',
             'legacy_inventory_count': len(inventory), 'mapped_story_count': len(contract['stories']),
             'migrated_story_count': 0, 'passed_assertion_count': 0,
             'scope': 'next three parent Stories only; requirements are not executed assertions',
-            'stories': contract['stories'], 'additional_source_maps': [network, sessions, provider, channel, channel_cli, direct_chat, structured, webhook, judge, fixed_loop, admission, friend_requests, friend_connections, bot_search, delivery_policy, operator_cli, collaboration_team, sessions_services, service_policy, authority, *edge_friend_mutation_maps],
+            'stories': contract['stories'], 'additional_source_maps': [network, sessions, provider, channel, channel_cli, direct_chat, structured, webhook, judge, fixed_loop, admission, friend_requests, friend_connections, bot_search, delivery_policy, operator_cli, collaboration_team, sessions_services, service_policy, authority, session_owner, *edge_friend_mutation_maps],
             'cross_environment_source_candidates': {
                 **edge_read_adaptability(),
                 'cases': edge_read_adaptability()['cases'] + edge_search_adaptability()['cases'],

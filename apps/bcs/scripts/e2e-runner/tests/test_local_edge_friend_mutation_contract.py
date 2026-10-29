@@ -142,7 +142,8 @@ class EdgeFriendMutationContractTests(unittest.TestCase):
     def test_backlog_testcases_stay_outside_the_release_parent_registry(self):
         plan = migration_plan()
         registered = {row['case_id'] for row in plan['local_registered_executors']}
-        backlog = plan['local_backlog_case_slices']
+        backlog = [row for row in plan['local_backlog_case_slices']
+                   if row['suite'] == SUITE]
         self.assertEqual([row['case_id'] for row in backlog], list(BACKLOG_CASE_IDS))
         for row in backlog:
             with self.subTest(case_id=row['case_id']):

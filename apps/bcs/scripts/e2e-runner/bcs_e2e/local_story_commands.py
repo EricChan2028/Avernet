@@ -16,6 +16,10 @@ from .errors import has_cancellation
 from .inventory import reviewed_release_inventory
 from .migration_inventory import migration_plan
 from .profile import identifier
+from .local_backlog_story_commands import (
+    BACKLOG_STORY_COMMANDS, dispatch_backlog_story_command,
+    register_backlog_story_commands,
+)
 from .run_state import RunStateError, write
 
 
@@ -72,7 +76,7 @@ LOCAL_STORY_COMMANDS = frozenset({
     'local-service-policy-report',
     'local-authority-run',
     'local-authority-report',
-})
+}) | BACKLOG_STORY_COMMANDS
 
 
 def register_local_story_commands(commands) -> None:
@@ -354,9 +358,12 @@ def register_local_story_commands(commands) -> None:
     authority_report = commands.add_parser('local-authority-report', help='Verify frozen Bot-authority journey evidence offline')
     authority_report.add_argument('--state-dir', type=Path, required=True)
     authority_report.add_argument('--output-dir', type=Path)
+    register_backlog_story_commands(commands)
 
 
 def dispatch_local_story_command(args, *, write_reports: Callable) -> tuple[dict, int]:
+    if args.command in BACKLOG_STORY_COMMANDS:
+        return dispatch_backlog_story_command(args, write_reports=write_reports)
     if args.command == 'local-coverage-suite':
         return dispatch_coverage_command(args)
     if args.command == 'local-event-run':
