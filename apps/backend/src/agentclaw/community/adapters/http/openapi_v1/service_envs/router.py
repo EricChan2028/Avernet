@@ -2,9 +2,10 @@
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Path, Query, Request
+from fastapi import APIRouter, Depends, Path, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
+from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath, Envelope
 from agentclaw.community.adapters.http.openapi_v1.responses import accepted, envelope, envelope_errors
 from agentclaw.community.api.bot_publish_service import BotPublishServiceProtocol
@@ -19,7 +20,7 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 from .schemas import EvalEnvPublishResult, EvalEnvTeardownResult
 
-router = APIRouter(route_class=PublicAPIRoute)
+router = APIRouter(route_class=PublicAPIRoute, dependencies=[Depends(require_principal)])
 
 
 @router.post(
@@ -46,9 +47,7 @@ async def publish_eval_env(
     将 `BASE_URL` 设置为实际 API 服务入口，并按部署要求附带身份凭据。
     以下 ID 均为占位示例，请替换为实际值；无需 JSON 请求体。
 
-    ```bash
-    curl -X POST "${BASE_URL}/openapi/v1/bots/bot-1/service-envs/7/env-publish?owner_id=owner-1&operator=user-1&biz_id=task-1"
-    ```
+        curl -X POST "${BASE_URL}/openapi/v1/bots/bot-1/service-envs/7/env-publish?owner_id=owner-1&operator=user-1&biz_id=task-1"
 
     - `bot-1`：源 Bot ID；`7`：Backend 发布记录 ID。
     - `owner_id`、`operator` 必填；`biz_id` 可省略，默认空字符串。
@@ -103,9 +102,7 @@ async def get_env_publish_progress(
     将 `BASE_URL` 设置为实际 API 服务入口，并按部署要求附带身份凭据。
     用发布响应 `data.baas_publish_id` 的实际值替换示例中的 `42`。
 
-    ```bash
-    curl "${BASE_URL}/openapi/v1/service-envs/env-publish/42/progress"
-    ```
+        curl "${BASE_URL}/openapi/v1/service-envs/env-publish/42/progress"
 
     只需 `baas_publish_id`，无需 Bot ID、owner_id 或请求体。
     HTTP 200 的 `data` 为 BaaS 进度信息；检查 `data.status` 判断结果：
@@ -139,9 +136,7 @@ async def teardown_eval_env(
     用发布响应 `data.bot_uuid` 替换 `eval-bot-1`，用原 Backend 发布记录 ID
     替换 `publish_id=7`；不要将 BaaS 工作流 ID 当作 publish_id。
 
-    ```bash
-    curl -X POST "${BASE_URL}/openapi/v1/service-envs/eval-bot-1/env-teardown?operator=user-1&publish_id=7"
-    ```
+        curl -X POST "${BASE_URL}/openapi/v1/service-envs/eval-bot-1/env-teardown?operator=user-1&publish_id=7"
 
     无需请求体。`operator` 默认 `system`；`publish_id` 默认 `0`，建议传入
     原发布记录 ID，使主动释放和 TTL 自动释放使用同一操作记录。

@@ -229,3 +229,16 @@ def test_call_examples_are_published_in_openapi(method, path):
     assert "调用示例" in description
     assert "curl" in description
     assert "${BASE_URL}/openapi/v1/" in description
+
+
+@pytest.mark.asyncio
+async def test_non_service_bot_cannot_publish_eval_environment(resource_services):
+    bots, _ = resource_services
+    bots.get_bot_by_address.return_value["bot_type"] = "personal"
+    service = Mock(eval_publish=AsyncMock())
+    request = Request({"type": "http", "method": "POST", "path": "/"})
+    result = await publish_eval_env(
+        "bot-1", 7, request, "actor", "owner", "", service, *resource_services,
+    )
+    assert result.status_code == 409
+    service.eval_publish.assert_not_awaited()

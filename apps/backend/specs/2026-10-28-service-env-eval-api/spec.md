@@ -118,3 +118,40 @@ Like the other service environment endpoints, admission is OPEN and authorizatio
 explicit NoCheck. Existing public identity handling remains, but the endpoint does
 not verify caller ownership of the environment. operator is a business field only.
 Tests cover forwarding, defaults, enqueue failure propagation, and API registration.
+
+## Public contract and CI integration
+
+All three routes explicitly depend on `require_principal`, including when the
+service-env router is mounted independently. OPEN admission and NoCheck remain
+unchanged: business operator/owner values are not verified caller identities.
+These operations have no acting-user dimension and do not add a `user_id`
+parameter. Publication keeps its required `owner_id` locator, distinct from the
+optional caller-derived owner on engine-runtime operations. The public contract
+inventories explicitly assert these differences rather than disabling their gates.
+
+Gateway configuration declares `service-envs` as a Backend domain using the
+existing Backend schema, with optional user/app/bot identity shapes matching
+OPEN admission. A verified principal is still required by Backend. Existing URL
+paths and service method contracts are unchanged; no new core service is added.
+Deployment must ship the matching gateway configuration to route this domain.
+
+Response fields carry descriptions, and curl examples use indented Markdown
+rather than fenced code to comply with the published-document contract.
+The endpoint framework executes real HTTP success/error cases for every route,
+including unsigned-request rejection. Only long-running orchestration is replaced
+through per-test DI; publication resource validation uses real repositories.
+
+Validation of the CI integration fix (2026-10-29):
+- Focused Backend contracts, adapter tests, admission/authorization inventories,
+  endpoint coverage gate, no-mock gates, and the reported agentswarm regression:
+  188 passed. The agentswarm failure did not reproduce; its code is unchanged.
+- Registered environment HTTP cases: 9 passed (success, business/validation
+  errors, and missing-principal rejection).
+- Executable Backend source lines changed by this fix against its parent:
+  15/15 covered. This is not the full PR merge-base coverage result.
+- Focused Ruff check and `git diff --check` passed; changed Python files remain
+  below 1,000 lines.
+- Gateway YAML routing/security assertions passed in the Backend contract suite.
+  Gateway's own config/architecture suites could not run successfully with the
+  Backend interpreter: `pydantic_settings` and `pytestarch` are not installed.
+- Full Backend suite and Singlebox E2E were not rerun locally.

@@ -330,7 +330,6 @@ _OPEN_SUBGROUPS = [
 # Keep it on the user-scoped response surface so the published contract carries
 # the standard 403 response as well as the principal requirement.
 _USER_SCOPED_SUBGROUPS = [
-    service_envs_router,
     skill_readme_router,
 ]
 
@@ -515,6 +514,8 @@ def build_public_router() -> APIRouter:
     user" above).
     """
     public = APIRouter(route_class=PublicAPIRoute)
+    # Explicit business locators, no acting-user query dimension.
+    public.include_router(service_envs_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH)
     # The caller's own identity — the one operation whose answer IS the user,
     # so it takes no ``user_id`` and can answer no 403: it gets the base error
     # table, not the user-scoped one. The caller is the sole top-level public

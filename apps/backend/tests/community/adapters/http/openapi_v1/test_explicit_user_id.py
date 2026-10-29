@@ -280,6 +280,10 @@ def _without_request_id(response) -> dict:
 #: between "this operation has no user dimension" and "somebody found the
 #: parameter inconvenient".
 _NO_USER_DIMENSION = {
+    # Environment operations declare business operator/owner, not an acting user.
+    ("post", "/openapi/v1/bots/{bot_id}/service-envs/{publication_id}/env-publish"),
+    ("get", "/openapi/v1/service-envs/env-publish/{baas_publish_id}/progress"),
+    ("post", "/openapi/v1/service-envs/{bot_uuid}/env-teardown"),
     # Expert discovery is tenant-wide, selected by the verified principal.
     ("get", f"{PUBLIC_API_PREFIX}/experts"),
     ("get", f"{PUBLIC_API_PREFIX}/experts/categories"),
@@ -615,7 +619,8 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # dimension: helpful marking plus interaction write, summary, batch summary,
 # and Personal Center reads: 129 -> 134. Topic edit and delete add two more
 # explicit-author account-level routes, both with no Bot dimension: 134 -> 136.
-_BOT_ID_PLACEMENT = {"path": 212, "query": 1, "none": 136}
+# Service environments add one Bot-addressed and two workflow/environment operations.
+_BOT_ID_PLACEMENT = {"path": 213, "query": 1, "none": 138}
 
 
 def _schema() -> dict:
