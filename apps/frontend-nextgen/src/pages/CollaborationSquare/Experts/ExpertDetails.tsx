@@ -86,6 +86,42 @@ export function ExpertDetails({ expertId, onBack }: { expertId: string; onBack: 
                 ))}
               </section>
             )}
+            {Array.isArray(expert.cli_tools) && (
+              <section aria-label="模板声明的 CLI" className="space-y-3">
+                <h2 className="text-lg font-semibold text-foreground">模板声明的 CLI</h2>
+                <p className="text-sm text-muted-foreground">
+                  创建时替换 Bot 上传的 CLI 集合；不改变平台默认 CLI。工具不自动加入 PATH，按所选引擎的工具目录和模板用法调用。
+                  实际交付结果以创建任务为准。
+                </p>
+                {expert.cli_tools.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">模板声明移除所有 Bot 上传的 CLI。</p>
+                ) : (
+                  expert.cli_tools.map((tool) => (
+                    <article key={tool.name} className="rounded-xl border border-input bg-card p-5">
+                      <h3 className="font-mono text-sm text-foreground">{tool.name}</h3>
+                    </article>
+                  ))
+                )}
+              </section>
+            )}
+            {Array.isArray(expert.resources) && (
+              <section aria-label="模板声明的资源" className="space-y-3">
+                <h2 className="text-lg font-semibold text-foreground">模板声明的资源</h2>
+                <p className="text-sm text-muted-foreground">
+                  创建时先清理工作区非保护项，再写入声明的资源；普通用户输出也可能被清理。资源不自动进入上下文或知识库。
+                  创建后可在 Bot 详情的资源管理中查看实际文件。
+                </p>
+                {expert.resources.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">模板声明清理资源，不写入新文件。</p>
+                ) : (
+                  expert.resources.map((resource) => (
+                    <article key={resource.path} className="rounded-xl border border-input bg-card p-5">
+                      <h3 className="break-all font-mono text-sm text-foreground">{resource.path}</h3>
+                    </article>
+                  ))
+                )}
+              </section>
+            )}
             <CreateBotModal
               scenario={creating ? 'cloud' : undefined}
               expert={expert}

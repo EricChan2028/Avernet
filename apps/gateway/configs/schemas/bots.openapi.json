@@ -32195,6 +32195,22 @@
             "title": "Category",
             "type": "string"
           },
+          "cli_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ExpertCliTool"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Declared uploaded CLI names; not installation or execution status. Null means omitted/no operation; [] removes all Bot-uploaded CLI tools. Platform default CLI supply is not managed by this category.",
+            "title": "Cli Tools"
+          },
           "creation_count": {
             "description": "Historical number of independently created Bots, including deleted Bots.",
             "title": "Creation Count",
@@ -32236,6 +32252,22 @@
             "title": "Name",
             "type": "string"
           },
+          "resources": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ExpertResource"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Declared workspace-relative resource destinations, without source or content. Null means omitted/no operation; [] clears non-protected workspace items; a nonempty list clears non-protected items before writing these resources.",
+            "title": "Resources"
+          },
           "skills": {
             "description": "Declared local Skill metadata.",
             "items": {
@@ -32265,6 +32297,36 @@
           "skills"
         ],
         "title": "ExpertDetail",
+        "type": "object"
+      },
+      "ExpertCliTool": {
+        "description": "A CLI declaration without source locations or executable bytes.",
+        "properties": {
+          "name": {
+            "description": "Declared CLI runtime name.",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ExpertCliTool",
+        "type": "object"
+      },
+      "ExpertResource": {
+        "description": "A resource destination without source locations or file content.",
+        "properties": {
+          "path": {
+            "description": "Workspace-relative destination; directory paths end in /.",
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "ExpertResource",
         "type": "object"
       },
       "ExpertIdentity": {

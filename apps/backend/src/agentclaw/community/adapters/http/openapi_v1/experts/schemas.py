@@ -41,6 +41,18 @@ class ExpertMcp(BaseModel):
     )
 
 
+class ExpertCliTool(BaseModel):
+    """A CLI declaration without source locations or executable bytes."""
+
+    name: str = Field(description="Declared CLI runtime name.")
+
+
+class ExpertResource(BaseModel):
+    """A resource destination without source locations or file content."""
+
+    path: str = Field(description="Workspace-relative destination; directory paths end in /.")
+
+
 class ExpertDetail(ExpertSummary):
     """Expert display data without execution documents or source credentials."""
 
@@ -51,4 +63,20 @@ class ExpertDetail(ExpertSummary):
     mcp: list[ExpertMcp] = Field(
         default_factory=list,
         description="Declared MCP servers; connection overrides are omitted.",
+    )
+    cli_tools: list[ExpertCliTool] | None = Field(
+        default=None,
+        description=(
+            "Declared uploaded CLI names; not installation or execution status. "
+            "Null means omitted/no operation; [] removes all Bot-uploaded CLI tools. "
+            "Platform default CLI supply is not managed by this category."
+        ),
+    )
+    resources: list[ExpertResource] | None = Field(
+        default=None,
+        description=(
+            "Declared workspace-relative resource destinations, without source or content. "
+            "Null means omitted/no operation; [] clears non-protected workspace items; "
+            "a nonempty list clears non-protected items before writing these resources."
+        ),
     )

@@ -1,6 +1,8 @@
 """Public expert discovery uses real persisted scope-filtered content."""
 
 import asyncio
+import struct
+import pytest
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -24,17 +26,39 @@ from agentclaw.community.plugins.local.database import SqliteDB, reset_for_tests
 from tests.community.core.expert_market.test_catalog import write_expert
 
 
-def test_real_catalog_http_dto_scope_filters_and_limits(tmp_path):
+@pytest.mark.parametrize("resource_mode", ["omitted", "empty", "files"])
+@pytest.mark.parametrize("cli_mode", ["omitted", "empty", "files"])
+def test_real_catalog_http_dto_scope_filters_and_limits(tmp_path, resource_mode, cli_mode):
     reset_for_tests()
     db = SqliteDB()
     asyncio.run(db.bootstrap())
     catalog = ExpertCatalogRepository(db)
     folder = write_expert(tmp_path)
+    # A header fixture exercises discovery validation, not executable runtime.
+    tool = bytearray(64)
+    tool[:6] = b"\x7fELF\x02\x01"
+    struct.pack_into("<HH", tool, 16, 2, 0x3E)
+    (folder / "review-cli").write_bytes(tool)
+    (folder / "guide.txt").write_text("private resource body")
     with (folder / "manifest.yaml").open("a") as manifest:
         manifest.write(
             "  mcp:\n    - server_code: project-tools\n"
             "      config:\n        headers:\n          X-Project: private-project-value\n"
         )
+        if cli_mode == "empty":
+            manifest.write("  cli_tools: []\n")
+        elif cli_mode == "files":
+            manifest.write(
+                "  cli_tools:\n    - name: review-cli\n      from: aiworkbench\n"
+                "      subpath: agents/writer/review-cli\n"
+            )
+        if resource_mode == "empty":
+            manifest.write("  resources: []\n")
+        elif resource_mode == "files":
+            manifest.write(
+                "  resources:\n    - path: reference/guide.txt\n      from: aiworkbench\n"
+                "      subpath: agents/writer/guide.txt\n"
+            )
     ExpertScanner(catalog).scan(
         tmp_path, source_commit="a" * 40, scope=ExpertScope("a", "dev", "aiworkbench")
     )
@@ -58,6 +82,16 @@ def test_real_catalog_http_dto_scope_filters_and_limits(tmp_path):
         assert detail.json()["data"]["mcp"] == [{"server_code": "project-tools"}]
         assert "private-project-value" not in detail.text
         assert "config" not in detail.json()["data"]["mcp"][0]
+        expected_cli = {"omitted": None, "empty": [], "files": [{"name": "review-cli"}]}
+        assert detail.json()["data"]["cli_tools"] == expected_cli[cli_mode]
+        expected_resources = {
+            "omitted": None,
+            "empty": [],
+            "files": [{"path": "reference/guide.txt"}],
+        }
+        assert detail.json()["data"]["resources"] == expected_resources[resource_mode]
+        assert "private resource body" not in detail.text
+        assert "agents/writer" not in detail.text
         assert "source_commit" not in detail.text
         assert (
             client.get("/openapi/v1/experts", params={"page_size": 101}).status_code
@@ -77,7 +111,7 @@ def test_real_catalog_http_dto_scope_filters_and_limits(tmp_path):
 
 
 def test_published_expert_detail_matches_runtime_dto():
-    """Generated clients see the same MCP declarations as the real response DTO."""
+    """Generated clients see the same safe declarations as the response DTO."""
     import json
     from pathlib import Path
     from agentclaw.community.adapters.http.openapi_v1.experts.schemas import ExpertDetail
@@ -89,3 +123,5 @@ def test_published_expert_detail_matches_runtime_dto():
     schemas = published["components"]["schemas"]
     assert schemas["ExpertDetail"] == actual
     assert schemas["ExpertMcp"] == definitions["ExpertMcp"]
+    assert schemas["ExpertCliTool"] == definitions["ExpertCliTool"]
+    assert schemas["ExpertResource"] == definitions["ExpertResource"]
