@@ -347,7 +347,7 @@ async def test_content_boundary_external_success_never_logs_signed_url(caplog):
     from engine.community.api.session_files.content_diagnostics import logged_content_response
 
     async def action():
-        return JSONResponse({"delivery": "external_url", "size_bytes": 123, "download_url": "https://example.test/private?token=private-export-token"})
+        return JSONResponse({"delivery": "external_url", "size_bytes": 123, "download_url": "https://example.test/private?token=test-token"})
 
     with caplog.at_level(logging.INFO, logger="engine.session_files.api"):
         await logged_content_response(action, session_key="a", resource_id="r", disposition="attachment")
@@ -355,7 +355,7 @@ async def test_content_boundary_external_success_never_logs_signed_url(caplog):
     assert [record.event for record in records] == ["request", "success"]
     assert records[-1].status == 200
     assert records[-1].size_bytes == 123
-    assert "private-export-token" not in caplog.text
+    assert "test-token" not in caplog.text
     assert "example.test" not in caplog.text
 
 
