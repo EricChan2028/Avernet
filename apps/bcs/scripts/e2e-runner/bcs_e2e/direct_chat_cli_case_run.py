@@ -80,12 +80,15 @@ DUAL_DIRECT_CHAT_CASE_ID = "DUAL-DIRECT-CHAT-01"
 DUAL_DIRECT_CHAT_CASE_METHOD = "execute_direct_chat_case"
 
 # Bounded remote convergence budgets (seconds), disclosed per projection.
-# Derived from the r3 preprod natural history: submits acknowledge pending
-# under station rate limiting, the main Run reaches running within seconds
-# to tens of seconds, cancel acknowledgements precede abort convergence,
-# and the ping Run completes naturally ("pong") in a few minutes on the
-# shared asynchronous queue.
-DM_RUNNING_DEADLINE_SECONDS = 45.0
+# Derived from the r3 preprod natural history (20261029-direct-chat-preprod-r3
+# leaf replay + status-poll probe): submits acknowledge pending under station
+# rate limiting and the main Run stayed queued/pending for up to ~204s after
+# submission before reaching running, so the running convergence budget spans
+# minutes, not seconds; cancel acknowledgements precede abort convergence
+# (r3: cancelled terminal observed ~16s after the acknowledgement), and the
+# ping Run completes naturally ("pong") within ~150s on the shared
+# asynchronous queue.
+DM_RUNNING_DEADLINE_SECONDS = 270.0
 DM_CANCEL_DEADLINE_SECONDS = 120.0
 DM_TERMINAL_DEADLINE_SECONDS = 30.0
 DM_PING_TERMINAL_DEADLINE_SECONDS = 120.0
