@@ -9,22 +9,22 @@
     {
       "id": "CLI-SESSION-SERVICE.session-lifecycle",
       "command": "bcs-cli session create + session list + session get + session patch",
-      "expectation": "PM creates one release Session inside the exact CLI-managed Group, and independent CLI list, get, and patch reads keep its session ID, group binding, title, and renamed title consistent; persisted input is never treated as downstream execution completion."
+      "expectation": "PM creates one release Session inside the exact CLI-managed Group: session create returns its session_id and the managed group_id; a filtered session list (status running, title query, participant, offset/limit) contains the created session; session get keeps session_id and session_title; session patch responds with the renamed session_title itself. Persisted input is never treated as downstream execution completion."
     },
     {
       "id": "CLI-SESSION-SERVICE.member-chat-lifecycle",
       "command": "bcs-cli session add-member + set-member-mode + get + chat + messages + invite-link + remove-member + get",
-      "expectation": "PM governs only the owned QA membership in the exact Session: add, mute, read, chat, and message-history operations are observable, the invite returns token and join URL, and QA is absent only after removal. Chat and history never invent delivery results."
+      "expectation": "PM governs only the owned QA membership in the exact Session: add-member response participants contain the QA bot_uuid; after set-member-mode muted, a follow-up session get shows the QA participant with mode muted; session chat keeps the same session_id and group_id and exposes delivery_results without inventing delivery results; session messages --view-bot PM --limit 50 returns a JSON array containing the submitted message; invite-link returns invite_token and join_url; after remove-member a follow-up session get shows the QA participant absent."
     },
     {
       "id": "CLI-SESSION-SERVICE.session-complete",
       "command": "bcs-cli session complete --output <payload>",
-      "expectation": "PM completes the exact owned Session and receives completed with its exact output payload; completion is not inferred from a missing or synthetic response."
+      "expectation": "PM completes the exact owned Session; the complete response itself reports status=completed and keeps output.summary equal to the submitted payload; completion is not inferred from a missing or synthetic response."
     },
     {
       "id": "CLI-SESSION-SERVICE.service-roundtrip",
       "command": "bcs-cli service invoke --detach + service status + service wait",
-      "expectation": "PM invokes one detached group service in the owned Group and keeps service session identity and group binding through status; bounded wait reports either a terminal completed record or the exact session-specific timeout contract, never an unbounded or synthetic terminal state; the owned chat Session, exact bot-owned service Session, and its Group are then cleaned up with creator-scoped requests."
+      "expectation": "PM invokes one detached group service in the owned Group; service invoke returns session_id and session_kind=service_invocation; service status keeps that session identity and group binding; bounded wait (timeout-ms 1) reports either a terminal completed record keeping the session id or the exact session-specific 'Timed out after <id>' contract, never an unbounded or synthetic terminal state; the owned chat Session, bot-owned service Session, and Group are then cleaned up with creator-scoped requests."
     }
   ]
 }
