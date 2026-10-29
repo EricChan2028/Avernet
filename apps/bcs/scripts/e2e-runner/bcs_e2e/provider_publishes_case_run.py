@@ -24,10 +24,6 @@ from .profile import (
     require_resolved,
     unique_keys,
 )
-from .provider_publishes_profile import (
-    provider_publishes_credential_kind,
-    validate_provider_publishes_profile,
-)
 from .provider_publishes_contract import (
     CASE_ID,
     PARENT,
@@ -35,7 +31,9 @@ from .provider_publishes_contract import (
     STEP_BY_REQUIREMENT,
     STEP_ROWS,
     provider_publishes_case_plan,
+    provider_publishes_credential_kind,
     provider_publishes_source_binding,
+    validate_provider_publishes_profile,
 )
 from .provider_publishes_transport import (
     ProviderPublishesTransport,

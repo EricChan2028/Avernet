@@ -33,8 +33,8 @@ from bcs_e2e.provider_publishes_contract import (
     STEP_BY_OPERATION,
     STEP_ROWS,
     provider_publishes_source_binding,
+    validate_provider_publishes_profile,
 )
-from bcs_e2e.provider_publishes_profile import validate_provider_publishes_profile
 from bcs_e2e.run_state import read
 
 RUN_ID = "provider-publishes-run-1"

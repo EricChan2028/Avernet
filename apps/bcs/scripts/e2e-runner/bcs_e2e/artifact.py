@@ -110,10 +110,10 @@ def disk_digest() -> str:
     # This session's Direct-chat and Custom-collaboration leaf splits consume
     # the staged headroom and add two further focused leaf modules, so the
     # allowance grows by exactly those two leaf files. The dual Provider
-    # publish/retire slice adds its source contract, profile contract,
-    # dedicated legacy HTTP transport and command/adapters module, so the
-    # allowance grows by exactly those four focused files.
-    if len(paths) > 325:
+    # publish/retire slice adds its source/profile contract, dedicated legacy
+    # HTTP transport and command/adapters module, so the allowance grows by
+    # exactly those three focused files.
+    if len(paths) > 324:
         raise ValueError('executor artifact exceeds its source-file budget')
     digest = hashlib.sha256()
     for path in paths:
