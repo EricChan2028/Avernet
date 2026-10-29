@@ -178,7 +178,10 @@ def test_pipeline_logs_counts_and_distinct_removed_profile_keys(tmp_path, caplog
         vector_store=vectors, metadata_store=FileMetadataStoreAdapter(storage_dir=str(tmp_path / "metadata")),
         fragment_config=FragmentRetrievalConfig(aggregation_strategy="max"),
     )
-    caplog.set_level(logging.DEBUG, logger="src")
+    caplog.set_level(
+        logging.DEBUG,
+        logger="app.application.services.worker_vector_match_service",
+    )
     try:
         # Exercise dense threshold logging without lexical matches rescuing rows.
         results = service.match(query_embedding=[1.0, 0.0], query="unmatched-query",
