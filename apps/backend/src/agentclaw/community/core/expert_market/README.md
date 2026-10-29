@@ -18,6 +18,17 @@ combine a single category, and sort the complete filtered set before pagination.
 Historical creation counts come from persisted Bot origins including soft-deleted
 rows; catalogue updates cannot change those facts.
 
+Detail also exposes declared uploaded CLI names and workspace-relative resource
+destinations. It omits executable bytes, resource content and all source paths.
+These are declarations, not installation or execution status. Resource destinations
+preserve the native distinction: `null` means the category was omitted and is not
+touched; `[]` clears non-protected workspace items; a nonempty array clears those
+items before writing the declared files. Ordinary user output can be removed by
+an explicit resource declaration. CLI declarations also distinguish omitted (`null`)
+from explicitly removing every uploaded tool (`[]`). CLI replacement only manages Bot-uploaded tools,
+leaving platform default CLI supply to its existing owner; runtime placement and
+invocation remain engine-owned.
+
 ## Context Boundary
 
 ```yaml
