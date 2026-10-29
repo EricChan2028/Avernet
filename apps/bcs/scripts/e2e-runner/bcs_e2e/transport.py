@@ -196,7 +196,7 @@ class ReadClient:
                         + "?actor_type=bot&actor_id="
                         + binding["caller_actor_id"]
                         + "&direction=" + direction
-                        + "&page=1&page_size=20")
+                        + "&page=1&page_size=100")
             else:
                 path = binding["path"] + "?direction=" + direction
         elif operation in {"friend.decision.member_requests.read",

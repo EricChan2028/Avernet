@@ -371,7 +371,7 @@ class RemoteEdgeReadAdapterTests(unittest.TestCase):
         request = records[0]
         expected = (PATH
                     + '?actor_type=bot&actor_id=bot-driver&direction=received'
-                    + '&page=1&page_size=20')
+                    + '&page=1&page_size=100')
         self.assertEqual(request.full_url.split('https://gateway.example.com', 1)[1], expected)
         self.assertEqual(request.headers.get('Cookie'), COOKIE)
         self.assertNotIn('Authorization', request.headers)

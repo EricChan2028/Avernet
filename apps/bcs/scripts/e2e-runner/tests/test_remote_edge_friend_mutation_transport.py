@@ -445,7 +445,7 @@ class FriendMutationReadTransportTests(unittest.TestCase):
         headers = {name.lower(): value for name, value in request.header_items()}
         self.assertTrue(request.full_url.endswith(
             "/friend-connections/requests?actor_type=bot&actor_id=driver-bot"
-            "&direction=sent&status=pending&page=1&page_size=20"))
+            "&direction=sent&status=pending&page=1&page_size=100"))
         self.assertEqual(request.method, "GET")
         self.assertEqual(headers["cookie"], COOKIE)
         self.assertNotIn("authorization", headers)

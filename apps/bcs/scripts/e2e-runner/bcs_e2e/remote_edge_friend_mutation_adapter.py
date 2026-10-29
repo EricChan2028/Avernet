@@ -218,6 +218,10 @@ class RemoteEdgeFriendMutationAdapter:
         rows = data["items"]
         if any(not isinstance(row, dict) for row in rows):
             raise RunStateError("friend-mutation page contains an invalid row")
+        if len(rows) < data["total"]:
+            raise RunStateError("friend-mutation projection page is truncated: "
+                                f"total={data['total']} exceeds the single-page "
+                                f"rows={len(rows)}")
         return rows
 
     def _request_row(self, *, data: object, candidates: set[str], sender: str | None = None, receiver: str | None = None) -> dict | None:

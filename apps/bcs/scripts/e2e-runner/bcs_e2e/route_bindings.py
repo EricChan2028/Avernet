@@ -151,7 +151,7 @@ FRIEND_CONNECTION_DECISION_CREATE_PATH = "/openapi/v1/collaboration/friend-conne
 FRIEND_CONNECTION_REQUESTS_READ_TEMPLATE = (
     "/openapi/v1/collaboration/friend-connections/requests"
     "?actor_type=bot&actor_id={actor_id}"
-    "&direction=received&status=pending&page=1&page_size=20"
+    "&direction=received&status=pending&page=1&page_size=100"
 )
 FRIEND_CONNECTION_REJECT_PATH = (
     "/openapi/v1/collaboration/friend-connections/requests/{request_id}/reject"
@@ -162,7 +162,7 @@ FRIEND_CONNECTION_ACCEPT_PATH = (
 FRIEND_CONNECTION_DRIVER_CONNECTIONS_TEMPLATE = (
     "/openapi/v1/collaboration/friend-connections"
     "?actor_type=bot&actor_id={actor_id}"
-    "&target_type=bot&page=1&page_size=20"
+    "&target_type=bot&page=1&page_size=100"
 )
 FRIEND_CONNECTION_PUBLIC_ACCEPT_CREATE_PATH = FRIEND_CONNECTION_DECISION_CREATE_PATH
 NETWORK_REGISTER_TOKEN_PATH = "/openapi/v1/collaboration/register/token"
@@ -195,24 +195,28 @@ FRIEND_MUTATION_REJECT_PATH = (
 FRIEND_MUTATION_CANCEL_PATH = (
     "/openapi/v1/collaboration/friend-connections/requests/{request_id}/cancel"
 )
+# Reviewed single-page projection contract: the BCS list handlers clamp only
+# page_size==0 to 20 with no upper cap (bcs-edge-permission connect.rs), so
+# the reviewed friend projections read one bounded page of 100 rows and the
+# mutation adapter fences any truncation explicitly.
 FRIEND_MUTATION_REQUESTS_SENT_PATH = (
     "/openapi/v1/collaboration/friend-connections/requests"
     "?actor_type=bot&actor_id={actor_id}&direction=sent"
-    "&status=pending&page=1&page_size=20"
+    "&status=pending&page=1&page_size=100"
 )
 FRIEND_MUTATION_REQUESTS_RECEIVED_PATH = (
     "/openapi/v1/collaboration/friend-connections/requests"
     "?actor_type=bot&actor_id={actor_id}&direction=received"
-    "&status=pending&page=1&page_size=20"
+    "&status=pending&page=1&page_size=100"
 )
 FRIEND_MUTATION_REQUESTS_ALL_PATH = (
     "/openapi/v1/collaboration/friend-connections/requests"
     "?actor_type=bot&actor_id={actor_id}&direction=all"
-    "&status=pending&page=1&page_size=20"
+    "&status=pending&page=1&page_size=100"
 )
 FRIEND_MUTATION_CONNECTIONS_PATH = (
     "/openapi/v1/collaboration/friend-connections"
-    "?actor_type=bot&actor_id={actor_id}&target_type=bot&page=1&page_size=20"
+    "?actor_type=bot&actor_id={actor_id}&target_type=bot&page=1&page_size=100"
 )
 FRIEND_MUTATION_BOT_DETAIL_PATH = "/openapi/v1/collaboration/bots/{bot_uuid}"
 FRIEND_MUTATION_DISCOVER_PATH = "/openapi/v1/bots/discover?collaborate_bot={target_actor_id}"

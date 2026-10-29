@@ -588,5 +588,16 @@ class AdapterTest(unittest.TestCase):
                 self.assertTrue(context.exception.gap["singlebox_closure"])
 
 
+    def test_truncated_projection_page_is_refused(self):
+        adapter, _ = self.adapter()
+        truncated = {"items": [{"actor": {"type": "bot", "id": "peer"}}],
+                     "total": 2, "page": 1, "page_size": 100}
+        with self.assertRaisesRegex(RunStateError, "projection page is truncated"):
+            adapter._page_rows(truncated)
+        complete = {"items": [{"actor": {"type": "bot", "id": "peer"}}],
+                    "total": 1, "page": 1, "page_size": 100}
+        self.assertEqual(adapter._page_rows(complete),
+                         [{"actor": {"type": "bot", "id": "peer"}}])
+
 if __name__ == "__main__":
     unittest.main()

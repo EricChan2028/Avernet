@@ -384,7 +384,7 @@ class RemoteEdgeReadAdapter:
         if self.profile["environment"].get("tier") == "preprod":
             return (self.binding["path"] + "?actor_type=bot&actor_id="
                     + self.caller_actor_id + "&direction="
-                    + direction + "&page=1&page_size=20")
+                    + direction + "&page=1&page_size=100")
         return self.binding["path"] + "?direction=" + direction
 
     def _read(self, requirement_id: str) -> AdapterCall:
