@@ -114,14 +114,12 @@ def test_published_expert_detail_matches_runtime_dto():
     """Generated clients see the same safe declarations as the response DTO."""
     import json
     from pathlib import Path
-    from agentclaw.community.adapters.http.openapi_v1.experts.schemas import ExpertDetail
 
     repository = Path(__file__).resolve().parents[8]
     published = json.loads((repository / "apps/gateway/configs/schemas/bots.openapi.json").read_text())
-    actual = ExpertDetail.model_json_schema(ref_template="#/components/schemas/{model}")
-    definitions = actual.pop("$defs")
+    app = FastAPI()
+    app.include_router(router)
+    generated = app.openapi()["components"]["schemas"]
     schemas = published["components"]["schemas"]
-    assert schemas["ExpertDetail"] == actual
-    assert schemas["ExpertMcp"] == definitions["ExpertMcp"]
-    assert schemas["ExpertCliTool"] == definitions["ExpertCliTool"]
-    assert schemas["ExpertResource"] == definitions["ExpertResource"]
+    for name in ("ExpertDetail", "ExpertMcp", "ExpertCliTool", "ExpertResource"):
+        assert schemas[name] == generated[name]

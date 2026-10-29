@@ -32207,7 +32207,6 @@
                 "type": "null"
               }
             ],
-            "default": null,
             "description": "Declared uploaded CLI names; not installation or execution status. Null means omitted/no operation; [] removes all Bot-uploaded CLI tools. Platform default CLI supply is not managed by this category.",
             "title": "Cli Tools"
           },
@@ -32264,7 +32263,6 @@
                 "type": "null"
               }
             ],
-            "default": null,
             "description": "Declared workspace-relative resource destinations, without source or content. Null means omitted/no operation; [] clears non-protected workspace items; a nonempty list clears non-protected items before writing these resources.",
             "title": "Resources"
           },
