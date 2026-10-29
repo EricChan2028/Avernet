@@ -680,7 +680,14 @@ impl BcsServer {
                 gateway: provider_transport.clone(),
                 sender: provider_transport.clone(),
                 identity,
-                observe_injector_factory: None,
+                // Observe fan-out (§6.4) over the SAME shared provider
+                // transport — the factory reuses its client and outbound-URL
+                // guard; non-Provider targets simply stay un-fanned.
+                observe_injector_factory: Some(Arc::new(
+                    crate::message_delivery_wiring::ProviderObserveInjectorFactory {
+                        transport: provider_transport.clone(),
+                    },
+                )),
             }
         });
         let wired_message_flow =

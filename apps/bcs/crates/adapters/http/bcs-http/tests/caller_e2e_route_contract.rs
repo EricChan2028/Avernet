@@ -145,7 +145,6 @@ impl bcs_service_api::GroupQueryService for FakeGroupQuery {
             updated_at: 0,
             chat_url: None,
             context_injected: 0,
-            service_spec: None,
             latest_running_session_id: None,
             initial_run: None,
             originator: group.originator.clone(),
