@@ -218,9 +218,11 @@ class CollaborationTeamContractTests(unittest.TestCase):
             # Infer the product-CLI operation from the actual command, not from
             # the call index.  This keeps the mock order-sensitive.
             tail = tuple(command[6:])
-            if tail == ("visibility", "set", "--value", "protected"):
+            if tail == ("visibility", "set", "--bot-uuid", CS,
+                        "--value", "protected"):
                 return "visibility.protected"
-            if tail == ("visibility", "set", "--value", "public"):
+            if tail == ("visibility", "set", "--bot-uuid", CS,
+                        "--value", "public"):
                 return "visibility.public"
             if tail == ("friend", "request", "--bot-uuid", CS):
                 return "friend.request"
@@ -413,6 +415,19 @@ class CollaborationTeamContractTests(unittest.TestCase):
         finally:
             import shutil
             shutil.rmtree(root)
+
+    def test_visibility_commands_bind_the_customer_service_bot_identity(self):
+        runner = self.runner(gateway=True)
+        for operation, visibility in (("visibility.protected", "protected"),
+                                      ("visibility.public", "public")):
+            with self.subTest(operation=operation):
+                role, arguments, method, path = runner._command(operation)
+                self.assertEqual(role, "customer_service")
+                self.assertEqual(arguments, (
+                    "visibility", "set", "--bot-uuid", CS,
+                    "--value", visibility))
+                self.assertEqual((method, path), (
+                    "PUT", f"/bots/{CS}/visibility"))
 
     def test_friendship_and_group_readback_are_not_live_sample_order_dependent(self):
         # A real live run reordered expanded-group participants.  Equality must

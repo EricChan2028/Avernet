@@ -44,12 +44,14 @@ _ROLE_OPERATIONS = {
     "visibility.protected": (
         "customer_service", "PUT",
         "/bots/{customer_service_id}/visibility",
-        ("visibility", "set", "--value", "protected"),
+        ("visibility", "set", "--bot-uuid", "{customer_service_id}",
+         "--value", "protected"),
     ),
     "visibility.public": (
         "customer_service", "PUT",
         "/bots/{customer_service_id}/visibility",
-        ("visibility", "set", "--value", "public"),
+        ("visibility", "set", "--bot-uuid", "{customer_service_id}",
+         "--value", "public"),
     ),
     "friend.requests.before": (
         "customer_service", "GET",
@@ -193,8 +195,13 @@ class CollaborationTeamRunner:
                  topic: str = "") -> tuple[str, tuple[str, ...], str, str]:
         if operation in _ROLE_OPERATIONS:
             role, method, path, arguments = _ROLE_OPERATIONS[operation]
-            path = path.format(engineering_id=self.engineering_id,
-                               customer_service_id=self.customer_service_id)
+            replacements = {
+                "engineering_id": self.engineering_id,
+                "customer_service_id": self.customer_service_id,
+            }
+            path = path.format(**replacements)
+            arguments = tuple(argument.format(**replacements)
+                              for argument in arguments)
             return role, arguments, method, path
         if operation == "friend.request":
             return ("engineering",
