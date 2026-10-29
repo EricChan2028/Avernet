@@ -18,6 +18,7 @@ from bcs_e2e.case_executor import CaseExecution, StepOutcome
 from bcs_e2e.cli import main
 from bcs_e2e.fresh_fixture_pair import (
     CONTRACT as FRESH_FIXTURE_CONTRACT,
+    PUBLIC_AUTO_ACCEPT_MEMBER_PROFILE,
     FreshFixturePair,
     FreshFixtureProvisioningError,
     initial_fresh_fixture_receipt,
@@ -139,7 +140,8 @@ class FriendPublicAcceptCaseRunTests(unittest.TestCase):
 
     def fresh_pair(self, profile: dict) -> FreshFixturePair:
         receipt = initial_fresh_fixture_receipt(
-            run_id=RUN_ID, purpose="friend-public-accept")
+            run_id=RUN_ID, purpose="friend-public-accept",
+            member_profile=PUBLIC_AUTO_ACCEPT_MEMBER_PROFILE)
         receipt.update({
             "status": "PASS",
             "resource_disposition": "FRESH_OWNED_BOT_PAIR_RETAINED_PUBLIC_V1_NO_DELETE_ROUTE",
@@ -148,7 +150,42 @@ class FriendPublicAcceptCaseRunTests(unittest.TestCase):
                 "member": {"bot_id": MEMBER, "bot_name": "story-agent-member"},
             },
         })
+        receipt["member_profile_preparation"].update({
+            "status": "PASS",
+            "baseline": {
+                "visibility": "protected",
+                "friend_check_in_strategy": "APPROVAL",
+            },
+            "observed": {
+                "bot_id": MEMBER,
+                "visibility": "public",
+                "friend_check_in_strategy": "OPEN",
+                "created_by": "owner-1",
+            },
+            "requests": [],
+        })
+        receipt["member_profile_release"]["requested"] = {
+            "visibility": "protected",
+            "friend_check_in_strategy": "APPROVAL",
+        }
         return FreshFixturePair(profile=profile, evidence=receipt)
+
+    @staticmethod
+    def release_pair(*, profile: dict, evidence: dict, member_profile: dict,
+                     on_progress=None) -> dict:
+        released = json.loads(json.dumps(evidence))
+        released["member_profile_release"].update({
+            "status": "PASS",
+            "requested": {"visibility": "protected",
+                          "friend_check_in_strategy": "APPROVAL"},
+            "observed": {"bot_id": MEMBER, "visibility": "protected",
+                         "friend_check_in_strategy": "APPROVAL",
+                         "created_by": "owner-1"},
+            "requests": [],
+        })
+        if on_progress is not None:
+            on_progress(released)
+        return released
 
     def invoke(self, status: str = "PASS"):
         profile = base_profile()
@@ -156,7 +193,10 @@ class FriendPublicAcceptCaseRunTests(unittest.TestCase):
         expected = expected_execution(status=status)
         with patch(
                 "bcs_e2e.friend_public_accept_case_run.provision_fresh_owned_bot_pair",
-                return_value=self.fresh_pair(profile)), \
+                return_value=self.fresh_pair(profile)) as provision, \
+             patch(
+                "bcs_e2e.friend_public_accept_case_run.release_fresh_owned_bot_pair",
+                side_effect=self.release_pair) as release, \
              patch(
                 "bcs_e2e.friend_public_accept_case_run.RemoteFriendPublicAcceptAdapter",
                 FakeAdapter), \
@@ -170,10 +210,10 @@ class FriendPublicAcceptCaseRunTests(unittest.TestCase):
                 allow_write=True,
                 confirm_run_id=RUN_ID,
             )
-        return report, profile, expected, self.state_dir
+        return report, profile, expected, self.state_dir, provision, release
 
     def test_local_run_writes_sanitized_receipts_and_case_scope(self):
-        report, profile, expected, state_dir = self.invoke()
+        report, profile, expected, state_dir, provision, release = self.invoke()
         self.assertEqual(report["status"], "PASS")
         self.assertEqual(report["case_id"], CASE_ID)
         self.assertEqual(report["resource_disposition"], RESOURCE_DISPOSITION)
@@ -187,6 +227,15 @@ class FriendPublicAcceptCaseRunTests(unittest.TestCase):
         self.assertEqual(
             report["fresh_fixture"]["resource_disposition"],
             "FRESH_OWNED_BOT_PAIR_RETAINED_PUBLIC_V1_NO_DELETE_ROUTE")
+        self.assertEqual(report["cleanup"]["status"], "PASS")
+        self.assertEqual(report["cleanup"]["member_profile_release"], "PASS")
+        self.assertEqual(
+            provision.call_args.kwargs["member_profile"],
+            PUBLIC_AUTO_ACCEPT_MEMBER_PROFILE)
+        self.assertEqual(
+            release.call_args.kwargs["member_profile"],
+            PUBLIC_AUTO_ACCEPT_MEMBER_PROFILE)
+        self.assertEqual(release.call_args.kwargs["profile"], profile)
         self.assertEqual(read(state_dir / "friend-public-accept-profile.json"), profile)
         self.assertEqual(
             read(state_dir / "friend-public-accept-fresh-fixture.json"),
@@ -199,7 +248,8 @@ class FriendPublicAcceptCaseRunTests(unittest.TestCase):
         self.assertNotIn("human-cookie-private-value", serialized)
 
     def test_blocked_run_never_claims_finalization(self):
-        report, profile, expected, state_dir = self.invoke(status="BLOCKED")
+        report, profile, expected, state_dir, provision, release = self.invoke(
+            status="BLOCKED")
         self.assertEqual(report["status"], "BLOCKED")
         self.assertEqual(report["resource_disposition"], "UNKNOWN_OWNED_BOT_PUBLIC_ACCEPTANCE")
         self.assertEqual(report["case"]["completed_count"], 0)

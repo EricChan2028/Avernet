@@ -26,14 +26,24 @@ from .local_network_register_contract import execute_network_register_case
 from .remote_network_register_adapter import RemoteNetworkRegisterAdapter
 from .route_bindings import _EDGE_CASES
 from .run_state import RunStateError
+from .transport import ReadClient
+from .write_transport import WriteClient
 
-CONTRACT = "dual-fresh-owned-bot-pair-v1"
+CONTRACT = "dual-fresh-owned-bot-pair-v2"
 REGISTER_CONTRACT = "PUBLIC-NETWORK-REGISTER-01"
 REGISTER_OPERATIONS = (
     "register.token.read",
     "register.bot.create",
     "register.bot.readback",
 )
+PROFILE_OPERATIONS = (
+    "friend_connection_mutation.bot_detail.read",
+    "friend_connection_mutation.visibility.write",
+)
+PUBLIC_AUTO_ACCEPT_MEMBER_PROFILE = {
+    "visibility": "public",
+    "friend_check_in_strategy": "OPEN",
+}
 RETAINED_DISPOSITION = "FRESH_OWNED_BOT_PAIR_RETAINED_PUBLIC_V1_NO_DELETE_ROUTE"
 PARTIAL_DISPOSITION = "FRESH_OWNED_BOT_PAIR_PARTIAL_RETAINED"
 EMPTY_DISPOSITION = "NO_FRESH_FIXTURE_CREATED"
@@ -41,6 +51,7 @@ CLEANUP_CONTRACT = {
     "fixture_lifetime": "SINGLE_RUN_ONLY_NEVER_REUSED",
     "bot_deletion": "UNAVAILABLE_ON_PUBLIC_V1",
     "retained_resource_disclosure": "FRESH_PAIR_LISTED_IN_RECEIPT",
+    "temporary_profile_restore": "PATCH_ORIGINAL_FIELDS_AND_READBACK",
     "leak_scan": "WRAPPER_POST_RUN",
     "process_orphan_sweep": "BULK_WRAPPER_POST_FAMILY",
 }
@@ -57,6 +68,18 @@ _REGISTER_BINDINGS = {
     for operation in REGISTER_OPERATIONS
 }
 
+_PROFILE_BINDINGS = {
+    operation: {
+        "method": _EDGE_CASES[operation][0],
+        "path": _EDGE_CASES[operation][1],
+        "api_face": "public-v1",
+        "auth": _EDGE_CASES[operation][2],
+        "response": "public-envelope",
+        "traceparent": "disabled",
+    }
+    for operation in PROFILE_OPERATIONS
+}
+
 _REQUEST_FIELDS = (
     "operation",
     "method",
@@ -70,10 +93,29 @@ _REQUEST_FIELDS = (
     "traceparent_mode",
     "identity",
 )
+_PROFILE_REQUEST_FIELDS = (
+    "operation",
+    "method",
+    "path",
+    "http_status",
+    "credentials_sent",
+    "authorization_sent",
+    "request_id_echoed",
+    "traceparent_mode",
+    "bound_bot_id",
+)
 
 
 class FreshFixtureProvisioningError(RunStateError):
     """Provisioning failed after recording exactly which fresh Bots were created."""
+
+    def __init__(self, message: str, evidence: dict):
+        super().__init__(message)
+        self.evidence = copy.deepcopy(evidence)
+
+
+class FreshFixtureReleaseError(RunStateError):
+    """A temporary fixture profile could not be restored after its Case run."""
 
     def __init__(self, message: str, evidence: dict):
         super().__init__(message)
@@ -88,7 +130,8 @@ class FreshFixturePair:
     evidence: dict
 
 
-def _progress_receipt(*, run_id: str, purpose: str) -> dict:
+def _progress_receipt(*, run_id: str, purpose: str,
+                      member_profile: dict | None = None) -> dict:
     return {
         "schema_version": 1,
         "contract": CONTRACT,
@@ -100,16 +143,33 @@ def _progress_receipt(*, run_id: str, purpose: str) -> dict:
         "register_operations": list(REGISTER_OPERATIONS),
         "fresh_pair": {"driver": None, "member": None},
         "steps": [],
+        "member_profile_preparation": {
+            "status": "NOT_REQUIRED" if member_profile is None else "NOT_RUN",
+            "target_role": "member",
+            "requested": copy.deepcopy(member_profile),
+            "baseline": None,
+            "observed": None,
+            "requests": [],
+        },
+        "member_profile_release": {
+            "status": "NOT_REQUIRED" if member_profile is None else "NOT_RUN",
+            "target_role": "member",
+            "requested": None,
+            "observed": None,
+            "requests": [],
+        },
         "resource_disposition": "FRESH_FIXTURE_PROVISIONING_IN_FLIGHT",
         "cleanup_contract": dict(CLEANUP_CONTRACT),
     }
 
 
-def initial_fresh_fixture_receipt(*, run_id: str, purpose: str) -> dict:
+def initial_fresh_fixture_receipt(*, run_id: str, purpose: str,
+                                  member_profile: dict | None = None) -> dict:
     """Return the in-flight receipt written before the first network call."""
     return _progress_receipt(
         run_id=identifier(run_id, "fresh fixture run ID"),
         purpose=identifier(purpose, "fresh fixture purpose"),
+        member_profile=member_profile,
     )
 
 
@@ -140,6 +200,168 @@ def _project_register_requests(evidence: dict) -> list[dict]:
     if [row.get("operation") for row in projected] != list(REGISTER_OPERATIONS):
         raise RunStateError("fresh-pair register request order is outside the contract")
     return projected
+
+
+def _validated_member_profile(value: dict | None) -> dict | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict) or not value:
+        raise ConfigError("fresh fixture member profile must be a nonempty object")
+    if not set(value) <= {"visibility", "friend_check_in_strategy"}:
+        raise ConfigError("fresh fixture member profile has unsupported fields")
+    if "visibility" in value and value["visibility"] not in {
+            "public", "protected", "private"}:
+        raise ConfigError("fresh fixture member visibility is unsupported")
+    if ("friend_check_in_strategy" in value
+            and value["friend_check_in_strategy"] not in {
+                "OPEN", "APPROVAL", "DEPT_FREE"}):
+        raise ConfigError("fresh fixture member friend strategy is unsupported")
+    return dict(value)
+
+
+def _profile_bindings(target_actor_id: str) -> dict:
+    return {
+        operation: {**binding, "target_actor_id": target_actor_id}
+        for operation, binding in _PROFILE_BINDINGS.items()
+    }
+
+
+def _project_profile_request(record: dict) -> dict:
+    return {key: record[key] for key in _PROFILE_REQUEST_FIELDS if key in record}
+
+
+def _prepare_member_profile(profile: dict, member_id: str,
+                            fields: dict) -> tuple[dict, list[dict], dict]:
+    provisioning_profile = copy.deepcopy(profile)
+    provisioning_profile["edge_case_bindings"] = {
+        **provisioning_profile["edge_case_bindings"],
+        **_profile_bindings(member_id),
+    }
+    writer = WriteClient(provisioning_profile)
+    reader = ReadClient(provisioning_profile)
+    baseline_observation = reader.read(
+        "friend.mutation.bot_detail.read", bot_id=member_id)
+    baseline = baseline_observation.data
+    baseline_fields = {
+        key: baseline.get(key) if isinstance(baseline, dict) else None
+        for key in ("visibility", "friend_check_in_strategy")
+    }
+    if (not isinstance(baseline, dict)
+            or any(value is None for value in baseline_fields.values())
+            or baseline.get("created_by") != profile["human"]["user_id"]):
+        raise RunStateError(
+            "fresh member Bot baseline read did not prove the exact owned state")
+    _validated_member_profile(baseline_fields)
+    patch_data, patch_record = writer.patch_bot_friend_profile(
+        member_id, visibility=fields.get("visibility"),
+        friend_check_in_strategy=fields.get("friend_check_in_strategy"))
+    if (not isinstance(patch_data, dict)
+            or any(patch_data.get(key) != value for key, value in fields.items())):
+        raise RunStateError(
+            "fresh member Bot profile patch did not acknowledge the exact state")
+    observation = reader.read("friend.mutation.bot_detail.read", bot_id=member_id)
+    observed = observation.data
+    if (not isinstance(observed, dict)
+            or any(observed.get(key) != value for key, value in fields.items())
+            or observed.get("created_by") != profile["human"]["user_id"]):
+        raise RunStateError(
+            "fresh member Bot profile read-back did not prove the exact owned state")
+    requests = [_project_profile_request(baseline_observation.evidence),
+                _project_profile_request(patch_record),
+                _project_profile_request(observation.evidence)]
+    secrets = [secret for client in (writer, reader)
+               for secret in client.headers.values()]
+    if any(secret and secret in repr(requests) for secret in secrets):
+        raise RunStateError("fresh member profile evidence must not expose a credential")
+    projection = {
+        key: observed[key]
+        for key in ("bot_id", "visibility", "friend_check_in_strategy", "created_by")
+        if key in observed
+    }
+    return projection, requests, baseline_fields
+
+
+def release_fresh_owned_bot_pair(*, profile: dict, evidence: dict,
+                                 member_profile: dict | None,
+                                 on_progress=None) -> dict:
+    """Restore a temporarily widened fresh member profile after its Case run.
+
+    The Bots themselves remain retained and disclosed because public-v1 has no
+    Bot-delete route.  Any temporary playbook fields (for example public/OPEN)
+    are restored to the exact baseline observed immediately after registration
+    and independently read back.
+    """
+    if not isinstance(evidence, dict):
+        raise ConfigError("fresh fixture release requires a provisioning receipt")
+    receipt = copy.deepcopy(evidence)
+    release = receipt.get("member_profile_release")
+    if not isinstance(release, dict):
+        raise ConfigError("fresh fixture release receipt is missing")
+    member_profile = _validated_member_profile(member_profile)
+    if member_profile is None:
+        release.update({
+            "status": "NOT_REQUIRED",
+            "requested": None,
+            "observed": None,
+            "requests": [],
+        })
+        if on_progress is not None:
+            on_progress(copy.deepcopy(receipt))
+        return receipt
+    member = (receipt.get("fresh_pair") or {}).get("member")
+    if receipt.get("status") != "PASS" or not isinstance(member, dict):
+        release.update({
+            "status": "NOT_RUN",
+            "error_type": "FreshFixtureNotProvisioned",
+            "error_detail": "no completed fresh member is available to restore",
+        })
+        if on_progress is not None:
+            on_progress(copy.deepcopy(receipt))
+        return receipt
+    preparation = receipt.get("member_profile_preparation")
+    baseline = preparation.get("baseline") if isinstance(preparation, dict) else None
+    prepared = preparation.get("status") if isinstance(preparation, dict) else None
+    if prepared != "PASS":
+        release.update({
+            "status": "NOT_RUN",
+            "error_type": "MemberProfilePreparationNotCompleted",
+            "error_detail": "temporary member profile was never applied",
+        })
+        if on_progress is not None:
+            on_progress(copy.deepcopy(receipt))
+        return receipt
+    baseline = _validated_member_profile(baseline)
+    if (baseline is None
+            or set(baseline) != {"visibility", "friend_check_in_strategy"}):
+        raise RunStateError("fresh member profile baseline is incomplete")
+    release.update({
+        "status": "IN_PROGRESS",
+        "requested": copy.deepcopy(baseline),
+    })
+    if on_progress is not None:
+        on_progress(copy.deepcopy(receipt))
+    try:
+        observed, requests, _ = _prepare_member_profile(
+            profile, member["bot_id"], baseline)
+    except Exception as error:
+        detail = _redacted_error_detail(error, profile)
+        release.update({
+            "status": "BLOCKED",
+            "error_type": type(error).__name__,
+            "error_detail": detail,
+        })
+        if on_progress is not None:
+            on_progress(copy.deepcopy(receipt))
+        raise FreshFixtureReleaseError(
+            f"fresh member profile release failed: {detail}", receipt) from None
+    release.update({
+        "status": "PASS",
+        "observed": observed,
+        "requests": requests,
+    })
+    if on_progress is not None:
+        on_progress(copy.deepcopy(receipt))
+    return receipt
 
 
 def _registration_step(role: str, execution: CaseExecution) -> dict:
@@ -230,6 +452,7 @@ def provision_fresh_owned_bot_pair(
     profile: dict,
     run_id: str,
     purpose: str,
+    member_profile: dict | None = None,
     on_progress=None,
 ) -> FreshFixturePair:
     """Register a fresh Human-owned driver/member pair for one Case run.
@@ -242,6 +465,7 @@ def provision_fresh_owned_bot_pair(
         raise ConfigError("fresh fixture provisioning requires an admitted profile")
     run_id = identifier(run_id, "fresh fixture run ID")
     purpose = identifier(purpose, "fresh fixture purpose")
+    member_profile = _validated_member_profile(member_profile)
     entrypoint = profile.get("entrypoint", {})
     environment = profile.get("environment", {})
     valid_entrypoint = (
@@ -262,7 +486,8 @@ def provision_fresh_owned_bot_pair(
         **provisioning_profile["edge_case_bindings"],
         **_REGISTER_BINDINGS,
     }
-    receipt = _progress_receipt(run_id=run_id, purpose=purpose)
+    receipt = _progress_receipt(
+        run_id=run_id, purpose=purpose, member_profile=member_profile)
 
     def publish() -> None:
         if on_progress is not None:
@@ -305,6 +530,43 @@ def provision_fresh_owned_bot_pair(
             "bot_id": completed["bot_id"],
             "bot_name": completed["bot_name"],
         }
+        publish()
+
+    if member_profile is not None:
+        preparation = receipt["member_profile_preparation"]
+        preparation["status"] = "IN_PROGRESS"
+        publish()
+        try:
+            observed, requests, baseline = _prepare_member_profile(
+                profile, receipt["fresh_pair"]["member"]["bot_id"],
+                member_profile)
+        except Exception as error:
+            detail = _redacted_error_detail(error, profile)
+            preparation.update({
+                "status": "BLOCKED",
+                "error_type": type(error).__name__,
+                "error_detail": detail,
+            })
+            receipt.update({
+                "status": "BLOCKED",
+                "error_type": type(error).__name__,
+                "error_detail": detail,
+                "fresh_pair": _fresh_pair_from_steps(receipt["steps"]),
+                "resource_disposition": PARTIAL_DISPOSITION,
+                "retained_bots": _retained_bots(receipt["steps"]),
+            })
+            publish()
+            raise FreshFixtureProvisioningError(
+                f"member fresh Bot profile preparation failed: {detail}",
+                receipt,
+            ) from None
+        preparation.update({
+            "status": "PASS",
+            "baseline": baseline,
+            "observed": observed,
+            "requests": requests,
+        })
+        receipt["member_profile_release"]["requested"] = copy.deepcopy(baseline)
         publish()
 
     effective_profile = _replace_actor_pair(

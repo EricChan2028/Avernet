@@ -10,10 +10,13 @@ from pathlib import Path
 
 from .fresh_fixture_pair import (
     CONTRACT as FRESH_FIXTURE_CONTRACT,
+    PUBLIC_AUTO_ACCEPT_MEMBER_PROFILE,
     RETAINED_DISPOSITION as FRESH_FIXTURE_DISPOSITION,
     FreshFixtureProvisioningError,
+    FreshFixtureReleaseError,
     initial_fresh_fixture_receipt,
     provision_fresh_owned_bot_pair,
+    release_fresh_owned_bot_pair,
 )
 from .inventory import executor_digest
 from .local_friend_public_accept_contract import (
@@ -153,20 +156,26 @@ def dual_friend_public_accept_case_run(
     write(binding_file, binding)
 
     fresh_fixture = initial_fresh_fixture_receipt(
-        run_id=run_id, purpose=FRESH_FIXTURE_PURPOSE)
+        run_id=run_id, purpose=FRESH_FIXTURE_PURPOSE,
+        member_profile=PUBLIC_AUTO_ACCEPT_MEMBER_PROFILE)
     write(fresh_fixture_file, fresh_fixture)
     effective_profile = None
+    fresh_pair = None
     execution = None
     execution_snapshot = None
     error_type = None
     error_detail = None
+    release_error_type = None
+    release_error_detail = None
     try:
         fresh = provision_fresh_owned_bot_pair(
             profile=profile,
             run_id=run_id,
             purpose=FRESH_FIXTURE_PURPOSE,
+            member_profile=PUBLIC_AUTO_ACCEPT_MEMBER_PROFILE,
             on_progress=lambda receipt: write(fresh_fixture_file, receipt),
         )
+        fresh_pair = fresh
         fresh_fixture = fresh.evidence
         effective_profile = fresh.profile
         write(fresh_fixture_file, fresh_fixture)
@@ -200,12 +209,33 @@ def dual_friend_public_accept_case_run(
             plan, type(error).__name__, str(error)[:800])
         error_type = type(error).__name__
         error_detail = str(error)[:800]
+    finally:
+        if fresh_pair is not None and fresh_fixture.get("status") == "PASS":
+            try:
+                fresh_fixture = release_fresh_owned_bot_pair(
+                    profile=fresh_pair.profile,
+                    evidence=fresh_fixture,
+                    member_profile=PUBLIC_AUTO_ACCEPT_MEMBER_PROFILE,
+                    on_progress=lambda receipt: write(fresh_fixture_file, receipt),
+                )
+            except FreshFixtureReleaseError as error:
+                fresh_fixture = error.evidence
+                release_error_type = type(error).__name__
+                release_error_detail = str(error)[:800]
+            write(fresh_fixture_file, fresh_fixture)
 
-    success = execution is not None and execution.status == "PASS"
+    success = (
+        execution is not None
+        and execution.status == "PASS"
+        and release_error_type is None
+    )
     disposition = RESOURCE_DISPOSITION if success else "UNKNOWN_OWNED_BOT_PUBLIC_ACCEPTANCE"
     if fresh_fixture.get("status") != "PASS":
         disposition = fresh_fixture.get(
             "resource_disposition", "UNKNOWN_FRESH_OWNED_BOT_PAIR")
+    if release_error_type is not None and error_type is None:
+        error_type = release_error_type
+        error_detail = release_error_detail
     execution_report = (
         {
             "status": execution.status,
@@ -245,6 +275,15 @@ def dual_friend_public_accept_case_run(
             "selected_obligations": list(adaptability["selected_obligations"]),
         },
         "execution": execution_report,
+        "cleanup": {
+            "status": "BLOCKED" if release_error_type is not None else "PASS",
+            "fresh_fixture_retention": fresh_fixture.get("resource_disposition"),
+            "member_profile_release": (
+                fresh_fixture.get("member_profile_release", {}).get("status")),
+            "leak_scan": fresh_fixture.get("cleanup_contract", {}).get("leak_scan"),
+            "process_orphan_sweep": fresh_fixture.get(
+                "cleanup_contract", {}).get("process_orphan_sweep"),
+        },
         "resource_disposition": disposition,
         "remote_validation": "NOT_RUN",
         "grants_release_credit": False,
