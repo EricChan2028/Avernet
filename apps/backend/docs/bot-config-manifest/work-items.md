@@ -1,5 +1,10 @@
 # Bot Config Manifest — Implementation Work Items
 
+> 当前身份合同增量：IDENTITY.md 在目标 engine 原白名单内允许显式 Apply，遗漏/identity: []
+> 保留旧档案；MEMORY.md 仍禁止声明且不被清理。本文后续历史任务中的“双保留名不可写”
+> 以 manifest-schema.zh-CN.md §3.5 和 engine-convergence-contract.zh-CN.md A2 为准。
+
+
 > **Status: PLANNING.** The design is settled in the four documents beside this
 > one (`README.zh-CN.md`, `design.zh-CN.md`, `manifest-schema.zh-CN.md`,
 > `examples.zh-CN.md`, `engine-requirements.zh-CN.md`, merged as #1031). This

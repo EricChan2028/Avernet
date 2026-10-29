@@ -30,13 +30,12 @@ An entry reaches ``resolve`` as the raw mapping, e.g. ``{"type": "SOUL.md",
 "source": {"protocol": "oss", "bucket": "team-artifacts",
 "key": "identity/soul.md", "auth": "oss-prod"}}``.
 
-The area this overwrites is the bot's identity
-file set, minus ``MEMORY.md`` / ``IDENTITY.md`` — engine-generated runtime
-state that apply never writes and never removes, whatever a document says.
-The validator refuses their *declaration*; this module refuses to reach them
-from the removal side too, which is the half the validator cannot see, so the
-guarantee holds even for a document that arrives without the validator in its
-history (a hand-built apply in W8's lifecycle points).
+The area this overwrites is the bot's identity file set, with two protections.
+``MEMORY.md`` remains engine-owned: neither declaration nor removal is allowed.
+``IDENTITY.md`` may be written explicitly on an engine that accepts it, but its
+omission never clears an existing profile. This keeps legacy AGENTS-only and
+empty identity declarations from gaining a new destructive effect. The validator
+and this module both enforce the declaration boundary.
 
 **Same write path as the public API, by reuse rather than imitation.** The
 materialiser derives the entity pair exactly as the identity router does —
@@ -88,6 +87,7 @@ from agentclaw.community.core.apply_engine.capabilities import (
 )
 from agentclaw.community.core.apply_engine.identity_types import (
     RESERVED_IDENTITY_FILES,
+    OMISSION_PROTECTED_IDENTITY_FILES,
     legal_identity_types,
 )
 
@@ -118,8 +118,9 @@ class IdentityMaterialiser(Materialiser):
                                 EntryOutcome.UPDATED),)
 
     A removal is an **empty write**, not a delete: the domain reads absent and
-    empty as one state, and ``IdentityService`` exposes no delete. A reserved
-    name (``MEMORY.md``, ``IDENTITY.md``) never receives even that.
+    empty as one state, and ``IdentityService`` exposes no delete. ``MEMORY.md``
+    never receives even that; an omitted ``IDENTITY.md`` is also protected from
+    removal.
     """
 
     construct = Category.IDENTITY
@@ -199,20 +200,20 @@ class IdentityMaterialiser(Materialiser):
                 current = await self._identity.read_identity_file(
                     entity_type, entity_id, ctx.bot_id, intent.identity, ctx.owner_id
                 )
-            if not current:
-                outcome = EntryOutcome.CREATED.value
-            elif current == intent.value:
+            if presence.get(intent.identity) and current == intent.value:
                 outcome = EntryOutcome.UNCHANGED.value
+            elif not current:
+                outcome = EntryOutcome.CREATED.value
             else:
                 outcome = EntryOutcome.UPDATED.value
             planned.append(PlannedEntry(intent, outcome))
 
-        # The area: files that exist, minus the reserved names — never removal
-        # candidates, never emptied, whatever the document does or omits.
+        # Cleanup protects both runtime memory and an omitted identity profile.
+        # Explicit IDENTITY.md writes above remain legal, including empty writes.
         existing = {
             file_type
             for file_type, exists in presence.items()
-            if exists and file_type not in RESERVED_IDENTITY_FILES
+            if exists and file_type not in OMISSION_PROTECTED_IDENTITY_FILES
         }
         removals = tuple(sorted(existing - declared))
         return CategoryPlan(entries=tuple(planned), removals=removals)

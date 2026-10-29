@@ -104,5 +104,7 @@ from the latest expert catalogue or Git.
 An internal `ExpertOrigin` travels into the initial Bot INSERT with avatar and
 Passport ext fields. Ordinary Bot metadata updates reject that system key.
 The public Bot DTO exposes only `expert_name`; internal provenance remains in
-`ext.expert_origin`. Teclaw expert creation is explicitly refused until runtime
-consumption can be proven for that identity adapter.
+`ext.expert_origin`. Teclaw keeps the same native identity declarations and uses
+its existing device or platform delivery selected by the deployment. Target
+creation preflight, filename validation and Factory checks remain authoritative;
+this adapter neither switches engines nor changes the delivery mode.

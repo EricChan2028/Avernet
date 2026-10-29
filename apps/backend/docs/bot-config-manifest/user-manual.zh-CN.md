@@ -777,9 +777,9 @@ identity:
   `BOOTSTRAP` / `KNOWLEDGE` / `CLAUDE` / `GREETING` / `README`（物理文件为
   `<type>.md`）。**claude_code 引擎的 bot 只允许 `CLAUDE.md`**，写别的在 `PUT`
   时就报错，而不是 apply 时静默跳过。
-- **`MEMORY.md` 与 `IDENTITY.md` 声明不了**：它们是引擎生成的运行期状态，被列入
-  保留名单——apply 永不写、永不删。清单里写了会在 `PUT` 时被拒绝（否则你会得到
-  一份「被接受但永远收敛不了」的文档）。
+- **`MEMORY.md` 声明不了**：apply 永不写、永不删，`PUT` 明确拒绝。
+- **`IDENTITY.md` 可显式写入**：仅限目标 engine 原本允许该文件时，内容沿原身份
+  写入路径；显式空内容可清空。未声明或 `identity: []` 则保留已有档案。
 - **优先取源、少用内联。**内联内容游离于版本控制之外，久了会变成「藏在配置里的
   第二份人设」，排查「这句话哪来的」要看两个地方。
 - apply 走的是现有 IdentityService，所以现有派生行为原样生效（例如
@@ -1196,7 +1196,7 @@ teclaw 收下整包 artifact 并替换，ARCA 现在对被声明的类目做同�
 | `on_fetch_failure: skip` | 该取值已删除 | 改 `keep_last` 或 `fail` |
 | 未知的 `mode` 取值 | 拼错 | 只有 `strict` / `non_strict` |
 | `identity.type` 非法 | 不在白名单，或 bot 是 claude_code 引擎（只允许 `CLAUDE.md`） | 见 §5.1 |
-| `identity.type` 是 `MEMORY.md` / `IDENTITY.md` | 保留名单 | 删掉这条 |
+| `identity.type` 是 `MEMORY.md` | 保留名单 | 删掉这条 |
 | `resources.path` 绝对路径或含 `../` | 路径穿越 | 改成 workspace 相对路径 |
 | `resources` 条目嵌套在另一个目录条目之下 | 所有权无法定义 | 拆开或收缩目录条目 |
 | `skills` 非 git 源缺 `digest` | 该形态强制 | 补 `digest` |
@@ -2357,7 +2357,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 
 | 类目 | 键字段 | 约束 | 被覆盖的区域 |
 | --- | --- | --- | --- |
-| `identity` | `type` | 白名单枚举；claude_code 仅 `CLAUDE.md`；**`MEMORY.md` / `IDENTITY.md` 写入即拒** | identity 文件集合（减保留名单） |
+| `identity` | `type` | 白名单枚举；claude_code 仅 `CLAUDE.md`；**`MEMORY.md` 写入即拒；`IDENTITY.md` 显式可写、遗漏保留** | identity 文件集合（减保留名单） |
 | `skills` | `name` | 标识符，不含位置信息 | active skill set |
 | `resources` | `path` | workspace 相对；`/` 结尾 = 目录条目；禁绝对路径/`../`；禁嵌套；**来源只能是内联 `source` URL 或 `content`** | **仅被声明的 `path` 子树** |
 | `mcp` | `server_code` | 平台注册表引用；可选封闭 Bot `config` | 已启用的 server 集合及显式 Bot override |
@@ -2379,7 +2379,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 写了下面任何一条，提交时就会被拒绝（不是静默忽略）：
 
 - `${OCB_*}`、`on_fetch_failure: skip`、`apply_once`；
-- `identity.type` 是 `MEMORY.md` / `IDENTITY.md`；
+- `identity.type` 是 `MEMORY.md`；
 - 一个条目上同时有两个来源，或 `content` 条目上写了 `auth`/`digest`/`on_fetch_failure`；
 - git 源条目上写了 `digest`；用了 `from` 的条目上写了 `auth`；
 - `source` URL 里带 `user:token@`；
