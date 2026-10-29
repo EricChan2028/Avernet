@@ -30,6 +30,7 @@ class StepOutcome:
     evidence: dict
     error_type: str | None
     error_gap: object = None
+    error_detail: str | None = None
 
     def validate(self) -> None:
         if (self.status not in {'PASS', 'NOT_RUN'}
@@ -50,6 +51,7 @@ class CaseExecution:
     total_count: int
     error_type: str | None
     ready_to_execute: bool
+    error_detail: str | None = None
 
     def validate(self) -> None:
         if (self.status not in {'PASS', 'BLOCKED'}
@@ -73,6 +75,7 @@ class CaseExecution:
             'total_count': self.total_count,
             'ready_to_execute': self.ready_to_execute,
             'error_type': self.error_type,
+            'error_detail': self.error_detail,
             'steps': [
                 {
                     'requirement_id': step.requirement_id,
@@ -82,6 +85,7 @@ class CaseExecution:
                     'evidence': step.evidence,
                     'error_type': step.error_type,
                     'error_gap': step.error_gap,
+                    'error_detail': step.error_detail,
                 }
                 for step in self.steps
             ],
@@ -93,6 +97,7 @@ def execute_case(plan: CaseRewritePlan, adapter: object) -> CaseExecution:
     validate_adapter_contract(adapter, plan)
     steps: list[StepOutcome] = []
     error_type: str | None = None
+    first_error_detail: str | None = None
     completed = 0
 
     for requirement in plan.requirements:
@@ -117,11 +122,17 @@ def execute_case(plan: CaseRewritePlan, adapter: object) -> CaseExecution:
                 completed += 1
             except Exception as error:
                 error_type = type(error).__name__
+                detail = str(error) or None
+                if detail is not None and len(detail) > 800:
+                    detail = detail[:797] + "..."
+                if first_error_detail is None:
+                    first_error_detail = detail
                 step = StepOutcome(requirement_id=requirement.requirement_id,
                                    method=method_name, status='NOT_RUN',
                                    data=None, evidence={},
                                    error_type=error_type,
-                                   error_gap=getattr(error, "gap", None))
+                                   error_gap=getattr(error, "gap", None),
+                                   error_detail=detail)
         steps.append(step)
 
     execution = CaseExecution(
@@ -133,6 +144,7 @@ def execute_case(plan: CaseRewritePlan, adapter: object) -> CaseExecution:
         total_count=len(steps),
         error_type=error_type,
         ready_to_execute=error_type is None,
+        error_detail=first_error_detail,
     )
     execution.validate()
     return execution
