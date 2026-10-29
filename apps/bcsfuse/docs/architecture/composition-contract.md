@@ -226,7 +226,11 @@ Search transport also enforces a 64 KiB body-size boundary in the same
 middleware: a POST with `Content-Length` above that value is rejected before
 admission with HTTP 413 and stable code `SEARCH_REQUEST_TOO_LARGE`; when a
 client omits `Content-Length`, the middleware consumes the undeclared body
-under the same 64 KiB bound before JSON parsing. Both paths increment
+under the same 64 KiB bound before JSON parsing and before an admission permit is
+taken. A slow or failed body upload therefore cannot consume the process admission
+slot or leak capacity; receive-side exceptions increment
+`bcsfuse_search_body_read_errors_total` and remain errors rather than empty
+successes. Oversized paths increment
 `bcsfuse_search_request_too_large_total`. V1 search and recommendation schemas
 have the same query cardinality guard as v2: query/question text is at most 4,096
 characters, filters contain at most 16 fields, and each array value contains at most

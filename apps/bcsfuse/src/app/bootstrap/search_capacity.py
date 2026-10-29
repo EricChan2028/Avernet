@@ -86,6 +86,11 @@ def _get_search_metrics() -> dict[str, Any]:
             "Search requests rejected before admission because the body was too large",
             operation_labels,
         ),
+        "body_read_errors": Counter(
+            "bcsfuse_search_body_read_errors_total",
+            "Search request body transport failures before admission",
+            operation_labels,
+        ),
         "duration": Histogram(
             "bcsfuse_search_duration_seconds",
             "Search and recommendation HTTP request duration",
@@ -139,6 +144,24 @@ class SearchCapacityMiddleware:
             await response(scope, receive, send)
             return
 
+        # Payment for business work starts only after the request body has been
+        # fully loaded under the transport boundary. A slow or failed upload
+        # must not consume a Qdrant/model admission slot.
+        app_receive: Receive = receive
+        if declared_size is None:
+            try:
+                messages, body_too_large = await self._read_bounded_request(receive)
+            except Exception:
+                self._metrics["body_read_errors"].labels(**labels).inc()
+                raise
+            if body_too_large:
+                response = self._reject_too_large(
+                    operation, api_version, started_at=started_at
+                )
+                await response(scope, receive, send)
+                return
+            app_receive = _replayed_receive(messages)
+
         if not self._permits.acquire(blocking=False):
             response = self._reject(
                 operation, api_version, labels,
@@ -147,18 +170,6 @@ class SearchCapacityMiddleware:
             )
             await response(scope, receive, send)
             return
-
-        app_receive: Receive = receive
-        if declared_size is None:
-            messages, body_too_large = await self._read_bounded_request(receive)
-            if body_too_large:
-                response = self._reject_too_large(
-                    operation, api_version, started_at=started_at
-                )
-                await response(scope, receive, send)
-                self._permits.release()
-                return
-            app_receive = _replayed_receive(messages)
 
         inflight = self._metrics["inflight"].labels(**labels)
         inflight.inc()
