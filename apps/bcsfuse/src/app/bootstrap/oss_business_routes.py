@@ -1463,6 +1463,13 @@ def include_oss_business_routes(app) -> None:
             agent_search_service = AgentSearchService(
                 embedding_generator=embedding_gen,
                 vector_match_service=match_service,
+                result_cache=getattr(
+                    getattr(
+                        getattr(request, "app", None), "state", None
+                    ),
+                    "agent_search_result_cache",
+                    None,
+                ),
                 offload=run_search_in_threadpool,
             )
             outcome = await agent_search_service.search(

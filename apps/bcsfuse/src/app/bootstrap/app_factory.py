@@ -277,6 +277,12 @@ def create_bcsfuse_app(
         settings=capacity_settings,
     )
     app.state.search_capacity_max_inflight = capacity_settings.max_inflight
+
+    from app.application.agent_search_cache import AgentSearchResultCache
+
+    app.state.agent_search_result_cache = (
+        AgentSearchResultCache.from_context(context)
+    )
     app.add_middleware(TraceIdMiddleware)
 
     # Store context in app state

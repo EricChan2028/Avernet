@@ -293,6 +293,13 @@ async def recommend_bots(
 
     agent_search_service = AgentSearchService(
         candidate_recommendation_service=candidate_service,
+        result_cache=getattr(
+            getattr(
+                getattr(http_request, "app", None), "state", None
+            ),
+            "agent_search_result_cache",
+            None,
+        ),
         offload=run_search_in_threadpool,
     )
     try:

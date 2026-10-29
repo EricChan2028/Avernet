@@ -16,6 +16,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.application.agent_search_cache import AgentSearchResultCache
 from app.domain.models.candidate_recommendation import CandidateRecommendationResponse
 from app.domain.models.retrieval_mode import RetrievalMode
 
@@ -70,6 +71,7 @@ class AgentRecommendationOutcome:
     config_applied: dict[str, Any]
     elapsed_ms: float
     diagnostics: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 Offload = Callable[[Callable[[], Any]], Awaitable[Any]]
@@ -98,14 +100,83 @@ class AgentSearchService:
         embedding_generator: Any | None = None,
         vector_match_service: Any | None = None,
         candidate_recommendation_service: Any | None = None,
+        result_cache: AgentSearchResultCache | None = None,
         offload: Offload = _default_offload,
         clock: Callable[[], float] = time.monotonic,
     ):
         self._embedding_generator = embedding_generator
         self._vector_match_service = vector_match_service
         self._candidate_recommendation_service = candidate_recommendation_service
+        self._result_cache = result_cache
         self._offload = offload
         self._clock = clock
+
+    async def _cached_or_execute(
+        self,
+        operation: str,
+        *,
+        normalized_query: str,
+        material: dict[str, Any],
+        metadata: dict[str, Any],
+        execute: Callable[[], Awaitable[Any]],
+    ) -> Any:
+        """Return a result through the bounded, index-aware process cache."""
+
+        if self._result_cache is None:
+            return await execute()
+
+        index_version = self._result_cache.current_index_version()
+        if index_version is None:
+            return await execute()
+
+        key = self._result_cache.key(
+            operation,
+            index_version=index_version,
+            material={
+                "normalized_query": self._result_cache.normalize_query(
+                    normalized_query
+                ),
+                **material,
+            },
+        )
+        hit = self._result_cache.get(key)
+        if hit is not None:
+            metadata["cache_hit"] = True
+            if getattr(hit, "metadata", None) is not None:
+                hit.metadata["cache_hit"] = True
+            return hit
+
+        self._result_cache.record_miss()
+        async with self._result_cache.singleflight(key):
+            hit = self._result_cache.get_without_metrics(key)
+            if hit is not None:
+                metadata["cache_hit"] = True
+                if getattr(hit, "metadata", None) is not None:
+                    hit.metadata["cache_hit"] = True
+                return hit
+
+            outcome = await execute()
+            outcome_metadata = (
+                outcome.response.metadata
+                if isinstance(outcome, AgentRecommendationOutcome)
+                else outcome.metadata
+            )
+            if not self._has_degradation_markers(outcome_metadata):
+                self._result_cache.store(key, outcome)
+            outcome.metadata["cache_hit"] = False
+            return outcome
+
+    @staticmethod
+    def _has_degradation_markers(metadata: dict[str, Any]) -> bool:
+        if metadata.get("keyword_unavailable") is True:
+            return True
+        if metadata.get("semantic_unavailable") is True:
+            return True
+        if metadata.get("literal_fallback_used") is True:
+            return True
+        if metadata.get("score_source") == "regex_fallback":
+            return True
+        return metadata.get("rerank_degraded") is True
 
     @staticmethod
     def _validated_query(value: str, *, field_name: str) -> str:
@@ -143,43 +214,58 @@ class AgentSearchService:
         metadata: dict[str, Any] = {}
         started = self._clock()
 
-        try:
-            query_embedding = await self._run(
-                lambda: self._embedding_generator.embed(normalized_query)
-            )
-        except Exception:
-            # The bounded keyword/literal chain in the match service remains
-            # usable when the semantic model is unavailable.
-            metadata["semantic_unavailable"] = True
-            query_embedding = []
-
-        try:
-            results = await self._run(
-                lambda: self._vector_match_service.match(
-                    query_embedding=query_embedding,
-                    top_k=command.top_k,
-                    query=normalized_query,
-                    mode=command.mode,
-                    min_score=command.min_score,
-                    filters=filters,
-                    runtime_config=runtime_config,
+        async def execute_search() -> AgentSearchOutcome:
+            try:
+                query_embedding = await self._run(
+                    lambda: self._embedding_generator.embed(normalized_query)
                 )
+            except Exception:
+                # The bounded keyword/literal chain in the match service remains
+                # usable when the semantic model is unavailable.
+                metadata["semantic_unavailable"] = True
+                query_embedding = []
+
+            try:
+                results = await self._run(
+                    lambda: self._vector_match_service.match(
+                        query_embedding=query_embedding,
+                        top_k=command.top_k,
+                        query=normalized_query,
+                        mode=command.mode,
+                        min_score=command.min_score,
+                        filters=filters,
+                        runtime_config=runtime_config,
+                    )
+                )
+            except Exception as error:
+                raise RuntimeError("search retrieval unavailable") from error
+
+            config_applied = dict(runtime_config)
+            config_applied["filters"] = filters
+
+            return AgentSearchOutcome(
+                query=command.query,
+                normalized_query=normalized_query,
+                top_k=command.top_k,
+                mode=command.mode,
+                results=tuple(results or []),
+                metadata=metadata,
+                config_applied=config_applied,
+                elapsed_ms=(self._clock() - started) * 1000,
             )
-        except Exception as error:
-            raise RuntimeError("search retrieval unavailable") from error
 
-        config_applied = dict(runtime_config)
-        config_applied["filters"] = filters
-
-        return AgentSearchOutcome(
-            query=command.query,
+        return await self._cached_or_execute(
+            "search",
             normalized_query=normalized_query,
-            top_k=command.top_k,
-            mode=command.mode,
-            results=tuple(results or []),
+            material={
+                "top_k": command.top_k,
+                "mode": command.mode,
+                "min_score": command.min_score,
+                "filters": filters,
+                "reranker_model": command.reranker_model,
+            },
             metadata=metadata,
-            config_applied=config_applied,
-            elapsed_ms=(self._clock() - started) * 1000,
+            execute=execute_search,
         )
 
     async def recommend(
@@ -204,33 +290,52 @@ class AgentSearchService:
             else command.reranker_model,
         }
         started = self._clock()
+        metadata: dict[str, Any] = {}
 
-        try:
-            response = await self._run(
-                lambda: self._candidate_recommendation_service.recommend(
-                    question=normalized_question,
-                    mode=RetrievalMode.EXPERT_DIAGNOSIS,
-                    participants=None,
-                    max_candidates=command.top_k,
-                    runtime_config=runtime_config,
-                    filters=filters,
-                    vector_min_score=command.vector_min_score,
-                    rerank_min_score=command.rerank_min_score,
+        async def execute_recommend() -> AgentRecommendationOutcome:
+            try:
+                response = await self._run(
+                    lambda: self._candidate_recommendation_service.recommend(
+                        question=normalized_question,
+                        mode=RetrievalMode.EXPERT_DIAGNOSIS,
+                        participants=None,
+                        max_candidates=command.top_k,
+                        runtime_config=runtime_config,
+                        filters=filters,
+                        vector_min_score=command.vector_min_score,
+                        rerank_min_score=command.rerank_min_score,
+                    )
                 )
-            )
-        except Exception as error:
-            raise RuntimeError("recommendation service unavailable") from error
+            except Exception as error:
+                raise RuntimeError("recommendation service unavailable") from error
 
-        return AgentRecommendationOutcome(
-            question=command.question,
-            response=response,
-            config_applied=dict(runtime_config),
-            elapsed_ms=(self._clock() - started) * 1000,
-            diagnostics={
-                "min_score_explicit": command.min_score_explicit,
+            return AgentRecommendationOutcome(
+                question=command.question,
+                response=response,
+                config_applied=dict(runtime_config),
+                elapsed_ms=(self._clock() - started) * 1000,
+                diagnostics={
+                    "min_score_explicit": command.min_score_explicit,
+                    "vector_min_score": command.vector_min_score,
+                    "rerank_min_score": command.rerank_min_score,
+                },
+                metadata=metadata,
+            )
+
+        return await self._cached_or_execute(
+            "recommend",
+            normalized_query=normalized_question,
+            material={
+                "top_k": command.top_k,
+                "enable_rerank": command.enable_rerank,
+                "reranker_model": command.reranker_model,
+                "expand_factor": command.expand_factor,
                 "vector_min_score": command.vector_min_score,
                 "rerank_min_score": command.rerank_min_score,
+                "filters": filters,
             },
+            metadata=metadata,
+            execute=execute_recommend,
         )
 
 

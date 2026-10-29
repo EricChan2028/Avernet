@@ -39,17 +39,19 @@ def _metrics() -> dict[str, object]:
     return _RESULT_CACHE_METRICS
 
 
-def record_search_result_cache_hit() -> None:
-    _metrics()["hits"].labels(api_version="v2").inc()
+def record_search_result_cache_hit(api_version: str = "v2") -> None:
+    _metrics()["hits"].labels(api_version=api_version).inc()
 
 
-def record_search_result_cache_miss() -> None:
-    _metrics()["misses"].labels(api_version="v2").inc()
+def record_search_result_cache_miss(api_version: str = "v2") -> None:
+    _metrics()["misses"].labels(api_version=api_version).inc()
 
 
-def record_search_result_cache_eviction() -> None:
-    _metrics()["evictions"].labels(api_version="v2").inc()
+def record_search_result_cache_eviction(api_version: str = "v2") -> None:
+    _metrics()["evictions"].labels(api_version=api_version).inc()
 
 
-def set_search_result_cache_entries(entries: int) -> None:
-    _metrics()["entries"].labels(api_version="v2").set(entries)
+def set_search_result_cache_entries(
+    entries: int, api_version: str = "v2"
+) -> None:
+    _metrics()["entries"].labels(api_version=api_version).set(entries)
