@@ -32,5 +32,22 @@ def test_bcs_caller_sync_protocol_is_satisfied_by_method_shape() -> None:
 def test_caller_bcs_sync_error_is_an_internal_error_family_member() -> None:
     contracts = _import_contracts()
     assert issubclass(contracts.CallerBcsSyncError, InternalError)
+    assert contracts.CallerBcsSyncError().detail == "CALLER_BCS_SYNC_FAILED"
     assert "CallerBcsSyncError" in contracts.__all__
     assert "BcsCallerConfigSyncProtocol" in _import_protocols().__all__
+
+
+def test_api_reexports_the_sync_port_and_error() -> None:
+    from agentclaw.community.api import caller_identity_service
+
+    contracts = _import_contracts()
+    protocols = _import_protocols()
+    assert "CallerBcsSyncError" in caller_identity_service.__all__
+    assert "BcsCallerConfigSyncProtocol" in caller_identity_service.__all__
+    assert (
+        caller_identity_service.CallerBcsSyncError is contracts.CallerBcsSyncError
+    )
+    assert (
+        caller_identity_service.BcsCallerConfigSyncProtocol
+        is protocols.BcsCallerConfigSyncProtocol
+    )
