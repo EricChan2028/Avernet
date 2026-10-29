@@ -994,3 +994,6 @@ async fn edge_table_audit_columns_backfilled_for_legacy_db() -> DbResult<()> {
     assert!(columns.iter().any(|c| c == "gmt_modified"));
     Ok(())
 }
+
+#[path = "tests/retired_service_policy.rs"]
+mod retired_service_policy;
