@@ -10,6 +10,7 @@ from bcs_e2e.draft_delivery.checks import (DraftDeliveryViolation,
                                            check_client_selected_idempotent_create,
                                            check_immutable_revision_append,
                                            check_read_token_single_revision,
+                                           check_read_token_read_only,
                                            check_revoked_or_deleted_unavailable,
                                            check_stale_update_conflict)
 from bcs_e2e.run_state import RunStateError
@@ -244,6 +245,44 @@ class RevokedOrDeletedUnavailableTests(unittest.TestCase):
                     value['availability']['late_create']['method'] = 'POST'
                 with self.assertRaises(DraftDeliveryViolation):
                     check_revoked_or_deleted_unavailable(value)
+
+
+def read_only_evidence():
+    return {
+        'management': {
+            'public_delete': {'status': 401},
+            'token_delete': {'status': 401},
+            'token_update': {'status': 401},
+            'head_after': 2,
+            'deleted_after': False,
+        },
+    }
+
+
+class ReadTokenReadOnlyTests(unittest.TestCase):
+    def test_accepts_all_unauthorized_management_attempts(self):
+        check_read_token_read_only(read_only_evidence())
+
+    def test_accepts_forbidden_status_from_scope_guard(self):
+        value = read_only_evidence()
+        value['management']['token_delete']['status'] = 403
+        check_read_token_read_only(value)
+
+    def test_rejects_any_management_success(self):
+        for field in ('public_delete', 'token_delete', 'token_update'):
+            with self.subTest(field=field):
+                value = read_only_evidence()
+                value['management'][field]['status'] = 200
+                with self.assertRaisesRegex(RunStateError, 'rejected as unauthorized'):
+                    check_read_token_read_only(value)
+
+    def test_rejects_state_mutation_after_rejection(self):
+        for field, replacement in (('head_after', 3), ('deleted_after', True)):
+            with self.subTest(field=field):
+                value = read_only_evidence()
+                value['management'][field] = replacement
+                with self.assertRaises(DraftDeliveryViolation):
+                    check_read_token_read_only(value)
 
 
 if __name__ == '__main__':

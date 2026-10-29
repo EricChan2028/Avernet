@@ -15,6 +15,7 @@ OBLIGATION_APPEND = 'DRAFT-DELIVERY.immutable-revision-append'
 OBLIGATION_STALE = 'DRAFT-DELIVERY.stale-update-conflict'
 OBLIGATION_READ_TOKEN = 'DRAFT-DELIVERY.read-token-single-revision'
 OBLIGATION_UNAVAILABLE = 'DRAFT-DELIVERY.revoked-or-deleted-unavailable'
+OBLIGATION_READ_ONLY = 'DRAFT-DELIVERY.read-token-read-only'
 _UUID = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')
 
 
@@ -182,3 +183,21 @@ def check_revoked_or_deleted_unavailable(evidence: dict) -> None:
     if late.get('method') != 'PUT' or _integer(late.get('status'), 'late create status',
                                                OBLIGATION_UNAVAILABLE) != 404:
         _fail(OBLIGATION_UNAVAILABLE, 'late create revived a deleted Draft')
+
+
+def check_read_token_read_only(evidence: dict) -> None:
+    """No draft token can authorize delete or revision management."""
+    management = _mapping(evidence.get('management'), 'management observations',
+                          OBLIGATION_READ_ONLY)
+    for field, label in (('public_delete', 'public delete'),
+                         ('token_delete', 'readToken delete'),
+                         ('token_update', 'readToken update')):
+        observation = _mapping(management.get(field), label, OBLIGATION_READ_ONLY)
+        status = _integer(observation.get('status'), label + ' status', OBLIGATION_READ_ONLY)
+        if status not in (401, 403):
+            _fail(OBLIGATION_READ_ONLY, label + ' was not rejected as unauthorized')
+    if _integer(management.get('head_after'), 'head after management rejection',
+                OBLIGATION_READ_ONLY) != 2:
+        _fail(OBLIGATION_READ_ONLY, 'rejected management operation changed the head')
+    if management.get('deleted_after') is not False:
+        _fail(OBLIGATION_READ_ONLY, 'rejected management operation deleted the Draft')
