@@ -18,6 +18,10 @@ from qdrant_client import QdrantClient, models
 from search_core.config.qdrant import LOCAL_QDRANT, QdrantConnection
 from search_core.plugin_api.vector_point import VectorPoint
 from search_core.plugin_api.vector_search_hit import VectorSearchHit
+from search_core.providers.qdrant_payload import (
+    KEYWORD_PAYLOAD_INDEX_FIELDS,
+    ensure_payload_indexes,
+)
 from search_core.providers.qdrant_server import remote_client
 
 
@@ -53,8 +57,10 @@ class QdrantKeywordIndex:
         exact_match_field: str | None = None,
         connection: QdrantConnection = LOCAL_QDRANT,
         collection_name: str = "keywords",
+        payload_indexes_on_connect: bool = True,
     ):
         self._exact_match_field = exact_match_field
+        self._payload_indexes_on_connect = payload_indexes_on_connect
         self.connection = connection
         self.collection_name = collection_name
         self._client = None
@@ -93,11 +99,31 @@ class QdrantKeywordIndex:
                     raise ValueError(
                         "Qdrant keyword collection must use the text IDF sparse vector"
                     )
+                if (
+                    self.connection.mode == "server"
+                    and self._payload_indexes_on_connect
+                ):
+                    ensure_payload_indexes(
+                        client,
+                        collection_name=self.collection_name,
+                        fields=KEYWORD_PAYLOAD_INDEX_FIELDS,
+                    )
             except Exception:
                 client.close()
                 raise
             self._client = client
 
+    def ensure_payload_indexes(self) -> None:
+        """Create Server filter indexes; read-only initialization must not do this."""
+
+        if self.connection.mode != "server":
+            return
+        self._ensure_client()
+        ensure_payload_indexes(
+            self._client,
+            collection_name=self.collection_name,
+            fields=KEYWORD_PAYLOAD_INDEX_FIELDS,
+        )
     def get_vector_ids(self):
         self._ensure_client()
         ids, offset = [], None

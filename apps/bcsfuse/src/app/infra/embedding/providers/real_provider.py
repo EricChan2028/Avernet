@@ -71,6 +71,13 @@ class RealEmbeddingProvider(SharedEmbeddingProvider):
             latency_ms=latency_ms,
         )
 
+    def _record_wire_protocol(self, protocol: str):
+        from app.infra.public.observability.search_dependency_metrics import (
+            record_embedding_wire_response,
+        )
+
+        record_embedding_wire_response(self._settings.model, protocol)
+
     def _record_failure(self, e):
         from app.infra.observability.service_counters import get_service_counters
 

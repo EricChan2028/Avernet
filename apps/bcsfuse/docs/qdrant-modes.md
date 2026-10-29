@@ -59,6 +59,13 @@ Worker-ID lookup; the TC adapter retains its existing exact Worker-ID priority.
   and sparse indexes, removing records absent from the database, before readiness.
   Existing Local index files are not copied into Server; stored vectors are reused
   without calling Embedding again.
+- Dense and keyword Server collections create keyword payload indexes for the
+  bounded v1 filter fields (`availability`, `runtime_state`, `domains`,
+  `trust_level`, `worker_id`, `profile_key`) and for their internal external-ID
+  fields. This avoids scanning every vector when default visibility filters are
+  present. In the durable-lease composition, only the current owner performs this
+  schema initialization; read-only replicas connect and probe without mutating
+  Qdrant.
 - Dense vectors use the configured collection; sparse keywords use
   `<collection>_keywords`. By default both collections use the same Qdrant
   service. Setting `QDRANT_KEYWORD_URL` (or the other `QDRANT_KEYWORD_*`

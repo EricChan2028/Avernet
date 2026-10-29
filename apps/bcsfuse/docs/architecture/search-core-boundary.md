@@ -40,6 +40,14 @@ shared contracts. HTTP is an optional adapter. Importing the contracts opens no
 model, database or background task. Public code cannot import an enterprise host.
 The public TC entrypoint remains independently runnable with public providers.
 
+Qdrant Server collections index all bounded v1 payload-filter fields. The
+durable owner creates these schema indexes; read-only replicas must not mutate
+the shared collection.
+The HTTP embedding provider keeps the OpenAI-compatible JSON response as its
+default and may negotiate the compact float32 response documented in
+[embedding wire](../../packages/search-core/docs/embedding-wire.md). Request
+authentication and error semantics are unchanged.
+
 ## Ownership and current scope
 
 | Owner | Implemented | Remaining work |

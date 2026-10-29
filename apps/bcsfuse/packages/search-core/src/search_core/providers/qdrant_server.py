@@ -7,6 +7,10 @@ from qdrant_client import QdrantClient, models
 from search_core.config.qdrant import QdrantConnection
 from search_core.providers.qdrant import QdrantLocalVectorStore
 from search_core.providers.qdrant_ids import _logical_id_from_result
+from search_core.providers.qdrant_payload import (
+    DENSE_PAYLOAD_INDEX_FIELDS,
+    ensure_payload_indexes,
+)
 
 
 def remote_client(connection: QdrantConnection) -> QdrantClient:
@@ -31,9 +35,11 @@ class QdrantServerVectorStore(QdrantLocalVectorStore):
         collection_name: str,
         dimension: int,
         distance: str = "Cosine",
+        payload_indexes_on_connect: bool = True,
     ):
         super().__init__(collection_name, "[server]", dimension, distance)
         self.connection = connection
+        self._payload_indexes_on_connect = payload_indexes_on_connect
         self._init_lock = Lock()
 
     def _ensure_client(self):
@@ -61,12 +67,27 @@ class QdrantServerVectorStore(QdrantLocalVectorStore):
                     raise ValueError(
                         "Qdrant collection dimension/distance does not match"
                     )
+                if self._payload_indexes_on_connect:
+                    ensure_payload_indexes(
+                        client,
+                        collection_name=self.collection_name,
+                        fields=DENSE_PAYLOAD_INDEX_FIELDS,
+                    )
             except Exception:
                 client.close()
                 raise
             self._client = client
             self._collection_initialized = True
 
+    def ensure_payload_indexes(self) -> None:
+        """Create the bounded Server filter indexes without changing points."""
+
+        self._ensure_client()
+        ensure_payload_indexes(
+            self._client,
+            collection_name=self.collection_name,
+            fields=DENSE_PAYLOAD_INDEX_FIELDS,
+        )
     def _ensure_collection(self):
         self._ensure_client()
 

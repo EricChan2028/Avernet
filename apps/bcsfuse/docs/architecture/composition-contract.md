@@ -222,15 +222,20 @@ does not turn an empty valid result into an outage.
 
 ### Search capacity admission and workers
 
-The composed application owns a process-wide, non-queuing search admission pool.
-It is configured through the `config` provider, not route code or raw
-environment access: `search.capacity.max_inflight` (default 64) and
+The composed application owns a process-wide bounded search admission pool and
+wait queue. It is configured through the `config` provider, not route code or
+raw environment access: `search.capacity.max_inflight` (default 64),
+`search.capacity.max_queue` (default 128),
+`search.capacity.queue_wait_seconds` (default 0.5), and
 `search.capacity.retry_after_seconds` (default 1). The pool is shared by
 `/api/v1/search`, `/api/v1/recommend`, `/api/v2/search`, and
-`/api/v2/recommend`. Requests beyond the limit return HTTP 429,
+`/api/v2/recommend`. A request beyond both the execution and queue budgets, or
+one that waits longer than `queue_wait_seconds`, returns HTTP 429,
 `Retry-After`, and stable code `SEARCH_CAPACITY_EXCEEDED` before business
 execution consumes embedding, Qdrant, rerank, or durable database capacity.
-This is a per-process admission layer, not a distributed token bucket.
+The small queue absorbs short bursts without amplifying downstream
+concurrency. This is a per-process admission layer, not a distributed token
+bucket.
 Search transport also enforces a 64 KiB body-size boundary in the same
 middleware: a POST with `Content-Length` above that value is rejected before
 admission with HTTP 413 and stable code `SEARCH_REQUEST_TOO_LARGE`; when a

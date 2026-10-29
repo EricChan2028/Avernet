@@ -12,7 +12,7 @@ BCSFuse is a collaboration control plane for AI worker management, providing tas
 ## Quick Start
 
 For the `app` / `search_core` package layout, current extraction scope and
-public/enterprise boundaries, see [search architecture](docs/architecture/search-core-boundary.md).
+public/enterprise boundaries, see [search architecture](docs/architecture/search-core-boundary.md); the optional embedding response protocol is documented in [embedding wire](packages/search-core/docs/embedding-wire.md).
 
 ### Installation
 

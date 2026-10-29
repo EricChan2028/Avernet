@@ -64,6 +64,11 @@ def _get_metrics() -> dict[str, Any]:
             "Failed external embedding provider calls after retries",
             ["model"],
         ),
+        "embedding_wire_responses": Counter(
+            "bcsfuse_embedding_wire_responses_total",
+            "External embedding responses by negotiated transport protocol",
+            ["model", "protocol"],
+        ),
         "rerank_circuit_open": Gauge(
             "bcsfuse_rerank_circuit_open",
             "Whether the process-local reranker circuit is open or probing",
@@ -151,6 +156,13 @@ def record_embedding_call(
     )
     if outcome == "error":
         metrics["embedding_errors"].labels(model=model).inc()
+
+
+def record_embedding_wire_response(model: str, protocol: str) -> None:
+    """Record which successful embedding response protocol was used."""
+    _get_metrics()["embedding_wire_responses"].labels(
+        model=model, protocol=protocol
+    ).inc()
 
 
 def set_embedding_circuit_open(model: str, *, open_: bool) -> None:

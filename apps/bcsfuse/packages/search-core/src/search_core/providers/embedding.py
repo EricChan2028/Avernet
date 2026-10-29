@@ -18,8 +18,19 @@ import httpx
 
 from search_core.plugin_api.embedding import EmbeddingProvider
 from search_core.config.embedding import EmbeddingSettings
+from search_core.providers.embedding_wire import (
+    BINARY_CONTENT_TYPE,
+    EMBEDDING_ACCEPT_HEADER,
+    EmbeddingWireError,
+    decode_embedding_vectors,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _is_binary_response(response: httpx.Response) -> bool:
+    content_type = response.headers.get("Content-Type", "").split(";", 1)[0]
+    return content_type.strip().lower() == BINARY_CONTENT_TYPE
 
 
 class EmbeddingAPIError(Exception):
@@ -287,6 +298,7 @@ class RealEmbeddingProvider(EmbeddingProvider):
 
         headers = {
             "Content-Type": "application/json",
+            "Accept": EMBEDDING_ACCEPT_HEADER,
             "Authorization": f"Bearer {self._settings.auth_token}",
         }
 
@@ -326,6 +338,26 @@ class RealEmbeddingProvider(EmbeddingProvider):
             client = self._get_client()
             response = client.post(url, json=payload, headers=headers)
             response.raise_for_status()
+            if _is_binary_response(response):
+                try:
+                    vectors = decode_embedding_vectors(
+                        response.content,
+                        expected_count=len(texts),
+                        dimension=self._settings.dimension,
+                    )
+                except EmbeddingWireError as e:
+                    logger.error(
+                        "[EMBEDDING_RESPONSE_PROTOCOL_ERROR] protocol=%s error=%s model=%s",
+                        BINARY_CONTENT_TYPE,
+                        e,
+                        self._settings.model,
+                    )
+                    raise EmbeddingAPIError(
+                        f"Embedding binary response is invalid: {e}",
+                        status_code=415,
+                    ) from e
+                self._record_wire_protocol("binary")
+                return vectors
             response_data = response.json()
 
         except httpx.HTTPStatusError as e:
@@ -373,6 +405,9 @@ class RealEmbeddingProvider(EmbeddingProvider):
             logger.error(f"Embedding API 超时: {e}")
             raise EmbeddingAPIError(f"Embedding API 请求超时: {e}")
 
+        except EmbeddingAPIError:
+            raise
+
         except Exception as e:
             logger.error(f"Embedding API 调用异常: {e}")
             raise EmbeddingAPIError(f"Embedding API 调用失败: {e}")
@@ -388,11 +423,14 @@ class RealEmbeddingProvider(EmbeddingProvider):
                     f"返回的 embedding 数量不匹配: 期望 {len(texts)}, 实际 {len(embeddings)}"
                 )
 
+            self._record_wire_protocol("json")
             return embeddings
 
-        except (KeyError, TypeError) as e:
+        except (KeyError, TypeError, ValueError) as e:
             logger.error(f"解析 Embedding API 响应失败: {e}")
-            raise EmbeddingAPIError(f"解析 API 响应失败: {e}")
+            raise EmbeddingAPIError(
+                "Embedding JSON response is invalid", status_code=415
+            ) from e
 
     def _should_retry(self, status_code: Optional[int], attempt: int) -> bool:
         """
@@ -489,6 +527,9 @@ class RealEmbeddingProvider(EmbeddingProvider):
             Optional[str]: 模型名称
         """
         return self._settings.model
+
+    def _record_wire_protocol(self, protocol: str) -> None:
+        """Application adapter may observe the negotiated response type."""
 
     def _record_success(self, latency_ms: int) -> None:
         """Application adapter may observe a successful request."""

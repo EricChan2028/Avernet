@@ -8,9 +8,14 @@ from search_core.providers.keyword import normalize, sparse
 
 class QdrantKeywordIndex(SharedKeywordIndex):
     def __init__(self, *, connection: QdrantConnection = LOCAL_QDRANT,
-                 collection_name: str = "keywords"):
-        super().__init__(exact_match_field="_keyword_worker_id",
-                         connection=connection, collection_name=collection_name)
+                 collection_name: str = "keywords",
+                 payload_indexes_on_connect: bool = True):
+        super().__init__(
+            exact_match_field="_keyword_worker_id",
+            connection=connection,
+            collection_name=collection_name,
+            payload_indexes_on_connect=payload_indexes_on_connect,
+        )
 
     def upsert(self, points: list[VectorPoint]) -> None:
         prepared = []

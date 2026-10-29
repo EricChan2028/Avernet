@@ -83,6 +83,7 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
             self._qdrant = QdrantServerVectorStore(
                 connection=connection, collection_name=collection_name,
                 dimension=dimension, distance=distance,
+                payload_indexes_on_connect=False,
             )
         else:
             self._qdrant = QdrantLocalVectorStore(
@@ -116,6 +117,7 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         return QdrantKeywordIndex(
             connection=self.keyword_connection,
             collection_name=self.collection_name + "_keywords",
+            payload_indexes_on_connect=False,
         )
 
     # ------------------------------------------------------------------
@@ -319,6 +321,13 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
     # Misc protocol methods
     # ------------------------------------------------------------------
 
+    def ensure_payload_indexes(self) -> None:
+        """Initialize bounded Server filter indexes for the durable index owner."""
+
+        if self.connection.mode == "server":
+            self._qdrant.ensure_payload_indexes()
+        if self.keyword_connection.mode == "server":
+            self._keywords.ensure_payload_indexes()
     def check_ready(self) -> None:
         """Probe both Server collections; a running Python process is insufficient."""
         with self._index_lock.read():

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 from typing import Any
@@ -22,13 +23,26 @@ _SEARCH_PATHS = {
 class SearchCapacitySettings:
     """Read deployment capacity through the composed config provider."""
 
-    def __init__(self, *, max_inflight: int, retry_after_seconds: float):
+    def __init__(
+        self,
+        *,
+        max_inflight: int,
+        retry_after_seconds: float,
+        max_queue: int = 128,
+        queue_wait_seconds: float = 0.5,
+    ):
         if max_inflight <= 0:
             raise ValueError("search capacity max_inflight must be positive")
         if retry_after_seconds <= 0:
             raise ValueError("search capacity retry_after_seconds must be positive")
+        if max_queue < 0:
+            raise ValueError("search capacity max_queue must not be negative")
+        if queue_wait_seconds <= 0:
+            raise ValueError("search capacity queue_wait_seconds must be positive")
         self.max_inflight = max_inflight
         self.retry_after_seconds = retry_after_seconds
+        self.max_queue = max_queue
+        self.queue_wait_seconds = queue_wait_seconds
 
     @classmethod
     def from_context(cls, context: Any) -> "SearchCapacitySettings":
@@ -43,9 +57,22 @@ class SearchCapacitySettings:
                 "get_float",
             )
         )
+        max_queue = int(
+            _config_get(context, "search.capacity.max_queue", 128, "get_int")
+        )
+        queue_wait_seconds = float(
+            _config_get(
+                context,
+                "search.capacity.queue_wait_seconds",
+                0.5,
+                "get_float",
+            )
+        )
         return cls(
             max_inflight=max_inflight,
             retry_after_seconds=retry_after_seconds,
+            max_queue=max_queue,
+            queue_wait_seconds=queue_wait_seconds,
         )
 
 
@@ -80,6 +107,21 @@ def _get_search_metrics() -> dict[str, Any]:
         "capacity": Gauge(
             "bcsfuse_search_capacity_max_inflight",
             "Configured maximum simultaneous search requests",
+        ),
+        "queued": Counter(
+            "bcsfuse_search_capacity_queued_total",
+            "Search requests that waited for a free execution slot",
+            operation_labels,
+        ),
+        "queue_wait": Histogram(
+            "bcsfuse_search_capacity_queue_wait_seconds",
+            "Admission queue wait before business execution starts",
+            operation_labels,
+            buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 0.75, 1, 2),
+        ),
+        "queue_capacity": Gauge(
+            "bcsfuse_search_capacity_max_queue",
+            "Configured maximum waiting search requests",
         ),
         "too_large_requests": Counter(
             "bcsfuse_search_request_too_large_total",
@@ -119,8 +161,12 @@ class SearchCapacityMiddleware:
         self.app = app
         self.settings = settings
         self._metrics = metrics or _get_search_metrics()
-        self._permits = threading.BoundedSemaphore(settings.max_inflight)
+        self._permits = asyncio.Semaphore(settings.max_inflight)
+        self._inflight_count = 0
+        self._waiting_count = 0
+        self._state_lock = threading.Lock()
         self._metrics["capacity"].set(settings.max_inflight)
+        self._metrics["queue_capacity"].set(settings.max_queue)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -162,7 +208,7 @@ class SearchCapacityMiddleware:
                 return
             app_receive = _replayed_receive(messages)
 
-        if not self._permits.acquire(blocking=False):
+        if not await self._admit(operation, api_version, labels):
             response = self._reject(
                 operation, api_version, labels,
                 started_at=started_at,
@@ -186,8 +232,54 @@ class SearchCapacityMiddleware:
             outcome = str(status_code or 500)
             self._record(operation, api_version, outcome, time.perf_counter() - started_at)
             inflight.dec()
+            with self._state_lock:
+                self._inflight_count -= 1
             self._permits.release()
 
+    async def _admit(
+        self,
+        operation: str,
+        api_version: str,
+        labels: dict[str, str],
+    ) -> bool:
+        """Reserve one slot from the bounded execution-and-wait budget."""
+
+        limits = self.settings.max_inflight + self.settings.max_queue
+        with self._state_lock:
+            if (
+                self._inflight_count + self._waiting_count
+                >= limits
+            ):
+                return False
+            self._waiting_count += 1
+            queued = (
+                self._inflight_count + self._waiting_count
+                > self.settings.max_inflight
+            )
+
+        queued_since = time.perf_counter()
+        try:
+            if queued:
+                self._metrics["queued"].labels(**labels).inc()
+                try:
+                    await asyncio.wait_for(
+                        self._permits.acquire(),
+                        timeout=self.settings.queue_wait_seconds,
+                    )
+                except TimeoutError:
+                    return False
+            else:
+                await self._permits.acquire()
+        finally:
+            if queued:
+                self._metrics["queue_wait"].labels(**labels).observe(
+                    time.perf_counter() - queued_since
+                )
+            with self._state_lock:
+                self._waiting_count -= 1
+        with self._state_lock:
+            self._inflight_count += 1
+        return True
     async def _read_bounded_request(self, receive: Receive) -> tuple[list[Message], bool]:
         """Consume an undeclared body while bounding total search request bytes."""
         messages = []

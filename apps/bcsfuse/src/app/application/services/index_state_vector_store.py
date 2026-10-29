@@ -56,10 +56,12 @@ class IndexStateMaintainingVectorStore:
         self._index_owner_changes = 0
         self._index_owner_takeover_seconds = 0.0
         self._last_owner_observed_at = 0.0
+        self._payload_indexes_ready = False
         try:
             self._refresh_from_record(self._store.claim_owner(
                 collection_pair, owner_id, lease_seconds=lease_seconds
             ))
+            self._ensure_payload_indexes_if_owner()
         except Exception as error:
             logger.warning("[INDEX-STATE] initial ownership probe failed: %s", error)
             self._mark_unavailable()
@@ -116,6 +118,7 @@ class IndexStateMaintainingVectorStore:
             # explicitly returned ``False`` means the backing index is not ready.
             backend_ready = self.backend.check_ready()
             self._refresh()
+            self._ensure_payload_indexes_if_owner()
             # Staleness is transport-level grace handled by the composed wrapper.
             # Here ``None`` is success; only ``False`` is an explicit outage.
             return backend_ready is not False
@@ -268,6 +271,27 @@ class IndexStateMaintainingVectorStore:
         self._local_version = self.index_version
         self._apply_staleness()
 
+    def _ensure_payload_indexes_if_owner(self) -> None:
+        """Let a lease owner idempotently create Server schema only once."""
+
+        if self.read_only or self._payload_indexes_ready:
+            return
+        initializer = getattr(self.backend, "ensure_payload_indexes", None)
+        if initializer is None:
+            self._payload_indexes_ready = True
+            return
+        try:
+            initializer()
+        except Exception as error:
+            logger.warning(
+                "[INDEX-STATE] payload index initialization failed: %s", error
+            )
+            # A failed schema dependency is not ready; a later readiness probe
+            # can reacquire the lease and retry without mutating data points.
+            self._payload_indexes_ready = False
+            self._mark_unavailable()
+            return
+        self._payload_indexes_ready = True
     def _refresh_from_record(self, record: IndexStateRecord) -> None:
         self.index_state_unavailable = False
         previous_owner = self.index_owner

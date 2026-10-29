@@ -38,7 +38,12 @@ class Startup:
 
 def context(max_inflight: int) -> ApplicationContext:
     registry = ProviderRegistry()
-    registry.register("config", Config({"search.capacity.max_inflight": max_inflight}))
+    registry.register("config", Config({
+        "search.capacity.max_inflight": max_inflight,
+        # This legacy test exercises the queue-exhausted path. With
+        # zero queue capacity the second request still fails fast.
+        "search.capacity.max_queue": 0,
+    }))
     registry.register("secret_provider", object())
     registry.register("startup_provider", Startup())
     return ApplicationContext(
