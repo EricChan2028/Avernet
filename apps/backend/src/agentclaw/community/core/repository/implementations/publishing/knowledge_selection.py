@@ -50,12 +50,19 @@ _MAX_EXT_BYTES = 65535
 
 
 def _locked_source(session, publish):
+    source = _locked_native_source(session, publish)
+    if source.entity_id != publish.owner_id:
+        raise KnowledgeError("KNOWLEDGE_PUBLISH_SOURCE_MISMATCH")
+    return source
+
+
+def _locked_native_source(session, publish):
+    """Lock the native PK address; legacy Owner metadata is not its identity."""
     source = (
         session.query(BotModel)
         .filter(
             BotModel.id == publish.source_bot_pk,
             BotModel.bot_id == publish.source_bot_id,
-            BotModel.entity_id == publish.owner_id,
             BotModel.env == publish.env,
             BotModel.bot_type == "service",
             BotModel.is_delete == 0,
@@ -72,7 +79,6 @@ def _locked_source(session, publish):
     session.refresh(publish, with_for_update=True)
     if (
         source.id != publish.source_bot_pk
-        or source.entity_id != publish.owner_id
         or source.bot_id != publish.source_bot_id
         or source.env != publish.env
         or source.bot_type != "service"
@@ -500,7 +506,7 @@ def restore_draft(
     draft = session.query(Publish).filter(Publish.id == draft_publish_id).one_or_none()
     if draft is None:
         return False
-    source = _locked_source(session, draft)
+    source = _locked_native_source(session, draft)
     operation, params = _locked_restore_operation(
         session,
         draft,
@@ -542,6 +548,10 @@ def restore_draft(
     bindings = []
     ids = set()
     try:
+        # Native restoration accepts legacy Owner semantics, but knowledge may
+        # only be applied when both publication rows identify the live entity.
+        if draft.owner_id != source.entity_id or previous.owner_id != source.entity_id:
+            raise KnowledgeError("KNOWLEDGE_PUBLISH_SOURCE_MISMATCH")
         snapshot = validate_snapshot(previous, source)
         ids = set(snapshot["enabled_kb_ids"])
         enabled = (

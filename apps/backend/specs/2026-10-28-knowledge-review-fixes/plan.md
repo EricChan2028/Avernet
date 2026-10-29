@@ -67,3 +67,16 @@ A bounded restart_retry helper keeps the publish repository below 1000 lines. Qu
 ## Approved legacy-Owner draft-restore repair (2026-10-29)
 Native source resolution treats a live source_bot_pk plus bot_id as authoritative even when old publication owner_id does not equal the current immutable entity_id. Knowledge integration must not turn that supported native restore into failure after device success. Split native source locking from knowledge identity trust: keep PK/bot_id/env/tenant/service/nondeleted scope, writer reservation and refresh; keep strict entity equality for build/online completion. During restore, an entity mismatch on either draft or previous publication produces knowledge UNKNOWN, preserves working/online flags and revisions, and atomically completes the native ledger. Latest draft/source version/operation/attempt/deadline and replay guards remain mandatory. No fallback, history backfill, schema, startup, config or deployment change.
 Rejected: swallowing every source mismatch (loses isolation), or globally removing entity checks (would trust foreign snapshots). Verification uses the already approved native Flow/Service/Repository/operation seam, real PK Bot lookup and external device boundary doubles, plus negative identity/ledger cases.
+
+```python
+# knowledge_selection.py (internal helpers only)
+def _locked_native_source(session, publish): ...  # PK/bot_id/env/tenant/service/live
+
+def _locked_source(session, publish):
+    source = _locked_native_source(session, publish)
+    if source.entity_id != publish.owner_id:
+        raise KnowledgeError("KNOWLEDGE_PUBLISH_SOURCE_MISMATCH")
+    return source
+# restore_draft uses native lock, then checks both publication entity locators
+# inside the knowledge-only UNKNOWN boundary, before validate_snapshot/bindings.
+```

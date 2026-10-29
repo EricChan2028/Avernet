@@ -213,7 +213,11 @@ history validation. Selection changes on observed target deployment success.
 Draft restore retains native operation identity, latest-attempt, source, draft
 and deadline checks. Unknown history preserves working selection and records
 UNKNOWN in the restore marker while completing the native ledger. Completed
-restore replay cannot overwrite subsequent edits.
+restore replay cannot overwrite subsequent edits. A live source PK remains the
+native address authority even for legacy publication Owner semantics. If either
+publication's Owner metadata differs from the live immutable entity, knowledge
+restore is UNKNOWN (no binding edits), not a native restoration failure. This
+does not relax entity validation for build or online completion.
 
 Changed content-addressed artifacts are staged before added row locks, unchanged
 objects are reused, and PUT failure precedes any local transition. An exact CAS
