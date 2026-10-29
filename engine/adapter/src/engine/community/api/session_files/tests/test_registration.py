@@ -78,7 +78,7 @@ def test_post_register_returns_view_and_uses_existing_session_scope(client, capl
     [
         {},
         {"workspace_relative_path": 123},
-        {"workspace_relative_path": "report", "token": "private-token"},
+        {"workspace_relative_path": "report", "token": "test-token"},
         {"workspace_relative_path": None},
     ],
 )
