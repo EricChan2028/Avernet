@@ -1,8 +1,8 @@
-# Explicit ARCA storage routing context (experiment B)
+# Explicit ARCA platform routing context (experiment B)
 
-`ArcaTemplateConfig.arca_storage_tenant_id` is an optional validated string,
+`ArcaTemplateConfig.arca_tenant_id` is an optional validated string,
 propagated unchanged by `PaasServiceFactory` into `ArcaCredentials`. It identifies
-the ARCA storage routing tenant associated with the API key, independently of
+the ARCA platform routing tenant associated with the API key, independently of
 `tenant_name` (the BaaS business tenant). It is not a cross-tenant switch.
 
 The default is `null`; existing persisted JSON remains readable. Consumers may

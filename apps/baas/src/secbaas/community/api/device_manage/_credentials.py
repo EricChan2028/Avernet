@@ -75,7 +75,7 @@ class ArcaCredentials(PaasCredentials):
         default=1440,
         description="Default device lifetime in minutes",
     )
-    arca_storage_tenant_id: (
+    arca_tenant_id: (
         Annotated[
             str,
             StringConstraints(
@@ -88,7 +88,7 @@ class ArcaCredentials(PaasCredentials):
         | None
     ) = Field(
         default=None,
-        description="Explicit ARCA storage routing tenant (not the BaaS tenant); None disables optional NAS recovery",
+        description="Explicit ARCA platform routing tenant (not the BaaS tenant); None disables optional NAS recovery",
     )
     app_name: str = Field(
         default="secbaas",

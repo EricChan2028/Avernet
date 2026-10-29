@@ -45,7 +45,7 @@ class ArcaTemplateConfig(BaseModel):
     encrypt_api_key: bool = Field(
         default=False, description="api_key已是密文（由系统强制保证）"
     )
-    arca_storage_tenant_id: (
+    arca_tenant_id: (
         Annotated[
             str,
             StringConstraints(
@@ -58,7 +58,7 @@ class ArcaTemplateConfig(BaseModel):
         | None
     ) = Field(
         default=None,
-        description="Explicit ARCA storage routing tenant (not the BaaS tenant); None disables optional NAS recovery",
+        description="Explicit ARCA platform routing tenant (not the BaaS tenant); None disables optional NAS recovery",
     )
     app_name: str = Field(default="secbaas", description="应用名称")
     arca_template_id: str | None = Field(
@@ -313,7 +313,7 @@ def _default_arca_config() -> ArcaTemplateConfig:
         type="ARCA",
         base_url="",
         api_key="",
-        template_id=None,
+        arca_template_id=None,
         arca_template_id_pre=None,
         arca_template_id_prod=None,
         oss_mount_id=None,
