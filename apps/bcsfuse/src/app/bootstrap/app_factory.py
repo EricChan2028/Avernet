@@ -63,6 +63,11 @@ def _get_index_metrics():
                 "Index revision lag in seconds",
                 labels,
             ),
+            "degraded": Gauge(
+                "bcsfuse_index_degraded",
+                "Whether the index is serving with a degraded dependency",
+                labels,
+            ),
         }
     return _INDEX_METRICS
 
@@ -81,23 +86,42 @@ async def _index_readiness(context: ApplicationContext) -> tuple[bool, dict]:
     if vector_store is None:
         return is_ready, {"vector_store_available": False}
 
+    partial_readiness: dict[str, bool] | None = None
     try:
-        check_ready = getattr(vector_store, "check_ready", None)
-        if check_ready is not None:
+        partial_readiness_probe = getattr(
+            vector_store, "index_dependency_readiness", None
+        )
+        if partial_readiness_probe is not None:
             from starlette.concurrency import run_in_threadpool
 
-            store_ready = await run_in_threadpool(check_ready)
-            if store_ready is False:
-                is_ready = False
+            partial_readiness = dict(
+                await run_in_threadpool(partial_readiness_probe)
+            )
+        else:
+            check_ready = getattr(vector_store, "check_ready", None)
+            if check_ready is not None:
+                from starlette.concurrency import run_in_threadpool
+
+                store_ready = await run_in_threadpool(check_ready)
+                if store_ready is False:
+                    is_ready = False
     except Exception as error:
         is_ready = False
         return is_ready, {"vector_store_error": type(error).__name__}
+
+    if partial_readiness is not None:
+        dense_ready = bool(partial_readiness.get("dense_qdrant_ready"))
+        keyword_ready = bool(partial_readiness.get("keyword_qdrant_ready"))
+        # An explicit false from the wrapper records durable index-state failure
+        # even while a particular Qdrant replica answers a collection probe.
+        index_state_ready = bool(partial_readiness.get("index_state_ready", True))
+        is_ready = is_ready and dense_ready and index_state_ready
 
     connection = getattr(vector_store, "connection", None)
     index_stale = bool(getattr(vector_store, "index_stale", False))
     if index_stale:
         is_ready = False
-    vector_store_info = {
+    vector_store_info: dict = {
         "vector_store_available": True,
         "qdrant_mode": getattr(connection, "mode", None),
         "keyword_qdrant_mode": getattr(
@@ -116,6 +140,22 @@ async def _index_readiness(context: ApplicationContext) -> tuple[bool, dict]:
         ),
         "read_only": bool(getattr(vector_store, "read_only", False)),
     }
+    if partial_readiness is not None:
+        dense_ready = bool(partial_readiness.get("dense_qdrant_ready"))
+        keyword_ready = bool(partial_readiness.get("keyword_qdrant_ready"))
+        vector_store_info.update(
+            {
+                "dense_qdrant_available": dense_ready,
+                "keyword_qdrant_available": keyword_ready,
+                "dense_qdrant_unavailable": not dense_ready,
+                "keyword_qdrant_unavailable": not keyword_ready,
+                "degraded": not (dense_ready and keyword_ready),
+            }
+        )
+    if vector_store_info.get("index_stale", False):
+        is_ready = False
+    if vector_store_info.get("index_state_unavailable", False):
+        is_ready = False
     return is_ready, vector_store_info
 
 
@@ -187,6 +227,9 @@ def _register_health_routes(app: FastAPI, context: ApplicationContext) -> None:
         except (TypeError, ValueError):
             lag = 0
         gauges["lag_seconds"].labels(**labels).set(max(lag, 0))
+        gauges["degraded"].labels(**labels).set(
+            1 if bool(info.get("degraded", False)) else 0
+        )
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 

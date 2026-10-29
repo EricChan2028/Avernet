@@ -331,6 +331,38 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
                 self._keywords._ensure_client()
                 self._keywords._client.get_collection(self._keywords.collection_name)
 
+    def index_dependency_readiness(self) -> dict[str, bool]:
+        """Report dense and keyword Qdrant readiness without leaking errors.
+
+        Dense retrieval is the minimum serving dependency. A keyword-only
+        outage is therefore observable degradation rather than process-wide
+        unavailability. Exception details are intentionally reduced to booleans;
+        transport callers only need which dependency class failed.
+        """
+        dense_ready = True
+        keyword_ready = self._keywords_ready
+        with self._index_lock.read():
+            if self.connection.mode == "server":
+                try:
+                    self._ensure_client()
+                    self._qdrant._client.get_collection(self.collection_name)
+                except Exception:
+                    dense_ready = False
+            if self.keyword_connection.mode == "server" and keyword_ready:
+                try:
+                    self._keywords._ensure_client()
+                    self._keywords._client.get_collection(
+                        self._keywords.collection_name
+                    )
+                except Exception:
+                    keyword_ready = False
+        return {
+            "dense_qdrant_ready": dense_ready,
+            "keyword_qdrant_ready": keyword_ready,
+            "dense_qdrant_unavailable": not dense_ready,
+            "keyword_qdrant_unavailable": not keyword_ready,
+        }
+
     def size(self) -> int:
         self._ensure_client()
         return self._qdrant.size()

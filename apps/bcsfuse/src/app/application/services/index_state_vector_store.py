@@ -103,6 +103,53 @@ class IndexStateMaintainingVectorStore:
             self._mark_unavailable()
             return False
 
+    def index_dependency_readiness(self) -> dict[str, bool]:
+        """Propagate partial readiness while refreshing index ownership.
+
+        Older aggregate-only backends do not become unavailable merely because
+        they have not adopted the partial-probe contract. Their successful
+        probe maps to both dependencies; their explicit failure or exception
+        retains the previous aggregate 503 behavior.
+        """
+        partial_probe = getattr(self.backend, "index_dependency_readiness", None)
+        if partial_probe is not None:
+            result = dict(partial_probe())
+        else:
+            backend_ready = self.backend.check_ready() is not False
+            result = {
+                "dense_qdrant_ready": backend_ready,
+                "keyword_qdrant_ready": backend_ready,
+                "dense_qdrant_unavailable": not backend_ready,
+                "keyword_qdrant_unavailable": not backend_ready,
+            }
+        recovered_revision = False
+        try:
+            self._refresh_read_only()
+            # Preserve the legacy readiness recovery path: acknowledge a newer
+            # shared revision for a read-only replica, or rebuild a stale owner.
+            # Partial probes must not remove this bounded multi-replica recovery.
+            if self.index_revision_stale:
+                recovered_revision = True
+                if self.read_only:
+                    self.synchronize_read_view()
+                else:
+                    self.rebuild_from_backend()
+        except Exception as error:
+            logger.warning(
+                "[INDEX-STATE] partial readiness refresh failed: %s", error
+            )
+            self._mark_unavailable()
+            return {
+                **result,
+                "index_state_ready": False,
+                "index_revision_recovered": False,
+            }
+        return {
+            **result,
+            "index_state_ready": not self.index_state_unavailable,
+            "index_revision_recovered": recovered_revision,
+        }
+
     def upsert(self, *args: Any, **kwargs: Any):
         with self._write():
             result = self.backend.upsert(*args, **kwargs)

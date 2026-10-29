@@ -73,9 +73,13 @@ Worker-ID lookup; the TC adapter retains its existing exact Worker-ID priority.
 - A failed durable write or index update is returned as an error. TC index update
   failure marks the keyword index unready until reconstruction succeeds.
 - `/health` reports process liveness. `/ready` probes the dense and keyword
-  Server collections separately and reports 503 if either logical index cannot
-  be served. It exposes `qdrant_mode` and `keyword_qdrant_mode`, but never
-  endpoint URLs or credentials. Server connection failures never switch storage modes.
+  Server collections separately. Dense Qdrant is the hard serving dependency:
+  a dense outage returns 503, while a keyword-only outage returns 200 with
+  `degraded=true` and `keyword_qdrant_unavailable=true` because dense search and
+  the bounded literal fallback remain available. Existing single-cluster
+  deployments remain ready only when their collection probe succeeds. Readiness
+  exposes `qdrant_mode` and `keyword_qdrant_mode`, but never endpoint URLs,
+  provider errors or credentials. Server connection failures never switch storage modes.
 - Generic `QdrantRetrievalIndex` retains its Server collections across reopen;
   its owning application must replay failed writes and manage recovery. It does
   not implement a durable catalog or update scheduler itself.

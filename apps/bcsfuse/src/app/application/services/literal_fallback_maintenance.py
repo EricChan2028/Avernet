@@ -163,6 +163,16 @@ class LiteralFallbackMaintainingVectorStore:
     def backend(self) -> VectorStoreAdapter:
         return self._backend
 
+    def index_dependency_readiness(self) -> dict[str, bool]:
+        """Forward partial readiness while maintaining the local literal view."""
+        result = dict(self._backend.index_dependency_readiness())
+        # IndexState may acknowledge or rebuild a newly observed revision during
+        # the same probe. Reload the process-local literal view after that
+        # recovery without probing Qdrant twice.
+        if result.pop("index_revision_recovered", False):
+            self.literal_fallback_index.reload_from_store(self._backend)
+        return result
+
     def check_ready(self) -> bool:
         # Some adapters use ``None`` for a successful probe; only an explicit
         # false value means unavailable.

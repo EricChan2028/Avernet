@@ -331,8 +331,15 @@ Qdrant Server while keeping the same collection-name, owner lease and shared
 `index_version`. All other `QDRANT_KEYWORD_*` settings resolve independently,
 but Local/Server mode must match the dense connection. Without a keyword
 override, the existing single Qdrant Server and collection-pair behavior is
-unchanged. Readiness reports both `qdrant_mode` and `keyword_qdrant_mode`
-without exposing endpoints or credentials.
+unchanged. Readiness uses dense Qdrant as the hard serving dependency:
+`ready=true` survives a keyword-only outage only when the durable index state is
+available and not stale, and explicitly reports `degraded=true` plus
+`keyword_qdrant_unavailable=true`. A dense outage returns `ready=false` with
+`dense_qdrant_unavailable=true`; stale index state or state-store failure also
+returns 503 and cannot be masked by a successful Qdrant probe. Readiness reports
+both `qdrant_mode` and `keyword_qdrant_mode` without exposing endpoints,
+provider errors or credentials. The `bcsfuse_index_degraded` gauge is one when
+dense or keyword Qdrant is unavailable.
 
 A lease owner may execute `rebuild_from_backend` or `sync_incremental`. A
 read-only replica must not: both direct operations raise
