@@ -14,6 +14,7 @@ OBLIGATION_CLIENT_ID = 'DRAFT-DELIVERY.client-selected-idempotent-create'
 OBLIGATION_APPEND = 'DRAFT-DELIVERY.immutable-revision-append'
 OBLIGATION_STALE = 'DRAFT-DELIVERY.stale-update-conflict'
 OBLIGATION_READ_TOKEN = 'DRAFT-DELIVERY.read-token-single-revision'
+OBLIGATION_UNAVAILABLE = 'DRAFT-DELIVERY.revoked-or-deleted-unavailable'
 _UUID = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')
 
 
@@ -154,3 +155,30 @@ def check_read_token_single_revision(evidence: dict) -> None:
         _fail(OBLIGATION_READ_TOKEN, 'a second card was not bound to revision 2')
     if other.get('read_token_revision') != 2:
         _fail(OBLIGATION_READ_TOKEN, 'readToken was reused across revisions')
+
+
+def check_revoked_or_deleted_unavailable(evidence: dict) -> None:
+    """Revoked and deleted fixed reads are uniformly unavailable without leaks."""
+    availability = _mapping(evidence.get('availability'), 'availability observations',
+                            OBLIGATION_UNAVAILABLE)
+    revoked = _mapping(availability.get('revoked'), 'revoked revision', OBLIGATION_UNAVAILABLE)
+    if _integer(revoked.get('status'), 'revoked status', OBLIGATION_UNAVAILABLE) != 404:
+        _fail(OBLIGATION_UNAVAILABLE, 'revoked revision must be unavailable with 404')
+    if revoked.get('error') != 'DRAFT_REFERENCE_UNAVAILABLE':
+        _fail(OBLIGATION_UNAVAILABLE, 'revoked read leaked a different error')
+    sibling = _mapping(availability.get('historical_sibling'), 'historical sibling',
+                       OBLIGATION_UNAVAILABLE)
+    if _integer(sibling.get('status'), 'historical sibling status',
+                OBLIGATION_UNAVAILABLE) != 200:
+        _fail(OBLIGATION_UNAVAILABLE, 'revoking one revision made a sibling unavailable')
+    if sibling.get('content_hash') != evidence.get('fixture', {}).get('content_hash'):
+        _fail(OBLIGATION_UNAVAILABLE, 'historical sibling changed content')
+    deleted = _mapping(availability.get('deleted'), 'deleted draft', OBLIGATION_UNAVAILABLE)
+    if _integer(deleted.get('status'), 'deleted status', OBLIGATION_UNAVAILABLE) != 404:
+        _fail(OBLIGATION_UNAVAILABLE, 'deleted Draft revision must be unavailable with 404')
+    if deleted.get('error') != 'DRAFT_REFERENCE_UNAVAILABLE':
+        _fail(OBLIGATION_UNAVAILABLE, 'deleted read leaked a different error')
+    late = _mapping(availability.get('late_create'), 'late create', OBLIGATION_UNAVAILABLE)
+    if late.get('method') != 'PUT' or _integer(late.get('status'), 'late create status',
+                                               OBLIGATION_UNAVAILABLE) != 404:
+        _fail(OBLIGATION_UNAVAILABLE, 'late create revived a deleted Draft')

@@ -10,6 +10,7 @@ from bcs_e2e.draft_delivery.checks import (DraftDeliveryViolation,
                                            check_client_selected_idempotent_create,
                                            check_immutable_revision_append,
                                            check_read_token_single_revision,
+                                           check_revoked_or_deleted_unavailable,
                                            check_stale_update_conflict)
 from bcs_e2e.run_state import RunStateError
 
@@ -196,6 +197,53 @@ class ReadTokenSingleRevisionTests(unittest.TestCase):
                     value['cards']['historical']['read_without_token']['content_hash'] = UPDATED_HASH
                 with self.assertRaises(DraftDeliveryViolation):
                     check_read_token_single_revision(value)
+
+
+def availability_evidence():
+    return {
+        'fixture': {'content_hash': CONTENT_HASH},
+        'availability': {
+            'revoked': {'status': 404, 'error': 'DRAFT_REFERENCE_UNAVAILABLE'},
+            'historical_sibling': {'status': 200, 'content_hash': CONTENT_HASH},
+            'deleted': {'status': 404, 'error': 'DRAFT_REFERENCE_UNAVAILABLE'},
+            'late_create': {'method': 'PUT', 'status': 404},
+        },
+    }
+
+
+class RevokedOrDeletedUnavailableTests(unittest.TestCase):
+    def test_accepts_revocation_scoped_to_one_revision_and_delete_tombstone(self):
+        check_revoked_or_deleted_unavailable(availability_evidence())
+
+    def test_rejects_revoked_revision_that_remains_readable(self):
+        for field, replacement in (('status', 200),
+                                   ('error', 'DRAFT_INPUT')):
+            with self.subTest(field=field):
+                value = availability_evidence()
+                value['availability']['revoked'][field] = replacement
+                with self.assertRaises(DraftDeliveryViolation):
+                    check_revoked_or_deleted_unavailable(value)
+
+    def test_rejects_sibling_deleted_by_revoke(self):
+        value = availability_evidence()
+        value['availability']['historical_sibling']['status'] = 404
+        with self.assertRaisesRegex(RunStateError, 'sibling'):
+            check_revoked_or_deleted_unavailable(value)
+
+    def test_rejects_deleted_draft_revival(self):
+        for mutation in ('deleted_status', 'deleted_error', 'late_status', 'late_method'):
+            with self.subTest(mutation=mutation):
+                value = availability_evidence()
+                if mutation == 'deleted_status':
+                    value['availability']['deleted']['status'] = 200
+                elif mutation == 'deleted_error':
+                    value['availability']['deleted']['error'] = 'DRAFT_INPUT'
+                elif mutation == 'late_status':
+                    value['availability']['late_create']['status'] = 200
+                else:
+                    value['availability']['late_create']['method'] = 'POST'
+                with self.assertRaises(DraftDeliveryViolation):
+                    check_revoked_or_deleted_unavailable(value)
 
 
 if __name__ == '__main__':
