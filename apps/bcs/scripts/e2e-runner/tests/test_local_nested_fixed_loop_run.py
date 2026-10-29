@@ -21,6 +21,7 @@ from bcs_e2e.local_nested_fixed_loop_run import (
     local_nested_fixed_loop_run, validate_nested_fixed_loop_binary,
     validate_nested_fixed_loop_cli_binary)
 from bcs_e2e.run_state import RunStateError, read
+from bcs_e2e.inventory import current_manifest
 
 GOOD_STDOUT = (b'booting owned runtime\n'
                b'  Nested Bot: 17/15/2 routing, paths, history and stale callback verified\n'
@@ -603,7 +604,7 @@ class NestedEvidenceTamperTests(unittest.TestCase):
 
 
 class NestedIndependenceTests(unittest.TestCase):
-    def test_slice_stays_bound_to_the_34_story_backlog_parent(self):
+    def test_slice_stays_bound_to_the_frozen_inventory_backlog_parent(self):
         from bcs_e2e.inventory import current_manifest
         legacy = current_manifest()['legacy_inventory']
         self.assertEqual(len(legacy), len(current_manifest()['legacy_inventory']))

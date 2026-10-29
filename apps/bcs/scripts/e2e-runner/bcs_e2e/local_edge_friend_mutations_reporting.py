@@ -15,7 +15,7 @@ from .edge_friend_mutation_case import (
     RELEASE_CASE_IDS,
     edge_friend_mutation_case_plan,
 )
-from .inventory import current_manifest, executor_digest
+from .inventory import current_manifest, executor_digest, reviewed_release_inventory
 from .local_edge_friend_mutations_run import journal_filename
 from .profile import fingerprint
 from .run_state import RunStateError, read
@@ -219,7 +219,7 @@ def _summary(binding: dict, projected: dict, issues: list[str]):
                   'release_parent_cases': list(RELEASE_CASE_IDS),
                   'backlog_cases': list(BACKLOG_CASE_IDS),
                   'legacy_inventory_count': len(binding['legacy_inventory']),
-                  'release_parent_denominator': 29,
+                  'release_parent_denominator': len(reviewed_release_inventory()),
                   'backlog_case_count': len(BACKLOG_CASE_IDS),
                   'full_release_status': 'NOT_QUALIFIED',
                   'full_story_status': 'LOCAL_EXECUTOR_ONLY' if status == 'PASS' else 'NOT_QUALIFIED',

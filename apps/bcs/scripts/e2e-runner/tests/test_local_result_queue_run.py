@@ -19,6 +19,7 @@ from bcs_e2e.local_result_queue_run import (BINARY_KIND, HUMAN_ID, MOCK_ERR_LOG_
                                            _parse_story_marker, _redaction_gate, local_result_queue_run,
                                            validate_result_queue_binary)
 from bcs_e2e.run_state import RunStateError, read
+from bcs_e2e.inventory import current_manifest
 
 GOOD_STDOUT = (b'booting owned runtime\n'
                b'Queued result: owner Send, observer Inject, bound context and unique history verified\n')

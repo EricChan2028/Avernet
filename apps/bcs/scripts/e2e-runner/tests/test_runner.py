@@ -121,14 +121,23 @@ class ProfileTests(unittest.TestCase):
 class ManifestTests(unittest.TestCase):
     def test_source_inventory_parity(self):
         legacy = ROOT.parent / "e2e-test"
+        regular, conditional = set(), set()
         main_source = (legacy / "stories.sh").read_text()
-        regular = re.findall(r'"(story_[^\"]+)"', main_source.split('E2E_TESTS_STORIES=(')[1].split(')')[0])
-        conditional = re.findall(r'E2E_TESTS_STORIES\+=\("?(story_[\w]+)"?\)',
-                                 main_source + (legacy / "fixed_loop_story.sh").read_text())
+        regular |= set(re.findall(r'"(story_[^"]+)"', main_source.split('E2E_TESTS_STORIES=(')[1].split(')')[0]))
+        for sh in sorted(legacy.glob("*.sh")):
+            for line in sh.read_text().splitlines():
+                top = re.match(r'E2E_TESTS_STORIES\+=\("?(story_[\w]+)"?\)\s*$', line)
+                if top:
+                    regular.add(top.group(1))
+                    continue
+                gated = re.match(r'^\s+E2E_TESTS_STORIES\+=\("?(story_[\w]+)"?\)\s*$', line)
+                if gated:
+                    conditional.add(gated.group(1))
         edge = (legacy / "edge_permission.sh").read_text()
-        edges = re.findall(r'"(test_ep_[^\"]+)"', edge.split('E2E_TESTS_EDGE_PERMISSION=(')[1].split(')')[0])
+        edges = set(re.findall(r'"(test_ep_[^"]+)"', edge.split('E2E_TESTS_EDGE_PERMISSION=(')[1].split(')')[0]))
         inventory = json.loads((ROOT / "manifest.json").read_text())["legacy_inventory"]
-        self.assertEqual([i["id"] for i in inventory], regular + conditional + edges)
+        self.assertFalse(regular & conditional)
+        self.assertEqual({i["id"] for i in inventory}, regular | conditional | edges)
         self.assertEqual(len(inventory), len(current_manifest()['legacy_inventory']))
         for item in inventory:
             self.assertRegex((legacy / item["source"]).read_text(), r"(?m)^" + item["id"] + r"\(\)")

@@ -19,6 +19,7 @@ from bcs_e2e.local_draft_group_run import (BINARY_KIND, HUMAN_ID, MOCK_ERR_LOG_N
                                            _parse_story_marker, _redaction_gate, local_draft_group_run,
                                            validate_draft_group_binary)
 from bcs_e2e.run_state import RunStateError, read
+from bcs_e2e.inventory import current_manifest
 
 GOOD_STDOUT = (b'booting owned runtime\n'
                b'Draft group launch story: 42 live HTTP assertions passed (including cleanup)\n')

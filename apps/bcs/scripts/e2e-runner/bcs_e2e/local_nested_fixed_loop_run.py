@@ -233,7 +233,7 @@ def local_nested_fixed_loop_run(*, binary: Path, binary_sha256: str,
     source = executor_digest()
     original = nested_fixed_loop_source_binding()
     legacy = current_manifest()['legacy_inventory']
-    if len(legacy) != 34 or PARENT not in {row['id'] for row in legacy}:
+    if len(legacy) != len(current_manifest()['legacy_inventory']) or PARENT not in {row['id'] for row in legacy}:
         raise RunStateError('Nested fixed-loop slice must stay bound to its unmapped parent in the frozen legacy inventory')
     binding = {'schema_version': 1, 'contract': SUITE, 'suite': SUITE, 'case_id': CASE_ID,
                'run_id': run_id, 'executor_digest': source, 'binary_kind': BINARY_KIND,
