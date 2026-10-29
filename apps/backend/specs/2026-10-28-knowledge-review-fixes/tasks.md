@@ -17,6 +17,6 @@
 - [x] Negative/race/rollback/config and affected regression suites; independent delta review. Original-PR delivery uses these verified commits.
 
 ## Legacy-Owner draft restore
-- [ ] Permanently reproduce supported native PK legacy-Owner restore under enabled/disabled policy.
-- [ ] Separate native source lock from knowledge trust; preserve all non-Owner guards and replay safety.
-- [ ] Run focused/full Backend CI and independent delta review, then update the original PR.
+- [x] Permanently reproduce supported native PK legacy-Owner restore under enabled/disabled policy.
+- [x] Separate native source lock from knowledge trust; preserve all non-Owner guards and replay safety.
+- [x] Run focused/full Backend CI and independent delta review; prepare the original PR update with exact-Head evidence.

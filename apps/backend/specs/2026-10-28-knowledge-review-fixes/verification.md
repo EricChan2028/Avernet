@@ -228,3 +228,70 @@ This supersedes 2,848 as the final integrated test count for this repair. Ruff,
 blocking SAST and whitespace checks passed. Documentation closure follows this
 source; normal remote push hooks remain required. No production acceptance, merge,
 deployment, live configuration or DB operation is claimed.
+
+
+## Legacy-Owner draft-restore compatibility closure (2026-10-29)
+
+- Repair base: `81204810d27c7817c1db84b1106466f1c6821107`.
+- Reviewed implementation/test source: `a496ad647a3720bfb6637660f231dbf1e47bd802`.
+  The delivery follow-up changes verification documents only.
+- Original defect: native PK-based resolution accepts legacy publication Owner
+  metadata, but knowledge completion rejected it after the external draft restore
+  had already succeeded, incorrectly failing the native operation ledger.
+- The repair separates native source locking from knowledge snapshot trust.
+  PK/Bot ID/env/tenant/live service-Bot checks, writer reservation and locked
+  refresh remain. Build and online completion retain strict entity validation.
+  Draft or previous-publication entity mismatch now records knowledge UNKNOWN
+  with `KNOWLEDGE_PUBLISH_SOURCE_MISMATCH`, preserves all selection flags and
+  revisions, and completes the native restore ledger atomically. No history
+  fallback/backfill, schema, plugin, startup or shipped-policy change.
+- Permanent red evidence: before the implementation, the selected regression
+  cases returned **4 failed, 8 passed**; enabled native legacy-Owner restore and
+  draft/previous/both metadata cases failed. The disabled native path passed.
+- Final permanent regression file: **17 passed**. Focused restore/native suites:
+  **62 passed**; broader affected publishing/restore suites: **317 passed**.
+  Counts overlap each other and the full suite; do not add them together.
+- Standards/Spec/Performance incremental reviews were completed before this
+  resumed delivery, with no new evidenced P2+ reported. This resumed run keeps
+  their implementation/test source unchanged. Performance remains PASS WITH
+  RISKS; no production plan/locking/load acceptance is implied.
+- This resumed run also reran the independent reviewer's original positive
+  enabled/disabled native-PK witness: **2 passed**. The old expected-failure
+  witness was intentionally deselected, not converted into a passing regression.
+- First complete Backend run: **1 failed, 27,464 passed, 40 existing skipped,
+  2 subtests passed**, 469.14 seconds. Its sole failure was the unchanged
+  AgentSwarm native Bot creation E2E returning APPLY_FAILED, not the earlier
+  timer-tick assertion. That exact test then passed in isolation (**1 passed**,
+  1.76 seconds). Its root cause was not established; this failed full run is
+  not green and the isolated rerun does not replace the full gate.
+- Complete unchanged-runner retry at the same source passed: **27,465 passed,
+  40 existing skipped, 2 subtests passed**, 496.81 seconds. Case pass rate
+  **100.00%**, line coverage **90.60%**, changed-line coverage **95.14% (704/740)**;
+  required floors remain 75% / 80%. The previously failed AgentSwarm case also
+  passed in this full run. No source, test, skip, exclusion, timeout, worker-count
+  or threshold adjustment was made between the two full runs.
+
+  ```sh
+  # Python 3.12; reuse already installed dependencies, normal four-worker runner.
+  BACKEND_CI_SKIP_INSTALL=1 BACKEND_CI_PYTEST_WORKERS=4 \
+  PYTHONDONTWRITEBYTECODE=1 SERVER_ENV=dev \
+    apps/backend/scripts/ci_test.sh \
+      --base d381ddc926e50e0a23ebea13b7792d8e4b28a1c1 \
+      --head a496ad647a3720bfb6637660f231dbf1e47bd802
+  ```
+
+- Latest fetched release target remained
+  `REL20261029@f14bc3043cab0aef1e3e2e3a530adde270449314`; merge-tree verification
+  found no conflict (tree `42d81fcff763b53caf5b5a677898213a7c354562`).
+  The local full gate tests the exact feature source based on `d381ddc926e`,
+  not the combined newer release tree. Fresh remote merge-state Backend and
+  Singlebox checks remain required for the delivered Head.
+- Whitespace validation and source-file size checks passed (596-line helper,
+  217-line regression file). Original-PR delivery must retain the normal
+  plaintext-secret and blocking SAST pre-push gates. Default push hooks are
+  lint-only; the complete Backend run above is separate evidence.
+- Prior schema-only checks, SQLite/local boundary evidence and prior-Head CI
+  do not establish current runtime DB write access, MySQL/OceanBase query plans,
+  lock contention/multi-instance load, actual BaaS/OSS/ECB/MCP behavior or deployed
+  acceptance. No merge, deployment, live configuration change, production DML/DDL,
+  permission operation or historical backfill is performed by this repair.
