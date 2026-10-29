@@ -41,10 +41,14 @@ from app.domain.models.bot_recommendation import (
     BotRecommendationResponse,
     create_bot_recommendation_response,
 )
-from app.domain.models.retrieval_mode import RetrievalMode
 from app.adapters.http.dependencies.fusion_dependencies import (
     get_candidate_recommendation_service,
     get_question_rewrite_service,
+)
+from app.adapters.http.search_threadpool import run_search_in_threadpool
+from app.application.agent_search_service import (
+    AgentRecommendationCommand,
+    AgentSearchService,
 )
 from app.infra.trace_context import get_trace_id
 from app.application.utils.drm_config_helper import get_recommend_min_score
@@ -261,36 +265,25 @@ async def recommend_bots(
         f"retrieval_mode=EXPERT_DIAGNOSIS"
     )
 
-    # 构建向量搜索运行时配置
-    runtime_config = {}
-    runtime_config["expand_factor"] = request.expand_factor
-
-    # 处理 Reranker 配置（默认开启）
+    # 构建并执行统一应用服务命令。推荐仍是 query-based 检索，只是 projection
+    # 和阈值业务语义与 search 不同；公共 normalization/default filters/
+    # bounded execution 均由 AgentSearchService 承担。
     default_reranker_model = os.getenv("RERANKER_MODEL", "Qwen3-Reranker-4B")
-
-    if enable_rerank:
-        runtime_config["reranker_model"] = request.reranker_model or default_reranker_model
-    else:
-        runtime_config["reranker_model"] = None
-
-    # 设置默认过滤条件：如果未传 filters，默认只搜索 protected 和 public 的 profile
-    filters = request.filters
-    if filters is None:
-        filters = {"availability": ["protected", "public"]}
+    request_reranker_model = (
+        request.reranker_model or default_reranker_model if enable_rerank else None
+    )
 
     logger.debug(
         f"[RECOMMEND][{trace_id}] config | "
         f"enable_rerank_requested={enable_rerank}, "
-        f"reranker_model={runtime_config.get('reranker_model')}, "
-        f"expand_factor={runtime_config.get('expand_factor')}, "
-        f"filter_fields={sorted(filters)}"
+        f"reranker_model={request_reranker_model}, "
+        f"expand_factor={request.expand_factor}, "
+        f"filter_fields={sorted(request.filters or {})}"
     )
 
-    # 核心:复用现有服务,participants=None 触发全库推荐
-    # Phase B: 传递两个独立的阈值
     logger.debug(
         f"[RECOMMEND][{trace_id}] CALLING SERVICE | "
-        f"service=WorkerCandidateRecommendationImpl.recommend, "
+        f"service=AgentSearchService.recommend, "
         f"mode=EXPERT_DIAGNOSIS, "
         f"participants=None (全库推荐), "
         f"max_candidates={request.topK}, "
@@ -298,24 +291,34 @@ async def recommend_bots(
         f"rerank_min_score={rerank_min_score}"
     )
 
-    from app.adapters.http.search_threadpool import (
-        run_search_in_threadpool,
+    agent_search_service = AgentSearchService(
+        candidate_recommendation_service=candidate_service,
+        offload=run_search_in_threadpool,
     )
-
     try:
-        candidate_response = await run_search_in_threadpool(
-            candidate_service.recommend,
-            question=rewrite_question,
-            mode=RetrievalMode.EXPERT_DIAGNOSIS,  # 兼容场景标记，非切换到旧评分算法
-            participants=None,  # 关键:不传 participants,触发全库推荐
-            max_candidates=request.topK,
-            runtime_config=runtime_config if runtime_config else None,
-            filters=filters,
-            vector_min_score=vector_min_score,  # Phase B: 向量召回阈值
-            rerank_min_score=rerank_min_score,  # Phase B: rerank 后质量阈值
+        outcome = await agent_search_service.recommend(
+            AgentRecommendationCommand(
+                question=rewrite_question,
+                top_k=request.topK,
+                enable_rerank=enable_rerank,
+                reranker_model=request_reranker_model,
+                expand_factor=request.expand_factor,
+                vector_min_score=vector_min_score,
+                rerank_min_score=rerank_min_score,
+                min_score_explicit=explicit_min_score_provided,
+                filters=request.filters,
+            )
         )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "INVALID_RECOMMEND_COMMAND",
+                "message": "recommendation request is invalid",
+            },
+        ) from error
     except Exception as error:
-        logger.error("[RECOMMEND] core execution failed: %s", error, exc_info=True)
+        logger.error("[RECOMMEND] core execution failed: %s", type(error).__name__)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
@@ -323,6 +326,9 @@ async def recommend_bots(
                 "message": "recommendation service unavailable",
             },
         ) from error
+
+    candidate_response = outcome.response
+    runtime_config = outcome.config_applied
 
     # Phase D: 构建响应 metadata（在创建响应之前）
     metadata = candidate_response.metadata

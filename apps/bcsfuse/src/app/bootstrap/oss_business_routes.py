@@ -34,6 +34,10 @@ from fastapi import APIRouter, Request, HTTPException, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, model_validator
 
+from app.application.agent_search_service import (
+    AgentSearchCommand,
+    AgentSearchService,
+)
 from app.bootstrap.index_write_guard import ensure_writable_index
 from app.domain.services.search_filter_contract import (
     validate_v1_search_filters,
@@ -1434,11 +1438,9 @@ def include_oss_business_routes(app) -> None:
                 len(search_req.query), search_req.top_k,
             )
 
-            # --- Obtain services via fusion_dependencies ---
             from app.adapters.http.search_threadpool import (
                 run_search_in_threadpool,
             )
-
             from app.adapters.http.dependencies.fusion_dependencies import (
                 _get_vector_match_service,
                 _get_embedding_generator,
@@ -1446,71 +1448,34 @@ def include_oss_business_routes(app) -> None:
 
             match_service = _get_vector_match_service()
             embedding_gen = _get_embedding_generator()
-
-            if not match_service or not embedding_gen:
+            if not match_service:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail={
                         "code": "PROVIDER_NOT_AVAILABLE",
-                        "message": "match_service or embedding_generator not available",
+                        "message": "match_service not available",
                     },
                 )
 
-            # --- Generate query embedding ---
-            # The fragment matcher treats an empty query vector as semantic
-            # unavailability and continues with keyword/literal retrieval.
-            # An embedding outage therefore degrades instead of failing search.
-            try:
-                query_embedding = await run_search_in_threadpool(
-                    embedding_gen.embed, search_req.query
-                )
-                logger.info(
-                    "[Search OSS] Embedding generated, dimension=%d",
-                    len(query_embedding) if query_embedding else 0,
-                )
-            except Exception as error:
-                logger.warning(
-                    "[Search OSS] Query embedding unavailable (%s); "
-                    "using bounded keyword/literal retrieval",
-                    type(error).__name__,
-                )
-                query_embedding = []
-
-            # --- Visibility filters (aligned with internal defaults) ---
-            default_visibility = {
-                "availability": ["protected", "public"],
-            }
-            user_filters = dict(getattr(search_req, "filters", None) or {})
-            merged_filters = dict(user_filters)
-            if "availability" not in merged_filters:
-                merged_filters["availability"] = default_visibility["availability"]
-            if "runtime_state" not in merged_filters:
-                # OSS keeps runtime_state default for backwards compat
-                merged_filters["runtime_state"] = ["online"]
-
-            logger.info(
-                "[Search OSS] merged_filter_fields=%s",
-                sorted(merged_filters),
+            # --- Execute the unified application search service ---
+            # Query normalization, default filters, bounded execution, and
+            # embedding degradation are application policy, not route policy.
+            agent_search_service = AgentSearchService(
+                embedding_generator=embedding_gen,
+                vector_match_service=match_service,
+                offload=run_search_in_threadpool,
             )
-
-            # --- Build runtime_config (aligned with internal) ---
-            # V1 search is fast by default. Rerank is an explicit deployment
-            # choice through RERANKER_MODEL, never a silent hidden default.
-            runtime_config = {
-                "reranker_model": os.getenv("RERANKER_MODEL"),
-            }
-
-            # --- Execute match via service (fragment-aware) ---
-            results = await run_search_in_threadpool(
-                match_service.match,
-                query_embedding=query_embedding,
-                top_k=search_req.top_k,
-                query=search_req.query,
-                mode=getattr(search_req, "mode", "auto"),
-                min_score=getattr(search_req, "min_score", 0.0),
-                filters=merged_filters,
-                runtime_config=runtime_config if runtime_config else None,
+            outcome = await agent_search_service.search(
+                AgentSearchCommand(
+                    query=search_req.query,
+                    top_k=search_req.top_k,
+                    mode=getattr(search_req, "mode", "auto"),
+                    min_score=getattr(search_req, "min_score", 0.0),
+                    filters=getattr(search_req, "filters", None),
+                    reranker_model=os.getenv("RERANKER_MODEL"),
+                )
             )
+            results = outcome.results
             logger.info(
                 "[Search OSS] match returned %d results", len(results),
             )
@@ -1551,8 +1516,8 @@ def include_oss_business_routes(app) -> None:
                     "source": "vector",
                 })
 
-            # --- Build config_applied (aligned with internal) ---
-            config_applied = dict(runtime_config)
+            # --- Build config_applied from the application outcome ---
+            config_applied = outcome.config_applied
 
             elapsed_ms = (time.time() - start_time) * 1000
 

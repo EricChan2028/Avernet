@@ -76,6 +76,13 @@ Default v2 search and recommend use the same query-based candidate flow.
 Unsupported scenes, filters and extension keys fail validation; personalized or
 no-query recommendation is not introduced by this refactor.
 
+The public TC v1 search and recommendation routes delegate to
+``AgentSearchService`` before projecting their separate response formats. The
+service owns shared query normalization, scope defaults, bounded offloading,
+fast-rerank configuration, embedding degradation and stable dependency errors;
+route code does not own retrieval policy. This is an internal composition
+cleanup and does not change either v1 response schema.
+
 TC v2 bridges the synchronous candidate service through an injected executor and
 a bounded admission semaphore. Cancellation or timeout does not release capacity
 until underlying work finishes. The composition root owns executor startup and
