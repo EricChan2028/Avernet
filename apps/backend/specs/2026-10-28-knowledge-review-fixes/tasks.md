@@ -15,3 +15,8 @@
 - [x] Reproduce enabled-policy failure via real failure observation/retry.
 - [x] Add restricted recovery and ledger/status/ext/env fences; retain generic success gates.
 - [x] Negative/race/rollback/config and affected regression suites; independent delta review. Original-PR delivery uses these verified commits.
+
+## Legacy-Owner draft restore
+- [ ] Permanently reproduce supported native PK legacy-Owner restore under enabled/disabled policy.
+- [ ] Separate native source lock from knowledge trust; preserve all non-Owner guards and replay safety.
+- [ ] Run focused/full Backend CI and independent delta review, then update the original PR.
