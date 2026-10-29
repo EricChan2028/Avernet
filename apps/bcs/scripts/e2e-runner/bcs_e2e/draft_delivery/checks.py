@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 
 from ..run_state import RunStateError
+from .contract import REDACTION_TOKENS
 
 OBLIGATION_CLIENT_ID = 'DRAFT-DELIVERY.client-selected-idempotent-create'
 OBLIGATION_APPEND = 'DRAFT-DELIVERY.immutable-revision-append'
@@ -17,6 +18,9 @@ OBLIGATION_READ_TOKEN = 'DRAFT-DELIVERY.read-token-single-revision'
 OBLIGATION_UNAVAILABLE = 'DRAFT-DELIVERY.revoked-or-deleted-unavailable'
 OBLIGATION_READ_ONLY = 'DRAFT-DELIVERY.read-token-read-only'
 OBLIGATION_NO_STORE = 'DRAFT-DELIVERY.no-store-every-response'
+OBLIGATION_REDACTION = 'DRAFT-DELIVERY.token-redaction'
+REDACTION_STREAMS = ('story.stdout', 'story.stderr', 'owned.console')
+REDACTION_ARTIFACTS = ('child.receipt', 'flow.report', 'canonical.report')
 _UUID = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')
 
 
@@ -225,3 +229,40 @@ def check_no_store_every_response(evidence: dict) -> None:
     required = {200, 201, 204, 401, 404, 409}
     if not required.issubset(observed_statuses):
         _fail(OBLIGATION_NO_STORE, 'response matrix omitted success or error status coverage')
+
+
+def scan_redaction(name: str, payload: bytes, *,
+                   tokens: tuple[str, ...] = REDACTION_TOKENS) -> dict:
+    """Return a non-secret observation of whether a byte stream leaks a canary."""
+    if not isinstance(name, str) or not name:
+        _fail(OBLIGATION_REDACTION, 'redaction scan name is invalid')
+    if not isinstance(payload, bytes):
+        _fail(OBLIGATION_REDACTION, 'redaction scan payload must be bytes')
+    return {'name': name, 'clean': all(token.encode('utf-8') not in payload
+                                       for token in tokens),
+            'bytes': len(payload)}
+
+
+def check_token_redaction(evidence: dict) -> None:
+    """All child streams and persisted artifacts are free of draft-token canaries."""
+    redaction = _mapping(evidence.get('redaction'), 'redaction observations',
+                         OBLIGATION_REDACTION)
+    if redaction.get('token_material_captured') is not False:
+        _fail(OBLIGATION_REDACTION, 'the child captured token material')
+    for group, required in (('streams', REDACTION_STREAMS),
+                            ('artifacts', REDACTION_ARTIFACTS)):
+        entries = redaction.get(group)
+        if not isinstance(entries, list):
+            _fail(OBLIGATION_REDACTION, group + ' redaction observations are missing')
+        by_name = {}
+        for index, value in enumerate(entries):
+            entry = _mapping(value, group + ' redaction entry ' + str(index),
+                             OBLIGATION_REDACTION)
+            name = entry.get('name')
+            if not isinstance(name, str) or not name or name in by_name:
+                _fail(OBLIGATION_REDACTION, group + ' redaction names are invalid')
+            by_name[name] = entry
+            if entry.get('clean') is not True:
+                _fail(OBLIGATION_REDACTION, name + ' leaked a draft-token canary')
+        if not set(required).issubset(by_name):
+            _fail(OBLIGATION_REDACTION, group + ' redaction coverage is incomplete')

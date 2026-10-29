@@ -11,9 +11,11 @@ from bcs_e2e.draft_delivery.checks import (DraftDeliveryViolation,
                                            check_immutable_revision_append,
                                            check_read_token_single_revision,
                                            check_no_store_every_response,
+                                           check_token_redaction,
                                            check_read_token_read_only,
                                            check_revoked_or_deleted_unavailable,
-                                           check_stale_update_conflict)
+                                           check_stale_update_conflict,
+                                           scan_redaction)
 from bcs_e2e.run_state import RunStateError
 
 DRAFT_ID = '750c52c6-60e2-4249-8ee5-1fb8cb9402ab'
@@ -327,6 +329,58 @@ class NoStoreEveryResponseTests(unittest.TestCase):
                     value['responses'][0]['path'] = '/health'
                 with self.assertRaises(DraftDeliveryViolation):
                     check_no_store_every_response(value)
+
+
+def redaction_evidence():
+    return {
+        'redaction': {
+            'token_material_captured': False,
+            'streams': [
+                {'name': 'story.stdout', 'clean': True},
+                {'name': 'story.stderr', 'clean': True},
+                {'name': 'owned.console', 'clean': True},
+            ],
+            'artifacts': [
+                {'name': 'child.receipt', 'clean': True},
+                {'name': 'flow.report', 'clean': True},
+                {'name': 'canonical.report', 'clean': True},
+            ],
+        },
+    }
+
+
+class TokenRedactionTests(unittest.TestCase):
+    def test_accepts_complete_clean_redaction_matrix(self):
+        check_token_redaction(redaction_evidence())
+
+    def test_scanner_detects_every_canary_without_echoing_values(self):
+        for canary in ('bot_token', 'readToken', 'read_token', 'Bearer '):
+            with self.subTest(canary=canary):
+                observation = scan_redaction('stream', ('safe ' + canary + ' tail').encode())
+                self.assertEqual(observation['name'], 'stream')
+                self.assertFalse(observation['clean'])
+                self.assertNotIn(canary, str(observation))
+
+    def test_rejects_any_leaking_stream_or_artifact(self):
+        for group in ('streams', 'artifacts'):
+            with self.subTest(group=group):
+                value = redaction_evidence()
+                value['redaction'][group][0]['clean'] = False
+                with self.assertRaisesRegex(RunStateError, 'leaked a draft-token canary'):
+                    check_token_redaction(value)
+
+    def test_rejects_incomplete_coverage_or_captured_material(self):
+        for mutation in ('missing_stream', 'missing_artifact', 'captured'):
+            with self.subTest(mutation=mutation):
+                value = redaction_evidence()
+                if mutation == 'missing_stream':
+                    value['redaction']['streams'].pop()
+                elif mutation == 'missing_artifact':
+                    value['redaction']['artifacts'].pop()
+                else:
+                    value['redaction']['token_material_captured'] = True
+                with self.assertRaises(DraftDeliveryViolation):
+                    check_token_redaction(value)
 
 
 if __name__ == '__main__':
