@@ -29,7 +29,7 @@ import time
 import uuid
 
 from .bounded_process import ProcessCaptureError, capture
-from .local_cli import require_cli_binary
+from .local_cli import cli_failure_detail, require_cli_binary
 from .profile import ConfigError, identifier, object_keys, origin, parsed_origin, unique_keys
 from .run_state import write
 
@@ -521,7 +521,9 @@ class OperatorCliRunner:
                     raw = raw.replace(secret, b"<redacted-credential>")
             exit_code = result.returncode
             if expect_zero and exit_code != 0:
-                raise OperatorCliRunnerError("operator product CLI returned nonzero")
+                raise OperatorCliRunnerError(
+                    "operator product CLI returned nonzero: " + cli_failure_detail(
+                        raw, result.stderr, tuple(secrets)))
         except ProcessCaptureError as error:
             public = OperatorCliRunnerError("operator product CLI process failed")
             if getattr(error, "child_shutdown_status", None) == "UNCONFIRMED":

@@ -15,7 +15,10 @@ from .collaboration_team_http import (
 )
 from .collaboration_team_http import delete_group as delete_group_request
 from .collaboration_team_profile import validate_collaboration_team_profile
-from .local_cli import require_cli_binary
+from .local_cli import (
+    cli_failure_detail, require_cli_binary,
+    station_cli_auth_failure_detail,
+)
 from .profile import identifier, text, unique_keys
 from .run_state import write
 
@@ -389,11 +392,18 @@ class CollaborationTeamRunner:
                              max_output_bytes=self.max_response_bytes)
             if result.returncode != 0:
                 raise CollaborationTeamRunnerError(
-                    "collaboration-team product CLI returned nonzero")
+                    "collaboration-team product CLI returned nonzero: "
+                    + cli_failure_detail(result.stdout, result.stderr,
+                                         (credential.encode(),)))
             if (credential.encode() in result.stdout
                     or credential.encode() in result.stderr):
                 raise CollaborationTeamRunnerError(
                     "collaboration-team CLI emitted its credential")
+            auth_gap = station_cli_auth_failure_detail(result.stdout)
+            if auth_gap is not None:
+                raise CollaborationTeamRunnerError(
+                    "collaboration-team product CLI station auth is unavailable: "
+                    + auth_gap)
             if operation in ("group.create", "termination.group.create",
                             "group_context.workspace"):
                 data = self._parse_group_create(result.stdout)

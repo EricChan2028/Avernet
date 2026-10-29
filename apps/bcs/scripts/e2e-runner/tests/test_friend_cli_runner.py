@@ -159,6 +159,39 @@ class FriendCliRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(FriendCliRunnerError, "already executed"):
             runner.execute("friend.list")
 
+    def test_nonzero_output_is_bounded_redacted_and_journaled(self):
+        profile = validate_friend_cli_profile(profile_value(gateway=True))
+        runner = FriendCliRunner(profile, binary=self.binary,
+                                 binary_sha256=self.digest, state_dir=self.root)
+
+        def fake_capture(cmd, **kwargs):
+            return subprocess.CompletedProcess(cmd, 1, b'{"status":"auth_failed"}',
+                                                 b"stderr-marker")
+
+        with patch.dict(os.environ, self.env), \
+             patch("bcs_e2e.friend_cli_runner.capture", side_effect=fake_capture):
+            with self.assertRaises(FriendCliRunnerError) as caught:
+                runner.execute("friend.requests.before")
+        message = str(caught.exception)
+        self.assertIn("nonzero", message)
+        self.assertIn("stderr-marker", message)
+
+        redacted = json.dumps({"echo": COOKIE}).encode() + b" " + b"a" * 700
+
+        def leaking_capture(cmd, **kwargs):
+            return subprocess.CompletedProcess(cmd, 1, redacted, b"")
+
+        bounded = FriendCliRunner(profile, binary=self.binary,
+                                  binary_sha256=self.digest, state_dir=self.root)
+        with patch.dict(os.environ, self.env), \
+             patch("bcs_e2e.friend_cli_runner.capture",
+                   side_effect=leaking_capture):
+            with self.assertRaises(FriendCliRunnerError) as caught:
+                bounded.execute("friend.requests.before")
+        bounded_message = str(caught.exception)
+        self.assertNotIn(COOKIE, bounded_message)
+        self.assertLessEqual(len(bounded_message), 600)
+
     def test_nonzero_or_leaking_cli_blocks(self):
         with self.assertRaisesRegex(FriendCliRunnerError, "nonzero"):
             self.run_execute("friend.request", returncode=1)

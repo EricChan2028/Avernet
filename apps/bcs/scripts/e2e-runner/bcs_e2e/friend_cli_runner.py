@@ -11,7 +11,10 @@ import uuid
 
 from .bounded_process import capture, ProcessCaptureError
 from .friend_cli_profile import validate_friend_cli_profile
-from .local_cli import require_cli_binary
+from .local_cli import (
+    cli_failure_detail, require_cli_binary,
+    station_cli_auth_failure_detail,
+)
 from .profile import unique_keys
 from .run_state import write
 
@@ -165,10 +168,16 @@ class FriendCliRunner:
                 max_output_bytes=self.profile["policy"]["max_response_bytes"],
             )
             if result.returncode != 0:
-                raise FriendCliRunnerError("friendship product CLI returned nonzero")
+                raise FriendCliRunnerError(
+                    "friendship product CLI returned nonzero: " + cli_failure_detail(
+                        result.stdout, result.stderr, (credential.encode(),)))
             raw = result.stdout
             if credential.encode() in raw:
                 raise FriendCliRunnerError("friendship product CLI emitted its credential")
+            auth_gap = station_cli_auth_failure_detail(raw)
+            if auth_gap is not None:
+                raise FriendCliRunnerError(
+                    "friendship product CLI station auth is unavailable: " + auth_gap)
             data = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_keys)
         except ProcessCaptureError as error:
             public = FriendCliRunnerError("friendship product CLI process failed")

@@ -25,7 +25,10 @@ from bcs_e2e.collaboration_team_profile import (
     ConfigError,
     validate_collaboration_team_profile,
 )
-from bcs_e2e.collaboration_team_runner import CollaborationTeamRunner
+from bcs_e2e.collaboration_team_runner import (
+    CollaborationTeamRunner,
+    CollaborationTeamRunnerError,
+)
 from bcs_e2e.migration_inventory import migration_plan
 
 ENG = "engineering-bot"
@@ -107,6 +110,39 @@ class CollaborationTeamContractTests(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
+
+    def test_nonzero_output_is_bounded_redacted_and_journaled(self):
+        runner = self.runner(gateway=True)
+        cookie = "human-cookie-private-value"
+
+        def fake_capture(command, **kwargs):
+            return subprocess.CompletedProcess(command, 1,
+                                                 b'{"status":"auth_failed"}',
+                                                 b"collab-stderr-marker")
+
+        with patch.dict("os.environ", {"BCS_E2E_HUMAN_COOKIE": cookie}), \
+             patch("bcs_e2e.collaboration_team_runner.capture",
+                   side_effect=fake_capture):
+            with self.assertRaises(CollaborationTeamRunnerError) as caught:
+                runner.execute("group.list")
+        message = str(caught.exception)
+        self.assertIn("nonzero", message)
+        self.assertIn("collab-stderr-marker", message)
+
+        redacted = json.dumps({"echo": cookie}).encode() + b" " + b"b" * 700
+
+        def leaking_capture(command, **kwargs):
+            return subprocess.CompletedProcess(command, 1, redacted, b"")
+
+        bounded = self.runner(gateway=True)
+        with patch.dict("os.environ", {"BCS_E2E_HUMAN_COOKIE": cookie}), \
+             patch("bcs_e2e.collaboration_team_runner.capture",
+                   side_effect=leaking_capture):
+            with self.assertRaises(CollaborationTeamRunnerError) as caught:
+                bounded.execute("group.list")
+        bounded_message = str(caught.exception)
+        self.assertNotIn(cookie, bounded_message)
+        self.assertLessEqual(len(bounded_message), 600)
 
     def runner(self, *, gateway=False, outputs=None):
         profile = validate_collaboration_team_profile(profile_value(gateway=gateway))

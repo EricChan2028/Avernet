@@ -15,8 +15,10 @@ from bcs_e2e.local_cli import (
     LocalCliError,
     OwnedLocalSessionCli,
     _execute,
+    cli_failure_detail,
     create_custom_collaboration_group,
     run_custom_collaboration_trial,
+    station_cli_auth_failure_detail,
     validate_collaboration_yaml,
 )
 from bcs_e2e.owned_bcs import file_sha256
@@ -27,6 +29,38 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class LocalCliTests(unittest.TestCase):
+    def test_cli_failure_detail_redacts_bounds_and_decodes(self):
+        secret = b"cookie-private-value"
+        stdout = b'{"status":"auth_failed"} echo=' + secret
+        long_stderr = b"\xff\xfe broken " + secret + b"c" * 700
+        detail = cli_failure_detail(stdout, long_stderr, (secret, b""))
+        self.assertNotIn("cookie-private-value", detail)
+        self.assertIn("<redacted-credential>", detail)
+        self.assertIn("stderr=", detail)
+        self.assertIn("broken", detail)
+        self.assertLessEqual(len(detail), 500)
+        bounded = cli_failure_detail(b"a" * 900, b"", ())
+        self.assertLessEqual(len(bounded), 500)
+        self.assertEqual(cli_failure_detail(b"", b"", ()), "")
+
+    def test_station_cli_auth_gap_envelope_is_recognized(self):
+        envelope = json.dumps({
+            "status": "auth_failed",
+            "message": "CLI OAuth via the internal office-network SDK is not "
+                       "available in the public build",
+            "network_env": "office"}).encode()
+        detail = station_cli_auth_failure_detail(envelope)
+        self.assertIsNotNone(detail)
+        self.assertIn("CLI OAuth", detail)
+        self.assertIn("office", detail)
+        self.assertIsNone(station_cli_auth_failure_detail(
+            json.dumps({"status": "ok"}).encode()))
+        self.assertIsNone(station_cli_auth_failure_detail(b"\xff not json"))
+        self.assertIsNone(station_cli_auth_failure_detail(
+            json.dumps({"status": "auth_failed",
+                        "message": "bad password"}).encode()))
+        self.assertIsNone(station_cli_auth_failure_detail(b""))
+
     def setUp(self):
         tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name); self.state = self.root / 'state'

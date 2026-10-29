@@ -710,8 +710,10 @@ class OperatorCliCommandTests(OperatorCliHarness):
     def test_nonzero_exit_blocks_the_case(self):
         script = CliScript()
         script.nonzero = ("list",)
-        with self.assertRaisesRegex(OperatorCliRunnerError, "nonzero"):
+        with self.assertRaises(OperatorCliRunnerError) as caught:
             self.run_prefix(OPERATOR_CLI_LIST, script=script)
+        self.assertIn("nonzero", str(caught.exception))
+        self.assertIn("forced nonzero", str(caught.exception))
 
     def test_leaked_credentials_are_scrubbed_before_projection(self):
         script = CliScript()

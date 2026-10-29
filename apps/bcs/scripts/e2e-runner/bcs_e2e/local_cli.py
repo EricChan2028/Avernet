@@ -32,6 +32,37 @@ class LocalCliError(RuntimeError):
     pass
 
 
+def cli_failure_detail(stdout: bytes, stderr: bytes,
+                       secrets: tuple[bytes, ...]) -> str:
+    """Redact credentials, then bound dual-environment CLI failure output."""
+    chunks = (stdout, stderr)
+    for secret in secrets:
+        if secret:
+            chunks = tuple(chunk.replace(secret, b"<redacted-credential>")
+                           for chunk in chunks)
+    parts: list[str] = []
+    for label, chunk in zip(("stdout", "stderr"), chunks):
+        text = chunk.decode("utf-8", errors="replace").strip()
+        if text:
+            parts.append(label + "=" + repr(text))
+    return "; ".join(parts)[:500]
+
+
+def station_cli_auth_failure_detail(stdout: bytes) -> str | None:
+    """Recognize the station CLI OAuth build-gap envelope that exits rc=0."""
+    try:
+        payload = json.loads(stdout.decode("utf-8", errors="replace"))
+    except (UnicodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("status") != "auth_failed":
+        return None
+    message = str(payload.get("message", "")).strip()
+    if "CLI OAuth" not in message and "office" not in message.lower():
+        return None
+    network_env = str(payload.get("network_env", "")).strip()
+    return f"CLI OAuth build gap (network_env={network_env}): {message}"[:300]
+
+
 def require_cli_binary(binary: Path, binary_sha256: str) -> None:
     """Validate the explicitly selected product artifact before any startup."""
     if (not isinstance(binary_sha256, str) or len(binary_sha256) != 64
