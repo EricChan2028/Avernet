@@ -1,0 +1,377 @@
+{
+  "schema_version": 1,
+  "parent": "story_provider_owner_isolation",
+  "suite": "owned-local-provider-owner-v1",
+  "case_id": "LOCAL-PROVIDER-OWNER-01",
+  "environment": {
+    "local": "LOCAL_EXECUTOR_ONLY",
+    "preprod": "REMOTE_UNSUPPORTED"
+  },
+  "sources": {
+    "provider_scope_story.py": "389176bcfb5e8d217074f4e28f5a3e2a1693b83017bc61f385789d089bf99518",
+    "provider_scope_story.sh": "40f97dc908dac01299399cefc3401dae6af03cd305065a144c6e7a166a584c7f"
+  },
+  "source_revision": "f181ba448a8bd5844c9517d8543ff3b6bb9d66bb",
+  "source_file_revisions": {
+    "provider_scope_story.py": "f181ba448a8bd5844c9517d8543ff3b6bb9d66bb",
+    "provider_scope_story.sh": "f181ba448a8bd5844c9517d8543ff3b6bb9d66bb"
+  },
+  "story_checks": 45,
+  "story_markers": [
+    "Provider scope story: {checks} live API assertions passed"
+  ],
+  "owned_runtime_binary": {
+    "package": "bcs",
+    "build_command": "cargo build -p bcs --bin bcs",
+    "hash_algorithm": "sha256",
+    "opt_in_env": [
+      "BCS_E2E_TEST_BINARY",
+      "BCS_E2E_TEST_BINARY_SHA256"
+    ],
+    "auto_build": false,
+    "required_arguments": [
+      "--binary",
+      "--binary-sha256"
+    ]
+  },
+  "requirements": [
+    {
+      "id": "PROVIDER-OWNER.mock-human-bootstrap",
+      "expectation": "Mock-admission loopback bootstrap: the story ensures the owner Human principal and a disjoint foreign Human principal exist through the loopback X-Mock-User-Id header before any business request; every later call carries the mock identity of exactly one of the two Humans.",
+      "story_lines": [
+        102,
+        103
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-OWNER.provider-registration",
+      "expectation": "The story registers one disposable Provider with static_bearer auth, a placeholder webhook_url and collaboration_scope standard; the response carries the provider_id and the provider_admin_token used by later admin calls.",
+      "story_lines": [
+        104,
+        108
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-OWNER.provider-bot-mint",
+      "expectation": "Four provider Bots are minted through the provider admin token: one restricted-scope Bot owned by the owner, one Bot under a second standard-scope Provider owned by the owner, one restricted-scope Bot owned by the foreign Human (foreign scope), and later one owner-owned third Bot; each mint returns its bot_uuid.",
+      "story_lines": [
+        109,
+        115
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-OWNER.public-visibility-writes",
+      "expectation": "The owner sets public visibility on its own two Bots and the foreign Human sets public visibility on its own foreign-scope Bot; each PUT /bots/{bot_uuid}/visibility succeeds for the minting owner only.",
+      "story_lines": [
+        116,
+        118
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-OWNER.public-group-create",
+      "expectation": "The standard-scope (cloud) Bot drives a public Group whose participants are the owner restricted-scope Bot and the owner Human (human_<owner>); group creation succeeds and returns the group id used by every later boundary exercise.",
+      "story_lines": [
+        119,
+        119
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-OWNER.restricted-scope-downgrade-denied",
+      "expectation": "While the restricted policy protects the group membership, PATCHing the restricted Provider to collaboration_scope same_owner together with a rename is rejected 409 and leaves the Provider metadata unchanged: name stays the original and collaboration_scope stays standard.",
+      "story_lines": [
+        120,
+        122
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-OWNER.group-private-transition",
+      "expectation": "PATCHing the Group to visibility private succeeds; the private transition itself is not the policy barrier for restricted Provider Bots.",
+      "story_lines": [
+        123,
+        123
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-OWNER.same-owner-promotion",
+      "expectation": "The provider admin token promotes the restricted Provider to collaboration_scope same_owner, and the promoted scope is observable through the authenticated provider metadata read-back.",
+      "story_lines": [
+        124,
+        125
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-OWNER.legacy-standard-downgrade-denied",
+      "expectation": "Once any restricted-scope Bot is attached to the Group, downgrading the restricted Provider back to collaboration_scope standard is rejected 403: the restricted policy is a one-way gate for attached Bots.",
+      "story_lines": [
+        126,
+        126
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-OWNER.restricted-bot-attach",
+      "expectation": "Under the current restricted policy the owner mints a third restricted Bot, sets it public and adds it as a member of the private Group; the restricted attachment path itself succeeds.",
+      "story_lines": [
+        127,
+        130
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-OWNER.foreign-member-add-denied",
+      "expectation": "Adding the foreign-scope restricted Bot to the private Group is rejected 403: same_owner collaboration forbids cross-owner membership.",
+      "story_lines": [
+        131,
+        131
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-OWNER.restricted-driver-foreign-member-denied",
+      "expectation": "Creating a new Group driven by the owner restricted-scope Bot with the foreign-scope Bot as participant is rejected 403.",
+      "story_lines": [
+        132,
+        132
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-OWNER.foreign-driver-group-denied",
+      "expectation": "Creating a new Group driven by the foreign-scope restricted Bot with the owner Bot as participant is rejected 403.",
+      "story_lines": [
+        133,
+        133
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-OWNER.cross-provider-member-denied",
+      "expectation": "Creating a public Group driven by the owner restricted-scope Bot with the standard-scope cloud Bot as participant is rejected 403: restricted Bots may not collaborate into public cross-scope Groups.",
+      "story_lines": [
+        134,
+        134
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-OWNER.restricted-group-visibility-upgrade-denied",
+      "expectation": "PATCHing the private Group back to public visibility is rejected 403 while restricted Provider Bots remain members.",
+      "story_lines": [
+        135,
+        135
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-OWNER.private-bot-collaboration-without-friendship",
+      "expectation": "The exact private-Bot collaboration requirement needs no friendship: setting the cloud Bot private, creating a Group driven by the owner Bot with the private cloud Bot as participant succeeds, and the cloud Bot is restored to public afterwards.",
+      "story_lines": [
+        136,
+        139
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-OWNER.invite-foreign-join-denied",
+      "expectation": "The invite-link surface mints an invite_token for the owner; the foreign Human joining through that link is rejected 403 while the owner Human joining through the same link succeeds.",
+      "story_lines": [
+        140,
+        142
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-OWNER.session-owner-boundary",
+      "expectation": "Creating a chat Session on the Group returns 201 with a session_id for the owner, while the foreign Human creating a Session on the same Group is rejected 403.",
+      "story_lines": [
+        143,
+        144
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-OWNER.session-messages-owner-boundary",
+      "expectation": "Reading Session messages succeeds for the owner Human and is rejected 400 for the foreign Human: session-scoped reads carry the owner boundary.",
+      "story_lines": [
+        145,
+        147
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-OWNER.session-foreign-chat-denied",
+      "expectation": "Posting a chat message to the owner Session as the foreign Human is rejected 403 before any delivery occurs.",
+      "story_lines": [
+        148,
+        148
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-OWNER.workbench-ws-owner-boundary",
+      "expectation": "The Workbench WebSocket answers the 101 Switching Protocols upgrade and the exact connect request projection respects the owner boundary: the owner Human connect converges ok=true and the foreign Human connect converges ok=false.",
+      "story_lines": [
+        149,
+        150
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-OWNER.legacy-restore-on-restricted-bot-removal",
+      "expectation": "Removing all restricted Bots from the Group membership restores legacy behavior without a permanent group policy: the visibility patch to public succeeds, the foreign Human joins through the earlier invite link, reads the Session messages and converges its Workbench connect to ok=true.",
+      "story_lines": [
+        151,
+        157
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-OWNER.restricted-member-readd-denied",
+      "expectation": "Re-adding the owner restricted-scope Bot to the restored legacy Group is still rejected 403, and the story prints the frozen live-API assertion count marker.",
+      "story_lines": [
+        158,
+        159
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-OWNER.cleanup-disposition",
+      "expectation": "Teardown deletes both Groups through the bot_id query of their respective drivers and deletes every minted provider Bot through the provider admin token; any cleanup failure fails the whole story instead of leaking provider state.",
+      "story_lines": [
+        161,
+        166
+      ],
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ]
+    }
+  ],
+  "remote_validation": "NOT_RUN",
+  "grants_release_credit": false,
+  "release_parent_denominator": false,
+  "independent_slice": true,
+  "evidence_granularity": "OWNED_CHILD_RECEIPT",
+  "documented_gaps": {
+    "PREPROD_PROVIDER_ADMIN_FACE_ABSENT": "The preprod faces expose group.* and session.* routes only (profiles/preprod.example.json route_bindings and the live preprod profile); the Provider registration/admin surface (/providers, /providers/{provider_id}/bots) is a BCS-internal face authenticated by the provider_admin_token bearer and admitted through loopback X-Mock-User-Id headers, neither of which exists on the preprod gateway, and no provider_admin_token credential channel is declared in any preprod profile auth.header_env. Remote preprod execution of this slice is unsupported by design, not by missing effort.",
+    "OWNED_LOCAL_PROVIDER_BOT_OWNER_EDGE_DRIFT": "Live owned-runtime replay on the current dev binary (first attempted 2026-10-30 against apps/bcs/target/debug/bcs, binary sha256 dcbc39f07cedb62c8764987caa9fb05983dd7b3b1e6185022281cf0daa73d8d3) blocks at story request 8: PUT /bots/{bot_uuid}/visibility answered 403 \"owner or manager role required for bot bot_...\" and GET /bots/{bot_uuid} answered 403 \"Not authorized to access bot\". Provider Bot registration records created_by but never seeds bcs-edge-permission owner/manager edges, and POST /me/ensure-human backfills only list_legacy_bots_for_owner (legacy registration path), so the minting Human never gains an authority role over provider-registered Bots. The upstream story was frozen at f181ba44 (2026-10-22, provider-scoped owner collaboration #2654) and predates the bot-authority model c6f001209 (2026-10-27, #2625) that made these surfaces require authority edges. The frozen map stays unmodified; the drift is recorded here and the slice stays LOCAL_EXECUTOR_ONLY BLOCKED until a reviewed product decision re-scopes either the seeding contract or the story.",
+    "WORKBENCH_WS_MOCK_ADMISSION": "The Workbench WebSocket 101 upgrade and the owner/foreign connect projection boundary depend on loopback X-Mock-User-Id admission available only on the owned-local runtime; no preprod Workbench WebSocket evidence is claimed by this slice."
+  },
+  "adaptability": {
+    "case_id": "LOCAL-PROVIDER-OWNER-01",
+    "legacy_id": "story_provider_owner_isolation",
+    "requirement_ids": [
+      "PROVIDER-OWNER.mock-human-bootstrap",
+      "PROVIDER-OWNER.provider-registration",
+      "PROVIDER-OWNER.provider-bot-mint",
+      "PROVIDER-OWNER.public-visibility-writes",
+      "PROVIDER-OWNER.public-group-create",
+      "PROVIDER-OWNER.restricted-scope-downgrade-denied",
+      "PROVIDER-OWNER.group-private-transition",
+      "PROVIDER-OWNER.same-owner-promotion",
+      "PROVIDER-OWNER.legacy-standard-downgrade-denied",
+      "PROVIDER-OWNER.restricted-bot-attach",
+      "PROVIDER-OWNER.foreign-member-add-denied",
+      "PROVIDER-OWNER.restricted-driver-foreign-member-denied",
+      "PROVIDER-OWNER.foreign-driver-group-denied",
+      "PROVIDER-OWNER.cross-provider-member-denied",
+      "PROVIDER-OWNER.restricted-group-visibility-upgrade-denied",
+      "PROVIDER-OWNER.private-bot-collaboration-without-friendship",
+      "PROVIDER-OWNER.invite-foreign-join-denied",
+      "PROVIDER-OWNER.session-owner-boundary",
+      "PROVIDER-OWNER.session-messages-owner-boundary",
+      "PROVIDER-OWNER.session-foreign-chat-denied",
+      "PROVIDER-OWNER.workbench-ws-owner-boundary",
+      "PROVIDER-OWNER.legacy-restore-on-restricted-bot-removal",
+      "PROVIDER-OWNER.restricted-member-readd-denied",
+      "PROVIDER-OWNER.cleanup-disposition"
+    ],
+    "selected_obligations": [
+      "mock-human-bootstrap",
+      "provider-registration",
+      "provider-bot-mint",
+      "public-visibility-writes",
+      "public-group-create",
+      "restricted-scope-downgrade-denied",
+      "group-private-transition",
+      "same-owner-promotion",
+      "legacy-standard-downgrade-denied",
+      "restricted-bot-attach",
+      "foreign-member-add-denied",
+      "restricted-driver-foreign-member-denied",
+      "foreign-driver-group-denied",
+      "cross-provider-member-denied",
+      "restricted-group-visibility-upgrade-denied",
+      "private-bot-collaboration-without-friendship",
+      "invite-foreign-join-denied",
+      "session-owner-boundary",
+      "session-messages-owner-boundary",
+      "session-foreign-chat-denied",
+      "workbench-ws-owner-boundary",
+      "legacy-restore-on-restricted-bot-removal",
+      "restricted-member-readd-denied",
+      "cleanup-disposition"
+    ],
+    "public_paths": [],
+    "environments": [
+      "owned-local-full-story"
+    ],
+    "local_executor_status": "LOCAL_EXECUTOR_ONLY",
+    "remote_validation": "NOT_RUN",
+    "grants_release_credit": false,
+    "blocker": "The Provider registration/admin face is absent from the preprod public-v1 route bindings and no provider_admin_token credential channel exists there (PREPROD_PROVIDER_ADMIN_FACE_ABSENT), and the owned-local live replay currently blocks because provider-registered Bots receive no authority owner edges (OWNED_LOCAL_PROVIDER_BOT_OWNER_EDGE_DRIFT). Neither environment grants release credit."
+  }
+}
