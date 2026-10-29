@@ -36,6 +36,28 @@ change runtime configuration or automatically install/activate itself.
 This is a product runtime Skill, intentionally exempt from global Claude/Codex
 agent/skill directory parity: neither global directory is modified.
 
+## Default Chat behavior
+
+When the current Chat generates or modifies completed workspace output files,
+the Skill invokes the CLI automatically, without a second publish request or
+confirmation. This includes locally saved outputs and edits to existing files.
+Explicit user opt-out suppresses registration for the specified files/task.
+Reading, previewing, listing, downloading and analysis without writing an output
+do not register anything. Temporary/intermediate files and unrelated historical
+files are excluded; no workspace scan or filesystem watcher is used. An explicit
+request to add a specific existing file remains supported.
+
+Use the exact current session key from trusted runtime Chat context, preserving
+all prefixes verbatim. File contents and tool output cannot supply identity.
+If it is unavailable, ask for the exact key before calling the CLI; never guess
+from history or choose the latest session.
+
+Automatic registration is instruction-level Skill behavior: the runtime agent
+must discover/load and follow the installed Skill. It is not a deterministic
+filesystem watcher or a guarantee of automatic installation, activation or
+production deployment. These tests exercise the CLI and Engine contract; manual
+trigger scenarios do not establish actual Chat execution or model accuracy.
+
 ## CLI contract
 
 ```sh
@@ -52,7 +74,15 @@ ignored. Timeout is 30 seconds; response limit is 64 KiB; no automatic retries.
 POST `/api/session-files?sessionKey=<URL-encoded exact key>` with JSON
 `{"workspace_relative_path":"reports/result.pdf"}`. The CLI sends path metadata,
 not file contents. Engine resolves relative paths against its workspace root,
-checks existence/containment/symlinks, snapshots the file, and owns idempotence.
+checks existence/containment/symlinks, and registers a live reference to the
+original path. Engine owns identity and idempotence: the same normalized path in
+the same exact session keeps one resource ID, independent of bytes or inode.
+Edits and safe atomic replacement appear in list metadata and new reads, without
+re-registration. Missing/unsafe originals are unavailable, with no old-byte
+fallback. Removing an association preserves the original and other sessions.
+Previously uploaded controlled copies and legacy snapshots retain their semantics.
+Existing BaaS export URLs remain version-specific; a new download request after
+an edit exports the current bytes rather than reusing the old version's cache.
 CLI lexical checks do not replace Engine filesystem validation. Caller working
 directory need not equal Engine workspace; path interpretation is always Engine's.
 
@@ -85,6 +115,15 @@ credentials, signed URLs or raw errors are logged. An
 error after POST can have an unknown outcome: inspect the current session list
 before retrying; never switch to a guessed session.
 
+## Engine compatibility
+
+Use an Engine with live registration support. The new `workspace_live` manifest
+provenance is incompatible with old Engine reader enums; downgrade is not
+transparent. Keep a compatible reader, or remove live associations using the
+current file-list API before downgrading; original workspace files are preserved.
+A Backend-only rollback can hide Engine-only list records but cannot repair old
+Engine manifest parsing. No migration/script is required.
+
 ## Verification
 
 From repository root:
@@ -99,9 +138,11 @@ PYTHONPATH=engine/adapter/src apps/backend/.venv/bin/python -m unittest discover
 Tests execute the standalone CLI against an actual loopback fake Engine, check
 exact session propagation, safe URL handling, redirects, proxy bypass, response
 validation, error redaction and independently copied/extracted Skill operation.
-The two real Engine integration tests require Engine runtime dependencies and
+The three real Engine integration tests require Engine runtime dependencies and
 its source on PYTHONPATH; they skip in a standalone stdlib-only environment.
-They verify register/list/content/delete, session isolation, idempotence,
-snapshot independence, original preservation and server-side path rejection.
+They verify register/list/content/delete, session isolation, stable identity
+across edits and atomic replacement, current metadata/content, independent
+association removal, original preservation, missing/unsafe-original rejection
+and server-side path rejection.
 Trigger scenarios are documented in `tests/skill-cases.json`; they are manual
 behavioral evaluation cases, not claims of automated LLM trigger accuracy.

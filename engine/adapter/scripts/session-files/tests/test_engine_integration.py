@@ -75,7 +75,7 @@ class EngineIntegrationTests(unittest.TestCase):
              "--engine-url", self.url],
             cwd=self.root.parent, capture_output=True, text=True, timeout=10, check=False)
 
-    def test_register_list_content_delete_source_retained(self):
+    def test_register_live_edits_stable_id_and_independent_unlink(self):
         source = self.root / "reports/报告.txt"
         source.parent.mkdir()
         source.write_bytes(b"completed generated file")
@@ -96,21 +96,83 @@ class EngineIntegrationTests(unittest.TestCase):
         self.assertEqual(self.http.get("/api/session-files", params={"sessionKey": "other"}).json(), {"files": []})
         resource = "/api/session-files/" + view["resource_id"]
         self.assertEqual(self.http.get(resource + "/content", params={"sessionKey": "other"}).status_code, 404)
-        repeated = self.publish("reports/报告.txt")
+        repeated = self.publish("./reports//报告.txt")
         self.assertEqual(repeated.returncode, 0, repeated.stderr)
         self.assertEqual(json.loads(repeated.stdout)["file"]["resource_id"], view["resource_id"])
         source.write_bytes(b"changed original")
         content = self.http.get(resource + "/content", params=params)
         self.assertEqual(content.status_code, 200)
-        self.assertEqual(content.content, b"completed generated file")
+        self.assertEqual(content.content, b"changed original")
+        listed = self.http.get("/api/session-files", params=params).json()["files"]
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(listed[0]["resource_id"], view["resource_id"])
+        self.assertEqual(listed[0]["size_bytes"], len(b"changed original"))
+        repeated = self.publish("reports/报告.txt")
+        self.assertEqual(repeated.returncode, 0, repeated.stderr)
+        self.assertEqual(json.loads(repeated.stdout)["file"]["resource_id"], view["resource_id"])
+        self.assertEqual(json.loads(repeated.stdout)["file"]["size_bytes"], len(b"changed original"))
+        replacement = source.with_suffix(".tmp")
+        replacement.write_bytes(b"atomic replacement with different length")
+        replacement.replace(source)
+        self.assertEqual(self.http.get(resource + "/content", params=params).content,
+                         b"atomic replacement with different length")
+        repeated = self.publish("reports/报告.txt")
+        self.assertEqual(repeated.returncode, 0, repeated.stderr)
+        self.assertEqual(json.loads(repeated.stdout)["file"]["resource_id"], view["resource_id"])
+        listed = self.http.get("/api/session-files", params=params).json()["files"]
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(listed[0]["size_bytes"], source.stat().st_size)
+        other_params = {"sessionKey": "agent:bot:chat:other"}
+        other = self.http.post("/api/session-files", params=other_params,
+                               json={"workspace_relative_path": "reports/报告.txt"})
+        self.assertEqual(other.status_code, 200)
+        other_resource = "/api/session-files/" + other.json()["resource_id"]
+        self.assertNotEqual(other.json()["resource_id"], view["resource_id"])
         self.assertEqual(self.http.delete(resource, params={"sessionKey": "other"}).status_code, 404)
         deleted = self.http.delete(resource, params=params)
         self.assertEqual(deleted.status_code, 200)
         self.assertTrue(deleted.json()["deleted"])
-        self.assertEqual(source.read_bytes(), b"changed original")
+        self.assertEqual(source.read_bytes(), b"atomic replacement with different length")
+        self.assertEqual(self.http.get(other_resource + "/content", params=other_params).content,
+                         source.read_bytes())
+        self.assertEqual(len(self.http.get("/api/session-files", params=other_params).json()["files"]), 1)
         self.assertEqual(self.http.get("/api/session-files", params=params).json(), {"files": []})
         self.assertEqual(self.http.get(resource + "/content", params=params).status_code, 404)
         self.assertNotIn("completed generated file", result.stdout + result.stderr)
+
+    def test_live_original_becoming_unavailable_never_serves_old_bytes(self):
+        source = self.root / "output.txt"
+        target = self.root / "other.txt"
+        target.write_bytes(b"unrelated private file")
+        for replacement in ("missing", "directory", "symlink"):
+            with self.subTest(replacement=replacement):
+                source.write_bytes(b"original registered bytes")
+                result = self.publish("output.txt")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                view = json.loads(result.stdout)["file"]
+                resource = "/api/session-files/" + view["resource_id"]
+                params = {"sessionKey": self.session}
+                source.unlink()
+                if replacement == "directory":
+                    source.mkdir()
+                elif replacement == "symlink":
+                    source.symlink_to(target)
+                content = self.http.get(resource + "/content", params=params)
+                self.assertEqual(content.status_code, 409)
+                self.assertNotIn(b"original registered bytes", content.content)
+                self.assertNotIn(b"unrelated private file", content.content)
+                listed = self.http.get("/api/session-files", params=params).json()["files"]
+                self.assertEqual(len(listed), 1)
+                self.assertEqual(listed[0]["resource_id"], view["resource_id"])
+                self.assertNotEqual(listed[0]["availability"], "ready")
+                self.assertEqual(self.http.delete(resource, params=params).status_code, 200)
+                self.assertTrue(target.is_file())
+                if replacement == "directory":
+                    self.assertTrue(source.is_dir())
+                    source.rmdir()
+                elif replacement == "symlink":
+                    self.assertTrue(source.is_symlink())
+                    source.unlink()
 
     def test_engine_rejects_missing_directory_and_symlink_via_cli(self):
         (self.root / "directory").mkdir()

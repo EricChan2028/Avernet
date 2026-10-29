@@ -189,7 +189,10 @@ class ManifestStore:
                     "observed_mtime_ns": observed_mtime_ns,
                     "observed_inode": observed_inode,
                     "baas_tenant": baas_tenant,
-                    "source_kind": "baas_session_file",
+                    "source_kind": (
+                        "workspace_live" if entry.source_kind == "workspace_live"
+                        else "baas_session_file"
+                    ),
                     "source_attachment_id": None,
                     "source_url_hash": None,
                 }
@@ -249,6 +252,11 @@ class ResourceMaterializationService:
         root = self._workspace_root()
         entry = ManifestStore(root).get(resource_id)
         if entry is None or entry.status != "ready":
+            raise ResourceNotMaterializedError("resource_not_materialized")
+        # COSEC: live references require session-scoped descriptor reads; this
+        # legacy copy endpoint must never reopen their original workspace path.
+        if entry.source_kind == "workspace_live":
+            log.info("engine.resource_content.refused resource_id=%s reason=live_requires_session", resource_id)
             raise ResourceNotMaterializedError("resource_not_materialized")
         relative = Path(entry.relative_path)
         if relative.is_absolute() or ".." in relative.parts:

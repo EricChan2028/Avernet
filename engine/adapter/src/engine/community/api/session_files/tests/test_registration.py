@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, InstanceProvider, Module
 
-from engine.community.api.session_files.tests.test_router import client  # noqa: F401
+from engine.community.api.session_files.tests import test_router as router_tests
 from engine.community.api.session_files.router import router
 from engine.community.core.session_files.service import SessionFileService
 from engine.community.core.session_files.export_service import SessionFileExportService
@@ -14,6 +14,9 @@ from engine.community.core.session_files.tests.test_export_service import (
     _SessionFileClient,
 )
 from engine.community.core.resource_materialization.service import ManifestStore
+
+
+client = router_tests.client
 
 
 def test_post_register_returns_view_and_uses_existing_session_scope(client, caplog):
@@ -182,12 +185,12 @@ def test_registration_storage_failure_maps_to_503_without_exception_secrets(
     assert (root / "report").read_text() == "private-content"
 
 
-def test_registered_large_attachment_uploads_real_snapshot_with_configured_tenant(
+def test_live_small_to_large_attachment_uploads_current_version(
     tmp_path,
 ):
     source = tmp_path / "large.bin"
     content = b"x" * (30 * 1024 * 1024 + 1)
-    source.write_bytes(content)
+    source.write_bytes(b"small")
     service = SessionFileService(
         workspace_root_provider=lambda: tmp_path,
         default_baas_tenant="configured-tenant",
@@ -209,7 +212,7 @@ def test_registered_large_attachment_uploads_real_snapshot_with_configured_tenan
             params={"sessionKey": "a"},
             json={"workspace_relative_path": "large.bin"},
         ).json()
-        source.write_bytes(b"changed-source")
+        source.write_bytes(content)
         path = f"/api/session-files/{view['resource_id']}/content"
         params = {"sessionKey": "a", "disposition": "attachment"}
         queued = http.get(path, params=params)
@@ -234,4 +237,139 @@ def test_registered_large_attachment_uploads_real_snapshot_with_configured_tenan
         assert baas.grant_calls[0][0].tenant == "configured-tenant"
         assert baas.grant_calls[0][0].transfer_id == ""
         assert baas.complete_calls[0].transfer_id == "replacement-transfer"
-        assert source.read_bytes() == b"changed-source"
+        assert source.read_bytes() == content
+
+
+def test_live_response_consumes_pinned_bytes_after_source_symlink_swap(client, monkeypatch):
+    http, root = client
+    source = root / "report"
+    source.write_bytes(b"observed content")
+    view = http.post("/api/session-files", params={"sessionKey": "a"}, json={"workspace_relative_path": "report"}).json()
+    original_open = SessionFileService.open_content
+    streams = []
+    def open_and_swap(self, **kwargs):
+        content = original_open(self, **kwargs)
+        streams.append(content.stream)
+        source.unlink()
+        source.symlink_to(root / "private")
+        (root / "private").write_bytes(b"credential-secret")
+        return content
+    monkeypatch.setattr(SessionFileService, "open_content", open_and_swap)
+    response = http.get(f"/api/session-files/{view['resource_id']}/content", params={"sessionKey": "a"})
+    assert response.status_code == 200
+    assert response.content == b"observed content"
+    assert int(response.headers["content-length"]) == len(response.content)
+    assert streams[0].closed
+
+
+def test_live_large_to_small_attachment_returns_current_direct_content(client):
+    http, root = client
+    source = root / "report"
+    with source.open("wb") as stream:
+        stream.truncate(30 * 1024 * 1024 + 1)
+    view = http.post("/api/session-files", params={"sessionKey": "a"}, json={"workspace_relative_path": "report"}).json()
+    source.write_bytes(b"now small")
+    response = http.get(f"/api/session-files/{view['resource_id']}/content", params={"sessionKey": "a", "disposition": "attachment"})
+    assert response.status_code == 200
+    assert response.content == b"now small"
+    assert response.headers["content-length"] == "9"
+
+
+def test_live_binary_has_no_store_but_legacy_headers_unchanged(client):
+    from engine.community.api.session_files.tests.test_router import _write_ready_file
+    http, root = client
+    (root / "report").write_bytes(b"one")
+    view = http.post("/api/session-files", params={"sessionKey": "a"}, json={"workspace_relative_path": "report"}).json()
+    response = http.get(f"/api/session-files/{view['resource_id']}/content", params={"sessionKey": "a"})
+    assert response.headers["cache-control"] == "no-store"
+    (root / "report").write_bytes(b"two")
+    assert http.get(f"/api/session-files/{view['resource_id']}/content", params={"sessionKey": "a"}).content == b"two"
+    _write_ready_file(root, "legacy")
+    legacy = http.get("/api/session-files/sr_001/content", params={"sessionKey": "legacy"})
+    assert legacy.status_code == 200
+    assert "cache-control" not in legacy.headers
+
+
+def test_live_content_boundary_logs_terminal_success_failure_without_secrets(client, caplog):
+    http, root = client
+    (root / "report").write_bytes(b"private-content-value")
+    view = http.post("/api/session-files", params={"sessionKey": "business:a"}, json={"workspace_relative_path": "report"}).json()
+    headers = {"Authorization": "Bearer private-token-value", "Cookie": "private-cookie-value"}
+    with caplog.at_level(logging.INFO, logger="engine.session_files.api"):
+        success = http.get(f"/api/session-files/{view['resource_id']}/content", params={"sessionKey": "business:a"}, headers=headers)
+        (root / "report").unlink()
+        failed = http.get(f"/api/session-files/{view['resource_id']}/content", params={"sessionKey": "business:a"}, headers=headers)
+    assert success.status_code == 200
+    assert failed.status_code == 409
+    records = [record for record in caplog.records if record.name == "engine.session_files.api" and getattr(record, "operation", "") == "session_files.content"]
+    assert [record.status for record in records] == ["request", 200, "request", 409]
+    assert all(record.sessionKey == "business:a" for record in records)
+    assert all(record.resource_id == view["resource_id"] for record in records)
+    assert all(record.disposition == "inline" for record in records)
+    assert all(record.system == "engine" and record.elapsed_ms >= 0 for record in records)
+    assert "engine.session_files.proxypass_access operation=content" in caplog.text
+    assert all(record.method == "GET" and record.route == "/api/session-files/{resource_id}/content" for record in records)
+    assert records[1].size_bytes == len(success.content)
+    assert records[1].event == "success"
+    assert records[-1].event == "failure"
+    for secret in ["private-content-value", "private-token-value", "private-cookie-value"]:
+        assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_content_boundary_stream_failure_logs_no_exception_or_body(caplog):
+    from fastapi.responses import StreamingResponse
+    from engine.community.api.session_files.content_diagnostics import logged_content_response
+
+    async def chunks():
+        yield b"private-stream-body"
+        raise OSError("private-storage-password")
+
+    async def action():
+        return StreamingResponse(chunks(), headers={"Content-Length": "99"})
+
+    with caplog.at_level(logging.INFO, logger="engine.session_files.api"):
+        response = await logged_content_response(action, session_key="a", resource_id="r", disposition="attachment")
+        with pytest.raises(OSError, match="private-storage-password"):
+            async for _ in response.body_iterator:
+                pass
+    records = [record for record in caplog.records if record.name == "engine.session_files.api"]
+    assert [record.event for record in records] == ["request", "failure"]
+    assert records[-1].error_type == "OSError"
+    assert records[-1].size_bytes == 99
+    assert "private-storage-password" not in caplog.text
+    assert "private-stream-body" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_content_boundary_external_success_never_logs_signed_url(caplog):
+    from fastapi.responses import JSONResponse
+    from engine.community.api.session_files.content_diagnostics import logged_content_response
+
+    async def action():
+        return JSONResponse({"delivery": "external_url", "size_bytes": 123, "download_url": "https://example.test/private?token=private-export-token"})
+
+    with caplog.at_level(logging.INFO, logger="engine.session_files.api"):
+        await logged_content_response(action, session_key="a", resource_id="r", disposition="attachment")
+    records = [record for record in caplog.records if record.name == "engine.session_files.api"]
+    assert [record.event for record in records] == ["request", "success"]
+    assert records[-1].status == 200
+    assert records[-1].size_bytes == 123
+    assert "private-export-token" not in caplog.text
+    assert "example.test" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_content_boundary_preparing_logs_terminal_202(caplog):
+    from fastapi.responses import JSONResponse
+    from engine.community.api.session_files.content_diagnostics import logged_content_response
+
+    async def action():
+        return JSONResponse(status_code=202, content={"status": "preparing_download", "retry_after_seconds": 2})
+
+    with caplog.at_level(logging.INFO, logger="engine.session_files.api"):
+        await logged_content_response(action, session_key="a", resource_id="r", disposition="attachment")
+    records = [record for record in caplog.records if record.name == "engine.session_files.api"]
+    assert [record.event for record in records] == ["request", "success"]
+    assert records[-1].status == 202
+    assert records[-1].size_bytes is None

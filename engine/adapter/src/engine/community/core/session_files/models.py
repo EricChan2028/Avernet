@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+MAX_DIRECT_CONTENT_BYTES = 30 * 1024 * 1024
+
+
 class SessionFileError(ValueError):
     """An Engine session file could not be safely accessed."""
 

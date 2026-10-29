@@ -6,7 +6,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import BinaryIO, Literal
 
 from pydantic import BaseModel, Field, field_validator
 from urllib.parse import urlsplit
@@ -111,7 +111,7 @@ class ManifestEntry(BaseModel):
     observed_inode: int | None = None
     uploaded_at: datetime | None = None
     baas_tenant: str | None = None
-    source_kind: Literal["baas_session_file", "temporary_url", "workspace_file"] = "baas_session_file"
+    source_kind: Literal["baas_session_file", "temporary_url", "workspace_file", "workspace_live"] = "baas_session_file"
     source_attachment_id: str | None = None
     source_url_hash: str | None = None
 
@@ -128,10 +128,15 @@ class PreparedChatAttachment:
 
 @dataclass(frozen=True)
 class MaterializedContent:
-    """Controlled metadata for a file resolved from a ready manifest entry."""
+    """Controlled metadata for a file resolved from a ready manifest entry.
+
+    When stream is present, consume and close that pinned operation-local stream;
+    path is descriptive metadata and must never be reopened for delivery.
+    """
 
     path: Path
     filename: str
     media_type: str
     content_disposition: str
     size_bytes: int
+    stream: BinaryIO | None = None

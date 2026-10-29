@@ -10,18 +10,20 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.background import BackgroundTask
 
+from engine.community.api.session_files.content_diagnostics import logged_content_response
 from engine.community.core.session_files.export_service import (
     EXPORT_POLL_SECONDS,
     SessionFileExportService,
 )
-from engine.community.core.session_files.models import SessionFileError
+from engine.community.core.session_files.models import MAX_DIRECT_CONTENT_BYTES, SessionFileError
 from engine.community.core.session_files.service import SessionFileService
 from engine.community.di import Injected
 
 log = logging.getLogger("engine.session_files.api")
 router = APIRouter(prefix="/api/session-files", tags=["session-files"])
-_MAX_DIRECT_CONTENT_BYTES = 30 * 1024 * 1024
+_MAX_DIRECT_CONTENT_BYTES = MAX_DIRECT_CONTENT_BYTES
 
 
 class RegisterSessionFileRequest(BaseModel):
@@ -32,6 +34,8 @@ class RegisterSessionFileRequest(BaseModel):
 
 def _error(exc: SessionFileError) -> HTTPException:
     code = str(exc)
+    if code == "resource_preview_too_large":
+        return HTTPException(status_code=413, detail=code)
     if code == "resource_not_found":
         return HTTPException(status_code=404, detail=code)
     if code in {"resource_missing", "resource_changed"}:
@@ -108,6 +112,19 @@ async def stream_session_file_content(
         "engine.session_files.proxypass_access operation=content resource_id=%s",
         resource_id,
     )
+    return await logged_content_response(
+        lambda: _content_response(resource_id, session_key, disposition, service, export_service),
+        session_key=session_key, resource_id=resource_id, disposition=disposition,
+    )
+
+
+async def _content_response(
+    resource_id: str,
+    session_key: str,
+    disposition: str,
+    service: SessionFileService,
+    export_service: SessionFileExportService,
+) -> Response:
     if disposition == "attachment":
         try:
             size_bytes = await asyncio.to_thread(
@@ -126,6 +143,8 @@ async def stream_session_file_content(
                 )
             except SessionFileError as exc:
                 raise _error(exc) from exc
+            if source.size_bytes != size_bytes:
+                raise _error(SessionFileError("resource_changed"))
             result = await export_service.request_download(
                 source=source,
                 session_key=session_key,
@@ -173,11 +192,17 @@ async def stream_session_file_content(
         )
     except SessionFileError as exc:
         raise _error(exc) from exc
+    if disposition == "attachment" and content.size_bytes != size_bytes:
+        if content.stream is not None:
+            content.stream.close()
+        raise _error(SessionFileError("resource_changed"))
     if content.size_bytes > _MAX_DIRECT_CONTENT_BYTES:
+        if content.stream is not None:
+            content.stream.close()
         raise HTTPException(status_code=413, detail="resource_preview_too_large")
 
     async def body() -> AsyncIterator[bytes]:
-        stream = await asyncio.to_thread(content.path.open, "rb")
+        stream = content.stream or await asyncio.to_thread(content.path.open, "rb")
         try:
             while chunk := await asyncio.to_thread(stream.read, 1024 * 1024):
                 yield chunk
@@ -187,9 +212,11 @@ async def stream_session_file_content(
     return StreamingResponse(
         body(),
         media_type=content.media_type,
+        background=BackgroundTask(content.stream.close) if content.stream is not None else None,
         headers={
             "Content-Length": str(content.size_bytes),
             "Content-Disposition": content.content_disposition,
+            **({"Cache-Control": "no-store"} if content.stream is not None else {}),
         },
     )
 

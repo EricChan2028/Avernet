@@ -21,7 +21,7 @@ def _service(root):
     )
 
 
-def test_register_snapshot_session_isolation_and_source_retention(tmp_path):
+def test_register_live_session_isolation_and_source_retention(tmp_path):
     source = tmp_path / "report.txt"
     source.write_bytes(b"original")
     service = _service(tmp_path)
@@ -29,7 +29,7 @@ def test_register_snapshot_session_isolation_and_source_retention(tmp_path):
         session_key="session:a", workspace_relative_path="report.txt"
     )
     entry = ManifestStore(tmp_path).get(view.resource_id)
-    assert entry.source_kind == "workspace_file"
+    assert entry.source_kind == "workspace_live"
     assert entry.transfer_id == ""
     assert entry.task_id == ""
     assert entry.content_hash == hashlib.sha256(b"original").hexdigest()
@@ -41,15 +41,15 @@ def test_register_snapshot_session_isolation_and_source_retention(tmp_path):
     content = service.open_content(
         session_key="session:a", resource_id=view.resource_id, disposition="inline"
     )
-    assert content.path.read_bytes() == b"original"
-    assert content.path != source
+    assert content.stream.read() == b"edited"
+    content.stream.close()
     service.delete_file(session_key="session:a", resource_id=view.resource_id)
     assert source.read_bytes() == b"edited"
-    assert not content.path.exists()
+    assert source.exists()
     assert service.list_files(session_key="session:a") == []
 
 
-def test_registration_is_idempotent_by_session_path_and_content(tmp_path):
+def test_registration_is_idempotent_by_session_and_path(tmp_path):
     source = tmp_path / "report.txt"
     source.write_text("one")
     service = _service(tmp_path)
@@ -64,8 +64,8 @@ def test_registration_is_idempotent_by_session_path_and_content(tmp_path):
     second = service.register_file(
         session_key="a", workspace_relative_path="report.txt"
     )
-    assert second.resource_id != first.resource_id
-    assert len(service.list_files(session_key="a")) == 2
+    assert second.resource_id == first.resource_id
+    assert len(service.list_files(session_key="a")) == 1
 
 
 def test_concurrent_registrations_preserve_duplicates_and_unrelated_entries(tmp_path):
@@ -242,27 +242,6 @@ service.register_file(session_key='a', workspace_relative_path=sys.argv[2])
     assert len(_service(tmp_path).list_files(session_key="a")) == 4
 
 
-def test_snapshot_directory_swap_during_copy_is_rejected(tmp_path, monkeypatch):
-    (tmp_path / "report").write_text("original")
-    real_replace = os.replace
-
-    def replace(source, target, *args, **kwargs):
-        if str(source).startswith(".register-"):
-            (tmp_path / ".teamclaw").rename(tmp_path / "moved")
-            (tmp_path / ".teamclaw").symlink_to(
-                tmp_path / "moved", target_is_directory=True
-            )
-        return real_replace(source, target, *args, **kwargs)
-
-    monkeypatch.setattr(os, "replace", replace)
-    with pytest.raises(SessionFileError):
-        _service(tmp_path).register_file(
-            session_key="a", workspace_relative_path="report"
-        )
-    assert not (tmp_path / "moved/session-files/.manifest.json").exists()
-    assert not list((tmp_path / "moved").rglob("report"))
-
-
 def test_manifest_symlink_never_reads_or_overwrites_target(tmp_path):
     (tmp_path / "report").write_text("hello")
     directory = tmp_path / ".teamclaw/session-files"
@@ -290,26 +269,111 @@ def test_corrupt_manifest_is_not_replaced(tmp_path):
     assert manifest.read_text() == "invalid-json"
 
 
-@pytest.mark.parametrize("symlink", [False, True])
-def test_snapshot_replacement_before_manifest_publication_is_rejected(tmp_path, monkeypatch, symlink):
-    (tmp_path / "report").write_bytes(b"original")
-    secret = tmp_path / "private"
-    secret.write_bytes(b"external")
-    real_replace = os.replace
-    def swap(source, target, *args, **kwargs):
-        result = real_replace(source, target, *args, **kwargs)
-        if str(source).startswith(".register-"):
-            parent = kwargs["dst_dir_fd"]
-            os.unlink(target, dir_fd=parent)
-            if symlink:
-                os.symlink(secret, target, dir_fd=parent)
-            else:
-                fd = os.open(target, os.O_WRONLY | os.O_CREAT, 0o600, dir_fd=parent)
-                with os.fdopen(fd, "wb") as stream:
-                    stream.write(b"replaced")
-        return result
-    monkeypatch.setattr(os, "replace", swap)
-    with pytest.raises(SessionFileError):
-        _service(tmp_path).register_file(session_key="a", workspace_relative_path="report")
-    assert ManifestStore(tmp_path).list_entries() == []
-    assert secret.read_bytes() == b"external"
+
+def test_live_replacement_metadata_and_independent_unlink(tmp_path):
+    source = tmp_path / "report"
+    source.write_bytes(b"old")
+    service = _service(tmp_path)
+    first = service.register_file(session_key="a", workspace_relative_path="./report")
+    other = service.register_file(session_key="b", workspace_relative_path="report")
+    replacement = tmp_path / "next"
+    replacement.write_bytes(b"current bytes")
+    replacement.replace(source)
+    assert service.list_files(session_key="a")[0].size_bytes == 13
+    assert service.get_file_size(session_key="a", resource_id=first.resource_id) == 13
+    content = service.open_content(session_key="a", resource_id=first.resource_id, disposition="inline")
+    # A later symlink swap must never affect actual response consumption.
+    source.unlink()
+    source.symlink_to(tmp_path / "private")
+    (tmp_path / "private").write_bytes(b"secret")
+    assert content.stream.read() == b"current bytes"
+    assert content.size_bytes == 13
+    content.stream.close()
+    with pytest.raises(SessionFileError, match="resource_missing"):
+        service.open_content(session_key="a", resource_id=first.resource_id, disposition="inline")
+    service.delete_file(session_key="a", resource_id=first.resource_id)
+    assert source.is_symlink()
+    assert service.list_files(session_key="b")[0].resource_id == other.resource_id
+    assert not list((tmp_path / ".teamclaw").rglob("*.part"))
+
+
+@pytest.mark.parametrize("kind", ["ancestor", "final", "directory", "fifo", "missing"])
+def test_live_each_access_rejects_unsafe_or_missing_sources(tmp_path, kind):
+    directory = tmp_path / "real"
+    directory.mkdir()
+    source = directory / "report"
+    source.write_bytes(b"data")
+    service = _service(tmp_path)
+    view = service.register_file(session_key="a", workspace_relative_path="real/report")
+    if kind == "ancestor":
+        directory.rename(tmp_path / "moved")
+        directory.symlink_to(tmp_path / "moved", target_is_directory=True)
+    else:
+        source.unlink()
+        if kind == "final":
+            source.symlink_to(tmp_path / "private")
+            (tmp_path / "private").write_bytes(b"secret")
+        elif kind == "directory":
+            source.mkdir()
+        elif kind == "fifo":
+            os.mkfifo(source)
+    assert service.list_files(session_key="a")[0].availability == "missing"
+    with pytest.raises(SessionFileError, match="resource_missing"):
+        service.get_file_size(session_key="a", resource_id=view.resource_id)
+    with pytest.raises(SessionFileError, match="resource_missing"):
+        service.open_content(session_key="a", resource_id=view.resource_id, disposition="attachment")
+
+
+@pytest.mark.parametrize("replacement", [False, True])
+def test_live_mutation_during_content_read_is_rejected(tmp_path, monkeypatch, replacement):
+    from engine.community.core.session_files import registration
+    source = tmp_path / "report"
+    source.write_bytes(b"safe content")
+    service = _service(tmp_path)
+    view = service.register_file(session_key="a", workspace_relative_path="report")
+    original_source = registration._source
+    from contextlib import contextmanager
+    @contextmanager
+    def racing_source(root, relative):
+        with original_source(root, relative) as stream:
+            class RacingRead:
+                def fileno(self):
+                    return stream.fileno()
+                def read(self, size):
+                    value = stream.read(size)
+                    if value:
+                        if replacement:
+                            next_path = tmp_path / "replacement"
+                            next_path.write_bytes(b"new bytes")
+                            next_path.replace(source)
+                        else:
+                            source.write_bytes(b"modified")
+                    return value
+            yield RacingRead()
+    monkeypatch.setattr(registration, "_source", racing_source)
+    with pytest.raises(SessionFileError, match="resource_changed"):
+        service.open_content(session_key="a", resource_id=view.resource_id, disposition="inline")
+
+
+def test_large_live_inline_rejects_before_reading_bytes(tmp_path, monkeypatch):
+    from engine.community.core.session_files import registration
+    from contextlib import contextmanager
+    source = tmp_path / "report"
+    source.write_bytes(b"small")
+    service = _service(tmp_path)
+    view = service.register_file(session_key="a", workspace_relative_path="report")
+    with source.open("wb") as stream:
+        stream.truncate(2 * 1024 * 1024 * 1024)
+    original_source = registration._source
+    @contextmanager
+    def no_read(root, relative):
+        with original_source(root, relative) as stream:
+            class ReadGuard:
+                def fileno(self):
+                    return stream.fileno()
+                def read(self, size):
+                    raise AssertionError("oversized inline must not read bytes")
+            yield ReadGuard()
+    monkeypatch.setattr(registration, "_source", no_read)
+    with pytest.raises(SessionFileError, match="resource_preview_too_large"):
+        service.open_content(session_key="a", resource_id=view.resource_id, disposition="inline")

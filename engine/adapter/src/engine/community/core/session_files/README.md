@@ -7,26 +7,62 @@ five-field SessionFileView: `resource_id`, `display_name`, `size_bytes`,
 boundary, like list/content/delete; it does not introduce another authentication
 transport. Never expose that trusted listener as a public unauthenticated API.
 
-`SessionFileService.register_file` copies a completed ordinary workspace file
-into the controlled `.teamclaw/session-files` layout before publishing a ready
-manifest entry. Absolute/traversing/internal paths, symlinks at any component,
-non-regular sources and source changes during copying are rejected. POSIX
-descriptor-relative opens pin directory inodes; the manifest merge uses the
-existing thread lock and a registration process lock. Same session, normalized
-path and content reuse an ID; changed content or another session gets a new ID.
-Failed writes do not register a ready file. Deleting a resource deletes only its
-snapshot, retaining the original workspace source.
+`SessionFileService.register_file` associates a completed ordinary workspace file
+with the exact session using `source_kind=workspace_live`. It persists metadata,
+not a registration byte snapshot. Identity uses the full session key and normalized
+workspace-relative path, independent of bytes/inode: edits, atomic replacements
+between operations and repeated registration keep one ID/list entry. Another
+session gets an independent association. Deleting a live entry removes only that
+association, preserving the source and every other session's entry.
 
-Local entries use `source_kind=workspace_file`, empty `transfer_id` and empty
-`task_id`: registration never pretends a BaaS transfer occurred. Small attachments
-stream directly without a BaaS tenant. Attachments over 30 MiB require a configured
-export capability and tenant; the existing exporter uploads the snapshot, completes
-the real transfer and then promotes the manifest to `baas_session_file`. The
-deployment owns the default tenant; community defaults fail closed for external
-export. Original source edits do not change already registered bytes.
+Every live list/content/export observation reads the current ordinary file using
+POSIX descriptor-relative no-follow opens for every path component. Absolute,
+traversing/internal paths, ancestor/final symlinks and nonregular sources are
+rejected. Missing or unsafe sources remain unavailable without old-byte fallback.
+Before/after descriptor and original-path observations reject detected concurrent
+mutation/replacement. Current size/hash observations are operation versions, not
+immutable registration constraints. Manifest writes retain thread/process locking;
+failed persistence never returns successful registration.
 
-Request/success/failure events use existing loggers, fixed event templates and
-structured `extra` fields. They include the business `sessionKey`, relative path,
-resource ID, status, byte count and duration where available. Only explicit safe
-metadata is logged; headers, request dictionaries, credentials, exception text,
-signed URLs and file contents are never logged.
+Direct content uses an anonymous operation-local temporary stream: verified bytes
+and Content-Length remain coherent through HTTP consumption even if the source is
+subsequently replaced. The transport consumes/closes that stream and never reopens
+the descriptive source Path. This temporary delivery representation is not a
+persistent registration copy. Live binary responses use `Cache-Control: no-store`
+because the stable content URL can return edited bytes. The core rejects direct
+content over 30 MiB from descriptor metadata before copying; growth during copying
+fails safely. Attachments inspect current size: small files stream without BaaS
+identity, large files use export. Changes between size selection and delivery
+observation fail safely.
+
+A new live entry has empty transfer/task IDs. Large attachments require a configured
+export capability and tenant. The exporter securely copies an observed version into
+an operation-local private transfer file, uploads/completes the actual transfer,
+and removes the temporary file. Promotion retains `workspace_live` provenance and
+original relative path; the real transfer is paired with its uploaded hash/size.
+Repeat registration cannot relabel an old transfer with new bytes. Cache identity
+includes observed content hash; revalidation rejects stale ready/pending results
+with `resource_changed`. New requests after edits export the new version. Already
+issued signed links remain specific to the previously exported bytes. The deployment
+owns the default tenant; community defaults fail closed for external export.
+
+Existing `workspace_file` entries are legacy controlled snapshots. They keep their
+original immutable-byte checks and snapshot-file deletion behavior. Uploaded
+`baas_session_file` and `temporary_url` controlled copies retain existing behavior,
+including promotion to `baas_session_file` on export. The legacy unsessioned
+materialization-content endpoint explicitly refuses `workspace_live` entries;
+only the session-scoped reader may consume live sources.
+
+Downgrade requires removing live associations from the manifest before starting an
+older Engine that cannot parse the new provenance. Originals remain intact, but an
+older runtime cannot preserve live-reference semantics. Do not relabel live entries
+as legacy snapshots: that would restore immutable checks and source-file deletion.
+Existing upload/snapshot entries need no conversion.
+
+Request/success/failure events retain existing loggers and historical access logs.
+Content diagnostics add method, constant route, business `sessionKey`, resource ID,
+disposition, status, size and duration when known. Direct success is logged after
+stream completion; HTTP/stream failures record controlled status and exception type.
+External preparing/ready responses also log safe outcomes. Only explicit safe
+metadata is logged; headers, credentials, raw exceptions, signed URLs and file bytes
+are never logged.

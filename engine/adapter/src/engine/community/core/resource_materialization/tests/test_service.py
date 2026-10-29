@@ -816,3 +816,21 @@ async def test_open_content_rejects_file_replaced_by_outside_symlink(tmp_path: P
 
     with pytest.raises(ResourceNotMaterializedError, match="resource_not_materialized"):
         service.open_content(resource_id="sr_001", disposition="attachment")
+
+
+def test_legacy_content_refuses_live_provenance_before_path_access(tmp_path, monkeypatch):
+    from engine.community.core.session_files.service import SessionFileService
+
+    (tmp_path / "live.txt").write_bytes(b"live bytes")
+    view = SessionFileService(workspace_root_provider=lambda: tmp_path).register_file(
+        session_key="a", workspace_relative_path="live.txt"
+    )
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(b"unused"), callback_client=_CallbackClient(),
+        workspace_root_provider=lambda: tmp_path,
+    )
+    def no_path_access(*args):
+        raise AssertionError("legacy consumer must reject live provenance before resolving source")
+    monkeypatch.setattr(service, "_assert_contained", no_path_access)
+    with pytest.raises(ResourceNotMaterializedError, match="resource_not_materialized"):
+        service.open_content(resource_id=view.resource_id, disposition="inline")

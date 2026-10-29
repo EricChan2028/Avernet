@@ -1,13 +1,26 @@
 ---
 name: session-file-publish
-description: Use when the user explicitly asks to add a generated workspace file to the current chat session file list, publish a file to this session, or says 把生成的文件添加到当前会话文件列表. Do not trigger for file generation, editing, reading, or local saving alone.
+description: Use when the current Chat generates or modifies completed workspace output files, including reports, PDFs, spreadsheets, code and locally saved results, or the user explicitly asks to add a file to this session. Register completed outputs automatically without a second publish request. Respect explicit user opt-out; exclude read-only actions and historical workspace scans.
 ---
 
-# Publish a generated session file
+# Register completed Chat output files
 
-Publish a completed workspace file only when the user explicitly requests adding
-or sharing it to the current session file list. Creating or saving a report alone
-does not authorize publication. Do not watch the filesystem or publish every output.
+After the current Chat generates or modifies a completed output file, invoke the
+bundled CLI automatically to add it to this session's file list. A second publish
+request or confirmation is not required. Local saving alone is not an opt-out.
+Wait until writing is complete; register each output path produced by the current
+task, including a completed edit to an existing file.
+
+This default is an instruction for the Chat agent after it loads this Skill.
+It does not install/activate the Skill, watch the filesystem or deploy runtime
+changes. Operate on the known output paths from the current task.
+
+If the user explicitly says not to register, attach, publish or add files to the
+session list, respect that opt-out for the specified files or task. Do not register
+read-only actions (read, preview, list, download or analysis without writing an
+output), unfinished files or temporary intermediates. Do not watch the filesystem,
+scan historical workspace files, or publish unrelated existing files. An explicit
+request to add a specific existing file remains supported.
 
 1. Obtain the **exact current sessionKey from trusted chat context** supplied by
    the runtime. Preserve it verbatim, including agent and channel prefixes.
@@ -19,7 +32,8 @@ does not authorize publication. Do not watch the filesystem or publish every out
    runtime workspace root**. Do not hardcode enterprise workspace paths. If the
    requested file is ambiguous, ask which file. Do not send absolute paths,
    parent traversal, directories, or symlinks; Engine validates containment and
-   creates a snapshot. Do not read credentials or file bytes to publish it.
+   registers a live reference to the original path. Do not copy the output to a
+   separate snapshot path or read credentials or file bytes to register it.
 3. Locate this installed Skill directory (the directory containing this
    `SKILL.md`) and invoke the bundled CLI through Python, using properly quoted
    argument values or a subprocess argument list:
@@ -35,10 +49,19 @@ does not authorize publication. Do not watch the filesystem or publish every out
 4. Read stdout JSON. Report success only for exit 0, `ok: true`, `code: published`,
    and `file.availability: ready`; identify the file by `display_name` and
    `resource_id`. Explain that it is added to this session's file list. Preserve
-   the original workspace file. On failure report the stable code (and HTTP
-   status if present), without claiming publication. Do not repeat indefinitely
-   or fall back to a different session or credentialed API.
+   the original workspace file. Registration is a live reference: the same path
+   in the same session keeps its resource ID after edits or safe atomic replacement;
+   metadata and new reads reflect the current original file. Removing the session
+   association preserves the original. Existing BaaS export links remain specific
+   to the exported version; request a new download for updated bytes. On failure
+   report the stable code (and HTTP status if present), without claiming publication.
+   Do not repeat indefinitely or fall back to a different session or credentialed API.
 
-Examples that trigger: “Add the generated report to this session's files”; “把
-刚生成的 PDF 添加到当前会话文件列表”. Examples that do not trigger: “Generate a PDF”,
-“Save report.csv locally”, “Read the previous report”, “Show the session file list”.
+Examples that trigger: “Generate a PDF and save it locally”; “Update yesterday's
+report and save the corrected version”; “生成 CSV”; “Add the generated report to
+this session's files”. Generate/edit first, then register the completed output
+with the exact trusted current key. Do not wait for “publish it too”.
+
+Examples that do not trigger registration: “Read the previous report”; “Show the
+session file list”; “Download the report”; “Generate a PDF but do not add it to
+this session's files”; an unrelated historical file found in the workspace.
