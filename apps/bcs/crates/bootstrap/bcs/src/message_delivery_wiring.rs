@@ -212,7 +212,24 @@ pub async fn wire_with_caller_assembly(
     // parking and the caller_required marker at admission.
     // One handoff instance for the whole epoch: admission parks here, the
     // same-epoch runtime pipeline claims here (spec §7.5.1/§7.5.2).
-    let caller_handoff = Arc::new(bcs_message_flow::caller_delivery_handoff::HumanCallerDeliveryHandoff::new(256));
+    // Published-slot reaping horizon tracks the identity credential's own
+    // TTL (2× the JWT max_ttl, floor 600s): reaping is memory housekeeping,
+    // never an identity-validity verdict — the credential is enforced where
+    // the token actually travels, so the horizon must not shorten the
+    // deliverable window below the credential TTL.
+    let identity_reap_horizon_ms = config
+        .caller_identity
+        .as_ref()
+        .and_then(|c| c.jwt.as_ref())
+        .map(|j| (j.max_ttl_seconds.saturating_mul(2).saturating_mul(1000)) as i64)
+        .filter(|ms| *ms > 0)
+        .unwrap_or(bcs_message_flow::caller_delivery_handoff::DEFAULT_PUBLISHED_REAP_HORIZON_MS);
+    let caller_handoff = Arc::new(
+        bcs_message_flow::caller_delivery_handoff::HumanCallerDeliveryHandoff::with_published_reap_horizon(
+            256,
+            identity_reap_horizon_ms,
+        ),
+    );
     // Term-scoped caller state (spec §7.5.2): the concrete instances the
     // master's epoch boundary seals — identity parked, observe references
     // and root lineage of an old term never outlive the term.

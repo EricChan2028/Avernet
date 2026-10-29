@@ -124,6 +124,59 @@ async fn a_late_claim_succeeds_and_consumes_once() {
 }
 
 #[tokio::test]
+async fn a_late_claim_survives_intervening_admission_sweeps_within_the_reap_horizon() {
+    // 拥塞场景:消息因前一任务或限流在队列里等待,越过 reserve 的 10s
+    // 过期点后另一条 caller 消息入队(每次准入都触发全局 sweep)。
+    // Published 身份的回收视角锚定在回执自己的 admitted_at 时刻,不是
+    // 准入窗:凭证仍有效、行预算未到,迟到 claim 必须成功。
+    let h = handoff(8);
+    let s = scope("e2");
+    h.reserve(&s, 10_000, NOW).await.expect("reserve");
+    h.publish(&s, ingress(300_000), QueuedAdmissionReceipt::new("d-1", 1, NOW))
+        .await
+        .expect("publish");
+    // 另一条消息准入 → reserve 前的全局 sweep 在 reserve 过期点之后运行。
+    h.reserve(&scope("other"), 10_000, NOW + 20_000).await.expect("other admission's reserve");
+    // 出队前的 readiness 探针必须仍然回答 Published:尚未被任何派发
+    // attempt claim 过的身份没有消失的理由。
+    assert_eq!(h.identity_readiness(&s).await, HandoffIdentityReadiness::Published);
+    let claimed = h
+        .claim(&s, HandoffClaim::new("d-1", 4, Some("run-1".into()), 1, NOW + 25_000))
+        .await
+        .expect("late claim survives other admissions' sweeps");
+    assert_eq!(claimed.actor().actor_id, "human_300000");
+}
+
+#[tokio::test]
+async fn published_identity_is_reaped_only_after_its_own_reap_horizon() {
+    // 回收是内存管理,不是身份裁决: published 槽位只在自己的回收视角
+    // (admitted_at + horizon)之后才可被 sweep 回收,capacity 不被无限期
+    // 占用,但也不被 30 秒的准入窗提前挤掉。
+    let h = HumanCallerDeliveryHandoff::with_published_reap_horizon(2, 300_000);
+    let s = scope("z");
+    h.reserve(&s, 10_000, NOW).await.expect("reserve");
+    h.publish(&s, ingress(300_000), QueuedAdmissionReceipt::new("d-1", 1, NOW))
+        .await
+        .expect("publish");
+    // horizon 之内: published 占 capacity,paired reserved 也算满,第三个
+    // scope 准入被拒 — sweep 不得提前回收 published。
+    h.reserve(&scope("cap"), 10_000, NOW + 100_000).await.expect("reserved within horizon");
+    assert_eq!(
+        h.reserve(&scope("cap2"), 10_000, NOW + 100_100).await.unwrap_err(),
+        HandoffError::CapacityExhausted
+    );
+    // 越过 horizon 之后,任何准入触发的 sweep 才恢复回收。
+    h.reserve(&scope("cap3"), 10_000, NOW + 300_500).await.expect("published reaped past horizon");
+    assert_eq!(h.identity_readiness(&s).await, HandoffIdentityReadiness::Gone);
+    assert_eq!(
+        h.claim(&s, HandoffClaim::new("d-1", 4, Some("run-1".into()), 1, NOW + 300_600))
+            .await
+            .unwrap_err(),
+        HandoffError::NotReserved
+    );
+}
+
+#[tokio::test]
 async fn capacity_counts_all_slots_and_sweeps_expired_before_refusing() {
     let h = handoff(2);
     h.reserve(&scope("c1"), 10_000, NOW).await.expect("r1");

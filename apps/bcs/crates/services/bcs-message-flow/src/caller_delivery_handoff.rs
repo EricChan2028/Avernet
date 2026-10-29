@@ -6,12 +6,13 @@
 //! decisions use the caller-provided clock.
 //!
 //! Slot lifecycle: `Reserved` (bounded, within capacity) → `Published`
-//! (identity parked once, expiry = the slot's own reserve TTL, purely for
-//! memory reaping) → `Claimed` (tombstone, identity gone, still counted
-//! against capacity until swept). Sweep runs on every reserve and on
-//! publish/claim of a different slot. `close` seals the whole handoff
+//! (identity parked once, reaping bound = the admission receipt's own
+//! horizon, NOT the reservation window — purely for memory housekeeping) →
+//! `Claimed` (tombstone, identity gone, still counted against capacity until
+//! swept). Sweep runs on every reserve. `close` seals the whole handoff
 //! irreversibly. Slot age is NEVER a claim refusal: the identity carries no
-//! expiry window and the one-shot claim is the structural bound.
+//! validity verdict from this map; the credential stays enforced downstream
+//! and the one-shot claim is the structural bound.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -20,6 +21,11 @@ use async_trait::async_trait;
 
 use bcs_service_api::application::caller_handoff::{HandoffClaim, HandoffError, HandoffIdentityReadiness, HandoffScope, HumanCallerDeliveryHandoffService, QueuedAdmissionReceipt};
 use bcs_service_api::application::caller_identity::AuthenticatedHumanCallerIngress;
+
+/// Default reaping horizon for Published identity slots: twice the default
+/// caller JWT TTL (300s → 600s). Housekeeping only — the credential's own
+/// expiry stays enforced downstream where the token is actually verified.
+pub const DEFAULT_PUBLISHED_REAP_HORIZON_MS: i64 = 600_000;
 
 /// Never derived and never persisted; the slot keeps it only until claimed.
 enum Slot {
@@ -44,6 +50,11 @@ impl Slot {
 /// claimed slots; expired slots are swept before answering capacity.
 pub struct HumanCallerDeliveryHandoff {
     capacity: usize,
+    /// Reaping horizon for Published slots, armed at publish time from the
+    /// admission receipt's `admitted_at_ms` (spec §7.5.2 清理行: the reaper
+    /// is memory management, never an identity-validity verdict). Deliberately
+    /// independent of the admission reserve window — see `slot_replace`.
+    published_reap_horizon_ms: i64,
     slots: Mutex<Slots>,
 }
 
@@ -55,9 +66,21 @@ struct Slots {
 impl HumanCallerDeliveryHandoff {
     /// Capacity must be positive; a zero-capacity handoff is a misassembly.
     pub fn new(capacity: usize) -> Self {
+        Self::with_published_reap_horizon(capacity, DEFAULT_PUBLISHED_REAP_HORIZON_MS)
+    }
+
+    /// `with_published_reap_horizon(capacity, horizon_ms)`: same bounded
+    /// handoff, with an explicit reaping horizon for Published identity
+    /// slots. The horizon must cover the identity credential's own validity
+    /// window (e.g. the caller JWT `max_ttl_seconds`) — a claim handed the
+    /// identity later still fails closed downstream on the credential, so
+    /// the horizon only bounds memory, never grants validity.
+    pub fn with_published_reap_horizon(capacity: usize, horizon_ms: i64) -> Self {
         assert!(capacity > 0, "handoff capacity must be positive");
+        assert!(horizon_ms > 0, "published reap horizon must be positive");
         Self {
             capacity,
+            published_reap_horizon_ms: horizon_ms,
             slots: Mutex::new(Slots { closed: false, map: HashMap::new() }),
         }
     }
@@ -172,12 +195,14 @@ impl HumanCallerDeliveryHandoffService for HumanCallerDeliveryHandoff {
                 Some(Slot::Reserved { .. }) => {}
             }
         }
-        // The slot's own reserve TTL stays the reaping bound (housekeeping only);
-        // the identity carries no expiry window and a late claim is not a
-        // loss.
+        // The Published slot's reaping bound lives on the admission receipt's
+        // own horizon (housekeeping only); the identity carries no validity
+        // verdict from this map and a late claim is not a loss — the bound is
+        // memory, the credential is enforced downstream.
+        let horizon_ms = self.published_reap_horizon_ms;
         let ingress = std::sync::Arc::new(ingress);
         for (scope, receipt) in targets {
-            slot_replace(&mut slots, scope, ingress.clone(), receipt.clone());
+            slot_replace(&mut slots, scope, ingress.clone(), receipt.clone(), horizon_ms);
         }
         Ok(())
     }
@@ -248,15 +273,22 @@ fn slot_replace(
     scope: &HandoffScope,
     ingress: std::sync::Arc<AuthenticatedHumanCallerIngress>,
     receipt: QueuedAdmissionReceipt,
+    horizon_ms: i64,
 ) {
-    // Snapshot semantics: the parked slot keeps the RESERVED slot's own
-    // expiry (reserve TTL) — pure memory reaping. The identity has no
-    // window and late claims succeed structurally (one-shot).
+    // Snapshot semantics for the identity, NOT for the expiry: parking arms
+    // the Published slot's reaping bound on the admission receipt's own
+    // horizon, never on the reservation window. This decouples reaping from
+    // the admission reserve TTL (spec §7.5.2: 排队不延长身份有效期 — but the
+    // reserve window bounds only the PENDING reservation; a message still
+    // queued past it keeps a claimable identity until its credential or its
+    // own row budget says otherwise). Pure memory reaping either way: the
+    // claim path never refuses on age and the credential is verified where
+    // the token actually travels.
     match slots.map.remove(scope) {
-        Some(Slot::Reserved { expires_at_ms }) => {
+        Some(Slot::Reserved { .. }) => {
             slots.map.insert(
                 scope.clone(),
-                Slot::Published { ingress, expires_at_ms },
+                Slot::Published { ingress, expires_at_ms: receipt.admitted_at_ms + horizon_ms },
             );
         }
         _ => {
