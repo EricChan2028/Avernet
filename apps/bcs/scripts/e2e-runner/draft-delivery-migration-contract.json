@@ -15,7 +15,7 @@
   "source_file_revisions": {
     "collaboration_draft_story.sh": "a6d4ff2242aa8bb23674154abf08c35a66244a42"
   },
-  "story_checks": 45,
+  "story_checks": 57,
   "story_markers": [
     "Draft delivery story: {checks} live HTTP assertions passed"
   ],

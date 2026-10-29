@@ -139,9 +139,9 @@ def check_read_token_single_revision(evidence: dict) -> None:
         _fail(OBLIGATION_READ_TOKEN, 'historical card bound a different draft ID')
     if _integer(historical.get('revision'), 'historical card revision', OBLIGATION_READ_TOKEN) != 1:
         _fail(OBLIGATION_READ_TOKEN, 'historical card followed the live head instead of staying on revision 1')
-    if historical.get('read_token_present') is not True:
+    if historical.get('compat_field_present') is not True:
         _fail(OBLIGATION_READ_TOKEN, 'compatibility card is missing the deprecated readToken field')
-    if _integer(historical.get('read_token_revision'), 'read token revision',
+    if _integer(historical.get('compat_revision'), 'read token revision',
                 OBLIGATION_READ_TOKEN) != 1:
         _fail(OBLIGATION_READ_TOKEN, 'readToken is not pinned to the card revision')
     if historical.get('read_with_token_as_header') is not False:
@@ -159,7 +159,7 @@ def check_read_token_single_revision(evidence: dict) -> None:
     other = _mapping(cards.get('other_revision'), 'other revision card', OBLIGATION_READ_TOKEN)
     if _integer(other.get('revision'), 'other card revision', OBLIGATION_READ_TOKEN) != 2:
         _fail(OBLIGATION_READ_TOKEN, 'a second card was not bound to revision 2')
-    if other.get('read_token_revision') != 2:
+    if other.get('compat_revision') != 2:
         _fail(OBLIGATION_READ_TOKEN, 'readToken was reused across revisions')
 
 
@@ -229,6 +229,30 @@ def check_no_store_every_response(evidence: dict) -> None:
     required = {200, 201, 204, 401, 404, 409}
     if not required.issubset(observed_statuses):
         _fail(OBLIGATION_NO_STORE, 'response matrix omitted success or error status coverage')
+
+
+def verify_all_obligations(evidence: dict) -> dict:
+    """Run every independent obligation check and return a non-secret receipt."""
+    if not isinstance(evidence, dict):
+        raise DraftDeliveryViolation('Draft delivery evidence must be an object')
+    checks = (
+        (OBLIGATION_CLIENT_ID, check_client_selected_idempotent_create),
+        (OBLIGATION_APPEND, check_immutable_revision_append),
+        (OBLIGATION_STALE, check_stale_update_conflict),
+        (OBLIGATION_READ_TOKEN, check_read_token_single_revision),
+        (OBLIGATION_UNAVAILABLE, check_revoked_or_deleted_unavailable),
+        (OBLIGATION_READ_ONLY, check_read_token_read_only),
+        (OBLIGATION_NO_STORE, check_no_store_every_response),
+        (OBLIGATION_REDACTION, check_token_redaction),
+    )
+    for obligation, check in checks:
+        try:
+            check(evidence)
+        except DraftDeliveryViolation:
+            raise
+        except (KeyError, TypeError, ValueError, AttributeError):
+            raise DraftDeliveryViolation(obligation + ': malformed observation') from None
+    return {'status': 'PASS', 'checked': [name for name, _ in checks]}
 
 
 def scan_redaction(name: str, payload: bytes, *,

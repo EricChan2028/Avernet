@@ -163,13 +163,13 @@ def read_token_evidence():
                 'draft_id': DRAFT_ID,
                 'revision': 1,
                 'content_hash': CONTENT_HASH,
-                'read_token_present': True,
-                'read_token_revision': 1,
+                'compat_field_present': True,
+                'compat_revision': 1,
                 'read_with_token_as_header': False,
                 'read_without_token': {'status': 200, 'revision': 1,
                                        'size_bytes': 2174, 'content_hash': CONTENT_HASH},
             },
-            'other_revision': {'revision': 2, 'read_token_revision': 2},
+            'other_revision': {'revision': 2, 'compat_revision': 2},
         },
     }
 
@@ -190,11 +190,11 @@ class ReadTokenSingleRevisionTests(unittest.TestCase):
             with self.subTest(mutation=mutation):
                 value = read_token_evidence()
                 if mutation == 'token_revision':
-                    value['cards']['historical']['read_token_revision'] = 2
+                    value['cards']['historical']['compat_revision'] = 2
                 elif mutation == 'token_header':
                     value['cards']['historical']['read_with_token_as_header'] = True
                 elif mutation == 'other_revision':
-                    value['cards']['other_revision']['read_token_revision'] = 1
+                    value['cards']['other_revision']['compat_revision'] = 1
                 elif mutation == 'read_status':
                     value['cards']['historical']['read_without_token']['status'] = 401
                 else:

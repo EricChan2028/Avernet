@@ -114,7 +114,12 @@ def disk_digest() -> str:
     # source binding contract, run lifecycle and offline report projection
     # modules, so the allowance grows by exactly those three files plus one
     # slot of headroom for a future adapter split.
-    if len(paths) > 324:
+    # The committed Edge friend-mutation backlog executor adds one flat module, the
+    # owned-local Bot-authority user journey parent slice adds its focused source
+    # binding contract, owned adapter, run lifecycle and offline report projection
+    # modules (four flat files), and three slots are reserved for the concurrent
+    # provider-owner promotion landing next.
+    if len(paths) > 332:
         raise ValueError('executor artifact exceeds its source-file budget')
     digest = hashlib.sha256()
     for path in paths:

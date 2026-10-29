@@ -25,15 +25,16 @@ from bcs_e2e.draft_delivery.contract import (CONFIG_FRAGMENT, CONFIG_REQUIRED, E
                                              FIXTURE_SOURCE, MARKER_PATTERNS,
                                              REDACTION_TOKENS, REQUIREMENTS, STORY_CHECKS,
                                              STORY_MARKERS, STORY_SOURCE, draft_delivery_source_binding)
+from bcs_e2e.draft_delivery.story import EXPECTED_CHECKS
 
-GOOD_MARKER = 'Draft delivery story: 45 live HTTP assertions passed'
+GOOD_MARKER = 'Draft delivery story: 57 live HTTP assertions passed'
 
 
 class MarkerTests(unittest.TestCase):
     def test_marker_pattern_binds_the_exact_assertion_count(self):
         match = MARKER_PATTERNS[0].match(GOOD_MARKER)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), '45')
+        self.assertEqual(match.group(1), '57')
         self.assertIsNone(MARKER_PATTERNS[0].match(GOOD_MARKER[:-len(' passed')]))
         self.assertIsNone(MARKER_PATTERNS[0].match('Draft delivery story: 45 checks passed'))
 
@@ -83,7 +84,7 @@ class ContractTests(unittest.TestCase):
         original = draft_delivery_source_binding()
         mutations = {
             'drop-requirement': lambda value: value['requirements'].pop(),
-            'story-checks': lambda value: value.__setitem__('story_checks', 44),
+            'story-checks': lambda value: value.__setitem__('story_checks', 56),
             'credit': lambda value: value.__setitem__('grants_release_credit', True),
             'denominator': lambda value: value.__setitem__('release_parent_denominator', True),
             'independent': lambda value: value.__setitem__('independent_slice', False),
@@ -123,6 +124,10 @@ class ContractTests(unittest.TestCase):
                         patch('bcs_e2e.draft_delivery.contract.' + attribute, replacement), \
                         self.assertRaises(RunStateError):
                     draft_delivery_source_binding()
+
+    def test_story_checks_match_the_black_box_child_constant(self):
+        self.assertEqual(STORY_CHECKS, EXPECTED_CHECKS)
+        self.assertEqual(STORY_CHECKS, 57)
 
     def test_parent_is_known_backlog_outside_release_denominator(self):
         manifest = current_manifest()
