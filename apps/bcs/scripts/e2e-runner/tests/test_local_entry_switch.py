@@ -31,12 +31,12 @@ class LocalEntrySwitchReviewTests(unittest.TestCase):
         self.assertEqual(result["schema_version"], 1)
         self.assertEqual(result["status"], "READY")
         self.assertTrue(result["ready_to_execute"])
-        self.assertEqual(result["executor_count"], 30)
+        self.assertEqual(result["executor_count"], 31)
         self.assertEqual(result["partial_executor_count"], 0)
         self.assertEqual(result["blockers"], [])
         self.assertEqual(
             [row["status"] for row in result["executors"]],
-            ["READY"] * 30,
+            ["READY"] * 31,
         )
         self.assertEqual(result["entry_switch"], "PERFORMED_LOCAL_SHELL_DEFAULT")
         self.assertEqual(result["remote_validation"], "NOT_RUN")
@@ -56,9 +56,9 @@ class LocalEntrySwitchReviewTests(unittest.TestCase):
             result = review_local_entry_switch()
         self.assertEqual(result["status"], "BLOCKED")
         self.assertFalse(result["ready_to_execute"])
-        self.assertEqual(result["executor_count"], 29)
+        self.assertEqual(result["executor_count"], 30)
         self.assertEqual(result["partial_executor_count"], 1)
-        self.assertIn("executor.count:29 expected 30", result["blockers"])
+        self.assertIn("executor.count:30 expected 31", result["blockers"])
         self.assertIn(
             "parents.missing:story_user_builds_trusted_team",
             result["blockers"],
@@ -79,7 +79,7 @@ class LocalEntrySwitchReviewTests(unittest.TestCase):
             result["blockers"],
         )
         self.assertIn("parents.unexpected:unknown-parent", result["blockers"])
-        self.assertNotIn("executor.count:30 expected 30", result["blockers"])
+        self.assertNotIn("executor.count:31 expected 31", result["blockers"])
 
     def test_non_integrated_reporting_is_an_exact_blocker(self):
         mutated = plan()

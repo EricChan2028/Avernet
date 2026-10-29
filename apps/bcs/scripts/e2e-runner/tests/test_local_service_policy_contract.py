@@ -146,8 +146,8 @@ class ObligationTests(unittest.TestCase):
         reviewed = {row['id'] for row in reviewed_release_inventory()}
         self.assertIn('story_retired_service_policy', reviewed)
         self.assertNotIn('story_retired_service_policy', KNOWN_UNMAPPED_LEGACY_IDS)
-        self.assertEqual(REVIEWED_RELEASE_PARENT_COUNT, 30)
-        self.assertEqual(len(reviewed), 30)
+        self.assertEqual(REVIEWED_RELEASE_PARENT_COUNT, 31)
+        self.assertEqual(len(reviewed), 31)
         self.assertEqual(len(current_manifest()['legacy_inventory']), 41)
 
 

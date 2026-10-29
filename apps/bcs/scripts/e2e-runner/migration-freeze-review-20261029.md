@@ -550,3 +550,48 @@ Previous freeze generations: `48b23001e` (umbrella + 15 families) and `71860eae`
   `target/debug/bcs`, all `ppid=1`, started 2026-10-29 20:37–22:45 inside this worktree's
   `.standalone-openclaw/`) were terminated; they pinned load ~6 on this box and produced
   timing flakes in the judge-sandbox suite (green twice after cleanup).
+
+## Slice-31 disposition: story_authority_user_journey (2026-10-30)
+
+- Promoted `story_authority_user_journey` out of `KNOWN_UNMAPPED_LEGACY_IDS` and raised
+  `REVIEWED_RELEASE_PARENT_COUNT` 30→31: the owned-local Bot-authority user journey becomes
+  the 31st reviewed release parent slice (`LOCAL-AUTHORITY-JOURNEY-01`, suite
+  `owned-local-authority-v1`, 16 frozen assertions / 24 frozen HTTP calls, binary kind `bcs`,
+  sha-256-locked to `dcbc39f07cedb62c8764987caa9fb05983dd7b3b1e6185022281cf0daa73d8d3`,
+  environment `local=LOCAL_EXECUTOR_ONLY` / `preprod=REMOTE_UNSUPPORTED`,
+  `independent_slice=false`, `release_parent_denominator=true`, source map
+  `authority-migration-contract.json`; upstream frozen at `authority.sh` git tip
+  `c6f00120949078f14cb0d3602fb8301f2ccb1803`, file sha256
+  `62c1f09fd74fc881edb191a827c9e2d91e11afd38980fd83c5333828371dd69a`, worktree clean).
+- Registration: `local-authority-run`/`local-authority-report` commands with a report
+  output-dir overwrite guard, `CaseBinding LOCAL-AUTHORITY-JOURNEY-01`, migration-inventory
+  `authority_slice` plus the `authority` source binding and executor/source-map entries, and
+  the junit/markdown requirement projection suite-set additions (`owned-local-authority-v1`).
+- Artifact allowance 324→332: the committed Edge backlog executor (+1 flat module), the
+  authority slice's four flat modules (+4), and three slots reserved for the concurrent
+  provider-owner promotion (+3); the historical allowance annotations stay untouched.
+- Semantic-projection bug found by the offline fence and fixed: the owned adapter wrote
+  unrendered `{...}` path templates into the INTENDED operation rows (the 24 call rows were
+  rendered correctly), so live-1 passed its run fence (`LOCAL_AUTHORITY_PASS`,
+  `http_call_count=24`, 16/16 requirements, fixture bots retained, STOPPED rc=0) while
+  `local-authority-report` correctly BLOCKED on 12 row `path` mismatches; `_begin_op` now
+  resolves identity tokens before publishing the INTENDED row, and the semantic-variant guard
+  grows the `unrendered-row-path-template` negative to pin that fence. Live rerun
+  `20261030-authority-live-2` passes both fences (run `LOCAL_AUTHORITY_PASS`; official offline
+  rendering `LOCAL_SUITE_PASS`, integrity PASS, rc=0; evidence under
+  `~/.codex/bcs-e2e/e2e-dev-fresh-authority-live-2/` and
+  `~/.codex/bcs-e2e/e2e-dev-fresh-authority-live-2-reports-offline/`; executor digest
+  `18feb847a317bb9839de8f75a97ee8d1f13fe83c9574b00ff019bffc7218bd10` frozen by the run and
+  re-derived identically; credentials `NOT_CAPTURED`, journal forbidden-substring scan clean).
+  Live-1 is retained as the BLOCKED-discovery evidence trail.
+- Focused unittests: 128 ran, OK (4 AuthorityLive environment-gated skips); shared count
+  sweeps landed in the entry-switch, migration-inventory, story-command, service-policy and
+  custom-collaboration tests and in the staged provider-owner canary fence (30→31); that
+  canary currently cannot import because the concurrent provider-owner slice has not yet
+  promoted its contract modules into `bcs_e2e/` by its own landing recipe - not an authority
+  regression.
+- Gates: upstream drift (git tip + file sha256 + contract identity) PASS; count gate 31/31
+  `CASES` READY against `REVIEWED_RELEASE_PARENT_COUNT=31`; secret gate clean (journal
+  forbidden-substring scan, staged-diff credential grep, strict mock-header admission record
+  per run). SOP deviation recorded: this freeze-review entry was appended after live-2 so the
+  document carries real results; every other SOP step ran in its documented order.

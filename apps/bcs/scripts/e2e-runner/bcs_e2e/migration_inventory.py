@@ -312,6 +312,10 @@ def migration_plan() -> dict:
                                                 REQUIREMENTS as POLICY_REQUIREMENTS,
                                                 SUITE as POLICY_SUITE,
                                                 service_policy_source_binding)
+    from .local_authority_contract import (CASE_ID as AUTHORITY_CASE_ID,
+                                            REQUIREMENTS as AUTHORITY_REQUIREMENTS,
+                                            SUITE as AUTHORITY_SUITE,
+                                            authority_source_binding)
     draft_group = draft_group_source_binding()
     caller_execution_slice = {'suite': CALLER_SUITE, 'case_id': CALLER_CASE, 'case_version': 1,
         'legacy_id': 'caller_execution_story', 'status': 'LOCAL_EXECUTOR_ONLY',
@@ -378,7 +382,21 @@ def migration_plan() -> dict:
         'release_parent_denominator': True, 'independent_slice': False,
         'remote_validation': 'NOT_RUN', 'grants_release_credit': False,
         'source_map': 'service-policy-migration-contract.json'}
+    authority_slice = {'suite': AUTHORITY_SUITE, 'case_id': AUTHORITY_CASE_ID, 'case_version': 1,
+        'legacy_id': 'story_authority_user_journey', 'status': 'LOCAL_EXECUTOR_ONLY',
+        'required_assertion_count': 16, 'requirement_ids': list(AUTHORITY_REQUIREMENTS),
+        'canonical_reporting': 'INTEGRATED_LOCAL',
+        'execution_command': 'local-authority-run',
+        'report_command': 'local-authority-report',
+        'required_parameters': ['binary', 'binary_sha256', 'state_dir', 'run_id', 'confirm_run_id',
+                                'allow_local_processes', 'allow_fixture_write', 'allow_write'],
+        'binary_kind': 'bcs', 'auto_build': False,
+        'environment': {'local': 'LOCAL_EXECUTOR_ONLY', 'preprod': 'REMOTE_UNSUPPORTED'},
+        'release_parent_denominator': True, 'independent_slice': False,
+        'remote_validation': 'NOT_RUN', 'grants_release_credit': False,
+        'source_map': 'authority-migration-contract.json'}
     service_policy = service_policy_source_binding()
+    authority = authority_source_binding()
     admission = admission_source_binding()
     friend_requests = friend_requests_list_source_binding()
     friend_connections = friend_connections_list_source_binding()
@@ -518,7 +536,7 @@ def migration_plan() -> dict:
                'canonical_reporting':'INTEGRATED_LOCAL','execution_command':'local-edge-friend-mutations-run',
                'report_command':'local-edge-friend-mutations-report','remote_validation':'NOT_RUN','grants_release_credit':False}
               for plan in edge_friend_release_plans.values()],
-            service_policy_slice],
+            service_policy_slice, authority_slice],
             'local_backlog_case_slices': [
                 {'suite': 'owned-local-edge-friend-mutations-v1',
                  'case_id': plan.case_id, 'case_version': 1,
@@ -539,7 +557,7 @@ def migration_plan() -> dict:
             'legacy_inventory_count': len(inventory), 'mapped_story_count': len(contract['stories']),
             'migrated_story_count': 0, 'passed_assertion_count': 0,
             'scope': 'next three parent Stories only; requirements are not executed assertions',
-            'stories': contract['stories'], 'additional_source_maps': [network, sessions, provider, channel, channel_cli, direct_chat, structured, webhook, judge, fixed_loop, admission, friend_requests, friend_connections, bot_search, delivery_policy, operator_cli, collaboration_team, sessions_services, service_policy, *edge_friend_mutation_maps],
+            'stories': contract['stories'], 'additional_source_maps': [network, sessions, provider, channel, channel_cli, direct_chat, structured, webhook, judge, fixed_loop, admission, friend_requests, friend_connections, bot_search, delivery_policy, operator_cli, collaboration_team, sessions_services, service_policy, authority, *edge_friend_mutation_maps],
             'cross_environment_source_candidates': {
                 **edge_read_adaptability(),
                 'cases': edge_read_adaptability()['cases'] + edge_search_adaptability()['cases'],

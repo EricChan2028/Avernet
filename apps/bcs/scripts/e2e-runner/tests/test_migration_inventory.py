@@ -259,7 +259,7 @@ class MigrationInventoryTests(unittest.TestCase):
 
     def test_local_migration_set_covers_the_reviewed_release_parent_stories(self):
         result = migration_plan()
-        self.assertEqual(len(result['local_registered_executors']), 30)
+        self.assertEqual(len(result['local_registered_executors']), 31)
         self.assertEqual(result['local_partial_executors'], [])
         all_inventory = {row['id'] for row in current_manifest()['legacy_inventory']}
         known_unmapped = set(KNOWN_UNMAPPED_LEGACY_IDS)
@@ -358,7 +358,7 @@ class MigrationInventoryTests(unittest.TestCase):
 
     def test_caller_execution_is_one_independent_local_slice_with_no_release_credit(self):
         result = migration_plan()
-        self.assertEqual(len(result['local_registered_executors']), 30)
+        self.assertEqual(len(result['local_registered_executors']), 31)
         slices = result['local_independent_slices']
         self.assertEqual(len(slices), 4)
         row = slices[0]

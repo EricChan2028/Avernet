@@ -502,7 +502,7 @@ def render_junit(summary: dict) -> str:
         ET.SubElement(properties, "property", {"name": "observer_binding." + key, "value": str(value)})
     for key, value in retained_properties(summary.get('retention', {})).items():
         ET.SubElement(properties, "property", {"name": key, "value": str(value)})
-    if summary.get('scope', {}).get('suite') in {'owned-local-trusted-team-v1', 'owned-local-cli-file-v1', 'owned-local-workspace-v1', 'owned-local-network-v1', 'owned-local-session-public-v1', 'owned-local-session-sharing-v1', 'owned-local-session-flow-v1', 'owned-local-provider-v1', 'owned-local-channel-http-v1', 'owned-local-channel-cli-v1', 'owned-local-delivery-policy-v1', 'owned-local-direct-chat-v1', 'owned-local-edge-read-v1', 'owned-local-operator-cli-v1'}:
+    if summary.get('scope', {}).get('suite') in {'owned-local-trusted-team-v1', 'owned-local-cli-file-v1', 'owned-local-workspace-v1', 'owned-local-network-v1', 'owned-local-session-public-v1', 'owned-local-session-sharing-v1', 'owned-local-session-flow-v1', 'owned-local-provider-v1', 'owned-local-channel-http-v1', 'owned-local-channel-cli-v1', 'owned-local-delivery-policy-v1', 'owned-local-direct-chat-v1', 'owned-local-edge-read-v1', 'owned-local-operator-cli-v1', 'owned-local-authority-v1'}:
         for key in ('expected_assertion_count','observed_assertion_count'):
             ET.SubElement(properties, 'property', {'name':key, 'value':str(summary['reports'][key])})
         for requirement in summary.get('requirements', []):
@@ -579,7 +579,7 @@ def render_markdown(summary: dict) -> str:
                   (summary.get('mock_boundary') or summary.get('verification_boundary')
                    or {'not_proven': []})['not_proven'])}",
               f"- Timing interpretation: {summary['timing']['interpretation']}", ""]
-    if summary.get('scope', {}).get('suite') in {'owned-local-trusted-team-v1', 'owned-local-cli-file-v1', 'owned-local-workspace-v1', 'owned-local-network-v1', 'owned-local-session-public-v1', 'owned-local-session-sharing-v1', 'owned-local-session-flow-v1', 'owned-local-provider-v1', 'owned-local-channel-http-v1', 'owned-local-channel-cli-v1', 'owned-local-delivery-policy-v1', 'owned-local-direct-chat-v1', 'owned-local-edge-read-v1', 'owned-local-operator-cli-v1'}:
+    if summary.get('scope', {}).get('suite') in {'owned-local-trusted-team-v1', 'owned-local-cli-file-v1', 'owned-local-workspace-v1', 'owned-local-network-v1', 'owned-local-session-public-v1', 'owned-local-session-sharing-v1', 'owned-local-session-flow-v1', 'owned-local-provider-v1', 'owned-local-channel-http-v1', 'owned-local-channel-cli-v1', 'owned-local-delivery-policy-v1', 'owned-local-direct-chat-v1', 'owned-local-edge-read-v1', 'owned-local-operator-cli-v1', 'owned-local-authority-v1'}:
         lines += ['## Parent Story requirements', '',
                   f"- Required assertions: {summary['reports']['expected_assertion_count']}",
                   f"- Observed assertions: {summary['reports']['observed_assertion_count']}",

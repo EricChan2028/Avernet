@@ -276,7 +276,7 @@ class CustomCollaborationLifecycleTests(unittest.TestCase):
         self.assertEqual(len(canonical['requirements']), 3)
 
     def test_release_parent_guard_reads_reviewed_denominator_not_the_raw_freeze(self):
-        without_parent = [{'id': f'other-{index}'} for index in range(30)]
+        without_parent = [{'id': f'other-{index}'} for index in range(31)]
         with patch('bcs_e2e.local_custom_collaboration_run.reviewed_release_inventory',
                    return_value=without_parent):
             with self.assertRaisesRegex(RunStateError, 'parent is missing'):

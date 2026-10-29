@@ -1,0 +1,505 @@
+{
+  "case_id": "LOCAL-AUTHORITY-JOURNEY-01",
+  "environment": {
+    "local": "LOCAL_EXECUTOR_ONLY",
+    "preprod": "REMOTE_UNSUPPORTED"
+  },
+  "evidence_granularity": "OWNED_PARENT_JOURNAL",
+  "grants_release_credit": false,
+  "independent_slice": false,
+  "parent": "story_authority_user_journey",
+  "release_parent_denominator": true,
+  "remote_validation": "NOT_RUN",
+  "requirements": [
+    {
+      "actor": "register",
+      "anchors": [
+        "_au_register_fixture_bot \"$BCS_MOCK_USER_ID\" \"authority-story-$$-$(date +%s)\"",
+        "_au_register_fixture_bot \"$_AU_STAFF_B\" \"authority-story-b-$$-$(date +%s)\"",
+        "_AU_STAFF_B=\"${BCS_E2E_AUTHORITY_STAFF_B:-002}\"",
+        "X-Mock-User-Id: $staff"
+      ],
+      "calls": [
+        {
+          "actor": "register_owner",
+          "expect_status": 200,
+          "method": "GET",
+          "path": "/register/token",
+          "query": null
+        },
+        {
+          "actor": "register_owner",
+          "expect_status": 200,
+          "method": "POST",
+          "path": "/register",
+          "query": null
+        },
+        {
+          "actor": "register_target",
+          "expect_status": 200,
+          "method": "GET",
+          "path": "/register/token",
+          "query": null
+        },
+        {
+          "actor": "register_target",
+          "expect_status": 200,
+          "method": "POST",
+          "path": "/register",
+          "query": null
+        }
+      ],
+      "expectation": "Trusted mock-header registration mints a one-time register token for the owner human (staff A) and registers the disposable owner fixture Bot, then repeats the same pair for the transfer target human B; both registrations commit their Bot rows and seed both Human actor rows, including B human_002, so later manager and transfer operands resolve.",
+      "id": "AUTHORITY.trusted-registration",
+      "kind": "http",
+      "method": "GET",
+      "path": "/register/token",
+      "story_lines": [
+        43,
+        135
+      ]
+    },
+    {
+      "actor": "owner",
+      "anchors": [
+        "_au_request GET \"${prefix}/bots/${owner_bot}/ownership\" \"$principal_a\"",
+        "assert_json_eq \"ownership keeps the bot id\" \"$RESPONSE\" \"data.bot_id\" \"$owner_bot\"",
+        "assert_json_eq \"ownership identifies the registered owner\""
+      ],
+      "calls": [
+        {
+          "actor": "owner",
+          "expect_status": 200,
+          "method": "GET",
+          "path": "/api/v1/collaboration/bots/{bot_id}/ownership",
+          "query": null
+        }
+      ],
+      "expectation": "The owner reads the collaboration ownership view for its registered Bot: HTTP 200 with data.bot_id equal to the registered bot uuid and data.owner_user_id equal to the registered owner staff id.",
+      "id": "AUTHORITY.ownership-read",
+      "kind": "http",
+      "method": "GET",
+      "path": "/api/v1/collaboration/bots/{bot_id}/ownership",
+      "story_lines": [
+        137,
+        142
+      ]
+    },
+    {
+      "actor": "owner",
+      "anchors": [
+        "require_status \"owner reads an empty manager page\" \"200\"",
+        "assert_json_eq \"manager page starts empty\" \"$RESPONSE\" \"data.total\" \"0\""
+      ],
+      "calls": [
+        {
+          "actor": "owner",
+          "expect_status": 200,
+          "method": "GET",
+          "path": "/api/v1/collaboration/bots/{bot_id}/managers",
+          "query": null
+        }
+      ],
+      "expectation": "The owner reads the manager page before any edit: HTTP 200 with data.total 0, proving the manager single-item surface starts from a verified empty ledger.",
+      "id": "AUTHORITY.empty-manager-page",
+      "kind": "http",
+      "method": "GET",
+      "path": "/api/v1/collaboration/bots/{bot_id}/managers",
+      "story_lines": [
+        144,
+        147
+      ]
+    },
+    {
+      "actor": "owner",
+      "anchors": [
+        "_au_request PUT \"${prefix}/bots/${owner_bot}/managers/${BCS_MOCK_USER_ID}\" \"$principal_a\"",
+        "require_status \"adding the owner as a manager is rejected\" \"409\"",
+        "assert_json_eq \"owner add uses the stable error code\""
+      ],
+      "calls": [
+        {
+          "actor": "owner",
+          "expect_status": 409,
+          "method": "PUT",
+          "path": "/api/v1/collaboration/bots/{bot_id}/managers/{owner_user_id}",
+          "query": null
+        }
+      ],
+      "expectation": "Adding the owner itself as a manager operand is rejected with HTTP 409 and the stable error code owner_not_manager; the owner is never a manager operand.",
+      "id": "AUTHORITY.owner-not-manager-polarity",
+      "kind": "http",
+      "method": "PUT",
+      "path": "/api/v1/collaboration/bots/{bot_id}/managers/{owner_user_id}",
+      "story_lines": [
+        149,
+        154
+      ]
+    },
+    {
+      "actor": "owner",
+      "anchors": [
+        "assert_json_eq \"manager add reports one added\" \"$RESPONSE\" \"data.added\" \"1\"",
+        "assert_json_array_contains \"manager page exposes the added manager\"",
+        "assert_json_eq \"manager removal reports one removed\" \"$RESPONSE\" \"data.removed\" \"1\"",
+        "require_status \"manager removal is idempotent for absent\" \"200\"",
+        "assert_json_eq \"absent manager removal reports no change\" \"$RESPONSE\" \"data.removed\" \"0\""
+      ],
+      "calls": [
+        {
+          "actor": "owner",
+          "expect_status": 200,
+          "method": "PUT",
+          "path": "/api/v1/collaboration/bots/{bot_id}/managers/{target_user_id}",
+          "query": null
+        },
+        {
+          "actor": "owner",
+          "expect_status": 200,
+          "method": "GET",
+          "path": "/api/v1/collaboration/bots/{bot_id}/managers",
+          "query": null
+        },
+        {
+          "actor": "owner",
+          "expect_status": 200,
+          "method": "DELETE",
+          "path": "/api/v1/collaboration/bots/{bot_id}/managers/{target_user_id}",
+          "query": null
+        },
+        {
+          "actor": "owner",
+          "expect_status": 200,
+          "method": "DELETE",
+          "path": "/api/v1/collaboration/bots/{bot_id}/managers/{target_user_id}",
+          "query": null
+        }
+      ],
+      "expectation": "The owner adds B as manager (data.added 1), the manager page then reports data.total 1 with B inside data.items, the first delete reports data.removed 1, and the repeat delete of the now-absent manager still succeeds with data.removed 0 (idempotent absent delete).",
+      "id": "AUTHORITY.manager-add-list-remove-idempotent",
+      "kind": "http",
+      "method": "PUT",
+      "path": "/api/v1/collaboration/bots/{bot_id}/managers/{target_user_id}",
+      "story_lines": [
+        156,
+        172
+      ]
+    },
+    {
+      "actor": "owner",
+      "anchors": [
+        "# Re-add so the transfer has a live manager ledger to update.",
+        "require_status \"manager is restored before the transfer\" \"200\""
+      ],
+      "calls": [
+        {
+          "actor": "owner",
+          "expect_status": 200,
+          "method": "PUT",
+          "path": "/api/v1/collaboration/bots/{bot_id}/managers/{target_user_id}",
+          "query": null
+        }
+      ],
+      "expectation": "The owner re-adds B as manager before the transfer chapter so the ledger carries a live manager row for the acceptance to rewrite, HTTP 200.",
+      "id": "AUTHORITY.manager-restore",
+      "kind": "http",
+      "method": "PUT",
+      "path": "/api/v1/collaboration/bots/{bot_id}/managers/{target_user_id}",
+      "story_lines": [
+        174,
+        176
+      ]
+    },
+    {
+      "actor": "mine",
+      "anchors": [
+        "public_prefix=\"/openapi/v1/collaboration\"",
+        "mine_only_staff=\"${BCS_E2E_AUTHORITY_STAFF_MINE:-137}\"",
+        "api_request_headers GET \"${public_prefix}/bots/mine?limit=20\" \"\"",
+        "require_status \"mine-ensured human reads its own mine\" \"200\""
+      ],
+      "calls": [
+        {
+          "actor": "mine",
+          "expect_status": 200,
+          "method": "GET",
+          "path": "/openapi/v1/collaboration/bots/mine",
+          "query": {
+            "limit": "20"
+          }
+        }
+      ],
+      "expectation": "The public openapi bots/mine read as the never-registered mine human C (staff 137) answers HTTP 200 and creates C through the collaboration entry only; the authority Human registry is the live bcs_bots actor row that this read creates, never the OAuth identity table.",
+      "id": "AUTHORITY.mine-ensured-human-read",
+      "kind": "http",
+      "method": "GET",
+      "path": "/openapi/v1/collaboration/bots/mine",
+      "story_lines": [
+        178,
+        199
+      ]
+    },
+    {
+      "actor": "owner",
+      "anchors": [
+        "_au_request PUT \"${prefix}/bots/${owner_bot}/managers/${mine_only_staff}\" \"$principal_a\"",
+        "require_status \"mine-ensured human is a valid manager add target\" \"200\"",
+        "assert_json_eq \"mine-ensured manager add reports one added\""
+      ],
+      "calls": [
+        {
+          "actor": "owner",
+          "expect_status": 200,
+          "method": "PUT",
+          "path": "/api/v1/collaboration/bots/{bot_id}/managers/{mine_user_id}",
+          "query": null
+        }
+      ],
+      "expectation": "Adding the mine-ensured human C (staff 137) as manager succeeds with HTTP 200 and data.added 1: a strict-edit acceptance the retired identity-table guard wrongly rejected as bot_authority_human_unknown.",
+      "id": "AUTHORITY.mine-ensured-manager-add",
+      "kind": "http",
+      "method": "PUT",
+      "path": "/api/v1/collaboration/bots/{bot_id}/managers/{mine_user_id}",
+      "story_lines": [
+        201,
+        204
+      ]
+    },
+    {
+      "actor": "owner",
+      "anchors": [
+        "_au_request PUT \"${prefix}/bots/${owner_bot}/managers/never-exists-$$\" \"$principal_a\"",
+        "require_status \"never-seen human is not a manager add target\" \"400\"",
+        "assert_json_eq \"unknown manager add uses the stable error code\""
+      ],
+      "calls": [
+        {
+          "actor": "owner",
+          "expect_status": 400,
+          "method": "PUT",
+          "path": "/api/v1/collaboration/bots/{bot_id}/managers/{never_user_id}",
+          "query": null
+        }
+      ],
+      "expectation": "Adding a never-seen user id is rejected with HTTP 400 and the stable error code bot_authority_human_unknown; the strict-edit path reads no leniency from any lenient sync.",
+      "id": "AUTHORITY.never-seen-manager-unknown",
+      "kind": "http",
+      "method": "PUT",
+      "path": "/api/v1/collaboration/bots/{bot_id}/managers/{never_user_id}",
+      "story_lines": [
+        206,
+        211
+      ]
+    },
+    {
+      "actor": "owner",
+      "anchors": [
+        "require_status \"mine-ensured manager is removed before the transfer\" \"200\"",
+        "assert_json_eq \"mine-ensured manager removal reports one removed\""
+      ],
+      "calls": [
+        {
+          "actor": "owner",
+          "expect_status": 200,
+          "method": "DELETE",
+          "path": "/api/v1/collaboration/bots/{bot_id}/managers/{mine_user_id}",
+          "query": null
+        }
+      ],
+      "expectation": "Removing C from the manager ledger before the transfer succeeds with HTTP 200 and data.removed 1, restoring the story manager set for the transfer chapter.",
+      "id": "AUTHORITY.mine-ensured-manager-remove",
+      "kind": "http",
+      "method": "DELETE",
+      "path": "/api/v1/collaboration/bots/{bot_id}/managers/{mine_user_id}",
+      "story_lines": [
+        213,
+        218
+      ]
+    },
+    {
+      "actor": "owner",
+      "anchors": [
+        "local transfer_path=\"${prefix}/bots/${owner_bot}/ownership-transfers/human_${_AU_STAFF_B}\"",
+        "require_status \"owner initiates the ownership transfer\" \"201\"",
+        "assert_json_eq \"initiated transfer names the target\"",
+        "assert new - old < 300_000, \"renewal stays within the re-stamp gap\""
+      ],
+      "calls": [
+        {
+          "actor": "owner",
+          "expect_status": 201,
+          "method": "PUT",
+          "path": "/api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}",
+          "query": null
+        },
+        {
+          "actor": "owner",
+          "expect_status": 200,
+          "method": "PUT",
+          "path": "/api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}",
+          "query": null
+        }
+      ],
+      "expectation": "The owner initiates the ownership transfer to human_002: HTTP 201 with data.status pending and data.target_owner_user_id 002; an immediate same-target refresh answers HTTP 200 and renews the seven-day expires_at window without shrinking it (new >= old and new - old < 300000 ms).",
+      "id": "AUTHORITY.transfer-initiate-refresh",
+      "kind": "http",
+      "method": "PUT",
+      "path": "/api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}",
+      "story_lines": [
+        220,
+        245
+      ]
+    },
+    {
+      "actor": "target",
+      "anchors": [
+        "_au_request GET \"$transfer_path\" \"$principal_b\"",
+        "require_status \"target human reads the pending transfer\" \"200\"",
+        "_au_request POST \"${transfer_path}/accept\" \"$principal_b\"",
+        "assert_json_eq \"accept records the accepted status\" \"$RESPONSE\" \"data.status\" \"accepted\""
+      ],
+      "calls": [
+        {
+          "actor": "target",
+          "expect_status": 200,
+          "method": "GET",
+          "path": "/api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}",
+          "query": null
+        },
+        {
+          "actor": "target",
+          "expect_status": 200,
+          "method": "POST",
+          "path": "/api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}/accept",
+          "query": null
+        }
+      ],
+      "expectation": "The target human B reads its pending transfer (HTTP 200, data.status pending) and accepts it (HTTP 200, data.status accepted), dual-admitting only a live target Human and moving the owner edge transactionally.",
+      "id": "AUTHORITY.transfer-read-accept",
+      "kind": "http",
+      "method": "GET",
+      "path": "/api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}",
+      "story_lines": [
+        247,
+        253
+      ]
+    },
+    {
+      "actor": "target",
+      "anchors": [
+        "_au_request GET \"${prefix}/bots/${owner_bot}/ownership\" \"$principal_b\"",
+        "require_status \"the new owner reads the collaboration ownership view\" \"200\"",
+        "assert_json_eq \"ownership transfer moved the owner\""
+      ],
+      "calls": [
+        {
+          "actor": "target",
+          "expect_status": 200,
+          "method": "GET",
+          "path": "/api/v1/collaboration/bots/{bot_id}/ownership",
+          "query": null
+        }
+      ],
+      "expectation": "The new owner B reads the ownership view after acceptance: HTTP 200 with data.bot_id unchanged and data.owner_user_id 002; the transfer moved ownership.",
+      "id": "AUTHORITY.transferred-ownership",
+      "kind": "http",
+      "method": "GET",
+      "path": "/api/v1/collaboration/bots/{bot_id}/ownership",
+      "story_lines": [
+        255,
+        258
+      ]
+    },
+    {
+      "actor": "target",
+      "anchors": [
+        "_au_request GET \"${prefix}/bots/${owner_bot}/managers\" \"$principal_b\"",
+        "require_status \"the new owner reads the transferred manager ledger\" \"200\"",
+        "assert_json_eq \"the transferred owner is in the ledger\"",
+        "assert_json_array_contains \"the original owner is now a plain manager\""
+      ],
+      "calls": [
+        {
+          "actor": "target",
+          "expect_status": 200,
+          "method": "GET",
+          "path": "/api/v1/collaboration/bots/{bot_id}/managers",
+          "query": null
+        }
+      ],
+      "expectation": "The new owner B reads the manager ledger after acceptance: HTTP 200 with data.owner.owner_user_id 002 and the original owner A present in data.items as a plain approved manager.",
+      "id": "AUTHORITY.transferred-manager-ledger",
+      "kind": "http",
+      "method": "GET",
+      "path": "/api/v1/collaboration/bots/{bot_id}/managers",
+      "story_lines": [
+        260,
+        265
+      ]
+    },
+    {
+      "actor": "owner",
+      "anchors": [
+        "_au_request GET \"${prefix}/ownership-transfers?direction=received\" \"$principal_b\"",
+        "require_status \"the new owner lists received transfers\" \"200\"",
+        "assert_contains \"received inbox contains the accepted bot\" \"$RESPONSE\" \"$owner_bot\"",
+        "_au_request GET \"${prefix}/ownership-transfers?direction=sent\" \"$principal_a\""
+      ],
+      "calls": [
+        {
+          "actor": "target",
+          "expect_status": 200,
+          "method": "GET",
+          "path": "/api/v1/collaboration/ownership-transfers",
+          "query": {
+            "direction": "received"
+          }
+        },
+        {
+          "actor": "owner",
+          "expect_status": 200,
+          "method": "GET",
+          "path": "/api/v1/collaboration/ownership-transfers",
+          "query": {
+            "direction": "sent"
+          }
+        }
+      ],
+      "expectation": "Both transfer inboxes observe the accepted round: B lists direction=received and A lists direction=sent, each HTTP 200 with the transferred bot uuid present in the response.",
+      "id": "AUTHORITY.transfer-inboxes",
+      "kind": "http",
+      "method": "GET",
+      "path": "/api/v1/collaboration/ownership-transfers",
+      "story_lines": [
+        267,
+        274
+      ]
+    },
+    {
+      "actor": "runtime",
+      "anchors": [
+        "story_authority_user_journey() {",
+        "E2E_TESTS_STORIES+=(\"story_authority_user_journey\")"
+      ],
+      "calls": [],
+      "expectation": "The owned strict runtime itself is the disposition evidence: one LOCAL_EXECUTOR_ONLY owned BCS process with ambient local identity disabled and strict mock-header admission replayed the complete journey; no bot deletion is performed, no credential enters the journal, and no remote validation or release credit is claimed.",
+      "id": "AUTHORITY.story-scoped-disposition",
+      "kind": "lifecycle",
+      "method": null,
+      "path": null,
+      "story_lines": [
+        1,
+        2
+      ]
+    }
+  ],
+  "schema_version": 1,
+  "source_file_revisions": {
+    "authority.sh": "c6f00120949078f14cb0d3602fb8301f2ccb1803"
+  },
+  "source_revision": "c6f00120949078f14cb0d3602fb8301f2ccb1803",
+  "sources": {
+    "authority.sh": "62c1f09fd74fc881edb191a827c9e2d91e11afd38980fd83c5333828371dd69a"
+  },
+  "suite": "owned-local-authority-v1"
+}

@@ -57,21 +57,20 @@ KNOWN_UNMAPPED_LEGACY_IDS = frozenset({
     # Long-unregistered upstream stories (harness-defined before the freeze,
     # never part of the reviewed release denominator; registered 2026-10-29
     # for migration with the fresh re-freeze, see migration-freeze-review-20261029.md):
-    'story_authority_user_journey',
     'story_provider_owner_isolation',
     'story_session_owner_permissions',
     'story_provider_operator_manages_subbots',
     'story_collaboration_draft_delivery',
     'story_collaboration_draft_group_launch',
 })
-REVIEWED_RELEASE_PARENT_COUNT = 30
+REVIEWED_RELEASE_PARENT_COUNT = 31
 
 
 def reviewed_release_inventory(manifest: dict | None = None) -> list[dict]:
-    """Return the reviewed 30-Story release denominator from the current 41-row legacy inventory.
+    """Return the reviewed 31-Story release denominator from the current 41-row legacy inventory.
 
-    Eleven legacy parents sit outside the reviewed release denominator: the
-    pre-existing backlog rows plus six registered 2026-10-29 during the
+    Ten legacy parents sit outside the reviewed release denominator: the
+    pre-existing backlog rows plus five registered 2026-10-29 during the
     harness re-freeze (long-unregistered upstream stories). They are known
     backlog, not silently missing or absorbed into this release denominator.
     """

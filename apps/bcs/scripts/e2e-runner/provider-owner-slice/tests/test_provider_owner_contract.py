@@ -198,7 +198,7 @@ class BacklogFenceTests(unittest.TestCase):
         self.assertIn('story_provider_owner_isolation', KNOWN_UNMAPPED_LEGACY_IDS)
         self.assertNotIn('story_provider_owner_isolation',
                          {row['id'] for row in reviewed_release_inventory()})
-        self.assertEqual(REVIEWED_RELEASE_PARENT_COUNT, 30)
+        self.assertEqual(REVIEWED_RELEASE_PARENT_COUNT, 31)
         row = next(item for item in current_manifest()['legacy_inventory']
                    if item['id'] == 'story_provider_owner_isolation')
         self.assertEqual(row['source'], 'provider_scope_story.sh')

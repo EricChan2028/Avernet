@@ -382,7 +382,7 @@ class ServicePolicyPromotionTests(unittest.TestCase):
         listing = list_cases()
         self.assertEqual(listing['case_count'], REVIEWED_RELEASE_PARENT_COUNT)
         self.assertEqual(listing['status'], 'READY')
-        self.assertEqual(REVIEWED_RELEASE_PARENT_COUNT, 30)
+        self.assertEqual(REVIEWED_RELEASE_PARENT_COUNT, 31)
 
     def test_promoted_row_leaves_the_independent_slice_registry(self):
         plan = migration_plan()
@@ -392,8 +392,8 @@ class ServicePolicyPromotionTests(unittest.TestCase):
         self.assertIn('LOCAL-SERVICE-POLICY-01', executor_ids)
         extra = [row for row in plan['local_registered_executors']
                  if row.get('release_parent_denominator') is True]
-        self.assertEqual(len(extra), 1)
-        self.assertEqual(extra[0]['case_id'], 'LOCAL-SERVICE-POLICY-01')
+        extra_ids = {row['case_id'] for row in extra}
+        self.assertEqual(extra_ids, {'LOCAL-SERVICE-POLICY-01', 'LOCAL-AUTHORITY-JOURNEY-01'})
 
 
 if __name__ == '__main__':
