@@ -28,10 +28,12 @@ def test_transport_error_maps_to_caller_bcs_sync_error() -> None:
     transport = MagicMock()
     transport.sync_bot_caller_config.side_effect = BcnServiceError("boom")
 
-    with pytest.raises(CallerBcsSyncError):
+    with pytest.raises(CallerBcsSyncError) as excinfo:
         _adapter(transport).sync_caller_config(
             bot_id="bot-1", owner_id="owner-1", enabled=True, source_revision=3
         )
+
+    assert isinstance(excinfo.value.__cause__, BcnServiceError)
 
 
 def test_skip_result_is_silent_success() -> None:

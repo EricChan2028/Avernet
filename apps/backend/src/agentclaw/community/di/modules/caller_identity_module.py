@@ -156,6 +156,7 @@ class CallerIdentityModule(Module):
         passport_plugin: PassportPlugin,
         collaborator_service: CoreCollaboratorServiceProtocol,
         session_validator: CallerSessionValidator,
+        bcs_caller_sync: BcsCallerConfigSyncProtocol,
     ) -> CallerIdentityService:
         """Construct the draft configuration and Agent Principal sync service."""
         return CallerIdentityService(
@@ -168,6 +169,7 @@ class CallerIdentityModule(Module):
             passport_plugin=passport_plugin,
             collaborator_service=collaborator_service,
             session_validator=session_validator,
+            bcs_caller_sync=bcs_caller_sync,
         )
 
     @singleton
