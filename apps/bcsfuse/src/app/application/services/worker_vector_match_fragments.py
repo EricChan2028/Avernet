@@ -21,10 +21,44 @@ from app.application.services.keyword_candidate_selection import (
 
 logger = logging.getLogger("app.application.services.worker_vector_match_service")
 
-MIN_DENSE_FRAGMENT_SEARCH_K = 64
+MIN_DENSE_FRAGMENT_SEARCH_K = 32
+
+# Bounded dense projection fields. Full `content` is intentionally omitted;
+# rerank loads complete profile text for selected candidates instead.
+DENSE_FRAGMENT_PAYLOAD_FIELDS = (
+    "profile_key",
+    "worker_id",
+    "profile_id",
+    "profile_type",
+    "fragment_type",
+    "domains",
+    "active_skills",
+    "short_profile",
+    "display_name",
+    "content_preview",
+    "_external_id",
+)
 
 
 class FragmentMatchingMixin:
+    def _dense_search(
+        self,
+        query_embedding: list[float],
+        top_k: int,
+        filters: dict[str, Any] | None,
+    ):
+        """Run dense search with bounded payload projection when supported."""
+
+        kwargs: dict[str, Any] = {}
+        if self._supports_payload_projection:
+            kwargs["payload_fields"] = list(DENSE_FRAGMENT_PAYLOAD_FIELDS)
+        return self._vector_store.search(
+            query_embedding,
+            top_k,
+            filters=filters,
+            **kwargs,
+        )
+
     def _match_with_fragments(
         self,
         query: str,
@@ -120,7 +154,6 @@ class FragmentMatchingMixin:
             has_excluded=len(excluded_set) > 0,
             expand_factor=effective_expand_factor,
         )
-        vector_size = 0
         try:
             if not query_embedding:
                 dense_available = False
@@ -131,16 +164,11 @@ class FragmentMatchingMixin:
                     hit_count=0,
                 )
             else:
-                vector_size = self._vector_store.size()
-                if vector_size == 0:
-                    log_stage(logger, "vector_search", index_size=0, hit_count=0, reason="empty_index")
-                    logger.error("[FRAGMENT-MATCH] vector store is empty")
-                    return []
-
-            if dense_available:
-                # 传递 filters 启用 Qdrant 前置过滤
+                # A remote size/point-count probe is a second Qdrant RPC on
+                # every cold query. Let the bounded search itself report an
+                # empty index and keep the keyword/literal fallback usable.
                 search_started = perf_counter()
-                fragment_hits = self._vector_store.search(query_embedding, top_k=search_k, filters=filters)
+                fragment_hits = self._dense_search(query_embedding, search_k, filters)
                 raw_hit_count = len(fragment_hits)
                 log_candidates(logger, "vector_hits", ((hit.id, hit.score) for hit in fragment_hits))
 
@@ -151,7 +179,7 @@ class FragmentMatchingMixin:
                 log_candidates(logger, "fragment_type_removed", (
                     (hit.id, hit.score) for hit in unfiltered_hits if hit.id not in retained_ids
                 ), level=logging.INFO)
-                log_stage(logger, "vector_search", index_size=vector_size, search_k=search_k,
+                log_stage(logger, "vector_search", search_k=search_k,
                           hit_count=raw_hit_count, after_type_filter=len(fragment_hits),
                           duration_ms=round((perf_counter() - search_started) * 1000, 2))
 
@@ -159,6 +187,24 @@ class FragmentMatchingMixin:
             log_stage(logger, "vector_search", reason="provider_error", error_type=type(e).__name__)
             logger.warning("Fragment search failed: %s", e)
             dense_available = False
+            fragment_hits = []
+
+        # Preserve the empty-index contract without putting a remote point-count
+        # RPC on the normal cache-miss request path. Only a zero-hit or failed
+        # semantic probe needs to distinguish an empty index from bad recall.
+        if query_embedding and not fragment_hits:
+            try:
+                if self._vector_store.size() == 0:
+                    log_stage(logger, "vector_search", hit_count=0, reason="empty_index")
+                    logger.error("[FRAGMENT-MATCH] vector store is empty")
+                    return []
+            except Exception as probe_error:
+                log_stage(
+                    logger,
+                    "vector_size_probe",
+                    reason="provider_error",
+                    error_type=type(probe_error).__name__,
+                )
 
         # Stage 3: 按 profile_key 聚合（使用运行时权重）
         aggregated = self._aggregate_fragments(
@@ -410,10 +456,17 @@ class FragmentMatchingMixin:
             return
         attempted = loaded = failed = 0
         for candidate in candidates:
-            if candidate.metadata.get("profile") or any(
-                fragment.fragment_type == "profile" and (fragment.content or fragment.content_preview)
-                for fragment in candidate.fragments
-            ):
+            already_loaded = candidate.metadata.get("profile")
+            if not already_loaded:
+                existing_profile = "\n".join(
+                    fragment.content
+                    for fragment in candidate.fragments
+                    if fragment.fragment_type == "profile" and fragment.content
+                )
+                if existing_profile:
+                    candidate.metadata["profile"] = existing_profile
+                already_loaded = candidate.metadata.get("profile")
+            if already_loaded:
                 continue
             worker_id, separator, profile_id = candidate.profile_key.rpartition(":")
             if not separator:
@@ -679,18 +732,10 @@ class FragmentMatchingMixin:
             elif i == log_limit:
                 logger.debug("[FRAGMENT-AGG] ... %d more fragments omitted", len(fragment_hits) - log_limit)
 
-            # 优先使用完整 content，如果没有则使用 content_preview
-            full_content = hit.payload.get("content", "") if hit.payload else ""
+            # The dense projection carries a preview rather than full text. Avoid
+            # an N+1 content-store read for every hit; rerank loads complete
+            # profile text later for only the selected candidate prefix.
             content_preview = hit.payload.get("content_preview", "") if hit.payload else ""
-
-            # Phase B: Fragment Content Reload - 从 MySQL 加载完整 content
-            # Phase C: 传递 payload 优先使用其中的 worker_id/profile_id
-            if not full_content and self._profile_content_store:
-                loaded_content = self._load_fragment_content_from_mysql(profile_key, hit.payload)
-                if loaded_content:
-                    full_content = loaded_content
-                    if i < log_limit:
-                        logger.debug("[FRAGMENT-AGG] Loaded content from MySQL for %s", profile_key)
 
             fragment_match = FragmentMatch(
                 fragment_type=fragment_type,
@@ -698,7 +743,7 @@ class FragmentMatchingMixin:
                 score=hit.score,
                 weighted_score=weighted_score,
                 content_preview=content_preview,
-                content=full_content if full_content else content_preview,  # 优先完整内容
+                content=content_preview,
             )
 
             p = profile_map[profile_key]

@@ -38,6 +38,8 @@ V2 改造: 支持 Fragment 多向量检索 + Reranker 精排
 
 from __future__ import annotations
 
+import inspect
+
 import logging
 import os
 from dataclasses import dataclass
@@ -157,6 +159,10 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
         """
         self._vector_store = vector_store
         self._metadata_store = metadata_store
+        search_method = getattr(self._vector_store, "search", None)
+        self._supports_payload_projection = search_method is not None and (
+            "payload_fields" in inspect.signature(search_method).parameters
+        )
         self._profile_filter = profile_filter
         self._profile_content_store = profile_content_store
         self._fallback_index = fallback_index
@@ -717,15 +723,10 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
         # Stage 2: Vector Search
         vector_search_failed = False
         try:
-            vector_size = self._vector_store.size()
-            if vector_size == 0:
-                logger.error("[LEGACY-MATCH] vector store is empty")
-                return []
-
             search_k = top_k * 3 if candidate_keys else top_k
             # 传递 filters 启用 Qdrant 前置过滤
             hits = self._vector_store.search(query_embedding, top_k=search_k, filters=filters)
-            logger.debug("[LEGACY-MATCH] search | index_size=%d, search_k=%d, hits=%d", vector_size, search_k, len(hits))
+            logger.debug("[LEGACY-MATCH] search | search_k=%d, hits=%d", search_k, len(hits))
         except Exception as error:
             vector_search_failed = True
             log_stage(logger, "vector_search", reason="provider_error", error_type=type(error).__name__)

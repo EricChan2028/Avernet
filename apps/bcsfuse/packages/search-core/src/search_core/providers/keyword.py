@@ -29,6 +29,18 @@ def normalize(text: str) -> str:
     return unicodedata.normalize("NFKC", text).strip().casefold()
 
 
+def _is_exact_id_query(query: str) -> bool:
+    """Whether a query is bounded enough to be worth an exact-ID scroll.
+
+    Prose queries almost always contain whitespace. Skipping exact-ID lookup
+    for them prevents each request from doubling its Qdrant keyword calls.
+    """
+
+    return bool(query) and len(query) <= 128 and re.fullmatch(
+        r"[a-z0-9_.:@-]+", query
+    ) is not None
+
+
 def sparse(text: str) -> models.SparseVector:
     terms = []
     for token in re.findall(r"[a-z0-9_]+|[\u3400-\u9fff]+", normalize(text)):
@@ -198,7 +210,7 @@ class QdrantKeywordIndex:
             for key, value in (filters or {}).items()
         ]
         exact = []
-        if self._exact_match_field is not None:
+        if self._exact_match_field is not None and _is_exact_id_query(query):
             # Exact IDs are retrieved separately, still subject to every caller filter.
             exact, _ = self._client.scroll(
                 self.collection_name,

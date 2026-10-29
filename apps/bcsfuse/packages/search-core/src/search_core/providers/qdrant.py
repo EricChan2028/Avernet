@@ -290,6 +290,8 @@ class QdrantLocalVectorStore(QdrantMutations):
         top_k: int = 10,
         filter: Optional[Dict[str, Any]] = None,
         filters: Optional[Dict[str, Any]] = None,
+        *,
+        payload_fields: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Search for similar vectors.
 
@@ -298,6 +300,8 @@ class QdrantLocalVectorStore(QdrantMutations):
             top_k: Number of results to return.
             filter: Optional filter dict (deprecated, use filters instead).
             filters: Optional filter dict (preferred).
+            payload_fields: Optional payload projection. ``None``
+                preserves the historical full-payload behavior.
 
         Returns:
             List of search results with id, score, and metadata.
@@ -376,6 +380,9 @@ class QdrantLocalVectorStore(QdrantMutations):
                 query=query_vector,
                 limit=top_k,
                 query_filter=qdrant_filter,
+                with_payload=list(payload_fields)
+                if payload_fields is not None
+                else True,
             ).points
 
             logger.info(
