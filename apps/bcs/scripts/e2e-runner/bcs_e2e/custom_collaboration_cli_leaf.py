@@ -25,7 +25,6 @@ from .local_cli import (
     CUSTOM_COLLABORATION_TOPIC,
     LocalCliError,
     TRIAL_CONTEXT,
-    TRIAL_INPUT,
     TRIAL_TOPIC,
     require_cli_binary,
 )
@@ -60,9 +59,6 @@ VALIDATE_YAML_OPERATION = "custom_collaboration_cli.validate"
 CREATE_PERSISTENT_GROUP_OPERATION = "custom_collaboration_cli.create_persistent_group"
 READ_PERSISTENT_GROUP_OPERATION = "custom_collaboration_cli.read_persistent_group"
 TRIAL_CREATE_GROUP_OPERATION = "custom_collaboration_cli.trial_create_group"
-TRIAL_ADD_MEMBER_OPERATION = "custom_collaboration_cli.trial_add_member"
-TRIAL_PERMISSION_OPERATION = "custom_collaboration_cli.trial_permission"
-TRIAL_RUN_OPERATION = "custom_collaboration_cli.trial_run"
 TRIAL_QUERY_GRAPH_OPERATION = "custom_collaboration_cli.trial_query_graph"
 TRIAL_QUERY_PENDING_OPERATION = "custom_collaboration_cli.trial_query_pending"
 TRIAL_RESPOND_GUARD_OPERATION = "custom_collaboration_cli.trial_respond_guard"
@@ -73,10 +69,13 @@ RUN_CANCEL_OPERATION = "custom_collaboration_cli.run.cancel"
 SESSION_READ_OPERATION = "custom_collaboration_cli.session.read"
 GROUP_DELETE_OPERATION = "custom_collaboration_cli.group.delete"
 GROUP_VERIFY_DELETED_OPERATION = "custom_collaboration_cli.group.verify_deleted"
+# Converged group-domain Run start (live preprod evidence 2026-10-29,
+# diag4c probe-b:b3): one raw HTTP leaf beside the frozen bcs-cli, which
+# exposes no group-domain run verb and is never modified.
+GROUP_RUN_START_OPERATION = "custom_collaboration_cli.run.start_group_domain"
 
 CUSTOM_COLLABORATION_CLI_OPERATIONS = (
-    VALIDATE_YAML_OPERATION, TRIAL_CREATE_GROUP_OPERATION, TRIAL_ADD_MEMBER_OPERATION,
-    TRIAL_PERMISSION_OPERATION, TRIAL_RUN_OPERATION, TRIAL_QUERY_GRAPH_OPERATION,
+    VALIDATE_YAML_OPERATION, TRIAL_CREATE_GROUP_OPERATION, TRIAL_QUERY_GRAPH_OPERATION,
     TRIAL_QUERY_PENDING_OPERATION, TRIAL_RESPOND_GUARD_OPERATION,
     TRIAL_MESSAGES_OPERATION, CREATE_PERSISTENT_GROUP_OPERATION,
     READ_PERSISTENT_GROUP_OPERATION,
@@ -85,6 +84,9 @@ _HTTP_PRODUCT_OPERATIONS = frozenset({
     RUN_CANCEL_OPERATION, SESSION_READ_OPERATION,
     GROUP_DELETE_OPERATION, GROUP_VERIFY_DELETED_OPERATION,
 })
+# Scenario (non-cleanup) HTTP exits: the converged group-domain Run start
+# belongs to the reviewed trial obligation, never to the cleanup segment.
+_HTTP_SCENARIO_OPERATIONS = frozenset({GROUP_RUN_START_OPERATION})
 # The Group delete and delete-proof routes serve both cleanup segments;
 # their fixture_effect is labelled per segment, never per route name.
 SCENARIO_CLEANUP_OPERATIONS = frozenset({GROUP_DELETE_OPERATION,
@@ -96,8 +98,7 @@ CUSTOM_COLLABORATION_REQUIREMENT_OPERATIONS = {
         CREATE_PERSISTENT_GROUP_OPERATION, READ_PERSISTENT_GROUP_OPERATION,
         GROUP_DELETE_OPERATION, GROUP_VERIFY_DELETED_OPERATION),
     "CUSTOM-COLLABORATION.trial-one-shot-lifecycle": (
-        TRIAL_CREATE_GROUP_OPERATION, TRIAL_ADD_MEMBER_OPERATION,
-        TRIAL_PERMISSION_OPERATION, TRIAL_RUN_OPERATION,
+        TRIAL_CREATE_GROUP_OPERATION, GROUP_RUN_START_OPERATION,
         TRIAL_QUERY_GRAPH_OPERATION, TRIAL_QUERY_PENDING_OPERATION,
         TRIAL_RESPOND_GUARD_OPERATION, TRIAL_MESSAGES_OPERATION,
         RUN_CANCEL_OPERATION, SESSION_READ_OPERATION,
@@ -106,9 +107,7 @@ CUSTOM_COLLABORATION_REQUIREMENT_OPERATIONS = {
 CUSTOM_COLLABORATION_CASE_METHODS = (
     (VALIDATE_YAML_OPERATION, "validate_yaml"),
     (TRIAL_CREATE_GROUP_OPERATION, "trial_create_group"),
-    (TRIAL_ADD_MEMBER_OPERATION, "trial_add_member"),
-    (TRIAL_PERMISSION_OPERATION, "trial_permission"),
-    (TRIAL_RUN_OPERATION, "trial_run"),
+    (GROUP_RUN_START_OPERATION, "trial_start_run"),
     (TRIAL_QUERY_GRAPH_OPERATION, "trial_query_graph"),
     (TRIAL_QUERY_PENDING_OPERATION, "trial_query_pending"),
     (TRIAL_RESPOND_GUARD_OPERATION, "trial_respond_guard"),
@@ -127,15 +126,13 @@ _STEP_EFFECTS = {
     CREATE_PERSISTENT_GROUP_OPERATION: CUSTOM_COLLABORATION_CREATE_EFFECT,
     READ_PERSISTENT_GROUP_OPERATION: CUSTOM_COLLABORATION_CREATE_EFFECT,
     TRIAL_CREATE_GROUP_OPERATION: CUSTOM_COLLABORATION_TRIAL_EFFECT,
-    TRIAL_ADD_MEMBER_OPERATION: CUSTOM_COLLABORATION_TRIAL_EFFECT,
-    TRIAL_PERMISSION_OPERATION: CUSTOM_COLLABORATION_TRIAL_EFFECT,
-    TRIAL_RUN_OPERATION: CUSTOM_COLLABORATION_TRIAL_EFFECT,
     TRIAL_QUERY_GRAPH_OPERATION: CUSTOM_COLLABORATION_TRIAL_EFFECT,
     TRIAL_QUERY_PENDING_OPERATION: CUSTOM_COLLABORATION_TRIAL_EFFECT,
     TRIAL_RESPOND_GUARD_OPERATION: CUSTOM_COLLABORATION_TRIAL_EFFECT,
     TRIAL_MESSAGES_OPERATION: CUSTOM_COLLABORATION_TRIAL_EFFECT,
     RUN_CANCEL_OPERATION: CUSTOM_COLLABORATION_TRIAL_EFFECT,
     SESSION_READ_OPERATION: CUSTOM_COLLABORATION_TRIAL_EFFECT,
+    GROUP_RUN_START_OPERATION: CUSTOM_COLLABORATION_TRIAL_EFFECT,
 }
 CUSTOM_COLLABORATION_CLI_RELATIONSHIPS = {
     "yaml_validation": "read-only-no-durable-resource",
@@ -157,6 +154,13 @@ DECLARED_CLEANUP_ROUTES = {
     GROUP_VERIFY_DELETED_OPERATION: (
         "GET", "/groups/{group_id}?bot_id={driver_actor_id}"),
 }
+# Converged scenario exits (live-verified 2026-10-29, diag4c probe-b/b3): the
+# group-domain Run start shares the reviewed cleanup binding vocabulary.
+DECLARED_SCENARIO_ROUTES = {
+    GROUP_RUN_START_OPERATION: (
+        "POST", "/groups/{group_id}/state-machine-runs"),
+}
+DECLARED_CLI_EXIT_ROUTES = {**DECLARED_CLEANUP_ROUTES, **DECLARED_SCENARIO_ROUTES}
 # (caller_role, argv head, admitted kwargs) per reviewed CLI leaf.
 LEAF_ARGUMENTS = {
     VALIDATE_YAML_OPERATION: (
@@ -166,13 +170,7 @@ LEAF_ARGUMENTS = {
     READ_PERSISTENT_GROUP_OPERATION: (
         "driver", ("get-group", "--id"), ("group_id",)),
     TRIAL_CREATE_GROUP_OPERATION: (
-        "driver", ("create-group", "--driver"), ()),
-    TRIAL_ADD_MEMBER_OPERATION: (
-        "driver", ("session", "add-member"), ("session_id",)),
-    TRIAL_PERMISSION_OPERATION: (
-        "driver", ("collaborate", "permission", "--session"), ("session_id",)),
-    TRIAL_RUN_OPERATION: (
-        "driver", ("collaborate", "run"), ("yaml_path", "session_id")),
+        "driver", ("collaboration", "create"), ("yaml_path",)),
     TRIAL_QUERY_GRAPH_OPERATION: (
         "driver", ("collaborate", "query"), ("run_id",)),
     TRIAL_QUERY_PENDING_OPERATION: (
@@ -191,15 +189,16 @@ LEAF_ARGUMENT_TEMPLATES = {
         "--binding", "reviewer={member}", "--context", CUSTOM_COLLABORATION_CONTEXT,
         "--topic", CUSTOM_COLLABORATION_TOPIC),
     READ_PERSISTENT_GROUP_OPERATION: ("{group_id}",),
+    # Converged trial transport: the one-shot trial Group is created through
+    # the same reviewed persistent-create form (bindings stored on the Group,
+    # group_strategy pinned state_machine by the server), then Started via
+    # the group-domain HTTP leaf below. TRIAL_CONTEXT/TRIAL_TOPIC stay
+    # distinct from the persistent obligation so live fixtures remain
+    # attributable per obligation.
     TRIAL_CREATE_GROUP_OPERATION: (
-        "{driver}", "--participants", "{driver},{member}", "--context",
-        TRIAL_CONTEXT, "--topic", TRIAL_TOPIC),
-    TRIAL_ADD_MEMBER_OPERATION: (
-        "{session_id}", "--bot-uuid", "human_{human}", "--role", "consultant"),
-    TRIAL_PERMISSION_OPERATION: ("{session_id}",),
-    TRIAL_RUN_OPERATION: (
-        "{yaml_path}", "--session", "{session_id}", "--binding",
-        "planner={driver}", "--binding", "reviewer={member}", "--input", TRIAL_INPUT),
+        "{yaml_path}", "--driver", "{driver}", "--binding", "planner={driver}",
+        "--binding", "reviewer={member}", "--context", TRIAL_CONTEXT,
+        "--topic", TRIAL_TOPIC),
     TRIAL_QUERY_GRAPH_OPERATION: ("--run", "{run_id}", "--graph"),
     TRIAL_QUERY_PENDING_OPERATION: ("--run", "{run_id}", "--pending"),
     TRIAL_RESPOND_GUARD_OPERATION: (
@@ -220,6 +219,7 @@ def custom_collaboration_cli_credential_kind(profile: dict) -> str:
 
 def expected_step_transport(operation: str) -> str:
     return ("PRODUCT_HTTP" if operation in _HTTP_PRODUCT_OPERATIONS
+            or operation in _HTTP_SCENARIO_OPERATIONS
             else "PRODUCT_CLI")
 
 
@@ -231,7 +231,7 @@ def custom_collaboration_step_credential_kind(profile: dict,
         if profile["environment"]["tier"] == "local":
             return "none"
         return custom_collaboration_cli_credential_kind(profile)
-    if operation in _HTTP_PRODUCT_OPERATIONS:
+    if operation in _HTTP_PRODUCT_OPERATIONS or operation in _HTTP_SCENARIO_OPERATIONS:
         return ("owned_local_bot_token"
                 if profile["environment"]["tier"] == "local" else "human_cookie")
     return custom_collaboration_cli_credential_kind(profile)
@@ -262,14 +262,6 @@ def _render(part: str, values: dict) -> str:
     return _TOKEN_PATTERN.sub(lambda match: str(values[match.group(1)]), part)
 
 
-def _custom_line(text: str, label: str) -> str:
-    lines = re.findall(rf"^  {re.escape(label)}: (.*)$", text, re.M)
-    if len(lines) != 1 or not lines[0].strip():
-        raise CustomCollaborationCliRunnerError(
-            "custom collaboration CLI line output is invalid")
-    return lines[0].strip()
-
-
 def _json_object(raw: bytes, label: str) -> dict:
     try:
         value = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_keys)
@@ -280,6 +272,15 @@ def _json_object(raw: bytes, label: str) -> dict:
         raise CustomCollaborationCliRunnerError(
             f"custom collaboration {label} did not return one JSON object")
     return dict(value)
+
+
+def _failure_detail(stdout: bytes, stderr: bytes, secrets: list[bytes]) -> str:
+    """Bounded honest nonzero-exit detail; credential bytes are scrubbed."""
+    text = (stdout + b"\n" + stderr).decode("utf-8", "replace")
+    for secret in secrets:
+        if secret:
+            text = text.replace(secret.decode("utf-8", "replace"), "[REDACTED]")
+    return text.strip()[:500]
 
 
 def _json_array(raw: bytes, label: str) -> list:
@@ -321,11 +322,13 @@ def _actor(value: object, role: str, human: str) -> dict:
 
 
 def _validate_cleanup_bindings(value: object) -> dict:
-    if not isinstance(value, dict) or set(value) != set(DECLARED_CLEANUP_ROUTES):
+    if (not isinstance(value, dict)
+            or set(value) != set(DECLARED_CLI_EXIT_ROUTES)):
         raise ConfigError(
-            "route_bindings: custom collaboration requires the four reviewed cleanup exits")
+            "route_bindings: custom collaboration requires the four reviewed "
+            "cleanup exits and the converged group-domain Run start")
     result = {}
-    for operation, (method, path) in DECLARED_CLEANUP_ROUTES.items():
+    for operation, (method, path) in DECLARED_CLI_EXIT_ROUTES.items():
         binding = object_keys(value[operation], {"method", "path", "api_face",
                                                 "auth", "response", "traceparent"},
                               f"route_bindings.{operation}")
@@ -335,7 +338,7 @@ def _validate_cleanup_bindings(value: object) -> dict:
                 or binding["response"] != "legacy-json"
                 or binding["traceparent"] != "disabled"):
             raise ConfigError(
-                f"route_bindings.{operation}: cleanup route differs from the product contract")
+                f"route_bindings.{operation}: exit route differs from the product contract")
         result[operation] = dict(binding)
     return result
 
@@ -644,7 +647,12 @@ class CustomCollaborationCliRunner:
                  "--log-level", "error", *arguments],
                 cwd=root, environment=environment,
                 timeout_seconds=self.profile["policy"]["timeout_seconds"],
-                max_output_bytes=self.profile["policy"]["max_response_bytes"])
+                max_output_bytes=self.profile["policy"]["max_response_bytes"],
+                collect_stderr=True)
+            if any(secret in result.stdout or secret in result.stderr
+                   for secret in secrets):
+                raise CustomCollaborationCliRunnerError(
+                    "custom collaboration product CLI emitted its credential")
             if operation == TRIAL_RESPOND_GUARD_OPERATION:
                 # The reviewed guard is proven by refusal: a nonzero exit is
                 # the expected product behaviour, never a failure.
@@ -654,14 +662,11 @@ class CustomCollaborationCliRunner:
                 data = {"guard_refused": True, "node": "plan"}
             else:
                 if result.returncode != 0:
-                    detail = result.stdout.strip().decode("utf-8", "replace")[:500]
                     raise CustomCollaborationCliRunnerError(
                         "custom collaboration product CLI returned nonzero: "
-                        + (detail or "<no output>"))
+                        + (_failure_detail(result.stdout, result.stderr, secrets)
+                           or "<no output>"))
                 data = self._parse(operation, result.stdout, **kwargs)
-            if any(secret in result.stdout for secret in secrets):
-                raise CustomCollaborationCliRunnerError(
-                    "custom collaboration product CLI emitted its credential")
         except ProcessCaptureError as error:
             public = CustomCollaborationCliRunnerError(
                 "custom collaboration product CLI process failed")
@@ -733,62 +738,22 @@ class CustomCollaborationCliRunner:
                     "custom collaboration Group readback differs")
             return value
         if operation == TRIAL_CREATE_GROUP_OPERATION:
-            try:
-                text = raw.decode("utf-8")
-            except UnicodeError:
+            # Converged trial transport: the reviewed projection equals the
+            # persistent obligation leaf (bindings stored on the Group, the
+            # initial Session handle returned with it).
+            value = _json_object(raw, "trial Group creation")
+            participants = value.get("participants")
+            ids = participant_ids(participants)
+            if (not isinstance(value.get("id"), str) or not value["id"]
+                    or not isinstance(value.get("session_id"), str)
+                    or not value["session_id"]
+                    or value.get("driver_bot") != self.driver_id
+                    or any(not isinstance(item, str) for item in (participants or []))
+                    or set(ids) != {self.driver_id, self.member_id} or len(ids) != 2
+                    or value.get("created") is not True):
                 raise CustomCollaborationCliRunnerError(
-                    "custom collaboration trial Group output is invalid") from None
-            if not text.startswith("Group created:\n"):
-                raise CustomCollaborationCliRunnerError(
-                    "custom collaboration trial Group output prefix is invalid")
-            group_id = _custom_line(text, "ID")
-            session_id = _custom_line(text, "Session")
-            participants = [item.strip()
-                            for item in _custom_line(text, "Participants").split(",")]
-            if (_custom_line(text, "Driver") != self.driver_id
-                    or participants != [self.driver_id, self.member_id]
-                    or not session_id.startswith(group_id + ":")):
-                raise CustomCollaborationCliRunnerError(
-                    "custom collaboration trial Group output differs")
-            return {"group_id": identifier(group_id, "custom collaboration trial Group ID"),
-                    "session_id": identifier(session_id,
-                                             "custom collaboration trial Session ID"),
-                    "driver_bot": self.driver_id, "participants": participants}
-        if operation == TRIAL_ADD_MEMBER_OPERATION:
-            value = _json_object(raw, "trial membership")
-            rows = [(item.get("bot_uuid") or item.get("actor_id"), item.get("role"))
-                    for item in value.get("participants", [])
-                    if isinstance(item, dict)]
-            if (not any(row[0] == f"human_{self.human_id}" and row[1] == "consultant"
-                        for row in rows)
-                    or (value.get("session_id") or value.get("id"))
-                    != kwargs["session_id"]):
-                raise CustomCollaborationCliRunnerError(
-                    "custom collaboration trial membership differs")
+                    "custom collaboration trial Group response differs")
             return value
-        if operation == TRIAL_PERMISSION_OPERATION:
-            value = _json_object(raw, "trial permission")
-            if (value.get("allowed") is not True
-                    or value.get("session_id") != kwargs["session_id"]
-                    or not isinstance(value.get("group_id"), str)
-                    or value.get("caller_bot_id") != self.driver_id
-                    or value.get("group_owner_bot_id") != self.driver_id
-                    or value.get("reason_code") != "allowed"
-                    or value.get("policy_version") != "session_state_machine_v1"
-                    or value.get("group_strategy") != "chat"):
-                raise CustomCollaborationCliRunnerError(
-                    "custom collaboration trial permission differs")
-            return value
-        if operation == TRIAL_RUN_OPERATION:
-            value = _json_object(raw, "one-shot Run")
-            run = value.get("run")
-            if (not isinstance(run, dict) or not isinstance(run.get("run_id"), str)
-                    or not run["run_id"] or not isinstance(run.get("session_id"), str)
-                    or not isinstance(run.get("group_id"), str)
-                    or run.get("status") not in ("running", "waiting")):
-                raise CustomCollaborationCliRunnerError(
-                    "custom collaboration one-shot Run identity differs")
-            return run
         if operation == TRIAL_QUERY_GRAPH_OPERATION:
             value = _json_object(raw, "execution graph")
             run, nodes = value.get("run"), value.get("nodes")

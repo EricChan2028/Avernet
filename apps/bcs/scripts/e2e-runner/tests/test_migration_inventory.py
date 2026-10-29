@@ -184,14 +184,21 @@ class MigrationInventoryTests(unittest.TestCase):
                          'respond refusal, restored state-machine history, then cancels '
                          'the Run and deletes the temporary Group while the Session '
                          'remains running.')
-        for scenario in ('remove', 'command', 'expectation'):
+        self.assertEqual([row['decision_id'] for row in binding['convergence_decisions']],
+                         ['custom-collaboration-trial-group-domain-transport'])
+        for scenario in ('remove', 'command', 'expectation', 'unknown_key',
+                         'malformed_decision'):
             value = copy.deepcopy(binding)
             if scenario == 'remove':
                 value['requirements'].pop()
             elif scenario == 'command':
                 value['requirements'][0]['command'] = 'bcs-cli foreign command'
-            else:
+            elif scenario == 'expectation':
                 value['requirements'][0]['expectation'] = 1
+            elif scenario == 'unknown_key':
+                value['foreign_additive_section'] = True
+            else:
+                value['convergence_decisions'] = [{'decision_id': 'missing-decision-text'}]
             with self.subTest(mutation=scenario), \
                  patch('bcs_e2e.local_operator_cli_contract.read', return_value=value), \
                  self.assertRaises(RunStateError):

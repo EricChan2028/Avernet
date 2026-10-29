@@ -1,25 +1,46 @@
 {
-  "schema_version": 1,
-  "source_revision": "71860eae99c62d7bf1349a0f46562f6395acbf1e",
+  "convergence_decisions": [
+    {
+      "date": "2026-10-29",
+      "decision": "The one-shot trial Run is converged onto the group-domain transport on both tiers: the trial Group is created through the reviewed persistent-form product-CLI create leaf (planner/reviewer bindings stored on the Group, group_strategy=state_machine pinned by the server), and the single Run is started by the raw group-domain HTTP exit POST /groups/{group_id}/state-machine-runs beside the frozen product CLI. The frozen bcs-cli exposes no group-domain run verb and is never modified; the native verb is a product gap tracked by DIMA with this surgery. Run-domain CLI reads, the respond guard refusal, the Run cancel, the session read, and the exact owned Group delete with 404 proof follow unchanged. The session-domain membership, permission and session-domain run-start leaves of the frozen owned-local parent are not re-chained on either tier; the difference is pinned in the trial projection and disclosed in the case report.",
+      "decision_id": "custom-collaboration-trial-group-domain-transport",
+      "frozen_requirements_unchanged": true,
+      "live_evidence": {
+        "disclosed_condition": "Real preprod Bot runtimes did not consume the bot_task node inside the live 75s window (plan node awaiting_response until cancel); consumption is disclosed as a live condition and is never asserted.",
+        "probe": "diag4c probe-b / probe-b3 (preprod, 2026-10-29)",
+        "results": [
+          "POST /groups/{group_id}/state-machine-runs returned 202 running with run_id, a group-derived session_id (prefix group_id + ':'), bound group_id, and created_by=human_<user_id>",
+          "CLI graph projection reads the derived Run and its nodes",
+          "--pending returned [] (Bot-only Run exposes no pending Human inputs)",
+          "collaborate respond guard refused by policy (nonzero exit contract)",
+          "POST /state-machine-runs/{run_id}/cancel returned 200 and the Run reached a terminal aborted state",
+          "DELETE /groups/{group_id}?bot_id={driver} returned 200; the Group, the derived Session and the Run all verified absent (404) afterwards"
+        ]
+      },
+      "scope": "CUSTOM-COLLABORATION.trial-one-shot-lifecycle transport convergence (Singlebox and preprod)"
+    }
+  ],
   "parent": "story_cli_operator_creates_custom_collaboration",
-  "sources": {
-    "cli-stories.sh": "779672ec0d0c02405e5f3fee0f50aec9fbe1febac0808c05ec6844a1e4a39efc"
-  },
   "requirements": [
     {
-      "id": "CUSTOM-COLLABORATION.validate-yaml",
       "command": "bcs-cli collaboration validate <yaml>",
-      "expectation": "Product CLI validation reports valid=true with exactly two participants and two nodes, without persisting resources or exposing YAML contents."
+      "expectation": "Product CLI validation reports valid=true with exactly two participants and two nodes, without persisting resources or exposing YAML contents.",
+      "id": "CUSTOM-COLLABORATION.validate-yaml"
     },
     {
-      "id": "CUSTOM-COLLABORATION.create-persistent-group",
       "command": "bcs-cli collaboration create <yaml> --driver <driver> --binding planner=<driver> --binding reviewer=<reviewer> --context <context> --topic <topic>",
-      "expectation": "Product CLI creates the exact two-role custom collaboration Group with its initial Session handle; CLI readback reports driver, participants, and group_strategy=state_machine before cleanup."
+      "expectation": "Product CLI creates the exact two-role custom collaboration Group with its initial Session handle; CLI readback reports driver, participants, and group_strategy=state_machine before cleanup.",
+      "id": "CUSTOM-COLLABORATION.create-persistent-group"
     },
     {
-      "id": "CUSTOM-COLLABORATION.trial-one-shot-lifecycle",
       "command": "bcs-cli create-group + session add-member + collaborate permission + collaborate run + collaborate query --graph/--pending + collaborate respond guard + session messages + run cancel/session read/group delete",
-      "expectation": "Product CLI creates the owned temporary chat Group, joins the exact Human session member, confirms current-session state-machine permission, starts the one-shot Run with fixed bindings/input, reads the exact graph, pending Human, guarded respond refusal, restored state-machine history, then cancels the Run and deletes the temporary Group while the Session remains running."
+      "expectation": "Product CLI creates the owned temporary chat Group, joins the exact Human session member, confirms current-session state-machine permission, starts the one-shot Run with fixed bindings/input, reads the exact graph, pending Human, guarded respond refusal, restored state-machine history, then cancels the Run and deletes the temporary Group while the Session remains running.",
+      "id": "CUSTOM-COLLABORATION.trial-one-shot-lifecycle"
     }
-  ]
+  ],
+  "schema_version": 1,
+  "source_revision": "71860eae99c62d7bf1349a0f46562f6395acbf1e",
+  "sources": {
+    "cli-stories.sh": "779672ec0d0c02405e5f3fee0f50aec9fbe1febac0808c05ec6844a1e4a39efc"
+  }
 }

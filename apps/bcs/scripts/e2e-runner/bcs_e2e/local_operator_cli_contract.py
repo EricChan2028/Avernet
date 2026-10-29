@@ -148,13 +148,26 @@ def custom_collaboration_source_binding():
     """Freeze all three reviewed custom-collaboration obligations."""
     try:
         value = read(ROOT/'custom-collaboration-migration-contract.json')
-        if (set(value) != {'schema_version', 'source_revision', 'parent',
-                           'sources', 'requirements'}
+        if (not {'schema_version', 'source_revision', 'parent', 'sources',
+                 'requirements'} <= set(value)
+                or not set(value) <= {'schema_version', 'source_revision', 'parent',
+                                      'sources', 'requirements',
+                                      'convergence_decisions'}
                 or value['schema_version'] != 1
                 or value['parent'] != CUSTOM_COLLABORATION_PARENT
                 or not re.fullmatch('[0-9a-f]{40}', value['source_revision'])
                 or set(value['sources']) != {'cli-stories.sh'}):
             raise ValueError
+        decisions = value.get('convergence_decisions')
+        if decisions is not None:
+            if (not isinstance(decisions, list)
+                    or any(not isinstance(row, dict)
+                           or not isinstance(row.get('decision_id'), str)
+                           or not row['decision_id']
+                           or not isinstance(row.get('date'), str) or not row['date']
+                           or not isinstance(row.get('decision'), str) or not row['decision']
+                           for row in decisions)):
+                raise ValueError
         path = ROOT.parent/'e2e-test'/'cli-stories.sh'
         if path.is_symlink() or not path.is_file():
             raise ValueError
