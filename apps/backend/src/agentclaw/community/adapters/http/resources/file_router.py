@@ -289,13 +289,18 @@ async def upload_files(
     # any path separator in a filename means a directory upload (preserve structure)
     preserve = any('/' in (file.filename or '') for file in files)
     payload = []
+    errors = []
     for file in files:
-        payload.append(
-            {
-                "filename": file.filename or "unnamed",
-                "data": await file.read(),
-            }
-        )
+        try:
+            payload.append(
+                {
+                    "filename": file.filename or "unnamed",
+                    "data": await file.read(),
+                }
+            )
+        except Exception as e:
+            logger.error("[upload_files] Failed reading: %s, %s", file.filename, e)
+            errors.append({"filename": file.filename, "error": str(e)})
     result = await file_svc.upload_files(
         entity_id=eid, bot_id=ebid, engine_type=eeng,
         target_dir=path, files=payload, preserve_structure=preserve,
