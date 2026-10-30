@@ -268,7 +268,7 @@ def _summary(binding: dict, projected: dict, issues: list[str]) -> dict:
         'scope': {
             'suite': SUITE,
             'selected_cases': [CASE_ID],
-            'legacy_inventory_count': 34,
+            'legacy_inventory_count': len(binding['legacy_inventory']),
             'full_release_status': 'NOT_QUALIFIED',
             'full_story_status': 'LOCAL_INTEGRATED' if status == 'PASS' else 'NOT_QUALIFIED',
             'manifest_digest': fingerprint(binding),

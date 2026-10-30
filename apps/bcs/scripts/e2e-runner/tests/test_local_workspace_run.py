@@ -94,7 +94,7 @@ class WorkspaceRunLiveTests(unittest.TestCase):
         self.assertEqual(len(result['requirements']), 18)
         self.assertEqual(sum(r['status']=='PASS' for r in result['requirements']), 7)
         self.assertEqual(sum(r['status']=='NOT_RUN' for r in result['requirements']), 11)
-        self.assertEqual(result['legacy_inventory_count'], 34)
+        self.assertEqual(result['legacy_inventory_count'], 41)
         self.assertEqual(result['full_story_status'], 'NOT_MIGRATED')
         self.assertEqual(result['remote_validation'], 'NOT_RUN')
         self.assertFalse(result['ready_to_execute'])

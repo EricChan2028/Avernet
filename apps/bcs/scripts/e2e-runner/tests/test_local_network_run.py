@@ -73,7 +73,7 @@ class NetworkAdmissionTests(unittest.TestCase):
         self.assertEqual(plan['mapped_story_count'], 3)  # Original frozen three-parent map.
         self.assertEqual(sum(row['parent'] == 'story_user_prepares_agent_network'
                              for row in plan['additional_source_maps']), 1)
-        self.assertEqual(plan['legacy_inventory_count'], 34)
+        self.assertEqual(plan['legacy_inventory_count'], 41)
         self.assertEqual(plan['migrated_story_count'], 0)
 
     def test_cli_needs_no_remote_profile_and_blocks_missing_permission(self):
@@ -105,7 +105,7 @@ class NetworkLifecycleLiveTests(unittest.TestCase):
         summary = result['canonical_summary']
         self.assertEqual(summary['status'], 'LOCAL_SUITE_PASS')
         self.assertEqual(summary['requirements'], [{'id': r, 'status': 'PASS'} for r in REQUIREMENTS])
-        self.assertEqual(summary['scope']['legacy_inventory_count'], 34)
+        self.assertEqual(summary['scope']['legacy_inventory_count'], 41)
         self.assertEqual(summary['scope']['full_release_status'], 'NOT_QUALIFIED')
         self.assertEqual(set(result['outputs']['outputs']), {'json', 'junit', 'markdown'})
         junit = ET.parse(self.root/'reports/junit.xml').getroot()

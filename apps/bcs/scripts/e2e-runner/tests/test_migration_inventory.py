@@ -270,16 +270,26 @@ class MigrationInventoryTests(unittest.TestCase):
         self.assertEqual(result['local_partial_executors'], [])
         all_inventory = {row['id'] for row in current_manifest()['legacy_inventory']}
         known_unmapped = set(KNOWN_UNMAPPED_LEGACY_IDS)
-        # These reviewed rows are present in the refreshed 41-row roster but
-        # remain owned-local-only pending this tree's command registration wave.
-        pending_local_registry = {
+        reviewed_parents = {row['id'] for row in reviewed_release_inventory()}
+        # This tree has not yet registered these reviewed parents, while the
+        # first dynamic family story remains executable outside the denominator.
+        pending_reviewed_local_registry = {
             'story_authority_user_journey',
+            'story_cli_operator_manages_group_context',
             'story_retired_service_policy',
         }
-        expected_parents = all_inventory - known_unmapped - pending_local_registry
+        dynamic_registered_unmapped = {'story_fixed_loop_human_editor_workflow'}
+        expected_parents = (
+            reviewed_parents - pending_reviewed_local_registry
+            | dynamic_registered_unmapped
+        )
         actual_parents = {row['legacy_id'] for row in result['local_registered_executors']}
         self.assertEqual(actual_parents, expected_parents)
-        self.assertEqual(all_inventory - expected_parents, known_unmapped | pending_local_registry)
+        self.assertEqual(
+            actual_parents & known_unmapped,
+            {'story_fixed_loop_human_editor_workflow'})
+        self.assertEqual(
+            reviewed_parents - expected_parents, pending_reviewed_local_registry)
         duplicate_cases = [row['case_id'] for row in result['local_registered_executors']]
         self.assertEqual(len(duplicate_cases), len(set(duplicate_cases)))
         self.assertTrue(all(row['remote_validation'] == 'NOT_RUN'
@@ -602,10 +612,10 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
              row['executor_migration']['preprod_verdict'])
             for row in legacy)
         self.assertEqual(counts, Counter({
-            ('DUAL', 'PASS'): 18,
+            ('DUAL', 'PASS'): 19,
             ('DUAL', 'BLOCKED_INVENTORIED'): 7,
             ('DUAL', 'NOT_RUN'): 1,
-            ('LOCAL_ONLY', 'NOT_RUN'): 10,
+            ('LOCAL_ONLY', 'NOT_RUN'): 9,
             ('DYNAMIC_OWNED_LOCAL', 'NOT_APPLICABLE'): 4,
             ('EDGE_OBLIGATION_IN_FAMILY', 'NOT_APPLICABLE'): 1,
         }))
@@ -624,8 +634,7 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
             rows['story_user_builds_trusted_team']['notes'],
             ['FRESH_FIXTURE_R5G'])
         self.assertEqual(
-            rows['story_cli_operator_manages_group_context']['notes'],
-            ['ROSTER_LAG'])
+            rows['story_cli_operator_manages_group_context']['notes'], [])
         self.assertEqual(rows['test_ep_ensure_bot'], {
             'mode': 'EDGE_OBLIGATION_IN_FAMILY',
             'preprod_verdict': 'NOT_APPLICABLE',
@@ -642,17 +651,18 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
              row['executor_migration']['preprod_verdict'])
             for row in reviewed)
         self.assertEqual(counts, Counter({
-            ('DUAL', 'PASS'): 17,
+            ('DUAL', 'PASS'): 19,
             ('DUAL', 'BLOCKED_INVENTORIED'): 7,
             ('DUAL', 'NOT_RUN'): 1,
-            ('LOCAL_ONLY', 'NOT_RUN'): 4,
-            ('DYNAMIC_OWNED_LOCAL', 'NOT_APPLICABLE'): 1,
+            ('LOCAL_ONLY', 'NOT_RUN'): 3,
+            ('DYNAMIC_OWNED_LOCAL', 'NOT_APPLICABLE'): 0,
             ('EDGE_OBLIGATION_IN_FAMILY', 'NOT_APPLICABLE'): 1,
         }))
         ids = {row['id'] for row in reviewed}
-        self.assertNotIn(
+        self.assertIn(
             'story_cli_operator_manages_group_context', ids)
-        self.assertIn('story_fixed_loop_human_editor_workflow', ids)
+        self.assertNotIn('story_fixed_loop_human_editor_workflow', ids)
+        self.assertNotIn('story_provider_operator_manages_subbots', ids)
 
     def test_manifests_do_not_duplicate_executor_migration(self):
         for suite in (

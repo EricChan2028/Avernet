@@ -87,7 +87,7 @@ class FixedLoopContractTests(unittest.TestCase):
         self.assertEqual(row['remote_validation'], 'NOT_RUN')
         self.assertFalse(row['grants_release_credit'])
         self.assertEqual(plan['migrated_story_count'], 0)
-        self.assertEqual(plan['legacy_inventory_count'], 34)
+        self.assertEqual(plan['legacy_inventory_count'], 41)
         self.assertFalse(plan['ready_to_execute'])
 
 

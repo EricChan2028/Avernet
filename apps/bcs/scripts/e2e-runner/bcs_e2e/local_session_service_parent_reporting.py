@@ -229,7 +229,7 @@ def _case_valid(root: Path, binding: dict, case: dict) -> bool:
             != binding['validation_profile_contract']
             or case.get('execution_profile_contract')
             != binding['execution_profile_contract']
-            or case.get('completed_count') != case.get('total_count') != 4
+            or case.get('completed_count') != 4 or case.get('total_count') != 4
             or case.get('error_type') is not None
             or not isinstance(steps, list) or len(steps) != 4):
         return False
@@ -237,12 +237,14 @@ def _case_valid(root: Path, binding: dict, case: dict) -> bool:
     for index, step in enumerate(steps):
         if (not isinstance(step, dict)
                 or set(step) != {'requirement_id', 'method', 'status', 'data',
-                                 'evidence', 'error_type', 'error_gap'}
+                                 'evidence', 'error_type', 'error_detail',
+                                 'error_gap'}
                 or step.get('requirement_id')
                 != SESSIONS_SERVICES_REQUIREMENTS[index]
                 or step.get('method') != METHODS[index]
                 or step.get('status') != 'PASS'
                 or step.get('error_type') is not None
+                or step.get('error_detail') is not None
                 or not _data_valid(index, step.get('data'))):
             return False
         evidence = step.get('evidence')
@@ -335,7 +337,7 @@ def _summary(binding: dict, projected: dict, issues: list[str]) -> dict:
         'scope': {
             'suite': binding['suite'],
             'selected_cases': [binding['case_id']],
-            'legacy_inventory_count': 34,
+            'legacy_inventory_count': len(binding['legacy_inventory']),
             'full_release_status': 'NOT_QUALIFIED',
             'full_story_status': ('LOCAL_INTEGRATED' if status == 'PASS'
                                   else 'NOT_QUALIFIED'),

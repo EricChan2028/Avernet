@@ -63,7 +63,7 @@ class ProviderFlowLiveTests(unittest.TestCase):
         self.assertEqual(summary['requirements'], [{'id': x, 'status': 'PASS'} for x in REQUIREMENTS])
         self.assertEqual(summary['reports'], {'expected_assertion_count': 32, 'observed_assertion_count': 32})
         self.assertEqual(summary['scope']['full_release_status'], 'NOT_QUALIFIED')
-        self.assertEqual(summary['scope']['legacy_inventory_count'], 34)
+        self.assertEqual(summary['scope']['legacy_inventory_count'], 41)
         self.assertEqual(summary['cases'][0]['cleanup'], 'RETAINED')
         self.assertEqual(result['shutdown']['status'], 'STOPPED')
         self.assertEqual(result['downstream']['state'], 'CLOSED')

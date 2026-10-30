@@ -287,7 +287,7 @@ class SerialReportingTests(unittest.TestCase):
         self.assertEqual(summary['integrity']['status'], 'PASS')
         self.assertEqual(summary['scope']['selected_cases'], ['RETAIN-GROUP-01'])
         self.assertEqual(summary['scope']['full_release_status'], 'NOT_QUALIFIED')
-        self.assertEqual(summary['scope']['legacy_inventory_count'], 34)
+        self.assertEqual(summary['scope']['legacy_inventory_count'], 41)
         self.assertEqual(summary['reports']['declared_case_count'], 2)
         case = next(c for c in summary['cases'] if c['id']=='RETAIN-GROUP-01')
         self.assertEqual(case['execution_status'], 'UNCONFIRMED')

@@ -80,7 +80,7 @@ class OperatorGuards(unittest.TestCase):
         self.assertEqual(row['report_command'], 'local-operator-cli-report')
         self.assertFalse(row['grants_release_credit'])
         self.assertEqual(row['legacy_id'], PARENT)
-        self.assertEqual(plan['legacy_inventory_count'], 34)
+        self.assertEqual(plan['legacy_inventory_count'], 41)
         self.assertEqual(plan['migrated_story_count'], 0)
         self.assertTrue(any(m.get('parent') == PARENT for m in plan['additional_source_maps']))
 

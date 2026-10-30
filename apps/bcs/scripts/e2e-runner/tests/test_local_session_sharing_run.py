@@ -81,7 +81,7 @@ class SharingLifecycleLiveTests(unittest.TestCase):
         self.assertEqual(summary['reports']['parent_requirement_count'], 9)
         self.assertEqual(summary['requirements'], [{'id': name, 'status': 'PASS' if i < 6 else 'NOT_RUN'}
                                                    for i, name in enumerate(REQUIREMENTS)])
-        self.assertEqual(summary['scope']['legacy_inventory_count'], 34)
+        self.assertEqual(summary['scope']['legacy_inventory_count'], 41)
         self.assertEqual(summary['scope']['full_story_status'], 'NOT_MIGRATED')
         tree = ET.parse(self.root/'sharing-reports/junit.xml').getroot()
         self.assertEqual(tree.attrib['name'], 'bcs-e2e-session-sharing')

@@ -52,7 +52,7 @@ class ChannelGuards(unittest.TestCase):
         row = next(r for r in plan['local_registered_executors'] if r['case_id'] == CASE_ID)
         self.assertEqual(row['requirement_ids'],list(REQUIREMENTS))
         self.assertFalse(row['grants_release_credit'])
-        self.assertEqual(plan['legacy_inventory_count'],34)
+        self.assertEqual(plan['legacy_inventory_count'],41)
         self.assertEqual(plan['migrated_story_count'],0)
         self.assertNotEqual(row['legacy_id'],'story_cli_operator_validates_channel_management')
 

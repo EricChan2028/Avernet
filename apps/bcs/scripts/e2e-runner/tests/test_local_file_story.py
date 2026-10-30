@@ -117,7 +117,7 @@ class LocalFileStoryLiveTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT state FROM resource WHERE kind='file'").fetchone()[0], 'deleted')
         summary = build_file_report(self.root)
         self.assertEqual(summary['status'], 'LOCAL_SUITE_PASS')
-        self.assertEqual(summary['scope']['legacy_inventory_count'], 34)
+        self.assertEqual(summary['scope']['legacy_inventory_count'], 41)
         self.assertEqual(summary['scope']['full_release_status'], 'NOT_QUALIFIED')
         self.assertEqual(summary['reports']['expected_assertion_count'], 10)
         for path in (self.root/'reports').iterdir():

@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 import stat
 
-from .inventory import executor_digest
+from .inventory import current_manifest, executor_digest
 from .local_caller_execution_contract import (CASE_ID, MARKER_KEYS, PARENT, REQUIREMENTS,
                                               STATUS, SUITE)
 from .local_caller_execution_run import BINARY_KIND, STORY_ERR_LOG_NAME, STORY_LOG_NAME
@@ -72,8 +72,8 @@ def _bound(root):
                                                 'preprod': 'REMOTE_UNSUPPORTED'}
              and binding.get('source_binding', {}).get('parent') == PARENT
              and [row['id'] for row in binding['source_binding']['requirements']] == list(REQUIREMENTS)
-             and len(binding.get('legacy_inventory', [])) == 34
-             and len({row['id'] for row in binding['legacy_inventory']}) == 34,
+             and len(binding.get('legacy_inventory', [])) == len(current_manifest()['legacy_inventory'])
+             and len({row['id'] for row in binding['legacy_inventory']}) == len(current_manifest()['legacy_inventory']),
              'Caller execution frozen binding is invalid')
     return binding
 
@@ -144,7 +144,7 @@ def _summary(binding, projected, issues):
             'status': 'LOCAL_SUITE_PASS' if status == 'PASS' else status,
             'target': {'tier': 'local', 'environment_id': binding['run_id']},
             'scope': {'suite': SUITE, 'selected_cases': [CASE_ID],
-                      'legacy_inventory_count': 34, 'evidence_granularity': 'SHARED_CHILD_RECEIPT',
+                      'legacy_inventory_count': len(binding['legacy_inventory']), 'evidence_granularity': 'SHARED_CHILD_RECEIPT',
                       'independent_slice': True, 'release_parent_denominator': False,
                       'environment': binding['environment'],
                       'full_release_status': 'NOT_QUALIFIED',

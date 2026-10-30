@@ -28,7 +28,7 @@ class TrustRegistrationTests(unittest.TestCase):
         case=self.manifest['cases'][0]
         self.assertEqual(len(case['assertions']),58)
         self.assertEqual(len(case['requirements']),5)
-        self.assertEqual(len(self.manifest['legacy_inventory']),34)
+        self.assertEqual(len(self.manifest['legacy_inventory']),41)
         self.assertEqual(self.manifest['legacy_inventory'],current_manifest()['legacy_inventory'])
         self.assertEqual(set(case['assertions']),set(sum(case['requirements'].values(),[])+case['finalization_assertions']))
         self.assertEqual(case['allowed_environments'],['owned-local'])

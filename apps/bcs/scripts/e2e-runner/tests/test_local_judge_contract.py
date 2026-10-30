@@ -45,4 +45,4 @@ class JudgeContractTests(unittest.TestCase):
         self.assertEqual(registered['report_command'],'local-slow-judge-report')
         self.assertEqual(registered['canonical_reporting'],'INTEGRATED_LOCAL')
         self.assertFalse(registered['grants_release_credit'])
-        self.assertEqual(plan['legacy_inventory_count'],34);self.assertEqual(plan['migrated_story_count'],0)
+        self.assertEqual(plan['legacy_inventory_count'],41);self.assertEqual(plan['migrated_story_count'],0)

@@ -15,7 +15,7 @@ from .edge_friend_mutation_case import (
     RELEASE_CASE_IDS,
     edge_friend_mutation_case_plan,
 )
-from .inventory import executor_digest
+from .inventory import current_manifest, executor_digest, reviewed_release_inventory
 from .local_edge_friend_mutations_run import journal_filename
 from .profile import fingerprint
 from .run_state import RunStateError, read
@@ -83,8 +83,8 @@ def _bound(root: Path):
              and binding.get('expected_assertion_count') == len(CASE_IDS)
              and set(binding.get('source_bindings', {})) == set(CASE_IDS)
              and set(binding.get('selected_requirement_ids', {})) == set(CASE_IDS)
-             and len(binding.get('legacy_inventory', [])) == 34
-             and len({row['id'] for row in binding['legacy_inventory']}) == 34
+             and len(binding.get('legacy_inventory', [])) == len(current_manifest()['legacy_inventory'])
+             and len({row['id'] for row in binding['legacy_inventory']}) == len(current_manifest()['legacy_inventory'])
              and set(PARENTS) == {plans[case_id].parent_id for case_id in CASE_IDS},
              'Edge friend-mutation frozen complete binding is invalid')
     for case_id in CASE_IDS:
@@ -218,8 +218,8 @@ def _summary(binding: dict, projected: dict, issues: list[str]):
         'scope': {'suite': SUITE, 'selected_cases': list(binding['case_ids']),
                   'release_parent_cases': list(RELEASE_CASE_IDS),
                   'backlog_cases': list(BACKLOG_CASE_IDS),
-                  'legacy_inventory_count': 34,
-                  'release_parent_denominator': 29,
+                  'legacy_inventory_count': len(binding['legacy_inventory']),
+                  'release_parent_denominator': len(reviewed_release_inventory()),
                   'backlog_case_count': len(BACKLOG_CASE_IDS),
                   'full_release_status': 'NOT_QUALIFIED',
                   'full_story_status': 'LOCAL_EXECUTOR_ONLY' if status == 'PASS' else 'NOT_QUALIFIED',

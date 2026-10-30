@@ -124,7 +124,7 @@ class EdgeReadContractTests(unittest.TestCase):
         self.assertTrue(all(row['status'] in ('LOCAL_EXECUTOR_ONLY', 'LOCAL_READ_SLICE_ONLY')
                             and row['remote_validation'] == 'NOT_RUN'
                             and not row['grants_release_credit'] for row in executors))
-        self.assertEqual(plan['legacy_inventory_count'], 34)
+        self.assertEqual(plan['legacy_inventory_count'], 41)
         self.assertEqual(plan['migrated_story_count'], 0)
         self.assertEqual(plan['passed_assertion_count'], 0)
 

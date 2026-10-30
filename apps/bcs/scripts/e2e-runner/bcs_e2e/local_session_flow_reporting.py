@@ -2,7 +2,7 @@
 from pathlib import Path
 import sqlite3
 
-from .inventory import executor_digest
+from .inventory import current_manifest, executor_digest
 from .ledger import Ledger, LedgerError
 from .local_session_reporting import _sha, _exclusive, _require, V1_REQUIREMENTS
 from .local_session_sharing_reporting import (SOURCES as SHARING_SOURCES,
@@ -32,7 +32,7 @@ def _bound(root):
              and binding.get('selected_requirement_ids') == list(V1_REQUIREMENTS)
              and binding.get('parent_requirement_ids') == list(V1_REQUIREMENTS)
              and [row['id'] for row in binding['source_binding']['requirements']] == list(V1_REQUIREMENTS)
-             and len(binding.get('legacy_inventory', [])) == 34 and binding.get('store_messages') is True
+             and len(binding.get('legacy_inventory', [])) == len(current_manifest()['legacy_inventory']) and binding.get('store_messages') is True
              and binding.get('public_journal_digest') == fingerprint(read(root/'local-session-public.json'))
              and binding.get('sharing_journal_digest') == fingerprint(read(root/'local-session-sharing.json'))
              and {k: v for k, v in binding.items() if k not in ('public_journal_digest', 'sharing_journal_digest')} == plan,
@@ -224,7 +224,7 @@ def _summary(binding, projected, issues):
     return {'schema_version': 1, 'run_id': binding['run_id'],
             'status': 'LOCAL_SUITE_PASS' if status == 'PASS' else status,
             'target': {'tier': 'local', 'environment_id': binding['run_id']},
-            'scope': {'suite': SUITE, 'selected_cases': [CASE_ID], 'legacy_inventory_count': 34,
+            'scope': {'suite': SUITE, 'selected_cases': [CASE_ID], 'legacy_inventory_count': len(binding['legacy_inventory']),
                       'full_release_status': 'NOT_QUALIFIED', 'full_story_status': 'LOCAL_INTEGRATED' if status == 'PASS' else 'NOT_QUALIFIED',
                       'selected_requirement_ids': list(V1_REQUIREMENTS), 'manifest_digest': fingerprint(binding)},
             'runner': {'executor_digest': binding['executor_digest']},

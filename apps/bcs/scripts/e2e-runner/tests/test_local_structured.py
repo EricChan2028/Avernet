@@ -120,7 +120,7 @@ class StructuredLive(unittest.TestCase):
         summary=build_structured_report(self.root)
         self.assertEqual(summary['status'],'LOCAL_SUITE_PASS')
         self.assertEqual(summary,self.result['canonical_summary'])
-        self.assertEqual(summary['scope']['legacy_inventory_count'],34)
+        self.assertEqual(summary['scope']['legacy_inventory_count'],41)
         self.assertEqual(summary['scope']['full_release_status'],'NOT_QUALIFIED')
         self.assertEqual(summary['reports']['observed_assertion_count'],17)
         self.assertEqual(summary['cases'][0]['cleanup'],'RETAINED')

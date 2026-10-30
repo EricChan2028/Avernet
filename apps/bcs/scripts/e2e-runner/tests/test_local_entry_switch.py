@@ -13,6 +13,16 @@ def plan():
     return migration_plan()
 
 
+# This A tree still has 29 registered executors: three reviewed parents await
+# registration and one registered row is still known backlog. Pin those 29
+# rows here so the 6.6 review regressions test the actual local migration
+# floor while the runtime roster keeps its honest 31/10/41 facts.
+A_TREE_LOCAL_EXECUTOR_ROSTER = tuple(
+    {'id': row['legacy_id']}
+    for row in plan()['local_registered_executors']
+)
+
+
 def partial_equivalent(value):
     result = copy.deepcopy(value)
     absorbed = result["local_registered_executors"].pop(0)
@@ -24,6 +34,14 @@ def partial_equivalent(value):
 
 class LocalEntrySwitchReviewTests(unittest.TestCase):
     maxDiff = None
+
+    def setUp(self):
+        roster_patch = patch(
+            'bcs_e2e.local_entry_switch.reviewed_release_inventory',
+            return_value=list(A_TREE_LOCAL_EXECUTOR_ROSTER),
+        )
+        roster_patch.start()
+        self.addCleanup(roster_patch.stop)
 
     def test_complete_review_is_backed_by_performed_local_shell_default(self):
         with patch("bcs_e2e.local_entry_switch.migration_plan", return_value=plan()):

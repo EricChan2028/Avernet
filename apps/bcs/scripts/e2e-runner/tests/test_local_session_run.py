@@ -64,7 +64,7 @@ class SessionAdmissionTests(unittest.TestCase):
         self.assertFalse(row['grants_release_credit'])
         self.assertNotIn(PUBLIC_CASE,
                          [item['case_id'] for item in plan['local_partial_executors']])
-        self.assertEqual(plan['legacy_inventory_count'], 34)
+        self.assertEqual(plan['legacy_inventory_count'], 41)
         self.assertEqual(plan['migrated_story_count'], 0)
 
     def test_cli_no_profile_does_not_grant_permissions(self):
@@ -91,7 +91,7 @@ class SessionPublicLifecycleLiveTests(unittest.TestCase):
         self.assertEqual(self.result['credentials']['credential_memory'], 'CLEARED')
         summary = self.result['canonical_summary']
         self.assertEqual(summary['status'], 'LOCAL_SLICE_PASS')
-        self.assertEqual(summary['scope']['legacy_inventory_count'], 34)
+        self.assertEqual(summary['scope']['legacy_inventory_count'], 41)
         self.assertEqual(summary['scope']['full_story_status'], 'NOT_MIGRATED')
         self.assertEqual(summary['requirements'], [{'id': r, 'status': 'PASS' if i == 0 else 'NOT_RUN'}
                                                    for i, r in enumerate(REQUIREMENTS)])

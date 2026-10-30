@@ -53,4 +53,4 @@ class EventContractTests(unittest.TestCase):
         registered=next(r for r in plan['local_registered_executors'] if r['legacy_id']==PARENT)
         self.assertFalse(registered['grants_release_credit'])
         self.assertEqual(registered['required_assertion_count'],20)
-        self.assertEqual(plan['legacy_inventory_count'],34);self.assertEqual(plan['migrated_story_count'],0)
+        self.assertEqual(plan['legacy_inventory_count'],41);self.assertEqual(plan['migrated_story_count'],0)

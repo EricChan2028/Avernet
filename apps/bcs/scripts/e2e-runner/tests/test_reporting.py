@@ -60,7 +60,7 @@ class ReportingTests(unittest.TestCase):
             summary = build_report(self.profile(), state, self.manifest())
             self.assertEqual(summary["status"], "PILOT_PASS")
             self.assertEqual(summary["scope"]["full_release_status"], "NOT_QUALIFIED")
-            self.assertEqual(summary["scope"]["legacy_inventory_count"], 34)
+            self.assertEqual(summary["scope"]["legacy_inventory_count"], 41)
             self.assertEqual(summary["mock_boundary"]["local_mock"], True)
             self.assertNotIn("must-not-appear", json.dumps(summary))
             self.assertIn("not a performance benchmark", summary["timing"]["interpretation"])
@@ -362,7 +362,7 @@ class ReportOutputSafetyTests(unittest.TestCase):
 
     def summary(self):
         return {"status": "BLOCKED", "run_id": "run", "target": {"tier": "local", "environment_id": "mock"},
-                "scope": {"full_release_status": "NOT_QUALIFIED", "legacy_inventory_count": 34},
+                "scope": {"full_release_status": "NOT_QUALIFIED", "legacy_inventory_count": 41},
                 "cases": [], "routes": [], "timing": {"interpretation": "not a benchmark"},
                 "mock_boundary": {"not_proven": []}}
 

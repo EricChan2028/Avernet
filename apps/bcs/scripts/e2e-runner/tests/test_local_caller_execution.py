@@ -183,7 +183,7 @@ class CallerExecutionRunTests(unittest.TestCase):
         summary = build_caller_execution_report(state)
         self.assertEqual(summary, result['canonical_summary'])
         self.assertEqual(summary['status'], 'LOCAL_SUITE_PASS')
-        self.assertEqual(summary['scope']['legacy_inventory_count'], 34)
+        self.assertEqual(summary['scope']['legacy_inventory_count'], 41)
         self.assertEqual(summary['scope']['independent_slice'], True)
         self.assertEqual(summary['scope']['release_parent_denominator'], False)
         self.assertEqual(summary['reports']['observed_assertion_count'], 9)

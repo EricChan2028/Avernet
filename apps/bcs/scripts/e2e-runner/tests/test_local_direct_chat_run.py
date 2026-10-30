@@ -45,7 +45,7 @@ class DirectChatAdmissionTests(unittest.TestCase):
         from bcs_e2e.migration_inventory import migration_plan
         plan=migration_plan();row=next(r for r in plan['local_registered_executors'] if r['case_id']==CASE_ID)
         self.assertEqual(row['requirement_ids'],list(REQUIREMENTS));self.assertFalse(row['grants_release_credit'])
-        self.assertEqual(plan['legacy_inventory_count'],34);self.assertEqual(plan['migrated_story_count'],0)
+        self.assertEqual(plan['legacy_inventory_count'],41);self.assertEqual(plan['migrated_story_count'],0)
 
     def test_permissions_confirmation_and_fresh_directory_precede_runtime(self):
         with tempfile.TemporaryDirectory() as tmp,patch('bcs_e2e.local_direct_chat_run.OwnedBcsProcess') as runtime:

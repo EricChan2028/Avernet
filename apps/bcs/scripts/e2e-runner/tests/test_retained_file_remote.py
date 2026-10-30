@@ -218,7 +218,7 @@ class RetainedFileRemoteTests(unittest.TestCase):
         summary = read(self.state / 'reports/summary.json')
         self.assertEqual(summary['status'], 'RETAINED_CASE_PASS')
         self.assertEqual(summary['scope']['suite'], 'preprod-retained-file-v1')
-        self.assertEqual(summary['scope']['legacy_inventory_count'], 34)
+        self.assertEqual(summary['scope']['legacy_inventory_count'], 41)
         self.assertEqual(result['case_version'], 2)
         queries = [call for call in self.calls if call[2].endswith('.db_query')]
         self.assertEqual(len(queries), 1)

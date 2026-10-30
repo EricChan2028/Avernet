@@ -93,9 +93,9 @@ class CustomCollaborationLifecycleTests(unittest.TestCase):
         self.cli_sha = 'b' * 64
         reviewed_legacy = [
             {'id': 'story_cli_operator_creates_custom_collaboration'}
-        ] + [{'id': f'other-{index}'} for index in range(28)]
-        # The frozen binding keeps the raw 34-row manifest; only the release
-        # denominator guards read the reviewed 29-row inventory.
+        ] + [{'id': f'other-{index}'} for index in range(30)]
+        # The frozen binding keeps the raw 41-row manifest; only the release
+        # denominator guards read the reviewed 31-row inventory.
         raw_legacy = list(reviewed_legacy) + [
             {'id': legacy_id} for legacy_id in KNOWN_UNMAPPED_LEGACY_IDS]
         self.raw_legacy = raw_legacy
@@ -265,7 +265,7 @@ class CustomCollaborationLifecycleTests(unittest.TestCase):
         binding = json.loads(
             (self.state_dir / 'custom-collaboration-lifecycle-binding.json').read_text())
         self.assertEqual(binding['legacy_inventory'], self.raw_legacy)
-        self.assertEqual(len(binding['legacy_inventory']), 34)
+        self.assertEqual(len(binding['legacy_inventory']), 41)
         self.assertTrue(
             KNOWN_UNMAPPED_LEGACY_IDS
             <= {row['id'] for row in binding['legacy_inventory']})

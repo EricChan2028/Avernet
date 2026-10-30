@@ -134,7 +134,7 @@ class EdgeFriendMutationContractTests(unittest.TestCase):
                     row['report_command'], 'local-edge-friend-mutations-report')
                 self.assertEqual(row['remote_validation'], 'NOT_RUN')
                 self.assertFalse(row['grants_release_credit'])
-        self.assertEqual(plan['legacy_inventory_count'], 34)
+        self.assertEqual(plan['legacy_inventory_count'], 41)
         self.assertEqual(plan['migrated_story_count'], 0)
         self.assertEqual(plan['passed_assertion_count'], 0)
 

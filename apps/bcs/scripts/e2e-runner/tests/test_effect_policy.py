@@ -28,7 +28,7 @@ class EffectPolicyTests(unittest.TestCase):
         self.assertEqual(manifest, before)
         self.assertEqual(current_manifest(), before)
         self.assertEqual([case['version'] for case in manifest['cases']], [3, 3, 3])
-        self.assertEqual(len(manifest['legacy_inventory']), 34)
+        self.assertEqual(len(manifest['legacy_inventory']), 41)
 
     def test_unknown_retained_or_broad_cleanup_effects_are_not_implicitly_admitted(self):
         for effect in ('create:dm', 'delete:provider', 'disable:organization', 'purge:message_history',

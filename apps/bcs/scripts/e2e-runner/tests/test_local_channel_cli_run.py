@@ -50,7 +50,7 @@ class ChannelCliAdmissionTests(unittest.TestCase):
         from bcs_e2e.migration_inventory import migration_plan
         plan=migration_plan();row=next(r for r in plan['local_registered_executors'] if r['case_id']==CASE_ID)
         self.assertEqual(row['requirement_ids'],list(REQUIREMENTS));self.assertFalse(row['grants_release_credit'])
-        self.assertEqual(plan['legacy_inventory_count'],34);self.assertEqual(plan['migrated_story_count'],0)
+        self.assertEqual(plan['legacy_inventory_count'],41);self.assertEqual(plan['migrated_story_count'],0)
         self.assertNotEqual(row['legacy_id'],'story_user_validates_external_channel_setup')
 
     def test_missing_permissions_precede_actual_binary_or_process(self):

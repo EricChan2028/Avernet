@@ -75,7 +75,7 @@ class BotSearchContractTests(unittest.TestCase):
                          if row['legacy_id'] == PARENT)
         self.assertEqual(candidate['status'], 'PENDING')
         self.assertFalse(candidate['grants_release_credit'])
-        self.assertEqual(plan['legacy_inventory_count'], 34)
+        self.assertEqual(plan['legacy_inventory_count'], 41)
         self.assertEqual(plan['migrated_story_count'], 0)
         self.assertEqual(plan['passed_assertion_count'], 0)
         self.assertFalse(plan['ready_to_execute'])

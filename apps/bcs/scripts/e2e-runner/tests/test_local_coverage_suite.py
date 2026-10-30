@@ -21,9 +21,26 @@ from bcs_e2e.run_state import RunStateError
 from tests.test_local_template_runtime import approved_asset
 
 
+# A still has 29 registered executors while the reviewed roster is 31: three
+# reviewed parents await registration and one registered row is still known
+# backlog. The next command-registration wave closes that set; these suite
+# regressions pin the 29 executables actually dispatchable in this tree.
+A_TREE_LOCAL_EXECUTOR_ROSTER = tuple(
+    {'id': row['legacy_id']}
+    for row in suite.migration_plan()['local_registered_executors']
+)
+
+
 class CoverageSuiteTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        patcher = patch.object(
+            suite,
+            'reviewed_release_inventory',
+            return_value=list(A_TREE_LOCAL_EXECUTOR_ROSTER),
+        )
+        cls.a_tree_roster_patch = patcher.start()
+        cls.addClassCleanup(cls.a_tree_roster_patch.stop)
         cls.listing = suite.list_cases()
 
     def setUp(self):
@@ -273,6 +290,15 @@ class CoverageSuiteTests(unittest.TestCase):
 
 
 class BindingTests(unittest.TestCase):
+    def setUp(self):
+        roster_patch = patch.object(
+            suite,
+            'reviewed_release_inventory',
+            return_value=list(A_TREE_LOCAL_EXECUTOR_ROSTER),
+        )
+        roster_patch.start()
+        self.addCleanup(roster_patch.stop)
+
     def test_zero_exit_cannot_hide_blocked_or_noncanonical_report(self):
         for report in ({'status': 'BLOCKED'}, {'status': 'unknown'},
                        {'status': 'LOCAL_SUITE_PASS', 'canonical_summary': {'status': 'BLOCKED'}}):

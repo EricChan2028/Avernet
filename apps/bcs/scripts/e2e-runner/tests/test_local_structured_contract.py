@@ -48,4 +48,4 @@ class StructuredContractTests(unittest.TestCase):
         row=next(r for r in plan['local_registered_executors'] if r['legacy_id']==PARENT)
         self.assertEqual(row['required_assertion_count'],17)
         self.assertFalse(row['grants_release_credit'])
-        self.assertEqual(plan['legacy_inventory_count'],34);self.assertEqual(plan['migrated_story_count'],0)
+        self.assertEqual(plan['legacy_inventory_count'],41);self.assertEqual(plan['migrated_story_count'],0)

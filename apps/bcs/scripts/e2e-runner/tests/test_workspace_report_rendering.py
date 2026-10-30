@@ -28,7 +28,7 @@ def summary(case_status="PASS"):
             "suite": "owned-local-workspace-v1",
             "full_release_status": "NOT_QUALIFIED",
             "manifest_digest": "manifest",
-            "legacy_inventory_count": 34,
+            "legacy_inventory_count": 41,
         },
         "runner": {"executor_digest": "executor"},
         "observer_binding": {},

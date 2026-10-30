@@ -50,7 +50,7 @@ def validate_manifest(value: dict) -> dict:
 
 KNOWN_UNMAPPED_LEGACY_IDS = frozenset({
     # Pre-existing five, unmapped since the reviewed-release cut:
-    'story_cli_operator_manages_group_context',
+    'story_fixed_loop_human_editor_workflow',
     'story_nested_fixed_loop_workflows',
     'story_state_machine_result_queue',
     'test_ep_dept_scope_parses_object_friend_ext_entries',
@@ -86,10 +86,10 @@ _VALID_EXECUTOR_MIGRATION_STATES = frozenset({
     ('EDGE_OBLIGATION_IN_FAMILY', 'NOT_APPLICABLE'),
 })
 _EXPECTED_EXECUTOR_MIGRATION_COUNTS = {
-    ('DUAL', 'PASS'): 18,
+    ('DUAL', 'PASS'): 19,
     ('DUAL', 'BLOCKED_INVENTORIED'): 7,
     ('DUAL', 'NOT_RUN'): 1,
-    ('LOCAL_ONLY', 'NOT_RUN'): 10,
+    ('LOCAL_ONLY', 'NOT_RUN'): 9,
     ('DYNAMIC_OWNED_LOCAL', 'NOT_APPLICABLE'): 4,
     ('EDGE_OBLIGATION_IN_FAMILY', 'NOT_APPLICABLE'): 1,
 }
@@ -97,7 +97,6 @@ _EXPECTED_EXECUTOR_MIGRATION_GATE_COUNTS = {'MOCK': 2}
 _EXPECTED_EXECUTOR_MIGRATION_NOTE_COUNTS = {
     'STATION_DEFECT_R5_CAVEAT': 1,
     'FRESH_FIXTURE_R5G': 1,
-    'ROSTER_LAG': 1,
 }
 
 

@@ -126,11 +126,28 @@ class ManifestTests(unittest.TestCase):
         edge = (legacy / "edge_permission.sh").read_text()
         edges = re.findall(r'"(test_ep_[^\"]+)"', edge.split('E2E_TESTS_EDGE_PERMISSION=(')[1].split(')')[0])
         inventory = json.loads((ROOT / "manifest.json").read_text())["legacy_inventory"]
-        self.assertEqual([i["id"] for i in inventory], regular + conditional + edges)
-        self.assertEqual(len(inventory), 34)
-        for item in inventory:
+        self.assertEqual([i["id"] for i in inventory[:34]], regular + conditional + edges)
+        self.assertEqual(len(inventory), 41)
+        # Rows 35-41 are frozen migration roster rows. Their legacy shell
+        # sources are synchronized by a separate A-tree wave; this runner-only
+        # change must not fabricate or claim to execute those sources.
+        self.assertEqual(
+            [(i["id"], i["source"], i["conditional"]) for i in inventory[34:]],
+            [
+                ("story_authority_user_journey", "authority.sh", False),
+                ("story_provider_owner_isolation", "provider_scope_story.sh", False),
+                ("story_session_owner_permissions", "session_owner_story.sh", False),
+                ("story_provider_operator_manages_subbots", "e2e.sh", False),
+                ("story_retired_service_policy", "service_policy_story.sh", False),
+                ("story_collaboration_draft_delivery", "collaboration_draft_story.sh", False),
+                ("story_collaboration_draft_group_launch", "collaboration_draft_story.sh", True),
+            ],
+        )
+        frozen = {i["id"] for i in inventory[34:]}
+        for item in inventory[:34]:
             self.assertRegex((legacy / item["source"]).read_text(), r"(?m)^" + item["id"] + r"\(\)")
             self.assertEqual(item["conditional"], item["id"] in conditional)
+        self.assertTrue(frozen.isdisjoint({i["id"] for i in inventory[:34]}))
 
     def test_plan_never_resolves_credentials_or_network(self):
         with patch.dict(os.environ, {}, clear=True), patch("bcs_e2e.transport.build_opener") as network:

@@ -170,7 +170,7 @@ class ResultQueueRunTests(unittest.TestCase):
                                                   'preprod': 'REMOTE_UNSUPPORTED'})
         self.assertEqual(binding['source_binding']['parent'], 'story_state_machine_result_queue')
         self.assertEqual(binding['runtime_dir'], str(state.resolve()))
-        self.assertEqual(len(binding['legacy_inventory']), 34)
+        self.assertEqual(len(binding['legacy_inventory']), 41)
         runtime = FakeOwnedRuntime.instances[0].init_kwargs
         self.assertEqual(runtime['allow_ambient_local_identity'], False)
         self.assertEqual(runtime['binary_sha256'], self.digest)
@@ -218,7 +218,7 @@ class ResultQueueRunTests(unittest.TestCase):
         summary = build_result_queue_report(state)
         self.assertEqual(summary, result['canonical_summary'])
         self.assertEqual(summary['status'], 'LOCAL_SUITE_PASS')
-        self.assertEqual(summary['scope']['legacy_inventory_count'], 34)
+        self.assertEqual(summary['scope']['legacy_inventory_count'], 41)
         self.assertEqual(summary['scope']['independent_slice'], True)
         self.assertEqual(summary['reports']['expected_assertion_count'], 18)
         self.assertEqual(summary['reports']['observed_assertion_count'], 18)
@@ -553,10 +553,10 @@ class ResultQueueEvidenceTamperTests(unittest.TestCase):
 
 
 class ResultQueueIndependenceTests(unittest.TestCase):
-    def test_slice_stays_bound_to_the_34_story_backlog_parent(self):
+    def test_slice_stays_bound_to_the_full_legacy_backlog_parent(self):
         from bcs_e2e.inventory import current_manifest
         legacy = current_manifest()['legacy_inventory']
-        self.assertEqual(len(legacy), 34)
+        self.assertEqual(len(legacy), 41)
         self.assertIn('story_state_machine_result_queue', {row['id'] for row in legacy})
         binding = result_queue_source_binding()
         self.assertEqual(binding['parent'], 'story_state_machine_result_queue')

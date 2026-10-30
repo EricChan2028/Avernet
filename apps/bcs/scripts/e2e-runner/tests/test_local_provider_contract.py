@@ -53,5 +53,5 @@ class ProviderContractTests(unittest.TestCase):
         self.assertEqual(executor['requirement_ids'], list(REQUIREMENTS))
         self.assertEqual(executor['required_assertion_count'], 32)
         self.assertFalse(executor['grants_release_credit'])
-        self.assertEqual(plan['legacy_inventory_count'], 34)
+        self.assertEqual(plan['legacy_inventory_count'], 41)
         self.assertEqual(plan['migrated_story_count'], 0)

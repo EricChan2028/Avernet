@@ -120,7 +120,7 @@ class OwnedLocalProviderApi:
                     'sink_url_sha256': hashlib.sha256(self.sink.url.encode()).hexdigest()}
         _require(executor_digest() == self.executor_digest and self.binding == expected
                  and read(self.binding_path) == expected
-                 and len(expected['legacy_inventory']) == 34
+                 and len(expected['legacy_inventory']) == len(current_manifest()['legacy_inventory'])
                  and fingerprint(source) == self.source_binding_digest
                  and fingerprint(read(self.identities.fixtures.path)) == self.fixture_digest,
                  'Provider executor, source, binding, or fixture artifact changed')

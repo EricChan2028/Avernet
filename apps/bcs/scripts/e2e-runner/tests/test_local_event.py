@@ -97,7 +97,7 @@ class EventLive(unittest.TestCase):
         before={str(p.relative_to(self.root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in self.root.rglob('*') if p.is_file()}
         summary=build_event_report(self.root)
         self.assertEqual(summary,self.result['canonical_summary']);self.assertEqual(summary['status'],'LOCAL_SUITE_PASS')
-        self.assertEqual(summary['scope']['legacy_inventory_count'],34);self.assertEqual(summary['reports']['observed_assertion_count'],20)
+        self.assertEqual(summary['scope']['legacy_inventory_count'],41);self.assertEqual(summary['reports']['observed_assertion_count'],20)
         self.assertEqual(summary['cases'][0]['cleanup'],'RETAINED');ET.parse(self.root/'reports/junit.xml')
         after={str(p.relative_to(self.root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in self.root.rglob('*') if p.is_file()}
         self.assertEqual(before,after)

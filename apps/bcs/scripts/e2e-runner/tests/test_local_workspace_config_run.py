@@ -69,7 +69,7 @@ class ConfigRunLiveTests(unittest.TestCase):
             {'id':'WORKSPACE.messages','status':'NOT_RUN'},
             {'id':'WORKSPACE.incident-delete','status':'NOT_RUN'}])
         self.assertEqual(result['parent_requirement_count'], 17)
-        self.assertEqual(result['legacy_inventory_count'], 34)
+        self.assertEqual(result['legacy_inventory_count'], 41)
         self.assertEqual(result['full_story_status'], 'NOT_MIGRATED')
         self.assertFalse(result['automatic_delete'])
         self.assertEqual(result['incident_case'], read(self.root/'local-workspace-incident.json'))
