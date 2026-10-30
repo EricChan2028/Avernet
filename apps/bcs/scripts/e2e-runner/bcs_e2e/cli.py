@@ -42,6 +42,7 @@ from .operator_cli_case_run import dual_operator_cli_case_run
 from .direct_chat_cli_case_run import dual_direct_chat_case_run
 from .delivery_policy_cli_case_run import dual_delivery_policy_case_run
 from .provider_publishes_case_run import dual_provider_publishes_case_run
+from .provider_subbots_case_run import dual_provider_subbots_case_run
 from .collaboration_team_case_run import dual_collaboration_team_cli_case_run
 from .custom_collaboration_cli_case_run import dual_custom_collaboration_case_run
 from .group_context_case_run import dual_group_context_cli_case_run
@@ -715,6 +716,18 @@ def main(argv: list[str] | None = None) -> int:
                 run_id=args.run_id,
                 allow_write=args.allow_write,
                 confirm_run_id=args.confirm_run_id,
+            )
+            rc = 0 if report["status"] == "PASS" else 2
+        elif args.command == "dual-provider-subbots-run":
+            report = dual_provider_subbots_case_run(
+                profile_path=args.profile,
+                case_key=args.case,
+                state_dir=args.state_dir,
+                run_id=args.run_id,
+                allow_write=args.allow_write,
+                confirm_run_id=args.confirm_run_id,
+                binary=getattr(args, "binary", None),
+                binary_sha256=getattr(args, "binary_sha256", None),
             )
             rc = 0 if report["status"] == "PASS" else 2
         elif args.command == "dual-session-file-run":

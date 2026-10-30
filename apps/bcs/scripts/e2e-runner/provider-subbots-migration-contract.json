@@ -1,0 +1,506 @@
+{
+  "schema_version": 1,
+  "parent": "story_provider_operator_manages_subbots",
+  "suite": "owned-local-provider-subbots-v1",
+  "case_id": "LOCAL-PROVIDER-SUBBOTS-01",
+  "environment": {
+    "local": "LOCAL_EXECUTOR_ONLY",
+    "preprod": "REMOTE_UNSUPPORTED"
+  },
+  "sources": {
+    "agentpass_subbots_story.py": "32ac5b874a7a3f2fdf7a2f0336c4eb589636c8177aae12556bbb95afef4ef577",
+    "e2e.sh": "4c77bd9967396af0b3cd8e451b6b690293a309628e94fbbf4abb951188727738",
+    "agentpass-subbots.md": "de098859f3aaf91d0c004811ae4bec2f004274ddc3373ebaa124380f471ca313"
+  },
+  "source_revision": "49ce1afc9f3d2b1f1dc9ec485f8cd368ade2b873",
+  "source_file_revisions": {
+    "agentpass_subbots_story.py": "49ce1afc9f3d2b1f1dc9ec485f8cd368ade2b873",
+    "e2e.sh": "c6f00120949078f14cb0d3602fb8301f2ccb1803",
+    "agentpass-subbots.md": "a30d8c2e20acfe2dc8e0eaa0b9f8edf5d9451898"
+  },
+  "story_checks": 131,
+  "story_markers": [
+    "Provider subbots story: {checks} live HTTP assertions passed"
+  ],
+  "owned_runtime_binary": {
+    "package": "bcs",
+    "build_command": "cargo build -p bcs --bin bcs",
+    "hash_algorithm": "sha256",
+    "opt_in_env": [
+      "BCS_E2E_TEST_BINARY",
+      "BCS_E2E_TEST_BINARY_SHA256"
+    ],
+    "auto_build": false,
+    "required_arguments": [
+      "--binary",
+      "--binary-sha256"
+    ]
+  },
+  "config_fragment": {
+    "path": "bcs_e2e/provider_subbots/provider-subbots-required.json",
+    "required": {
+      "provider_stream_gray_enabled": false,
+      "provider_stream_gray_created_by": []
+    },
+    "integration_note": "The slice injects its provider control-plane pin (provider_stream_gray_enabled=false) after the shared local config generator runs; it never edits local_config.py."
+  },
+  "redaction_tokens": [
+    "bot\u005ftoken",
+    "bot_runtime\u005ftoken",
+    "provider_admin\u005ftoken",
+    "X-Avernet-Principal",
+    "Bear\u0065r ",
+    "coo\u006bie"
+  ],
+  "requirements": [
+    {
+      "id": "PROVIDER-SUBBOTS.provider-registration-discovery",
+      "expectation": "The Human registers one new Provider with auth mode agentpass-subbots; the returned Provider ID/admin token are present (token value never retained), and public slug discovery reports agentpass-subbots.",
+      "story_lines": [
+        145,
+        165
+      ],
+      "anchors": [
+        {
+          "line": 146,
+          "literal": "\"create subbots Provider\""
+        },
+        {
+          "line": 153,
+          "literal": "\"auth\": {\"mode\": mode}"
+        },
+        {
+          "line": 164,
+          "literal": "public[\"auth_mode\"] == mode"
+        }
+      ],
+      "markers": [
+        "owned-local-provider-subbots-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-SUBBOTS.admin-complete-ref-validation",
+      "expectation": "Provider-admin registration rejects all six malformed complete Provider Bot references with HTTP 400 before any Bot is created.",
+      "story_lines": [
+        167,
+        182
+      ],
+      "anchors": [
+        {
+          "line": 171,
+          "literal": "\"provider_bot_ref\": f\"{parent}:reviewer\""
+        },
+        {
+          "line": 173,
+          "literal": "for invalid in (\"parent-without-slug\", \":a\", f\"{parent}:\", f\"{parent}:Uppercase\","
+        },
+        {
+          "line": 181,
+          "literal": "token=admin,"
+        }
+      ],
+      "markers": [
+        "owned-local-provider-subbots-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-SUBBOTS.admin-sibling-registration",
+      "expectation": "The Provider-admin path registers the reviewer with the exact parent, slug, auth mode and client-composed ref, and records a distinct runtime token without exposing its value.",
+      "story_lines": [
+        183,
+        212
+      ],
+      "anchors": [
+        {
+          "line": 184,
+          "literal": "\"register reviewer with Provider credential\""
+        },
+        {
+          "line": 191,
+          "literal": "first[\"agent_code\"] == parent and first[\"bot_slug\"] == \"reviewer\""
+        },
+        {
+          "line": 205,
+          "literal": "\"reject duplicate reviewer\""
+        }
+      ],
+      "markers": [
+        "owned-local-provider-subbots-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-SUBBOTS.scoped-complete-ref-validation",
+      "expectation": "The scoped registration path rejects four malformed complete refs and a removed bot_slug parameter cannot repair an incomplete ref.",
+      "story_lines": [
+        213,
+        238
+      ],
+      "anchors": [
+        {
+          "line": 214,
+          "literal": "\"owner issues scoped registration credential\""
+        },
+        {
+          "line": 225,
+          "literal": "\"removed bot_slug cannot complete a malformed ref\""
+        },
+        {
+          "line": 235,
+          "literal": "\"scoped registration rejects malformed complete ref\""
+        }
+      ],
+      "markers": [
+        "owned-local-provider-subbots-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-SUBBOTS.scoped-sibling-distinct-identity",
+      "expectation": "The scoped path registers the coder with the same parent/auth mode/ref conventions, and the two siblings receive distinct Bot UUIDs and runtime tokens.",
+      "story_lines": [
+        239,
+        268
+      ],
+      "anchors": [
+        {
+          "line": 240,
+          "literal": "\"register coder with scoped credential\""
+        },
+        {
+          "line": 246,
+          "literal": "identity[\"agent_code\"] == parent and identity[\"bot_slug\"] == \"coder\""
+        },
+        {
+          "line": 260,
+          "literal": "a[\"id\"] != b[\"id\"] and a[\"token\"] != b[\"token\"]"
+        }
+      ],
+      "markers": [
+        "owned-local-provider-subbots-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-SUBBOTS.duplicate-reference-conflicts",
+      "expectation": "Both registration paths reject an exact duplicate complete Provider Bot reference with HTTP 409.",
+      "story_lines": [
+        204,
+        268
+      ],
+      "anchors": [
+        {
+          "line": 205,
+          "literal": "\"reject duplicate reviewer\""
+        },
+        {
+          "line": 208,
+          "literal": "409,"
+        },
+        {
+          "line": 264,
+          "literal": "\"scoped duplicate fails at registration\""
+        },
+        {
+          "line": 267,
+          "literal": "409,"
+        }
+      ],
+      "markers": [
+        "owned-local-provider-subbots-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-SUBBOTS.self-lookup-actor-binding",
+      "expectation": "A static Bot token selects its exact Bot; matching Actor succeeds, sibling Actor, Actor-only and malformed Actor requests fail; every self projection carries no runtime token and Cache-Control no-store.",
+      "story_lines": [
+        273,
+        306
+      ],
+      "anchors": [
+        {
+          "line": 274,
+          "literal": "self.self_view(bot, parent)"
+        },
+        {
+          "line": 276,
+          "literal": "self.self_view(bot, parent, actor=sibling[\"id\"], status=401)"
+        },
+        {
+          "line": 293,
+          "literal": "\"Actor alone cannot fall back to human\""
+        },
+        {
+          "line": 300,
+          "literal": "\"malformed Actor is rejected\""
+        }
+      ],
+      "markers": [
+        "owned-local-provider-subbots-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-SUBBOTS.legacy-api-actor-binding",
+      "expectation": "Legacy /groups/my accepts the token Bot with a matching Actor and rejects a sibling Actor even though the request also carries the privileged mock Human header.",
+      "story_lines": [
+        277,
+        291
+      ],
+      "anchors": [
+        {
+          "line": 278,
+          "literal": "\"legacy auth accepts matching Actor\""
+        },
+        {
+          "line": 285,
+          "literal": "\"legacy auth rejects sibling Actor despite mock user\""
+        }
+      ],
+      "markers": [
+        "owned-local-provider-subbots-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-SUBBOTS.metadata-update-parent-immutability",
+      "expectation": "Provider metadata update retains the exact Bot UUID and updates the name; a following self lookup preserves parent and ref identity.",
+      "story_lines": [
+        307,
+        319
+      ],
+      "anchors": [
+        {
+          "line": 308,
+          "literal": "\"update reviewer metadata\""
+        },
+        {
+          "line": 315,
+          "literal": "changed[\"bot_uuid\"] == a[\"id\"] and changed[\"name\"] == \"E2E Senior Reviewer\""
+        }
+      ],
+      "markers": [
+        "owned-local-provider-subbots-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-SUBBOTS.onboard-parent-immutability",
+      "expectation": "Bot onboarding succeeds for the exact Actor and a subsequent self lookup still reports the same parent, ref and registered status.",
+      "story_lines": [
+        320,
+        328
+      ],
+      "anchors": [
+        {
+          "line": 321,
+          "literal": "\"onboarding metadata preserves parent identity\""
+        },
+        {
+          "line": 328,
+          "literal": "self.self_view(a, parent)"
+        }
+      ],
+      "markers": [
+        "owned-local-provider-subbots-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-SUBBOTS.parent-discovery-fail-closed",
+      "expectation": "Parent discovery requires credentials, rejects invalid pagination/query inputs with 400, and fails closed with agent_identity_unavailable when no AgentPass verifier is installed.",
+      "story_lines": [
+        329,
+        355
+      ],
+      "anchors": [
+        {
+          "line": 332,
+          "literal": "\"parent discovery requires credentials\""
+        },
+        {
+          "line": 337,
+          "literal": "for query_string in (\"limit=0\", \"limit=101\", \"cursor=\", \"unknown=value\")"
+        },
+        {
+          "line": 346,
+          "literal": "\"public build fails closed without AgentPass verifier\""
+        },
+        {
+          "line": 353,
+          "literal": "\"agent_identity_unavailable\""
+        }
+      ],
+      "markers": [
+        "owned-local-provider-subbots-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-SUBBOTS.callback-actor-binding",
+      "expectation": "Provider event callbacks authenticate the Bot token plus Provider/Actor tuple, reach run lookup for the exact Actor, and reject a sibling Actor; a token-only request is also accepted.",
+      "story_lines": [
+        357,
+        399
+      ],
+      "anchors": [
+        {
+          "line": 367,
+          "literal": "\"authenticated callback reaches run lookup\""
+        },
+        {
+          "line": 376,
+          "literal": "result[\"error\"] == \"run_not_found\""
+        },
+        {
+          "line": 380,
+          "literal": "\"callback rejects sibling Actor\""
+        },
+        {
+          "line": 389,
+          "literal": "\"callback accepts Bot token without Actor\""
+        }
+      ],
+      "markers": [
+        "owned-local-provider-subbots-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-SUBBOTS.signed-principal-live-state",
+      "expectation": "A signed Bot principal is accepted against live state despite a conflicting unsigned Actor, and the same signed principal is rejected after Provider disable and Bot deletion.",
+      "story_lines": [
+        401,
+        409
+      ],
+      "anchors": [
+        {
+          "line": 404,
+          "literal": "\"X-Avernet-Principal\": self.signed_bot(a, parent)"
+        },
+        {
+          "line": 405,
+          "literal": "\"X-BCN-Actor-Bot-Id\": b[\"id\"]"
+        },
+        {
+          "line": 409,
+          "literal": "\"Gateway principal uses signed Bot\""
+        }
+      ],
+      "markers": [
+        "owned-local-provider-subbots-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-SUBBOTS.disable-enable-state",
+      "expectation": "Disabling the Provider invalidates both sibling static-token views, callback authentication and the signed principal; enabling restores both sibling views and the signed principal.",
+      "story_lines": [
+        411,
+        438
+      ],
+      "anchors": [
+        {
+          "line": 411,
+          "literal": "\"disable Provider\""
+        },
+        {
+          "line": 412,
+          "literal": "self.self_view(a, parent, status=401)"
+        },
+        {
+          "line": 415,
+          "literal": "\"disabled Provider invalidates signed Bot\""
+        },
+        {
+          "line": 430,
+          "literal": "\"enable Provider\""
+        },
+        {
+          "line": 434,
+          "literal": "\"enabled Provider restores signed Bot\""
+        }
+      ],
+      "markers": [
+        "owned-local-provider-subbots-compliance"
+      ]
+    },
+    {
+      "id": "PROVIDER-SUBBOTS.deletion-tombstone-retirement",
+      "expectation": "Deleting each exact Bot reference invalidates its token and signed principal, leaves the sibling live, prevents both registration paths from reclaiming the deleted ref, and retires the Provider.",
+      "story_lines": [
+        440,
+        479
+      ],
+      "anchors": [
+        {
+          "line": 441,
+          "literal": "\"delete reviewer\""
+        },
+        {
+          "line": 456,
+          "literal": "\"deleted slug cannot be reclaimed\""
+        },
+        {
+          "line": 464,
+          "literal": "\"scoped path cannot reclaim deleted slug\""
+        },
+        {
+          "line": 470,
+          "literal": "\"delete coder\""
+        },
+        {
+          "line": 476,
+          "literal": "\"retire test Provider\""
+        }
+      ],
+      "markers": [
+        "owned-local-provider-subbots-compliance"
+      ]
+    }
+  ],
+  "documented_gaps": {
+    "PREPROD_PROVIDER_CONTROL_PLANE_ABSENT": "The preprod public-v1 profile declares only group.* and session.* route_bindings. It exposes no Provider registration/admin routes (/providers, /providers/{id}/bots), no parent-discovery or Provider callback bindings, and no provider_admin_token credential channel in any auth.header_env. Remote preprod execution of this story is unsupported by design, not by missing effort; remote_validation stays NOT_RUN and grants_release_credit is false."
+  },
+  "adaptability": {
+    "case_id": "LOCAL-PROVIDER-SUBBOTS-01",
+    "legacy_id": "story_provider_operator_manages_subbots",
+    "requirement_ids": [
+      "PROVIDER-SUBBOTS.provider-registration-discovery",
+      "PROVIDER-SUBBOTS.admin-complete-ref-validation",
+      "PROVIDER-SUBBOTS.admin-sibling-registration",
+      "PROVIDER-SUBBOTS.scoped-complete-ref-validation",
+      "PROVIDER-SUBBOTS.scoped-sibling-distinct-identity",
+      "PROVIDER-SUBBOTS.duplicate-reference-conflicts",
+      "PROVIDER-SUBBOTS.self-lookup-actor-binding",
+      "PROVIDER-SUBBOTS.legacy-api-actor-binding",
+      "PROVIDER-SUBBOTS.metadata-update-parent-immutability",
+      "PROVIDER-SUBBOTS.onboard-parent-immutability",
+      "PROVIDER-SUBBOTS.parent-discovery-fail-closed",
+      "PROVIDER-SUBBOTS.callback-actor-binding",
+      "PROVIDER-SUBBOTS.signed-principal-live-state",
+      "PROVIDER-SUBBOTS.disable-enable-state",
+      "PROVIDER-SUBBOTS.deletion-tombstone-retirement"
+    ],
+    "selected_obligations": [
+      "provider-registration-discovery",
+      "admin-complete-ref-validation",
+      "admin-sibling-registration",
+      "scoped-complete-ref-validation",
+      "scoped-sibling-distinct-identity",
+      "duplicate-reference-conflicts",
+      "self-lookup-actor-binding",
+      "legacy-api-actor-binding",
+      "metadata-update-parent-immutability",
+      "onboard-parent-immutability",
+      "parent-discovery-fail-closed",
+      "callback-actor-binding",
+      "signed-principal-live-state",
+      "disable-enable-state",
+      "deletion-tombstone-retirement"
+    ],
+    "public_paths": [],
+    "environments": [
+      "owned-local-full-story"
+    ],
+    "local_executor_status": "LOCAL_EXECUTOR_ONLY",
+    "remote_validation": "NOT_RUN",
+    "grants_release_credit": false,
+    "blocker": "The preprod public-v1 route bindings expose only group.* and session.* operations; they declare no Provider registration/admin surface, parent-discovery or Provider callback binding, and no provider_admin_token credential channel (PREPROD_PROVIDER_CONTROL_PLANE_ABSENT). Remote validation is therefore NOT_RUN and this independent backlog slice grants no release credit."
+  },
+  "remote_validation": "NOT_RUN",
+  "grants_release_credit": false,
+  "release_parent_denominator": false,
+  "independent_slice": true,
+  "evidence_granularity": "OWNED_CHILD_RECEIPT"
+}
