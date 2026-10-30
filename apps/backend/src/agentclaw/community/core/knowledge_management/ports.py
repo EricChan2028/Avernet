@@ -19,6 +19,8 @@ class KnowledgeCatalog(Protocol):
 
         Cursor zero starts a page sequence; consumers forward it unchanged,
         never add a page size, and never prefetch the legacy complete list.
+        space_id must be a positive int; invalid ids fail locally as
+        INVALID_KNOWLEDGE_INPUT without provider I/O.
         """
         ...
 
