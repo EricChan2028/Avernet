@@ -22,6 +22,7 @@ import uuid
 from collections.abc import Mapping
 from typing import Any
 
+from agentclaw.community.core.bot_management.addressing import stable_resource_owner_id
 from agentclaw.community.core.acli_clis.errors import (
     AcliBotNotRunningError,
     AcliCliNameMismatchError,
@@ -504,7 +505,7 @@ class AcliCliService(AcliCliServiceProtocol):
         if not lock_epoch_matches(
             self._locks,
             bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
+            owner_id=stable_resource_owner_id(bot),
             actor_id=actor_id,
             lock_epoch=lock_epoch,
         ):

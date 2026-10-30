@@ -233,3 +233,12 @@ TaskService.execute
 
 语义事件记录持久化在 Graph 的 `_semantic_outbox` 中，并支持 pending/acked 状态。
 `handle_dispatch_requested` 通过 `TaskDispatcher._prepare_into` 与 `TaskRunner._drain` 完成派发准备和锁外投递；不再引入 `Centralized*Handler`，也不再使用多继承拼装中心化执行链路。
+
+## Owner handoff and BCS identity
+
+`BotServiceBcsBotIdentityResolver` resolves bare product IDs through authoritative
+Bot rows and constructs `bot_id:entity_id`, never `bot_id:current_owner_id`.
+The narrow BotService contract requires the existing `entity_id` response field;
+missing entity and ambiguous bare IDs (including default) fail closed. Already
+qualified IDs remain opaque, validated and unchanged for existing BCS/provider
+consumers. This resolver does not rewrite remote identities or grant permissions.
