@@ -22,7 +22,6 @@ import uuid
 from collections.abc import Mapping
 from typing import Any
 
-from agentclaw.community.core.bot_management.addressing import stable_resource_owner_id
 from agentclaw.community.core.acli_clis.errors import (
     AcliBotNotRunningError,
     AcliCliNameMismatchError,
@@ -75,6 +74,7 @@ from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
     resolve_operable_permission_level,
 )
+from agentclaw.community.core.bot_management.addressing import stable_resource_owner_id
 from agentclaw.community.core.caller_identity.contracts import (
     CallerIdentityPermissionError,
     CallerLockEpochError,

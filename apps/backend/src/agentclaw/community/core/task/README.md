@@ -237,8 +237,13 @@ TaskService.execute
 ## Owner handoff and BCS identity
 
 `BotServiceBcsBotIdentityResolver` resolves bare product IDs through authoritative
-Bot rows and constructs `bot_id:entity_id`, never `bot_id:current_owner_id`.
-The narrow BotService contract requires the existing `entity_id` response field;
-missing entity and ambiguous bare IDs (including default) fail closed. Already
-qualified IDs remain opaque, validated and unchanged for existing BCS/provider
-consumers. This resolver does not rewrite remote identities or grant permissions.
+Bot rows, then uses the shared `bcn_identity.bcn_bot_reference` rule from BCN
+registration: preserve a converted service's stored Provider reference, otherwise
+use entity for service Bots and the existing Owner-qualified reference for
+personal/default/desktop Bots. The narrow BotService contract includes `bot_type`,
+`entity_id`, current `owner_id` and `ext`. Missing required coordinates, corrupt
+stored references and ambiguous bare IDs (including default) fail closed. Already
+qualified IDs remain opaque, validated and unchanged. This is the established
+TeamClaw composite addressing contract, not an assumption that arbitrary external
+Providers' `bot_uuid` and `provider_bot_ref` are interchangeable. This resolver
+does not rewrite remote identities or grant permissions.

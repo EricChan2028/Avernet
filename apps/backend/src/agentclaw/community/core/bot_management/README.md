@@ -17,6 +17,8 @@ Bot lifecycle, creation policy, repository, engine resolution, render-screen mod
 ```yaml
 purpose: "Bot lifecycle, creation policy, repository, engine resolution, render-screen models, and skill-set switching."
 provides:
+  - bcn_bot_reference
+  - provider_address_kwargs
   - "OwnerHandoffServiceProtocol and durable OwnerHandoffService"
   - "BotService"
   - "BotCreateContext"
@@ -315,3 +317,13 @@ second identity; the original ext is copied and other fields are preserved.
 This introduces no table/column or client input. Existing anomalous service
 bindings outside the validated pre-handoff baseline need explicit reconciliation;
 we do not infer a remote UUID from a Provider reference or overwrite its history.
+
+`bcn_identity.bcn_bot_reference` is also used by the Task/BCS bare-ID resolver and
+metadata synchronization. Registration and task routing therefore agree for
+staff-prefixed personal entities and converted services retaining their old
+binding. Already qualified BCS IDs are not reconstructed. This shared TeamClaw
+reference rule does not overwrite an external registration's returned UUID.
+Bot deletion computes and validates Provider coordinates immediately after Bot
+validation, before withdrawing grants, releasing devices, destroying credentials
+or soft deletion. The post-delete notification consumes only that captured value;
+a corrupt stored reference cannot strand an already-deleted Bot behind an error.

@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Callable, Optional, Dict, Any, List, Literal, Tuple, TYPE_CHECKING
 
 from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
-from agentclaw.community.core.bot_management.bcn_identity import provider_address_kwargs
+from agentclaw.community.core.bot_management.bcn_identity import bcn_bot_reference, provider_address_kwargs
 from agentclaw.community.core.bot_management.capabilities import (
     is_template_factory_config,
 )
@@ -3699,9 +3699,7 @@ class BotService(BotServiceProtocol):
             bot = BotAddressResolver(self._repository).resolve(
                 bot_id=bot_id, legacy_owner_id=owner_id
             ).bot
-            bcn_bot_id = provider_address_kwargs(bot).get(
-                "provider_bot_ref", f"{bot_id}:{bot['owner_id']}"
-            )
+            bcn_bot_id = bcn_bot_reference(bot)
 
             # 使用传入的新值或现有的值
             final_name = bot_name if bot_name is not None else bot.get("bot_name", bot_id)
@@ -4041,6 +4039,8 @@ class BotService(BotServiceProtocol):
 
         try:
             bot = self.validate_delete_bot(bot_id, user_id)
+            # Resolve before grant withdrawal, device release or soft deletion.
+            provider_address = provider_address_kwargs(bot)
             from agentclaw.community.core.bot_management.addressing import stable_resource_owner_id
             resource_owner_id = (
                 stable_resource_owner_id(bot)
@@ -4145,7 +4145,7 @@ class BotService(BotServiceProtocol):
             if bot_id != "default":
                 self._sweep_startup_script_that_raced_the_deletion(bot_id, bot)
 
-            self._sync_provider_bot_delete_to_bcn(bot_id, user_id, **provider_address_kwargs(bot))
+            self._sync_provider_bot_delete_to_bcn(bot_id, user_id, **provider_address)
 
             # 清理关联的脏数据（仅限非 default bot）
             # default bot 是用户的默认 Bot，删除它通常是"重启"逻辑，应保留技能和配置

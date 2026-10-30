@@ -1,22 +1,23 @@
-"""BCS Bot 身份解析：产品 Bot ID → BCS ``bot_id:entity_id`` UUID。"""
+"""BCS Bot 身份解析：产品 Bot ID → BCS TeamClaw 稳定复合身份。"""
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.bcn_identity import bcn_bot_reference
 from agentclaw.community.core.task.domain.errors import BotIdentityResolutionError
 from agentclaw.community.core.task.task_runner.client.ports import BcsBotIdentityResolver
 from agentclaw.community.core.task.task_runner.client.protocols import BotServiceProtocol
 
 
 class BotServiceBcsBotIdentityResolver(BcsBotIdentityResolver):
-    """基于 BotService 权威记录解析 BCS 身份；裸产品 ID 从权威 Bot 记录取得稳定 entity。"""
+    """基于 BotService 权威记录解析 BCS 身份；裸产品 ID 复用 BCN 注册的身份规则。"""
 
     def __init__(self, bot_service: BotServiceProtocol) -> None:
         self._bot_service = bot_service
 
     def resolve_many(self, product_bot_ids: list[str]) -> dict[str, str]:
-        """产品 Bot ID → BCS ``bot_id:entity_id`` 身份。
+        """产品 Bot ID → BCS TeamClaw 稳定身份。
 
         已带 ``:``(如上游已 resolve 成 BCS ``bot_id:entity_id``)的视为身份完整,原样透传、不再查 BotService,
-        也只把真正需要查询的无 ``:`` id 经 BotService 取 entity 后拼接。"""
+        也只把真正需要查询的无 ``:`` id 经 BotService 定位后按 BCN 注册规则解析。"""
         ids = list(dict.fromkeys(str(bot_id).strip() for bot_id in product_bot_ids if str(bot_id).strip()))
         if not ids:
             raise BotIdentityResolutionError("BCS identity resolution requires at least one bot_id")
@@ -80,8 +81,10 @@ class BotServiceBcsBotIdentityResolver(BcsBotIdentityResolver):
 
         for bot_id in need_lookup:
             matches = by_id.get(bot_id) or []
-            entity_id = str(matches[0].get("entity_id") or "").strip()
-            if not entity_id:
-                raise BotIdentityResolutionError(f"bot entity_id missing: bot_id={bot_id}")
-            resolved[bot_id] = f"{bot_id}:{entity_id}"
+            try:
+                resolved[bot_id] = bcn_bot_reference(matches[0])
+            except ValueError as exc:
+                raise BotIdentityResolutionError(
+                    f"invalid BCN identity for bot_id={bot_id}: {exc}"
+                ) from exc
         return resolved
