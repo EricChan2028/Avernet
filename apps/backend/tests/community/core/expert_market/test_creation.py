@@ -44,6 +44,7 @@ def test_identity_template_binds_latest_valid_full_commit_and_source(tmp_path):
         "mode": "strict",
         "auth": "catalog-credential",
     }
+    assert "cli_tools" not in doc["manifest"]
     assert doc["manifest"]["identity"][0]["subpath"] == "agents/writer/AGENTS.md"
     assert compiled.origin.expert_name == "写作专家"
     assert compiled.origin.source_commit == "a" * 40
@@ -178,3 +179,20 @@ def test_claude_multifile_expansion_obeys_existing_creation_document_limit(
             validate=validate,
             materialised=frozenset({Category.IDENTITY}),
         )
+
+
+@pytest.mark.parametrize("declaration", [[], [{"name": "review-cli"}]])
+def test_compile_refuses_cli_even_if_catalogue_input_bypasses_scanner(catalog, tmp_path, declaration):
+    scope = ExpertScope("a", "dev", "aiworkbench")
+    write_expert(tmp_path)
+    ExpertScanner(catalog).scan(tmp_path, source_commit="a" * 40, scope=scope)
+    value = catalog.get(scope, "writer")
+    value["manifest_template"]["manifest"]["cli_tools"] = declaration
+    catalog.reconcile(scope, "a" * 40, {"writer": value}, {}, {"writer"})
+    service = ExpertCreationService(
+        ExpertCatalogService(catalog, ExpertCatalogConfig()),
+        ExpertCreationConfig("https://example.com/experts.git"),
+    )
+    with pytest.raises(ValueError, match="cli_tools.*not supported"):
+        service.compile(tenant="a", expert_id="writer", engine="openclaw")
+    assert catalog.get(scope, "writer")["manifest_template"]["manifest"]["cli_tools"] == declaration

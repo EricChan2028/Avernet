@@ -21,16 +21,13 @@ beforeEach(() => {
   };
 });
 
-test('shows CLI names and resource destinations as declarations with actual delivery semantics', () => {
+test('shows resource destinations as declarations with actual delivery semantics', () => {
   mockExpert = {
     ...mockExpert,
-    cli_tools: [{ name: 'review-cli' }],
     resources: [{ path: 'reference/guide.txt' }, { path: 'templates/' }],
   };
   render(<ExpertDetails expertId="reviewer" onBack={jest.fn()} />);
-  expect(screen.getByRole('heading', { name: '模板声明的 CLI' })).toBeVisible();
-  expect(screen.getByText('review-cli')).toBeVisible();
-  expect(screen.getByText(/不自动加入 PATH/)).toBeVisible();
+  expect(screen.queryByRole('heading', { name: '模板声明的 CLI' })).not.toBeInTheDocument();
   expect(screen.getByRole('heading', { name: '模板声明的资源' })).toBeVisible();
   expect(screen.getByText('reference/guide.txt')).toBeVisible();
   expect(screen.getByText('templates/')).toBeVisible();
@@ -45,11 +42,4 @@ test('an explicit empty resource declaration shows clearing while an omission ma
   mockExpert = { ...mockExpert, resources: [] };
   rerender(<ExpertDetails expertId="reviewer" onBack={jest.fn()} />);
   expect(screen.getByText('模板声明清理资源，不写入新文件。')).toBeVisible();
-});
-
-test('an explicit empty CLI declaration shows removal of uploaded tools', () => {
-  mockExpert = { ...mockExpert, cli_tools: [] };
-  render(<ExpertDetails expertId="reviewer" onBack={jest.fn()} />);
-  expect(screen.getByRole('heading', { name: '模板声明的 CLI' })).toBeVisible();
-  expect(screen.getByText('模板声明移除所有 Bot 上传的 CLI。')).toBeVisible();
 });

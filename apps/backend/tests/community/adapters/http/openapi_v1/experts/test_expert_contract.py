@@ -1,7 +1,6 @@
 """Public expert discovery uses real persisted scope-filtered content."""
 
 import asyncio
-import struct
 import pytest
 
 from fastapi import FastAPI
@@ -27,31 +26,18 @@ from tests.community.core.expert_market.test_catalog import write_expert
 
 
 @pytest.mark.parametrize("resource_mode", ["omitted", "empty", "files"])
-@pytest.mark.parametrize("cli_mode", ["omitted", "empty", "files"])
-def test_real_catalog_http_dto_scope_filters_and_limits(tmp_path, resource_mode, cli_mode):
+def test_real_catalog_http_dto_scope_filters_and_limits(tmp_path, resource_mode):
     reset_for_tests()
     db = SqliteDB()
     asyncio.run(db.bootstrap())
     catalog = ExpertCatalogRepository(db)
     folder = write_expert(tmp_path)
-    # A header fixture exercises discovery validation, not executable runtime.
-    tool = bytearray(64)
-    tool[:6] = b"\x7fELF\x02\x01"
-    struct.pack_into("<HH", tool, 16, 2, 0x3E)
-    (folder / "review-cli").write_bytes(tool)
     (folder / "guide.txt").write_text("private resource body")
     with (folder / "manifest.yaml").open("a") as manifest:
         manifest.write(
             "  mcp:\n    - server_code: project-tools\n"
             "      config:\n        headers:\n          X-Project: private-project-value\n"
         )
-        if cli_mode == "empty":
-            manifest.write("  cli_tools: []\n")
-        elif cli_mode == "files":
-            manifest.write(
-                "  cli_tools:\n    - name: review-cli\n      from: aiworkbench\n"
-                "      subpath: agents/writer/review-cli\n"
-            )
         if resource_mode == "empty":
             manifest.write("  resources: []\n")
         elif resource_mode == "files":
@@ -82,8 +68,7 @@ def test_real_catalog_http_dto_scope_filters_and_limits(tmp_path, resource_mode,
         assert detail.json()["data"]["mcp"] == [{"server_code": "project-tools"}]
         assert "private-project-value" not in detail.text
         assert "config" not in detail.json()["data"]["mcp"][0]
-        expected_cli = {"omitted": None, "empty": [], "files": [{"name": "review-cli"}]}
-        assert detail.json()["data"]["cli_tools"] == expected_cli[cli_mode]
+        assert "cli_tools" not in detail.json()["data"]
         expected_resources = {
             "omitted": None,
             "empty": [],
@@ -121,5 +106,7 @@ def test_published_expert_detail_matches_runtime_dto():
     app.include_router(router)
     generated = app.openapi()["components"]["schemas"]
     schemas = published["components"]["schemas"]
-    for name in ("ExpertDetail", "ExpertMcp", "ExpertCliTool", "ExpertResource"):
+    for name in ("ExpertDetail", "ExpertMcp", "ExpertResource"):
         assert schemas[name] == generated[name]
+
+    assert "ExpertCliTool" not in schemas

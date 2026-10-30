@@ -14,7 +14,6 @@ export interface ExpertDetail extends ExpertSummary {
   /** Older catalogue responses omit MCP declarations during rollout. */
   mcp?: Array<{ server_code: string }>;
   /** Template declarations, not installed tools. Older responses may omit them. */
-  cli_tools?: Array<{ name: string }> | null;
   /** Null/omitted = no operation; [] = clear non-protected workspace items. */
   resources?: Array<{ path: string }> | null;
 }

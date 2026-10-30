@@ -421,16 +421,3 @@ def test_mcp_methods_return_false_on_failure():
     m["http_client"].post.side_effect = httpx.ConnectError("no route")
 
     assert service.sync_remove_mcp("s1") is False
-
-
-@pytest.mark.parametrize("selected", [None, frozenset(), frozenset({"IDENTITY.md"})])
-def test_apply_identity_selection_reaches_compose_without_rereading_input(selected):
-    service, dependencies = _make_service()
-    service.deliver_manifest_apply(applied_identity_files=selected)
-    request = dependencies["composer"].compose.call_args.args[0]
-    assert request.occasion is ComposeOccasion.MANIFEST_APPLY
-    assert request.applied_identity_files == selected
-    service.sync_symlinks([])
-    request = dependencies["composer"].compose.call_args.args[0]
-    assert request.occasion is ComposeOccasion.RUNTIME
-    assert request.applied_identity_files is None

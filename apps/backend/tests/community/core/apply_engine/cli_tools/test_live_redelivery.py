@@ -11,14 +11,14 @@ from .test_service import _CTX, _decl, _service
 
 
 @pytest.mark.asyncio
-async def test_management_install_and_remove_redeliver_without_selecting_identity():
-    selections = []
+async def test_management_install_and_remove_redeliver_with_shared_delivery():
+    deliveries = []
     resolved = []
     device = object()
 
     class Sync:
-        def deliver_manifest_apply(self, *, applied_identity_files):
-            selections.append(applied_identity_files)
+        def deliver_manifest_apply(self):
+            deliveries.append(True)
             return {"success": True}
 
     def resolve(bot_id, owner_id):
@@ -41,4 +41,4 @@ async def test_management_install_and_remove_redeliver_without_selecting_identit
     await service.remove(ctx, "mycli")
     assert repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli") is None
     assert resolved == [("bot7", "u1"), ("bot7", "u1")]
-    assert selections == [None, None]
+    assert deliveries == [True, True]

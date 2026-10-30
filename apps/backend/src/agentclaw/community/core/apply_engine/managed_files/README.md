@@ -24,10 +24,7 @@ compose reference, so the engine can distinguish clearing a declared profile
 from preserving an omitted one. Ordinary empty identity writes still remove
 objects; `MEMORY.md` is never admitted by the identity materialiser.
 
-A live Apply forwards only the protected profile selected by that execution's
-successful identity entry facts (created/updated/unchanged). Omitted, failed or
-unselected identity entries never replay a historical managed `IDENTITY.md`
-over a profile edited through the normal device API. The selection travels
-through the closing delivery and `ComposeRequest`; it is not re-read from a
-possibly changed Manifest. First provisioning still carries the prepared files,
-and runtime composes retain engine ownership.
+A live Apply composes a complete snapshot from the current platform entities,
+including identity files retained by the materialiser. The snapshot does not
+depend on which files the latest Apply selected. First provisioning carries
+the prepared files, and runtime composes retain engine ownership.

@@ -32195,21 +32195,6 @@
             "title": "Category",
             "type": "string"
           },
-          "cli_tools": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/ExpertCliTool"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Declared uploaded CLI names; not installation or execution status. Null means omitted/no operation; [] removes all Bot-uploaded CLI tools. Platform default CLI supply is not managed by this category.",
-            "title": "Cli Tools"
-          },
           "creation_count": {
             "description": "Historical number of independently created Bots, including deleted Bots.",
             "title": "Creation Count",
@@ -32295,21 +32280,6 @@
           "skills"
         ],
         "title": "ExpertDetail",
-        "type": "object"
-      },
-      "ExpertCliTool": {
-        "description": "A CLI declaration without source locations or executable bytes.",
-        "properties": {
-          "name": {
-            "description": "Declared CLI runtime name.",
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "ExpertCliTool",
         "type": "object"
       },
       "ExpertResource": {

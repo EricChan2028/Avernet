@@ -119,10 +119,6 @@ class ApplyContext:
     #: per fetch and rides the materialiser's call instead.
     apply_id: Optional[str] = None
     capability_state: CapabilityApplyState = field(default_factory=CapabilityApplyState)
-    #: Delivery selection from this Apply's successful identity entry facts.
-    #: None outside the closing step; an empty set means this Apply selected no
-    #: identity files. It never comes from a second read of stored input.
-    applied_identity_files: frozenset[str] | None = None
 
 
 __all__ = ["ApplyContext", "CapabilityApplyState"]

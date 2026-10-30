@@ -49,9 +49,6 @@ class CliToolContext:
     entity_type: str = "staff"
     #: The three an apply has and a single API-driven install does not.
     apply_id: Optional[str] = None
-    #: Single-tool management does not select any identity file for delivery.
-    #: None distinguishes this operation from an Apply report selection.
-    applied_identity_files: frozenset[str] | None = None
 
     @property
     def scope(self) -> CliToolScope:

@@ -155,9 +155,7 @@ class TeclawDeviceSyncService(DeviceSync):
             desired_skills=desired_skills,
         )
 
-    def deliver_manifest_apply(
-        self, *, applied_identity_files: frozenset[str] | None = None
-    ) -> dict[str, Any]:
+    def deliver_manifest_apply(self) -> dict[str, Any]:
         """The closing redeliver of a manifest apply (W8).
 
         The same whole-artifact delivery as every other method here, composed
@@ -165,13 +163,10 @@ class TeclawDeviceSyncService(DeviceSync):
         every category into its own state, so the artifact's ``ownership``
         map says the platform owns every category and the file categories
         are read from the platform's store. A runtime edit composes for the
-        default occasion and leaves them the engine's. The protected profile
-        is included only when this execution successfully selected it; omitted
-        or failed entries must not replay an older platform copy over UI edits.
+        default occasion and leaves them the engine's.
         """
         return self._compose_and_deliver(
-            caller="deliver_manifest_apply", occasion=ComposeOccasion.MANIFEST_APPLY,
-            applied_identity_files=applied_identity_files,
+            caller="deliver_manifest_apply", occasion=ComposeOccasion.MANIFEST_APPLY
         )
 
     def sync_bot_config(
@@ -222,7 +217,6 @@ class TeclawDeviceSyncService(DeviceSync):
         effective_mcps: Optional[list[dict[str, Any]]] = None,
         desired_skills: Optional[list[dict[str, Any]]] = None,
         occasion: ComposeOccasion = ComposeOccasion.RUNTIME,
-        applied_identity_files: frozenset[str] | None = None,
     ) -> dict[str, Any]:
         """Compose this bot's whole artifact and POST it to its container.
 
@@ -249,7 +243,6 @@ class TeclawDeviceSyncService(DeviceSync):
                     engine_type=self._engine_type,
                     entity_type=self._entity_type,
                     occasion=occasion,
-                    applied_identity_files=applied_identity_files,
                     effective_mcps=(
                         None if effective_mcps is None else tuple(effective_mcps)
                     ),

@@ -97,17 +97,7 @@ class ManagedFilesComposeReader(PlatformOwnershipReader, ManagedFilesReader):
     # ── ManagedFilesReader ───────────────────────────────────────────────
 
     def identity_files(self, req: ComposeRequest) -> list[CollectedFile]:
-        # A stored profile may predate edits made through the normal device/UI
-        # path. An Apply that did not select it must preserve the live profile,
-        # not replay that older copy. PROVISION still delivers a new Bot's
-        # initial files; runtime composes remain engine-owned.
-        return [
-            self._as_file(f)
-            for f in self._files(req, CATEGORY_IDENTITY)
-            if f.name != "IDENTITY.md"
-            or req.occasion is not ComposeOccasion.MANIFEST_APPLY
-            or f.name in (req.applied_identity_files or ())
-        ]
+        return [self._as_file(f) for f in self._files(req, CATEGORY_IDENTITY)]
 
     def resources(self, req: ComposeRequest) -> list[CollectedFile]:
         return [self._as_file(f) for f in self._files(req, CATEGORY_RESOURCES)]
