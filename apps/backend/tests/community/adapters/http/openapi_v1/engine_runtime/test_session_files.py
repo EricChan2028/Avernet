@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import importlib
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -92,6 +93,7 @@ class _Resources:
     @staticmethod
     def _record(resource_id: str = "sr_1", status=SessionResourceStatus.UPLOAD_URL_ISSUED):
         return SimpleNamespace(
+            gmt_create=datetime(2026, 10, 30, tzinfo=UTC),
             resource_id=resource_id,
             display_name="report.txt",
             status=status,
@@ -251,6 +253,8 @@ def test_friend_list_checks_friendship_and_session_ownership_before_resources(
 ):
     data = ok(friend_client.get(_base(), params={"owner_id": OWNER, "f_user_id": "friend-1"}))
     assert data["files"][0]["resource_id"] == "sr_1"
+    assert data["files"][0]["creator_type"] is None
+    assert data["files"][0]["created_at"] is None
     assert friendships.calls[0]["human_id"] == "friend-1"
     owned = next(call for call in expert.calls if call[0] == "get_owned_chat_session")
     assert owned[1][:4] == ("friend-1", BOT, OWNER, SESSION_ID)
@@ -464,6 +468,8 @@ def test_upload_resolves_binding_then_calls_legacy_service(
     assert response.status_code == 201, response.json()
     data = response.json()["data"]
     assert data["files"][0]["resource_id"] == "sr_1"
+    assert data["files"][0]["creator_type"] == "user"
+    assert data["files"][0]["created_at"] == "2026-10-30T00:00:00Z"
     assert "binding_id" not in str(data)
     assert "device_uuid" not in str(data)
     assert "owner_id" not in str(data)
@@ -549,6 +555,8 @@ def test_generated_file_roundtrip_reaches_real_engine_without_upload_record(
     public = ok(client.get(_base()))["files"]
     assert public[0]["resource_id"] == resource_id
     assert public[0]["status"] == "ready"
+    assert public[0]["creator_type"] == "bot"
+    assert public[0]["created_at"] == view["created_at"]
     content_url = _base() + f"/{resource_id}/content"
     preview = client.get(content_url)
     assert preview.status_code == 200 and preview.content == source.read_bytes()
@@ -674,6 +682,8 @@ def test_complete_and_status_return_public_resources(client, resources, observer
 
     assert complete["resource_id"] == "sr_1"
     assert status["resource_id"] == "sr_1"
+    assert complete["creator_type"] == status["creator_type"] == "user"
+    assert complete["created_at"] == status["created_at"] == "2026-10-30T00:00:00Z"
     assert [name for name, _ in resources.calls] == ["complete", "status"]
     assert [record.status for record in observer.records] == [
         SessionResourceStatus.DEVICE_SYNCING,

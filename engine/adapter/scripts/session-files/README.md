@@ -90,12 +90,12 @@ Stdout contains one JSON object for publish success/failure. `--help` is ordinar
 human-readable help with exit 0. Argument parser errors are sanitized JSON.
 
 ```json
-{"ok":true,"code":"published","file":{"resource_id":"sr_1","display_name":"result.pdf","size_bytes":12,"availability":"ready","uploaded_at":null}}
+{"ok":true,"code":"published","file":{"resource_id":"sr_1","display_name":"result.pdf","size_bytes":12,"availability":"ready","uploaded_at":"2026-10-30T00:00:00Z","creator_type":"bot","created_at":"2026-10-30T00:00:00Z"}}
 ```
 
 | Exit | code | Meaning |
 | --- | --- | --- |
-| 0 | published | Valid ready SessionFileView; only its five contract fields returned |
+| 0 | published | Valid ready SessionFileView; only declared metadata fields returned |
 | 2 | invalid_arguments | Missing/invalid arguments, path or session key |
 | 2 | invalid_engine_url | URL is not an allowed loopback HTTP origin |
 | 3 | engine_timeout | Request timed out; outcome may be unknown |

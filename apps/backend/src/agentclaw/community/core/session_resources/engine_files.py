@@ -142,6 +142,8 @@ class EngineSessionFilesService:
             or item.get("availability") not in {"ready", "missing", "changed"}
             or type(item.get("size_bytes")) is not int
             or item["size_bytes"] < 0
+            or item.get("creator_type") not in (None, "bot", "user")
+            or (item.get("created_at") is not None and not isinstance(item["created_at"], str))
             for item in files
         ):
             raise EngineUpstreamError("invalid session file list")
@@ -152,6 +154,8 @@ class EngineSessionFilesService:
                 "display_name": item["display_name"],
                 "status": item["availability"],
                 "size_bytes": item["size_bytes"],
+                "creator_type": item.get("creator_type"),
+                "created_at": item.get("created_at"),
             }
             for item in files
         ]

@@ -45,7 +45,8 @@ async def test_list_uses_selected_engine_and_projects_safe_view(setup, caplog):
     with caplog.at_level("INFO"):
         files = await service.list_files(target, "session:one")
     assert files == [{"resource_id": "sr_local", "display_name": "report.txt",
-                      "status": "ready", "size_bytes": 7}]
+                      "status": "ready", "size_bytes": 7,
+                      "creator_type": None, "created_at": None}]
     bindings.resolve.assert_called_once_with(target)
     resolver.resolve_for_binding.assert_called_once_with(73, "actor", bot_id="bot")
     assert transport.invoke.await_args.args[1:] == ("GET", "/api/session-files")
@@ -65,6 +66,33 @@ async def test_invalid_list_is_upstream_failure(setup, payload):
     service, target, _, _, transport = setup
     transport.invoke.return_value = payload
     with pytest.raises(EngineUpstreamError):
+        await service.list_files(target, "s")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("creator_type", ["bot", "user", None])
+async def test_list_projects_creation_metadata_without_exposing_extra_fields(setup, creator_type):
+    service, target, _, _, transport = setup
+    transport.invoke.return_value = {"files": [{
+        "resource_id": "r", "display_name": "report", "availability": "ready",
+        "size_bytes": 1, "creator_type": creator_type,
+        "created_at": "2026-10-30T00:00:00Z", "secret": "not-public",
+    }]}
+    result = (await service.list_files(target, "s"))[0]
+    assert result["creator_type"] == creator_type
+    assert result["created_at"] == "2026-10-30T00:00:00Z"
+    assert "secret" not in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("metadata", [{"creator_type": "admin"}, {"created_at": {"secret": "not-public"}}])
+async def test_invalid_creation_metadata_is_upstream_error(setup, metadata):
+    service, target, _, _, transport = setup
+    transport.invoke.return_value = {"files": [{
+        "resource_id": "r", "display_name": "report", "availability": "ready",
+        "size_bytes": 1, **metadata,
+    }]}
+    with pytest.raises(EngineUpstreamError, match="invalid session file list"):
         await service.list_files(target, "s")
 
 

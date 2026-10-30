@@ -184,6 +184,7 @@ def register_workspace_file(
                     raise SessionFileError("registration_failed")
                 fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
                 existing = store.get(resource_id)
+                registered_at = existing.uploaded_at if existing else datetime.now(UTC)
                 entry = ManifestEntry(
                     resource_id=resource_id, transfer_id="", task_id="", task_version=1,
                     scope_key_hash=scope_hash, session_key_hash=session_hash,
@@ -192,7 +193,9 @@ def register_workspace_file(
                     size_bytes=observed.st_size, content_hash=content_hash, status="ready",
                     observed_size=observed.st_size, observed_mtime_ns=observed.st_mtime_ns,
                     observed_inode=observed.st_ino,
-                    uploaded_at=existing.uploaded_at if existing else datetime.now(UTC),
+                    uploaded_at=registered_at,
+                    creator_type=existing.creator_type if existing else "bot",
+                    created_at=(existing.created_at or existing.uploaded_at) if existing else registered_at,
                     source_kind="workspace_live",
                 )
                 # Registration observations must not overwrite the version paired

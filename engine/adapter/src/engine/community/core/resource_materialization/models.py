@@ -114,6 +114,8 @@ class ManifestEntry(BaseModel):
     source_kind: Literal["baas_session_file", "temporary_url", "workspace_file", "workspace_live"] = "baas_session_file"
     source_attachment_id: str | None = None
     source_url_hash: str | None = None
+    creator_type: Literal["bot", "user"] | None = None
+    created_at: datetime | None = None
 
 
 @dataclass(frozen=True)

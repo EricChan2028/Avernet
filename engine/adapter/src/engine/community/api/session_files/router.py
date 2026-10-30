@@ -82,6 +82,7 @@ async def register_session_file(
         session_key, body.workspace_relative_path, view.resource_id, view.size_bytes, elapsed_ms,
         extra={**fields, "status": 200, "resource_id": view.resource_id,
                "size_bytes": view.size_bytes, "availability": view.availability,
+               "creator_type": view.creator_type, "created_at": view.created_at,
                "elapsed_ms": elapsed_ms},
     )
     return view.as_dict()

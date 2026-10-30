@@ -82,12 +82,16 @@ class SessionFileService:
             "engine.session_files.register.success system=engine sessionKey=%r workspace_relative_path=%r resource_id=%s status=ready size_bytes=%s elapsed_ms=%s",
             session_key, workspace_relative_path, entry.resource_id, entry.size_bytes, elapsed_ms,
             extra={**fields, "status": "ready", "resource_id": entry.resource_id,
+                   "creator_type": entry.creator_type,
+                   "created_at": self._format_uploaded_at(entry.created_at or entry.uploaded_at),
                    "size_bytes": entry.size_bytes, "elapsed_ms": elapsed_ms},
         )
         return SessionFileView(
             resource_id=entry.resource_id, display_name=entry.filename,
             size_bytes=entry.size_bytes, availability="ready",
             uploaded_at=self._format_uploaded_at(entry.uploaded_at),
+            creator_type=entry.creator_type,
+            created_at=self._format_uploaded_at(entry.created_at or entry.uploaded_at),
         )
 
     def list_files(self, *, session_key: str) -> list[SessionFileView]:
@@ -112,6 +116,8 @@ class SessionFileService:
                 size_bytes=size_bytes,
                 availability=availability,
                 uploaded_at=self._format_uploaded_at(entry.uploaded_at),
+                creator_type=entry.creator_type,
+                created_at=self._format_uploaded_at(entry.created_at or entry.uploaded_at),
             ))
         log.info(
             "engine.session_files.list session_key_hash=%s file_count=%s upload_time_count=%s",

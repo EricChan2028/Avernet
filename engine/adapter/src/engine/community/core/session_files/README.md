@@ -2,10 +2,16 @@
 
 `POST /api/session-files?sessionKey=<exact-session-key>` accepts exactly
 `{"workspace_relative_path": "reports/result.txt"}` and returns the existing
-five-field SessionFileView: `resource_id`, `display_name`, `size_bytes`,
-`availability`, `uploaded_at`. It uses the existing trusted Engine/proxypass
+SessionFileView: `resource_id`, `display_name`, `size_bytes`,
+`availability`, `uploaded_at`, `creator_type`, `created_at`. It uses the existing trusted Engine/proxypass
 boundary, like list/content/delete; it does not introduce another authentication
 transport. Never expose that trusted listener as a public unauthenticated API.
+
+Creation metadata is server-owned: Bot registrations use `creator_type=bot`,
+user uploads/attachments use `user`. `created_at` is the first resource creation
+time in UTC, preserved through edits, repeated registration, retry and export.
+It does not mean filesystem birthtime. Historical metadata is nullable; never
+infer human origin from BaaS transfer provenance. Keep `uploaded_at` compatible.
 
 `SessionFileService.register_file` associates a completed ordinary workspace file
 with the exact session using `source_kind=workspace_live`. It persists metadata,

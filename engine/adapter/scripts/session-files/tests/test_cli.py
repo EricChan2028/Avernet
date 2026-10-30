@@ -147,11 +147,21 @@ class CliTests(unittest.TestCase):
     def test_invalid_responses(self):
         for body in [b"SECRET", b"[]", b"{}", b"null", b"x" * 65537,
                      json.dumps(dict(VIEW, size_bytes=True)).encode(),
-                     json.dumps(dict(VIEW, availability="missing")).encode()]:
+                     json.dumps(dict(VIEW, availability="missing")).encode(),
+                     json.dumps(dict(VIEW, creator_type="admin")).encode(),
+                     json.dumps(dict(VIEW, created_at={"SECRET": "value"})).encode()]:
             with self.subTest(body=body[:20]), self.server(body=body) as (_, url):
                 status, data, err = self.invoke("publish", "a", "--session-key", "s", "--engine-url", url)
                 self.assertEqual((status, data["code"]), (5, "invalid_response"))
                 self.assertNotIn("SECRET", json.dumps(data) + err)
+
+    def test_creation_metadata_is_allowlisted_and_old_engine_stays_compatible(self):
+        self.assertEqual(self.cli.view_from_response(json.dumps(VIEW).encode()), VIEW)
+        for creator in ["bot", "user", None]:
+            metadata = dict(creator_type=creator, created_at="2026-10-30T00:00:00Z")
+            result = self.cli.view_from_response(json.dumps(dict(VIEW, **metadata, secret="SECRET")).encode())
+            self.assertEqual(result, dict(VIEW, **metadata))
+            self.assertNotIn("SECRET", json.dumps(result))
 
     def test_transport_failures_are_sanitized(self):
         for exc, code in [(TimeoutError("SECRET"), "engine_timeout"),

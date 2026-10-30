@@ -5,6 +5,19 @@ registered by Chat are live references to their original workspace paths. User
 uploads and legacy snapshots remain controlled copies; all appear in the same
 Engine manifest with distinct provenance.
 
+File responses add nullable `creator_type` (`bot` or `user`) and `created_at`
+(UTC ISO 8601). The category identifies Bot-generated registrations versus
+user-uploaded/materialized attachments, not a claimed human or Bot ID. Engine
+sets it from the ingestion path; registration callers cannot override it.
+Creation time means first creation of the session resource, not filesystem
+birthtime or last modification. Uploads reuse the Backend record creation time;
+new local registrations use the Engine clock. Edits, repeated registration,
+materialization retries and BaaS export preserve it. Unknown historical origins
+stay null, since a BaaS transfer may itself have come from a Bot export. Legacy
+`uploaded_at` supplies a known historical time when available and is unchanged.
+Engine and OpenAPI lists expose the same creation metadata; the standalone CLI
+also returns it when supported by Engine, retaining compatibility with old views.
+
 ## Default registration in Chat
 
 When the current Chat generates or modifies a completed output file, the product
@@ -50,7 +63,7 @@ unavailable, with no fallback to old bytes. Detected mutation during an operatio
 is rejected rather than serving mixed content.
 
 The result is the existing Engine view: `resource_id`, `display_name`,
-`size_bytes`, `availability` and `uploaded_at`. It is immediately visible on
+`size_bytes`, `availability`, `uploaded_at`, `creator_type` and `created_at`. It is immediately visible on
 `GET /api/session-files?sessionKey=...`. Deletion of a live entry removes only
 that session's association, preserving the original and associations in other
 sessions. A file does not become visible in another session without its own

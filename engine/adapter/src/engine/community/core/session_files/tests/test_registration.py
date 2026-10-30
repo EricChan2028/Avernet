@@ -54,6 +54,9 @@ def test_registration_is_idempotent_by_session_and_path(tmp_path):
     source.write_text("one")
     service = _service(tmp_path)
     first = service.register_file(session_key="a", workspace_relative_path="report.txt")
+    assert first.creator_type == "bot"
+    assert first.created_at == first.uploaded_at
+    assert first.created_at.endswith("Z")
     assert (
         service.register_file(session_key="a", workspace_relative_path="report.txt")
         == first
@@ -65,6 +68,8 @@ def test_registration_is_idempotent_by_session_and_path(tmp_path):
         session_key="a", workspace_relative_path="report.txt"
     )
     assert second.resource_id == first.resource_id
+    assert second.created_at == first.created_at
+    assert second.creator_type == "bot"
     assert len(service.list_files(session_key="a")) == 1
 
 
@@ -85,6 +90,35 @@ def test_concurrent_registrations_preserve_duplicates_and_unrelated_entries(tmp_
     assert {
         entry.resource_id for entry in ManifestStore(tmp_path).list_entries()
     } == set(ids)
+
+
+def test_legacy_manifest_creation_source_remains_unknown(tmp_path):
+    import json
+
+    source = tmp_path / "report"
+    source.write_bytes(b"report")
+    service = _service(tmp_path)
+    view = service.register_file(session_key="a", workspace_relative_path="report")
+    store = ManifestStore(tmp_path)
+    payload = json.loads(store.path.read_text())
+    entry = payload["resources"][view.resource_id]
+    entry.pop("creator_type")
+    entry.pop("created_at")
+    # Historical BaaS entries may have originated from either humans or Bots.
+    entry["source_kind"] = "baas_session_file"
+    store.path.write_text(json.dumps(payload))
+    legacy = service.list_files(session_key="a")[0]
+    assert legacy.creator_type is None
+    assert legacy.created_at == view.uploaded_at
+    repeated = service.register_file(session_key="a", workspace_relative_path="report")
+    assert repeated.creator_type is None
+    assert repeated.created_at == view.uploaded_at
+    entry["uploaded_at"] = None
+    store.path.write_text(json.dumps(payload))
+    assert service.list_files(session_key="a")[0].created_at is None
+    repeated = service.register_file(session_key="a", workspace_relative_path="report")
+    assert repeated.creator_type is None
+    assert repeated.created_at is None
 
 
 @pytest.mark.parametrize(

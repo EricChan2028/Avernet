@@ -88,6 +88,8 @@ async def test_chat_attachment_reuses_materializer_without_backend_callback(
     entry = service.manifest_store.get(result.resource_id)
     assert entry is not None
     assert entry.source_kind == "temporary_url"
+    assert entry.creator_type == "user"
+    assert entry.created_at is not None and entry.created_at.tzinfo is not None
     assert entry.source_attachment_id == "att-1"
     assert (
         entry.source_url_hash
@@ -456,6 +458,33 @@ async def test_materialize_writes_atomic_file_manifest_and_callback(tmp_path: Pa
     assert entry.observed_mtime_ns is not None
     assert entry.observed_inode is not None
     assert entry.uploaded_at == datetime(2026, 8, 3, 10, 20, 30, tzinfo=UTC)
+    assert entry.creator_type == "user"
+    assert entry.created_at == entry.uploaded_at
+    replay = await service.materialize(_request(content, task_version=2, uploaded_at="2026-10-30T00:00:00Z"))
+    assert replay.ready is True
+    updated = service.manifest_store.get("sr_001")
+    assert updated.created_at == entry.created_at
+    assert updated.creator_type == "user"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy_time", [None, datetime(2026, 8, 3, tzinfo=UTC)])
+async def test_rematerialization_preserves_unknown_legacy_creation_metadata(tmp_path, legacy_time):
+    content = b"legacy"
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(content), callback_client=_CallbackClient(),
+        workspace_root_provider=lambda: tmp_path,
+    )
+    assert (await service.materialize(_request(content))).ready
+    store = service.manifest_store
+    entry = store.get("sr_001")
+    store.upsert(entry.model_copy(update={
+        "creator_type": None, "created_at": None, "uploaded_at": legacy_time,
+    }))
+    assert (await service.materialize(_request(content, task_version=2, uploaded_at=None))).ready
+    updated = store.get("sr_001")
+    assert updated.creator_type is None
+    assert updated.created_at == legacy_time
 
 
 @pytest.mark.asyncio

@@ -14,6 +14,7 @@ import tempfile
 import time
 import uuid
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, ClassVar
 from urllib.parse import quote
@@ -579,6 +580,8 @@ class ResourceMaterializationService:
                 observed_mtime_ns=observed.st_mtime_ns,
                 observed_inode=getattr(observed, "st_ino", None),
                 uploaded_at=request.uploaded_at,
+                creator_type=current.creator_type if current else "user",
+                created_at=(current.created_at or current.uploaded_at) if current else (request.uploaded_at or datetime.now(UTC)),
                 baas_tenant=request.tenant,
                 source_kind="temporary_url"
                 if chat_request is not None
@@ -599,6 +602,8 @@ class ResourceMaterializationService:
                 request.task_version,
                 self._path_hash(canonical),
                 actual_size,
+                extra={"creator_type": entry.creator_type,
+                       "created_at": entry.created_at.isoformat() if entry.created_at else None},
             )
             return self._success_from_entry(entry)
         finally:

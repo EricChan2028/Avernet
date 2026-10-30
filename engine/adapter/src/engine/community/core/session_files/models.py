@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 
 MAX_DIRECT_CONTENT_BYTES = 30 * 1024 * 1024
@@ -20,6 +21,8 @@ class SessionFileView:
     size_bytes: int
     availability: str
     uploaded_at: str | None
+    creator_type: Literal["bot", "user"] | None = None
+    created_at: str | None = None
 
     def as_dict(self) -> dict[str, str | int | None]:
         return {
@@ -28,6 +31,8 @@ class SessionFileView:
             "size_bytes": self.size_bytes,
             "availability": self.availability,
             "uploaded_at": self.uploaded_at,
+            "creator_type": self.creator_type,
+            "created_at": self.created_at,
         }
 
 

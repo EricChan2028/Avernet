@@ -40,8 +40,12 @@ def test_post_register_returns_view_and_uses_existing_session_scope(client, capl
         "size_bytes",
         "availability",
         "uploaded_at",
+        "creator_type",
+        "created_at",
     }
     assert view["availability"] == "ready"
+    assert view["creator_type"] == "bot"
+    assert view["created_at"] == view["uploaded_at"]
     assert http.get(
         "/api/session-files", params={"sessionKey": "session:exact"}
     ).json() == {"files": [view]}
@@ -74,6 +78,8 @@ def test_post_register_returns_view_and_uses_existing_session_scope(client, capl
     ]
     assert {record.status for record in records} == {"request", 200}
     assert all(record.sessionKey == "session:exact" for record in records)
+    assert records[-1].creator_type == "bot"
+    assert records[-1].created_at == view["created_at"]
 
 
 @pytest.mark.parametrize(
@@ -81,6 +87,8 @@ def test_post_register_returns_view_and_uses_existing_session_scope(client, capl
     [
         {},
         {"workspace_relative_path": 123},
+        {"workspace_relative_path": "report", "creator_type": "user"},
+        {"workspace_relative_path": "report", "created_at": "2000-01-01T00:00:00Z"},
         {"workspace_relative_path": "report", "token": "test-token"},
         {"workspace_relative_path": None},
     ],

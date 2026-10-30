@@ -77,8 +77,16 @@ def view_from_response(raw):
                 or (value["uploaded_at"] is not None and not isinstance(value["uploaded_at"], str))):
             raise ValueError
         # COSEC: only return contract metadata, never arbitrary extra fields.
-        return {key: value[key] for key in (
+        view = {key: value[key] for key in (
             "resource_id", "display_name", "size_bytes", "availability", "uploaded_at")}
+        if value.get("creator_type") not in (None, "bot", "user"):
+            raise ValueError
+        if value.get("created_at") is not None and not isinstance(value["created_at"], str):
+            raise ValueError
+        for key in ("creator_type", "created_at"):
+            if key in value:
+                view[key] = value[key]
+        return view
     except (TypeError, ValueError, UnicodeError, RecursionError):
         raise Failure("invalid_response", 5) from None
 

@@ -433,5 +433,7 @@ async def test_live_edit_after_ready_export_uploads_new_bytes_and_keeps_path(tmp
     entry = ManifestStore(tmp_path).get(view.resource_id)
     assert entry.source_kind == "workspace_live"
     assert entry.relative_path == "report"
+    assert entry.creator_type == "bot"
+    assert service.list_files(session_key="a")[0].created_at == view.created_at
     service.delete_file(session_key="a", resource_id=view.resource_id)
     assert path.exists()
