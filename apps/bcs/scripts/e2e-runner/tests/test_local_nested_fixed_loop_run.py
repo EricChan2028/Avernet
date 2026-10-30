@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from bcs_e2e.local_nested_fixed_loop_contract import (MARKER_KEYS, PROVIDER_JUDGE_MOCK,
+from bcs_e2e.local_nested_fixed_loop_contract import (ASSERTION_IDS, MARKER_KEYS, PROVIDER_JUDGE_MOCK,
                                                      REQUIREMENTS, STORY_SOURCE,
                                                      nested_fixed_loop_source_binding)
 from bcs_e2e.local_nested_fixed_loop_reporting import build_nested_fixed_loop_report
@@ -232,6 +232,10 @@ class NestedFixedLoopRunTests(unittest.TestCase):
         self.assertEqual(case['zero_traffic']['observed_webhook_requests'], 0)
         self.assertEqual(case['zero_traffic']['judge_started'], False)
         self.assertEqual(case['driver_bot_id'], DRIVER_ID)
+        self.assertEqual(case['required_assertion_count'], len(ASSERTION_IDS))
+        self.assertEqual(len(case['assertions']), len(ASSERTION_IDS))
+        self.assertEqual([row['id'] for row in case['assertions']], list(ASSERTION_IDS))
+        self.assertEqual(len(set(ASSERTION_IDS)), len(ASSERTION_IDS))
         self.assertEqual(case['human_id'], HUMAN_ID)
         self.assertEqual(case['resource_disposition'], 'STORY_SCOPED_TEMPORARY_DIRECTORY')
         self.assertEqual(case['runtime_shutdown'], {'status': 'STOPPED', 'returncode': 0})
@@ -245,8 +249,8 @@ class NestedFixedLoopRunTests(unittest.TestCase):
         self.assertEqual(summary['status'], 'LOCAL_SUITE_PASS')
         self.assertEqual(summary['scope']['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(summary['scope']['independent_slice'], True)
-        self.assertEqual(summary['reports']['expected_assertion_count'], 16)
-        self.assertEqual(summary['reports']['observed_assertion_count'], 16)
+        self.assertEqual(summary['reports']['expected_assertion_count'], len(ASSERTION_IDS))
+        self.assertEqual(summary['reports']['observed_assertion_count'], len(ASSERTION_IDS))
         self.assertEqual(summary['runner']['required_arguments'],
                          ['--binary', '--binary-sha256', '--cli-binary', '--driver'])
         self.assertTrue(all(row['status'] == 'PASS' for row in summary['requirements']))

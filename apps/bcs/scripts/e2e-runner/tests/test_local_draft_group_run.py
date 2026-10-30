@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from bcs_e2e.local_draft_group_contract import (MARKER_KEYS, PROVIDER_JUDGE_MOCK, REQUIREMENTS,
+from bcs_e2e.local_draft_group_contract import (ASSERTION_IDS, MARKER_KEYS, PROVIDER_JUDGE_MOCK, REQUIREMENTS,
                                                 STORY_SOURCE, draft_group_source_binding)
 from bcs_e2e.local_draft_group_reporting import build_draft_group_report
 from bcs_e2e.local_draft_group_run import (BINARY_KIND, HUMAN_ID, MOCK_ERR_LOG_NAME, MOCK_LOG_NAME,
@@ -206,6 +206,10 @@ class DraftGroupRunTests(unittest.TestCase):
         self.assertEqual([row['id'] for row in case['requirements']], list(REQUIREMENTS))
         self.assertTrue(all(row['status'] == 'PASS' for row in case['requirements']))
         self.assertEqual(case['story_markers'], {'observed': [True], 'live_http_assertions': 42})
+        self.assertEqual(case['required_assertion_count'], len(ASSERTION_IDS))
+        self.assertEqual(len(case['assertions']), len(ASSERTION_IDS))
+        self.assertEqual([row['id'] for row in case['assertions']], list(ASSERTION_IDS))
+        self.assertEqual(len(set(ASSERTION_IDS)), len(ASSERTION_IDS))
         self.assertEqual(case['zero_traffic']['observed_webhook_requests'], 0)
         self.assertEqual(case['zero_traffic']['judge_started'], False)
         self.assertEqual(case['human_id'], HUMAN_ID)
@@ -221,8 +225,8 @@ class DraftGroupRunTests(unittest.TestCase):
         self.assertEqual(summary['status'], 'LOCAL_SUITE_PASS')
         self.assertEqual(summary['scope']['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(summary['scope']['independent_slice'], True)
-        self.assertEqual(summary['reports']['expected_assertion_count'], 17)
-        self.assertEqual(summary['reports']['observed_assertion_count'], 17)
+        self.assertEqual(summary['reports']['expected_assertion_count'], len(ASSERTION_IDS))
+        self.assertEqual(summary['reports']['observed_assertion_count'], len(ASSERTION_IDS))
         self.assertTrue(all(row['status'] == 'PASS' for row in summary['requirements']))
         self.assertIn('friend-auth-sync', ' '.join(summary['mock_boundary']['not_proven']))
 

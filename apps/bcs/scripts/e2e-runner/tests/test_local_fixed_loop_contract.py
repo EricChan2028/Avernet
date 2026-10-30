@@ -7,9 +7,24 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bcs_e2e.local_fixed_loop_contract import (
-    PARENT, REQUIREMENTS, fixed_loop_method, fixed_loop_source_binding)
+    ASSERTION_IDS, PARENT, REQUIREMENTS, _story_assertion_sites, fixed_loop_method,
+    fixed_loop_source_binding)
+from bcs_e2e.local_fixed_loop_reporting import _summary
 from bcs_e2e.run_state import RunStateError
 from bcs_e2e.inventory import current_manifest
+
+
+class AssertionSiteTests(unittest.TestCase):
+    def test_multiple_public_calls_on_one_line_get_sequential_ids(self):
+        source = """def story(self):
+            for value in (self.request('/a'), self.request('/a')):
+                assert value is not None
+        """
+        self.assertEqual(_story_assertion_sites(source, 'FIXED_LOOP.', weighted=False), (
+            'FIXED_LOOP.story.request-002-01',
+            'FIXED_LOOP.story.request-002-02',
+            'FIXED_LOOP.story.assert-003-01',
+        ))
 
 
 class FixedLoopContractTests(unittest.TestCase):
@@ -82,6 +97,8 @@ class FixedLoopContractTests(unittest.TestCase):
         self.assertEqual(row['status'], 'LOCAL_EXECUTOR_ONLY')
         self.assertEqual(row['case_version'], 1)
         self.assertEqual(row['required_assertion_count'], 8)
+        self.assertEqual(len(ASSERTION_IDS), 66)
+        self.assertEqual(len(set(ASSERTION_IDS)), len(ASSERTION_IDS))
         self.assertEqual(row['requirement_ids'], list(REQUIREMENTS))
         self.assertEqual(row['execution_command'], 'local-fixed-loop-run')
         self.assertEqual(row['report_command'], 'local-fixed-loop-report')
@@ -90,6 +107,21 @@ class FixedLoopContractTests(unittest.TestCase):
         self.assertEqual(plan['migrated_story_count'], 0)
         self.assertEqual(plan['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertFalse(plan['ready_to_execute'])
+
+    def test_blocked_fixed_loop_projection_does_not_claim_dynamic_assertions(self):
+        binding = {'run_id': 'fixed-loop-report-test', 'legacy_inventory': ['one'],
+                   'executor_digest': 'test-executor-digest'}
+        projected = {
+            'status': 'BLOCKED', 'functional': 'INCOMPLETE',
+            'evidence_status': 'INCOMPLETE', 'cleanup': 'BLOCKED',
+            'requirements': [{'id': name, 'status': 'NOT_RUN'} for name in REQUIREMENTS],
+            'assertions': [],
+        }
+        summary = _summary(binding, projected, [])
+        self.assertEqual(summary['reports']['expected_assertion_count'], len(ASSERTION_IDS))
+        self.assertEqual(summary['reports']['observed_assertion_count'], 0)
+        self.assertEqual(summary['status'], 'BLOCKED')
+        self.assertFalse(summary['ready_to_execute'])
 
 
 if __name__ == '__main__':

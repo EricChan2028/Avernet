@@ -21,6 +21,7 @@ from pathlib import Path
 import re
 
 from .run_state import RunStateError, read
+from .local_fixed_loop_contract import _story_assertion_sites
 
 ROOT = Path(__file__).resolve().parents[1]
 PARENT = 'story_nested_fixed_loop_workflows'
@@ -38,6 +39,10 @@ REQUIREMENTS = tuple('NESTED-LOOP.' + name for name in (
     'human-story-pending-loop-iteration', 'human-loop-context-isolation',
     'human-story-completion-marker', 'human-story-auth-boundary', 'history-output-equality',
     'main-required-args-and-two-story-orchestration'))
+ASSERTION_IDS = _story_assertion_sites(STORY_SOURCE.read_text(encoding='utf-8'),
+                                   'NESTED-LOOP.', weighted=False)
+REQUIRED_ASSERTION_COUNT = len(ASSERTION_IDS)
+
 MARKER_KEYS = ('nested-bot-story', 'nested-human-story')
 MARKER_PATTERNS = (
     re.compile(r'^  Nested Bot: 17/15/2 routing, paths, history and stale callback verified$', re.M),

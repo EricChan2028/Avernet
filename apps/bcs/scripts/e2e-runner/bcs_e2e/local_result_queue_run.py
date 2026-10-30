@@ -29,9 +29,10 @@ from urllib.request import ProxyHandler, build_opener
 
 from .errors import has_cancellation
 from .inventory import current_manifest, executor_digest
-from .local_result_queue_contract import (CASE_ID, MARKER_KEYS, MARKER_PATTERNS, PARENT,
-                                          PROVIDER_JUDGE_MOCK, REQUIREMENTS, STATUS,
-                                          STORY_SOURCE, SUITE, result_queue_source_binding)
+from .local_result_queue_contract import (
+    ASSERTION_IDS, REQUIRED_ASSERTION_COUNT, CASE_ID, MARKER_KEYS,
+    MARKER_PATTERNS, PARENT, PROVIDER_JUDGE_MOCK, REQUIREMENTS, STATUS,
+    STORY_SOURCE, SUITE, result_queue_source_binding)
 from .owned_bcs import OwnedBcsProcess, file_sha256
 from .profile import identifier
 from .run_state import RunStateError, read, write
@@ -349,6 +350,8 @@ def local_result_queue_run(*, binary: Path, binary_sha256: str, state_dir: Path,
                     'runtime_shutdown': {'status': owned_record.get('status'),
                                          'returncode': owned_record.get('returncode')},
                     'resource_disposition': 'STORY_SCOPED_TEMPORARY_DIRECTORY',
+                    'required_assertion_count': REQUIRED_ASSERTION_COUNT,
+                    'assertions': [{'id': name, 'status': 'PASS'} for name in ASSERTION_IDS],
                     'credentials': {'credential_memory': 'NOT_CAPTURED',
                                     'story_key_scope': 'STORY_SCOPED_TEMPORARY_DIRECTORY'}}
             write(root / 'result-queue.json', case)

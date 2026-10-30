@@ -8,6 +8,68 @@ import re
 
 from .run_state import RunStateError, read
 
+
+def _story_assertion_sites(text: str, prefix: str, *, weighted: bool) -> tuple[str, ...]:
+    """Return stable IDs for the story's machine-readable assertion sites.
+
+    ``request`` and ``cli`` helpers are not counted as extra obligations: each
+    public call site represents the status check that helper performs.  For
+    browser-shaped story calls ``weighted`` also counts envelope, response-status
+    and error-code checks from the frozen helper contract.  A call line containing
+    multiple public call sites receives sequential site numbers, so unlike
+    source-line labels these IDs remain one-to-one with AST sites.
+    """
+    rows: list[str] = []
+    cursors: dict[tuple[str, str, int], int] = {}
+
+    def add_sites(function: str, label: str, line: int, count: int) -> None:
+        key = (function, label, line)
+        start = cursors.get(key, 0)
+        rows.extend(
+            f'{prefix}{function}.{label}-{line:03d}-{index:02d}'
+            for index in range(start + 1, start + count + 1)
+        )
+        cursors[key] = start + count
+
+    class Visitor(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.fn = 'module'
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            old_fn = self.fn
+            self.fn = node.name
+            self.generic_visit(node)
+            self.fn = old_fn
+
+        def visit_Assert(self, node: ast.Assert) -> None:
+            if self.fn not in {'request', 'post', 'browser', 'cli'}:
+                add_sites(self.fn, 'assert', node.lineno, 1)
+            self.generic_visit(node)
+
+        def visit_Call(self, node: ast.Call) -> None:
+            name = getattr(node.func, 'attr', '')
+            public_helpers = {'request', 'post', 'browser', 'cli', 'check'}
+            if (name in public_helpers
+                    and self.fn not in {'request', 'post', 'browser', 'cli'}):
+                count = 1
+                if weighted and name in {'request', 'browser'}:
+                    keywords = {item.arg: item.value for item in node.keywords}
+                    envelope = keywords.get('envelope')
+                    if name == 'browser' or (
+                        name == 'request'
+                        and isinstance(envelope, ast.Constant)
+                        and envelope.value is True
+                    ):
+                        count += 2
+                    error = keywords.get('error')
+                    if isinstance(error, ast.Constant) and error.value is not None:
+                        count += 1
+                add_sites(self.fn, name, node.lineno, count)
+            self.generic_visit(node)
+
+    Visitor().visit(ast.parse(text, filename='story-source'))
+    return tuple(rows)
+
 ROOT = Path(__file__).resolve().parents[1]
 PARENT = 'story_fixed_loop_human_editor_workflow'
 CASE_ID = 'LOCAL-FIXED-LOOP-01'
@@ -19,6 +81,10 @@ KINDS = ('fixture', 'http', 'http', 'http', 'http', 'poll', 'http', 'fixture')
 METHODS = ('NONE', 'POST', 'POST', 'POST', 'GET', 'GET', 'DELETE', 'NONE')
 ACTORS = ('LOCAL_CONTROL', 'HUMAN_LOCAL', 'HUMAN_LOCAL', 'HUMAN_LOCAL',
           'HUMAN_LOCAL', 'HUMAN_LOCAL', 'HUMAN_LOCAL', 'LOCAL_CONTROL')
+ASSERTION_IDS = _story_assertion_sites(
+    (ROOT.parent / 'e2e-test' / 'fixed_loop_story.py').read_text(encoding='utf-8'),
+    'FIXED_LOOP.', weighted=False)
+REQUIRED_ASSERTION_COUNT = len(ASSERTION_IDS)
 SOURCES = {'fixed_loop_story.sh', 'fixed_loop_story.py', 'common.sh'}
 
 

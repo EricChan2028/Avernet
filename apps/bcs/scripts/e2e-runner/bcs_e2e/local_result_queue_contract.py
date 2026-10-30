@@ -21,6 +21,7 @@ from pathlib import Path
 import re
 
 from .run_state import RunStateError, read
+from .local_fixed_loop_contract import _story_assertion_sites
 
 ROOT = Path(__file__).resolve().parents[1]
 PARENT = 'story_state_machine_result_queue'
@@ -38,6 +39,10 @@ REQUIREMENTS = tuple('RESULT-QUEUE.' + name for name in (
     'state-machine-definition', 'state-machine-run-admission', 'one-shot-node-delivery',
     'durable-result-rows', 'scheduled-result-delivery', 'bound-context-and-unique-history',
     'run-completion-and-cleanup-disposition'))
+ASSERTION_IDS = _story_assertion_sites(STORY_SOURCE.read_text(encoding='utf-8'),
+                                   'RESULT-QUEUE.', weighted=False)
+REQUIRED_ASSERTION_COUNT = len(ASSERTION_IDS)
+
 MARKER_KEYS = ('result-queue-delivery',)
 MARKER_PATTERNS = (
     re.compile(r'^Queued result: owner Send, observer Inject, bound context '

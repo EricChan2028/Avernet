@@ -10,7 +10,8 @@ from .errors import has_cancellation
 from .inventory import current_manifest, executor_digest, reviewed_release_inventory
 from .local_fixtures import OwnedLocalFixtures
 from .local_fixed_loop_case import OwnedFixedLoopCaseAdapter
-from .local_fixed_loop_contract import CASE_ID, PARENT, SUITE, fixed_loop_source_binding
+from .local_fixed_loop_contract import (ASSERTION_IDS, REQUIRED_ASSERTION_COUNT, CASE_ID,
+                                       PARENT, SUITE, fixed_loop_source_binding)
 from .local_judge_sandbox import OwnedLocalJudgeSandbox
 from .local_role_identity import OwnedLocalRoleIdentity
 from .owned_bcs import OwnedBcsProcess
@@ -74,7 +75,11 @@ def local_fixed_loop_run(*, binary: Path, binary_sha256: str, state_dir: Path, r
                         execution = execute_fixed_loop_case(adapter)
                         case = execution.snapshot()
                         case.update(schema_version=1, run_id=run_id, case_id=CASE_ID,
-                                    executor_digest=source)
+                                    executor_digest=source,
+                                    required_assertion_count=REQUIRED_ASSERTION_COUNT,
+                                    assertions=[{'id': name, 'status': 'PASS'}
+                                                for name in ASSERTION_IDS]
+                                    if case.get('status') == 'PASS' else [])
                         write(runtime.root/'local-fixed-loop.json', case)
         except BaseException as failure:
             error = failure

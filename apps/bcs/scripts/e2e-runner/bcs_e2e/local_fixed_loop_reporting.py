@@ -9,7 +9,7 @@ import stat
 
 from .case_rewrite import fixed_loop_case_rewrite
 from .inventory import current_manifest, executor_digest
-from .local_fixed_loop_contract import CASE_ID, PARENT, SUITE
+from .local_fixed_loop_contract import (ASSERTION_IDS, CASE_ID, PARENT, SUITE)
 from .profile import fingerprint
 from .run_state import RunStateError, read
 
@@ -124,7 +124,8 @@ def _project(root: Path, binding: dict) -> dict:
         'resource_disposition': ('GROUP_AND_PROVIDER_BOT_DELETED_BY_BUSINESS_API_HISTORY_RETAINED'
                                   if complete else 'UNVERIFIED'),
         'requirements': expected_steps,
-        'assertions': [{'id': row['requirement_id'], 'status': row['status']} for row in expected_steps],
+        'assertions': case.get('assertions', [{'id': name, 'status': 'NOT_RUN'}
+                                              for name in ASSERTION_IDS]),
         'selected_steps': [{'id': row['requirement_id'], 'status': row['status']} for row in expected_steps],
     }
 
@@ -133,6 +134,8 @@ def _summary(binding: dict, projected: dict, issues: list[str]) -> dict:
     plan = fixed_loop_case_rewrite()
     status = projected.get('status', 'BLOCKED') if not issues else 'BLOCKED'
     case_status = projected.get('status', 'BLOCKED')
+    observed_assertions = sum(row.get('status') == 'PASS'
+                              for row in projected.get('assertions', []))
     return {
         'schema_version': 1, 'run_id': binding['run_id'],
         'status': 'LOCAL_SUITE_PASS' if status == 'PASS' else status,
@@ -147,10 +150,14 @@ def _summary(binding: dict, projected: dict, issues: list[str]) -> dict:
                    'evidence_status': projected.get('evidence_status', 'INCOMPLETE'),
                    'cleanup': projected.get('cleanup', 'BLOCKED'),
                    'resource_disposition': projected.get('resource_disposition', 'UNVERIFIED')}],
-        'requirements': projected.get('requirements', [{'id': row.requirement_id, 'status': 'NOT_RUN'}
-                                                        for row in plan.requirements]),
-        'reports': {'expected_assertion_count': len(plan.requirements),
-                    'observed_assertion_count': len(projected.get('assertions', []))},
+        'assertion_basis': {'source': 'dynamic story AST sites',
+                            'counting_rule': 'one public HTTP/CLI/assert check site',
+                            'not_machine_readable': []},
+        'requirements': projected.get('requirements', [{'id': row.requirement_id,
+                                                        'status': 'NOT_RUN'}
+                                                       for row in plan.requirements]),
+        'reports': {'expected_assertion_count': len(ASSERTION_IDS),
+                    'observed_assertion_count': observed_assertions},
         'integrity': {'status': 'BLOCKED' if issues else 'PASS', 'issues': issues},
         'routes': [],
         'cleanup': {'verification_scope': 'EXACT_OWNED_GROUP_AND_PROVIDER_BOT',

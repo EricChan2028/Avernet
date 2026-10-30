@@ -19,6 +19,7 @@ from pathlib import Path
 import re
 
 from .run_state import RunStateError, read
+from .local_fixed_loop_contract import _story_assertion_sites
 
 ROOT = Path(__file__).resolve().parents[1]
 PARENT = 'collaboration_draft_group_story'
@@ -36,6 +37,10 @@ REQUIREMENTS = tuple('LOCAL-DRAFT-GROUP.' + name for name in (
     'originator-selection', 'group-launch-input', 'browser-context-submission-guards',
     'impersonation-rejection', 'group-launch-binding', 'draft-immutability',
     'share-revocation', 'cleanup-disposition'))
+ASSERTION_IDS = _story_assertion_sites(STORY_SOURCE.read_text(encoding='utf-8'),
+                                   'LOCAL-DRAFT-GROUP.', weighted=True)
+REQUIRED_ASSERTION_COUNT = len(ASSERTION_IDS)
+
 MARKER_KEYS = ('draft-group-launch',)
 MARKER_PATTERNS = (
     re.compile(r'^Draft group launch story: ([0-9]+) live HTTP assertions passed '

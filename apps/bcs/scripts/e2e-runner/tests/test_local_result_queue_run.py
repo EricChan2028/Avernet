@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from bcs_e2e.local_result_queue_contract import (MARKER_KEYS, PROVIDER_JUDGE_MOCK, REQUIREMENTS,
+from bcs_e2e.local_result_queue_contract import (ASSERTION_IDS, MARKER_KEYS, PROVIDER_JUDGE_MOCK, REQUIREMENTS,
                                                 STORY_SOURCE, result_queue_source_binding)
 from bcs_e2e.local_result_queue_reporting import build_result_queue_report
 from bcs_e2e.local_result_queue_run import (BINARY_KIND, HUMAN_ID, MOCK_ERR_LOG_NAME, MOCK_LOG_NAME,
@@ -207,6 +207,10 @@ class ResultQueueRunTests(unittest.TestCase):
         self.assertTrue(all(row['status'] == 'PASS' for row in case['requirements']))
         self.assertEqual(case['story_markers'], {'observed': [True], 'checks': 1})
         self.assertEqual(case['scheduled_traffic']['observed_webhook_requests'], 3)
+        self.assertEqual(case['required_assertion_count'], len(ASSERTION_IDS))
+        self.assertEqual(len(case['assertions']), len(ASSERTION_IDS))
+        self.assertEqual([row['id'] for row in case['assertions']], list(ASSERTION_IDS))
+        self.assertEqual(len(set(ASSERTION_IDS)), len(ASSERTION_IDS))
         self.assertEqual(case['scheduled_traffic']['judge_started'], False)
         self.assertEqual(case['human_id'], HUMAN_ID)
         self.assertEqual(case['resource_disposition'], 'STORY_SCOPED_TEMPORARY_DIRECTORY')
@@ -221,8 +225,8 @@ class ResultQueueRunTests(unittest.TestCase):
         self.assertEqual(summary['status'], 'LOCAL_SUITE_PASS')
         self.assertEqual(summary['scope']['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(summary['scope']['independent_slice'], True)
-        self.assertEqual(summary['reports']['expected_assertion_count'], 18)
-        self.assertEqual(summary['reports']['observed_assertion_count'], 18)
+        self.assertEqual(summary['reports']['expected_assertion_count'], len(ASSERTION_IDS))
+        self.assertEqual(summary['reports']['observed_assertion_count'], len(ASSERTION_IDS))
         self.assertTrue(all(row['status'] == 'PASS' for row in summary['requirements']))
         self.assertIn('friend-auth-sync', ' '.join(summary['mock_boundary']['not_proven']))
 

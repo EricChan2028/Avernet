@@ -12,7 +12,7 @@ from pathlib import Path
 import stat
 
 from .inventory import current_manifest, executor_digest
-from .local_nested_fixed_loop_contract import (CASE_ID, MARKER_KEYS, PARENT, REQUIREMENTS,
+from .local_nested_fixed_loop_contract import (ASSERTION_IDS, CASE_ID, MARKER_KEYS, PARENT, REQUIREMENTS,
                                          STATUS, SUITE)
 from .local_nested_fixed_loop_run import (BINARY_KIND, HUMAN_ID, MOCK_ERR_LOG_NAME, MOCK_LOG_NAME,
                                     STORY_ERR_LOG_NAME, STORY_LOG_NAME)
@@ -182,6 +182,7 @@ def _project(root, binding):
             'evidence_status': 'PASS' if complete else 'INCOMPLETE',
             'cleanup': 'STORY_SCOPED_TEMPORARY_DIRECTORY' if complete else 'BLOCKED',
             'resource_disposition': case.get('resource_disposition', 'UNVERIFIED'),
+            'assertions': case.get('assertions', []),
             'requirements': [{'id': name, 'status': next(
                 (row['status'] for row in case.get('requirements', []) if row.get('id') == name), 'NOT_RUN')}
                 for name in REQUIREMENTS]}
@@ -190,6 +191,8 @@ def _project(root, binding):
 def _summary(binding, projected, issues):
     status = projected.get('status', 'BLOCKED') if not issues else 'BLOCKED'
     case_requirements = projected.get('requirements', [])
+    observed_assertions = sum(row.get('status') == 'PASS'
+                              for row in projected.get('assertions', []))
     return {'schema_version': 1, 'run_id': binding['run_id'],
             'status': 'LOCAL_SUITE_PASS' if status == 'PASS' else status,
             'target': {'tier': 'local', 'environment_id': binding['run_id']},
@@ -209,9 +212,12 @@ def _summary(binding, projected, issues):
                        'evidence_status': projected.get('evidence_status', 'INCOMPLETE'),
                        'cleanup': projected.get('cleanup', 'BLOCKED'),
                        'resource_disposition': projected.get('resource_disposition', 'UNVERIFIED')}],
+            'assertion_basis': {'source': 'dynamic story AST sites',
+                                'counting_rule': 'one public HTTP/CLI/assert check site',
+                                'not_machine_readable': []},
             'requirements': case_requirements or [{'id': name, 'status': 'NOT_RUN'} for name in REQUIREMENTS],
-            'reports': {'expected_assertion_count': EXPECTED_ASSERTIONS,
-                        'observed_assertion_count': len(case_requirements)},
+            'reports': {'expected_assertion_count': len(ASSERTION_IDS),
+                        'observed_assertion_count': observed_assertions},
             'integrity': {'status': 'BLOCKED' if issues else 'PASS', 'issues': issues},
             'routes': [],
             'cleanup': {'verification_scope': 'STORY_SCOPED_TEMPORARY_DIRECTORY',
