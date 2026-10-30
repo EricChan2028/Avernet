@@ -448,3 +448,117 @@ async fn authorized_group_owner_receives_its_one_shot_result_with_queue_on_or_of
         }
     }
 }
+
+// ---- Manager RunResult for failed and aborted Runs (issue #2610) ----
+
+fn run_result_payload(target: &str) -> bcs_service_api::StateMachineRunResultPayload {
+    bcs_service_api::StateMachineRunResultPayload {
+        run_id: "failed-run".into(),
+        group_id: "group-1".into(),
+        session_id: "group-1:result".into(),
+        target_bot_id: target.into(),
+        workflow: "谁是卧底 第1轮 发言".into(),
+        terminal: bcs_service_api::StateMachineRunResultTerminal::Failed,
+        reason: bcs_service_api::StateMachineRunTerminalReason::NodeFailed,
+        failed_node: Some(bcs_service_api::StateMachineRunFailedNode {
+            node_id: "speak_3".into(),
+            attempt: 1,
+            max_attempts: 1,
+        }),
+        completed_nodes: vec!["speak_1".into(), "speak_2".into()],
+        terminated_at_ms: 100,
+        deadline_ms: 600_100,
+    }
+}
+
+fn run_result_history_query() -> bcs_domain::MessageQuery {
+    bcs_domain::MessageQuery {
+        group_id: "group-1".into(),
+        session_id: "group-1:result".into(),
+        cursor: None,
+        limit: 50,
+        keyword: None,
+        sender_id: None,
+        message_type: None,
+        owner_filter: bcs_domain::MessageOwnerFilter::Any,
+        time_range: None,
+        visible_from_seq: None,
+        human_view: None,
+    }
+}
+
+fn queued_limits() -> Option<BTreeMap<String, u32>> {
+    Some(BTreeMap::from([("bot-driver".into(), 10), ("bot-observer".into(), 10)]))
+}
+
+#[tokio::test]
+async fn queued_run_result_targets_only_the_manager_and_stays_out_of_history() {
+    let (publisher, messages, managed, delivery, _) =
+        publication_fixture_with_options(GroupStrategy::ManagerWorker, queued_limits()).await;
+    let outcome = publisher.publish_state_machine_run_result(run_result_payload("bot-driver")).await.unwrap();
+    assert_eq!(outcome, bcs_service_api::StateMachineRunResultOutcome::Delivered);
+    let rows = managed.snapshot(None).await.unwrap();
+    assert_eq!(rows.len(), 1, "only the manager receives the RunResult");
+    assert_eq!(rows[0].target_bot_id, "bot-driver");
+    assert_eq!(rows[0].state.kind, bcs_service_api::DeliveryType::Send);
+    assert!(delivery.frames().await.is_empty(), "admission must not invoke legacy transport");
+
+    let replay = publisher.publish_state_machine_run_result(run_result_payload("bot-driver")).await.unwrap();
+    assert_eq!(replay, bcs_service_api::StateMachineRunResultOutcome::Delivered);
+    assert_eq!(managed.snapshot(None).await.unwrap().len(), 1, "a replay admits no second delivery");
+    let history = messages.query_messages(run_result_history_query()).await.unwrap();
+    assert!(history.messages.iter().all(|message| message.message_type != bcs_domain::RUN_RESULT_MESSAGE_TYPE));
+}
+
+#[tokio::test]
+async fn legacy_run_result_reaches_only_the_manager_and_stays_out_of_history() {
+    let (publisher, messages, _, delivery, _) =
+        publication_fixture_with_options(GroupStrategy::ManagerWorker, None).await;
+    let outcome = publisher.publish_state_machine_run_result(run_result_payload("bot-driver")).await.unwrap();
+    assert_eq!(outcome, bcs_service_api::StateMachineRunResultOutcome::Delivered);
+    let targets: Vec<String> = delivery.targets().await.iter().map(|target| target.bot_id().to_string()).collect();
+    assert_eq!(targets, vec!["bot-driver".to_string()]);
+    let history = messages.query_messages(run_result_history_query()).await.unwrap();
+    assert!(history.messages.iter().all(|message| message.message_type != bcs_domain::RUN_RESULT_MESSAGE_TYPE));
+}
+
+#[tokio::test]
+async fn run_result_never_reaches_other_bots_in_a_chat_group() {
+    let (publisher, _, _, delivery, _) = publication_fixture_with_options(GroupStrategy::Chat, None).await;
+    let outcome = publisher.publish_state_machine_run_result(run_result_payload("bot-driver")).await.unwrap();
+    assert_eq!(outcome, bcs_service_api::StateMachineRunResultOutcome::Delivered);
+    let targets: Vec<String> = delivery.targets().await.iter().map(|target| target.bot_id().to_string()).collect();
+    assert_eq!(targets, vec!["bot-driver".to_string()], "the observer must not be injected");
+}
+
+#[tokio::test]
+async fn run_result_is_skipped_when_the_manager_left_the_session() {
+    let (publisher, messages, managed, delivery, _) =
+        publication_fixture_with_options(GroupStrategy::ManagerWorker, queued_limits()).await;
+    let outcome = publisher.publish_state_machine_run_result(run_result_payload("bot-stranger")).await.unwrap();
+    assert!(matches!(outcome, bcs_service_api::StateMachineRunResultOutcome::Skipped { .. }));
+    assert!(managed.snapshot(None).await.unwrap().is_empty());
+    assert!(delivery.targets().await.is_empty());
+    assert_eq!(messages.get_current_seq("group-1:result").await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn run_result_is_skipped_when_the_session_is_no_longer_running() {
+    let support = flow_support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let mut group = support.group.get("group-1").await.unwrap();
+    group.group_strategy = GroupStrategy::ManagerWorker;
+    support.group.upsert(group.clone()).await.unwrap();
+    let mut session = session_support::test_session("group-1:result", "group-1", group.participants);
+    session.status = bcs_service_api::SessionStatus::Completed;
+    let messages = Arc::new(MemoryMessageRepo::new());
+    let flow = Arc::new(bcs_message_flow::BcsMessageFlow::new(
+        support.group, Arc::new(bcs_routing::MessageRouter::new()), support.registry,
+        support.bot_delivery.clone(), support.frontend_delivery,
+    ).with_message_repo(messages.clone())
+        .with_bot_run_context(Arc::new(bcs_message_flow::MemoryBotRunContextStore::new()))
+        .with_session_management(Arc::new(session_support::StaticSessionManagement::new(session))));
+    let publisher = MessageFlowStateMachineResultPublisher::new(flow);
+    let outcome = publisher.publish_state_machine_run_result(run_result_payload("bot-driver")).await.unwrap();
+    assert!(matches!(outcome, bcs_service_api::StateMachineRunResultOutcome::Skipped { .. }));
+    assert!(support.bot_delivery.targets().await.is_empty());
+}
