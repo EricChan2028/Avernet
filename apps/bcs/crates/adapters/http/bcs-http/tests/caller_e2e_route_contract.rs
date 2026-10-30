@@ -27,12 +27,14 @@ use bcs_service_api::port::repo::BotControlPlaneRepoPort;
 use bcs_service_api::port::repo::MessageRepoPort;
 use bcs_service_api::{
     BotControlPlaneCoreService, BotRegistryCoreService, GroupCoreService, MessageFlowService,
-    Participant, ParticipantRole, ProviderBotBindingRepoPort, ProviderRepoPort, RoutingCoreService,
+    Participant, ParticipantMode, ParticipantRole, ProviderBotBindingRepoPort, ProviderRepoPort,
+    RoutingCoreService,
 };
 use bcs_bot_store::PersistentBotRepo;
 use bcs_bot_store::provider::MemoryProviderStore;
 use bcs_bot::core::BotControlPlaneCore;
 use bcs_message_flow::caller_admission::CallerAdmissionDeps;
+use bcs_test_support::lazy_authority_chain;
 use bcs_service_api::application::caller_handoff::HumanCallerDeliveryHandoffService;
 use bcs_service_api::application::caller_handoff::HandoffError;
 use bcs_message_flow::managed_delivery::ManagedMessageDelivery;
@@ -178,6 +180,10 @@ async fn caller_app(
             Participant::human("human_12345678", ParticipantRole::Observer),
             Participant::bot("bot-driver", ParticipantRole::Driver),
         ];
+        // The F4 strict session-membership gate (spec §8.3) rejects an
+        // Absent-mode sender; Participant::human defaults to Absent, so the
+        // fixture must mark the Human as actually present to speak.
+        participants[0].mode = Some(ParticipantMode::Present);
         if !dm {
             participants.push(Participant::bot(
                 "bot-driver:12345678",
@@ -220,6 +226,12 @@ async fn caller_app(
         reserve_ttl_ms: 30_000,
     });
     let participants = fixture.group.get("group-1").await.unwrap().participants.clone();
+    // The Human-speaking-for-an-owned-Bot path consults the bot authority
+    // hook (upstream §10.13.4); failing to wire one is a 500, so give the
+    // fixture the shared lazy-seeded authority chain and grant the
+    // authenticated Human the owner edge on the owned Bot.
+    let authority = lazy_authority_chain();
+    authority.hook.seed_owner("bot-driver:12345678", "12345678");
     let mut flow = BcsMessageFlow::new(
         fixture.group.clone() as Arc<dyn GroupCoreService>,
         fixture.routing.clone() as Arc<dyn RoutingCoreService>,
@@ -232,7 +244,8 @@ async fn caller_app(
     .with_group_delivery_limits(std::collections::BTreeMap::from([("bot-driver".to_string(), 100)]))
     .with_session_management(Arc::new(StaticSessionManagement::new(test_session(
         "group-1:e2e", "group-1", participants,
-    ))));
+    ))))
+    .with_bot_authority_hook(Some(authority.hook.clone()));
     flow.caller_admission = Some(deps);
 
     let chain = Arc::new(AuthPluginChain::new(vec![plugin]));

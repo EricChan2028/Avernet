@@ -231,18 +231,54 @@ pub(super) async fn handle_connect(
             })
         });
     let subscription_key = session_id.clone().unwrap_or_else(|| group_id.clone());
-    let conn_id = state
-        .frontend_connections
-        .subscribe_with_shutdown(
-            subscription_key.clone(),
-            tx.clone(),
-            resolved_view_actor_id.map(str::to_string),
-            connection_human_view.clone(),
-            connection_state.shutdown.clone(),
-        )
-        .await?;
+    // The registry subscription carries the connection's protected
+    // delivery binding when one can be built: fanout (broadcast)
+    // frames then flow as typed Protected frames through the same
+    // final per-frame authorization as run frames. Connections that
+    // cannot produce a binding (no authenticated Human identity, or
+    // dispatch-driven tests without a queue) keep the legacy
+    // registry path.
+    let connect_binding = build_protected_delivery_binding(
+        auth,
+        &group_id,
+        session_id.as_deref(),
+        // The connect view actor IS the connection's view; there is
+        // no per-send Bot sender identity at subscribe time.
+        resolved_view_actor_id.unwrap_or_default(),
+        None,
+        None,
+        resolved_view_actor_id,
+    );
+    let conn_id = match (connect_binding, connection_state.protected_frames.clone()) {
+        (Some(binding), Some(queue)) => {
+            state
+                .frontend_connections
+                .subscribe_protected_with_shutdown(
+                    subscription_key.clone(),
+                    tx.clone(),
+                    resolved_view_actor_id.map(str::to_string),
+                    connection_human_view.clone(),
+                    connection_state.shutdown.clone(),
+                    binding,
+                    queue,
+                )
+                .await?
+        }
+        _ => {
+            state
+                .frontend_connections
+                .subscribe_with_shutdown(
+                    subscription_key.clone(),
+                    tx.clone(),
+                    resolved_view_actor_id.map(str::to_string),
+                    connection_human_view.clone(),
+                    connection_state.shutdown.clone(),
+                )
+                .await?
+        }
+    };
     connection_state.subscribed_sessions.push((
-        subscription_key,
+        subscription_key.clone(),
         conn_id,
         connection_human_view.clone(),
     ));
@@ -266,14 +302,65 @@ pub(super) async fn handle_connect(
     if let Some(session_id) = session_id.as_deref() {
         match state.interactions.list_pending(session_id).await {
             Ok(pending) => {
-                let pending_visible = connection_human_view.as_ref().is_none_or(|view| {
-                    view.allows_artifact(
-                        MessageVisibilityDomain::StateMachine,
-                        Some(&bcs_domain::MessageAudience::FullOnly),
-                    )
-                });
-                if pending_visible {
-                    for event in pending {
+                // Replaying pending interactions to a FRESH connection
+                // is an independent finite event (bot-authority spec
+                // §8.2/§7.3): each replayed event is authorized ONCE
+                // against CURRENT facts — a connection re-established
+                // after a revocation replays nothing it lost.
+                for event in pending {
+                    if let (Some(binding), Some(queue)) = (
+                        state
+                            .frontend_connections
+                            .protected_binding(&subscription_key, conn_id)
+                            .await,
+                        connection_state.protected_frames.clone(),
+                    ) {
+                        let scope = DeliveryScope {
+                            group_id: binding.group_id.clone(),
+                            session_id: binding.session_id.clone(),
+                        };
+                        let replay_visibility = DeliveryVisibility {
+                            domain: MessageVisibilityDomain::StateMachine,
+                            audience: Some(bcs_domain::MessageAudience::FullOnly),
+                        };
+                        let admitted = state
+                            .delivery_admission
+                            .resolve_recipient_views(&scope, &[binding])
+                            .await
+                            .map(|recipients| {
+                                recipients
+                                    .first()
+                                    .is_some_and(|permit| permit.allows(&replay_visibility))
+                            })
+                            .unwrap_or(false);
+                        if !admitted {
+                            debug!(
+                                request_id = %bcs_observability::CurrentRequestId,
+                                session_id,
+                                "pending interaction replay skipped: not admitted on the fresh connection"
+                            );
+                            continue;
+                        }
+                        let frame = OutboundFrame::Data {
+                            payload: interaction_event_json(&event)?,
+                        };
+                        if queue.send(frame).await.is_err() {
+                            warn!(
+                                request_id = %bcs_observability::CurrentRequestId,
+                                session_id,
+                                "closed protected queue dropped a pending interaction replay"
+                            );
+                        }
+                    } else {
+                        let pending_visible = connection_human_view.as_ref().is_none_or(|view| {
+                            view.allows_artifact(
+                                MessageVisibilityDomain::StateMachine,
+                                Some(&bcs_domain::MessageAudience::FullOnly),
+                            )
+                        });
+                        if !pending_visible {
+                            continue;
+                        }
                         send_interaction_event(tx, &event).await?;
                     }
                 }

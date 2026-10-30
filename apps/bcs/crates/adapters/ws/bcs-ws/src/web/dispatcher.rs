@@ -235,24 +235,6 @@ async fn handle_client_request(
     Ok(())
 }
 
-#[derive(Debug, Deserialize)]
-struct ConnectParams {
-    group_id: String,
-    #[serde(default, alias = "bcs_session_id", alias = "sessionId")]
-    session_id: Option<String>,
-    #[serde(default, alias = "viewActorId")]
-    view_actor_id: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct ConnectResponse {
-    group_id: String,
-    participants: Vec<Value>,
-    view_actor_id: String,
-    message_view_scope: bcs_domain::MessageViewScope,
-}
-
-
 async fn send_session_access_revoked(
     tx: &mpsc::Sender<String>,
     request_id: &str,
