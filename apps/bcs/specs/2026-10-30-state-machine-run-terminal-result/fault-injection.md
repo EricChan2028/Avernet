@@ -4,7 +4,7 @@
 - 关联：Issue #2610；实现见 #3334（BCS）与 #3335（主持人技能、副屏、注入脚本）
 - 代码：`oss-camp2026` @ `86252c1e9`，加上 #3334 与 #3335 的提交
 - 环境：与 [repro.md](repro.md) 相同。singlebox standalone（SQLite），模型 `deepseek/deepseek-v4.1-flash`，
-  `6bots_undercover_game_profile`（1 位人类 + 5 个玩家 Bot，主持人为 manager），群消息队列未开启（legacy 直投）
+  `6bots_undercover_game_profile`（1 位人类 + 5 个玩家 Bot，主持人为 manager），群消息队列未开启（legacy 直投）；打开队列后的复测见第 4 节
 - 命令：在 profile 目录下执行 `python3 tools/fault_inject.py --injections 10 --out acceptance.csv`
 
 ## 1. 方法
@@ -54,3 +54,52 @@
 
 所以 60 秒的余量主要被模型限流占用，而不是被平台占用。提高限额，或者让主持人与玩家使用不同的 key，
 都能缩短这段等待。
+
+## 4. 打开群消息队列后的复测
+
+第 1–3 节用的是 singlebox 默认配置：群消息队列关闭，RunResult 走直投。为了覆盖「走现有 Send 队列」这条路径，又在打开队列的情况下重跑了 10 次。
+
+- 开关：`PUT /admin/message-delivery/policy`，把 `flow_enabled.group` 和 `flow_enabled.system` 设为 true，`defaults.mode` 设为 `enforce`。
+  这样每个 Bot 同时只处理一条消息，两次发送至少间隔 1 秒，其余配置不变。跑完已恢复为关闭。
+- 其他环境和注入脚本都与第 1 节相同。
+
+### 4.1 复测发现的问题（已修复）
+
+第一次打开队列，第 1 次注入就卡死了：
+
+- RunResult 在 Run 失败后 3 毫秒入队。85 毫秒后，这条投递还没发出就变成了 `failed`。
+  检查点在入队时已经记为 `delivered`，所以不会补投，主持人一直没被唤醒。
+- 原因：队列发送前用 `canonical_text()` 取正文，而一次性结果只认 `chat` 类型，`run_result` 被判为
+  「canonical message text invalid」。
+- 修复：#3334 的 c77f97f66 让 `run_result` 和 `chat` 一样按一次性结果读取。
+  bootstrap 测试原来只断言入队成功，现在会对入队的那一行真正执行一次准备和发送。
+
+### 4.2 修复后的结果
+
+| # | 对局 | 阶段 | 被杀玩家 | 失败的 Run | RunResult | 队列投递 | 入队→开始发送 | 恢复耗时 |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 1 | 发言 | 逻辑控林工 | `sm-632b0f92` | `delivered`，3 ms 入队 | `group/send` → 主持人 `completed` | 46 ms | 3.3 s |
+| 2 | 1 | 投票 | 稳健老陈 | `sm-2aa390da` | `delivered`，2 ms 入队 | `group/send` → 主持人 `completed` | 3815 ms | 7.0 s |
+| 3 | 1 | 发言 | 逻辑控林工 | `sm-15001158` | `delivered`，2 ms 入队 | `group/send` → 主持人 `completed` | 63 ms | 3.5 s |
+| 4 | 1 | 投票 | 和事佬阿和 | `sm-ca4adad5` | `delivered`，5 ms 入队 | `group/send` → 主持人 `completed` | 56439 ms | 71.6 s |
+| 5 | 1 | 发言 | 和事佬阿和 | `sm-6581e0cd` | `delivered`，3 ms 入队 | `group/send` → 主持人 `completed` | 850 ms | 53.4 s |
+| 6 | 1 | 投票 | 逻辑控林工 | `sm-9d8e2713` | `delivered`，3 ms 入队 | `group/send` → 主持人 `completed` | 37 ms | 58.4 s |
+| 7 | 2 | 发言 | 和事佬阿和 | `sm-7995c8ef` | `delivered`，2 ms 入队 | `group/send` → 主持人 `completed` | 77 ms | 3.4 s |
+| 8 | 2 | 投票 | 稳健老陈 | `sm-6e2e4df9` | `delivered`，2 ms 入队 | `group/send` → 主持人 `completed` | 557 ms | 4.0 s |
+| 9 | 3 | 发言 | 逻辑控林工 | `sm-296831e5` | `delivered`，4 ms 入队 | `group/send` → 主持人 `completed` | 78 ms | 2.9 s |
+| 10 | 3 | 投票 | 和事佬阿和 | `sm-5fae5bb4` | `delivered`，3 ms 入队 | `group/send` → 主持人 `completed` | 30 ms | 16.3 s |
+
+汇总：
+
+- 10 次注入（发言、投票各 5 次，共 3 局，历时 53.9 分钟），卡死 0 次。
+  9 次在 60 秒内恢复，第 4 次用了 71.6 秒，恢复耗时中位数 5.5 秒。
+- 10 条 RunResult 都在 Run 失败后 2–5 毫秒入队，10 条队列投递全部 `completed`，目标都只有主持人。
+- 第 4 次超时的原因：RunResult 在队列里等了 56.4 秒，等主持人手上那一轮（开投票）结束。
+  那一轮的模型调用先被 429 挡了 45 秒，之后又碰上几次上游 SSL 错误和 500。
+  主持人收到 RunResult 后 15 秒就重开了投票。
+  关闭队列时 OpenClaw 也是按会话串行处理，这段等待不会消失，只是从 BCS 的队列挪到了 OpenClaw 内部。
+- 第 5、6 次（53.4 秒、58.4 秒）也是模型限流。它们在队列里只等了 0.85 秒和 37 毫秒，
+  时间都花在主持人收到之后的模型调用上。
+- 第 2 局开局时，主持人发完牌没有调用 `open-round`（模型没按技能执行）。
+  脚本在 120 秒后按开局兜底再说了一次「开始」。这只发生在开局，恢复过程中没有任何人类消息。
+  第一次复测时同样的情况让对局一直停在开局，这是加兜底的原因（#3335 的 a8c3bd48a）。
