@@ -101,8 +101,8 @@ def disk_digest() -> str:
     # offline report projection as three flat modules, and the shared backlog
     # command router adds one flat module. The Session-owner and Draft-delivery
     # slices remain subpackages outside this flat digest. The resulting flat
-    # count is 332 under a 340-file allowance, leaving eight slots for a future
-    # focused adapter split.
+    # count was 332 under a 340-file allowance before the dual Provider-subbots
+    # route-probe command added one flat focused module, leaving seven slots.
     # The enforced count keeps runner.py alongside the focused modules.
     # The dual-environment Edge friend-mutation remote slice adds its focused
     # remote Adapter and command Run lifecycle modules, so the focused-module

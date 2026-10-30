@@ -10,6 +10,7 @@ from .edge_friend_mutation_case_run import CASE_KEYS as EDGE_FRIEND_MUTATION_CAS
 from .session_service_cli_case_run import CASE_KEYS as SESSION_SERVICE_CASE_KEYS
 from .direct_chat_cli_case_run import CASE_KEYS as DIRECT_CHAT_CASE_KEYS
 from .delivery_policy_cli_case_run import CASE_KEYS as DELIVERY_POLICY_CASE_KEYS
+from .provider_subbots_case_run import CASE_KEYS as PROVIDER_SUBBOTS_CASE_KEYS
 
 
 CASE_COMMANDS = frozenset({
@@ -39,6 +40,7 @@ CASE_COMMANDS = frozenset({
     "dual-operator-cli-run",
     "dual-direct-chat-run",
     "dual-delivery-policy-run",
+    "dual-provider-subbots-run",
     "dual-custom-collaboration-run",
 })
 
@@ -286,6 +288,18 @@ def register_case_commands(commands) -> None:
     delivery_policy_case.add_argument("--run-id", required=True)
     delivery_policy_case.add_argument("--confirm-run-id", required=True)
     delivery_policy_case.add_argument("--allow-write", action="store_true")
+    provider_subbots_case = commands.add_parser(
+        "dual-provider-subbots-run",
+        help="Run the reviewed Provider subbots story through owned-local or the bounded preprod route probe")
+    provider_subbots_case.add_argument("--profile", type=Path, required=True)
+    provider_subbots_case.add_argument(
+        "--case", choices=tuple(PROVIDER_SUBBOTS_CASE_KEYS), required=True)
+    provider_subbots_case.add_argument("--state-dir", type=Path, required=True)
+    provider_subbots_case.add_argument("--run-id", required=True)
+    provider_subbots_case.add_argument("--confirm-run-id", required=True)
+    provider_subbots_case.add_argument("--allow-write", action="store_true")
+    provider_subbots_case.add_argument("--binary", type=Path)
+    provider_subbots_case.add_argument("--binary-sha256")
     custom_collaboration_case = commands.add_parser(
         "dual-custom-collaboration-run",
         help="Run the reviewed dual Custom-collaboration product-CLI story through Singlebox or preprod")
