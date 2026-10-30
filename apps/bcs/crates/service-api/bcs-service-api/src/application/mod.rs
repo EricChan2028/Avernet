@@ -61,3 +61,6 @@ pub use admission::AdmissionService;
 pub use connect::{ConnectResult, ConnectService, ConnectStatus, RequestDirection, RequestsPage};
 
 pub mod caller_execution;
+
+pub mod task_handle;
+pub use task_handle::*;

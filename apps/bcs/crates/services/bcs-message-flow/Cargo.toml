@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 bcs-observability = { workspace = true }
+metrics = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true }
