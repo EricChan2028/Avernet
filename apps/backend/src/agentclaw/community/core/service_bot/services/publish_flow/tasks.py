@@ -443,8 +443,8 @@ class PublishRestartHandler(_PublishTaskBase):
         if not result or not result.get("success"):
             message = (result or {}).get("message", "unknown error")
             # Deliberately does NOT touch ext.restart.restarting. Preflight
-            # failures never wrote it; a terminal engine veto already cleared
-            # only its own marker using a guarded status/ext CAS. Anything still
+            # failures never wrote it; engine policies own any failure
+            # state they wrote. Anything still
             # present may belong to someone else — ``restart_bot`` does
             # not reject a restart while one is in flight, so a concurrent
             # restart's marker (and its poll's wait state) can be sitting there.

@@ -15,11 +15,13 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, Optional
 
 from agentclaw.community.core.bot_management.errors import BotTemplateInvalidError
 from agentclaw.community.core.workspace.runtime_identity import ENGINE_FORM_KEY
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
+
+from .restart_contract import PublishedRestartServices
 
 # Public template input must not set platform-owned identity or lifecycle data.
 # ``engine_form`` is the server-managed form marker written only by creation
@@ -261,6 +263,22 @@ class EngineProvisioningStrategy(ABC):
         through to the original synchronous lifecycle callback.
         """
         return restart(**kwargs)
+
+    async def execute_published_restart(
+        self, ctx: BotProvisioningContext, restart: Callable[[], Awaitable[dict]], *,
+        services: PublishedRestartServices,
+        publish_id: int, stage: str, binding_id: int, source_status: str,
+    ) -> dict:
+        """Run the prepared common publish flow; default adds no policy or I/O.
+
+        Concrete engines may own precondition-failure persistence and replay
+        handling through services. The callback retains provider orchestration.
+        """
+        return await restart()
+
+    async def acquire_restart_workflow(self, ctx, op, issue, *, runner):
+        """Keep the runner's exact operation identity and crash/adoption contract."""
+        return await runner.acquire_workflow(op, issue)
 
     @abstractmethod
     def apply_restart_extra_configs(

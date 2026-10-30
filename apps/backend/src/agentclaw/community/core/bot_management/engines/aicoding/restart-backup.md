@@ -1,6 +1,25 @@
 # Coding-only restart backup
 
-## Best-effort policy (2026-10-12)
+## Confirmed-fastdisk policy (2026-10-30)
+
+Backend sends the embedded publication detector. Unknown/failed initial detection
+uses the best-effort policy below; a positively confirmed fastdisk target requires
+a successful, complete backup receipt within 300 seconds. Failure, partial backup,
+missing capability or unconfirmed result blocks replacement. Ordinary durable
+restarts persist positive confirmations across redelivery.
+
+Published restart policy lives in `restart_publish.py`, contributed by
+`AicodingProvisioningStrategy`. It owns the guard, terminal failure/replay handling,
+exact-operation failure and status/ext CAS for the existing frontend fields.
+Shared publish orchestration only calls the declared `execute_published_restart`
+and `acquire_restart_workflow` strategy hooks. Default implementations delegate
+without extra I/O or engine metadata. The generic operation runner retains its
+adopt-before-issue logic and has no backup exception or coding-state knowledge.
+Only the coding strategy catches `RestartBackupBlocked`; transient/post-submit
+failures retain the existing crash-resume behavior. No shared service is patched
+or reconfigured per request.
+
+## Non-fastdisk / unconfirmed best-effort policy (2026-10-12)
 
 Backup is attempted, but backup-only failures log sanitized warnings and do not
 block restart. This includes inventory, command, timeout, receipt and runtime boot-identity
@@ -229,9 +248,10 @@ transport still blocks replacement. Binding/database checks stay outside that
 boundary. This is dependency consolidation, not a new common provider API: BaaS
 continues to use inventory and Arca continues to pin the old binding's sandbox.
 
-The `prepare_instance_restart` published/Caller dispatcher preserves its existing
-`target_runtime` argument and wraps it with `RestartBackupDependencies.for_instance`
-before invoking the engine hook. No provider-specific backup factory is passed
+The `prepare_instance_restart` published/Caller dispatcher passes its existing
+`target_runtime` argument unchanged to the engine hook. Only the coding strategy
+wraps it with `RestartBackupDependencies.for_instance`; default/other engines do
+not construct coding backup dependencies. No provider-specific backup factory is passed
 through BotService or the engine hook anymore. BotService's existing BaaS service
 dependency remains for non-backup lifecycle operations; this change does not
 remove that shared functionality.

@@ -16,15 +16,15 @@ from tests.community.core.service_bot.services.test_publish_crash_windows import
 )
 
 
-@pytest.fixture
-def published():
+@pytest.fixture(params=['aicoding', 'claude_code'])
+def published(request):
     ledger, baas, build = _ledger(), FakeBaas(), Mock()
     record = _record(PublishStatus.SUCCESS.value)
     record.ext.update(binding={'online': 42}, unrelated={'keep': True})
     svc = _restart_flow(ledger, baas, build, record)
     svc._release_binding = Mock()
     svc._bot_service.get_bot_by_address.return_value = {
-        'bot_id': 'b', 'owner_id': 'u1', 'entity_id': 'u1', 'active_engine': 'aicoding',
+        'bot_id': 'b', 'owner_id': 'u1', 'entity_id': 'u1', 'active_engine': request.param,
     }
 
     def mutate(*, publish_id, mutator):

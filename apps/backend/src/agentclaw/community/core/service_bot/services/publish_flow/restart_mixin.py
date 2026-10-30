@@ -1,11 +1,13 @@
 """Bot restart (re-deploy) operations, mixed into PublishFlowService."""
 from __future__ import annotations
 
-from copy import deepcopy
-from uuid import uuid4
+from functools import partial
 
-from agentclaw.community.core.bot_management.engines.registry import prepare_instance_restart
-from agentclaw.community.core.bot_management.engines.restart_contract import RestartPreconditionError
+from agentclaw.community.core.bot_management.engines.registry import (
+    prepare_instance_restart,
+    resolve_restart_strategy,
+)
+from agentclaw.community.core.bot_management.engines.restart_contract import PublishedRestartServices
 
 from agentclaw.community.core.service_bot.repository.models import (
     PublishOperationKind,
@@ -259,47 +261,11 @@ class RestartMixin:
         return None, stage, bot_uuid
 
     async def execute_restart(
-        self, publish_id: int, stage: str, operator: str, in_place: bool = False,
-    ) -> dict:
-        """Translate a terminal engine veto to the existing publish error fields."""
-        guard_id = uuid4().hex
-        try:
-            return await self._execute_restart(
-                publish_id, stage, operator, in_place, guard_id=guard_id,
-            )
-        except RestartPreconditionError as error:
-            record = self._publish_service.get_publish_by_id(publish_id)
-            if record is None:
-                raise
-            expected_ext = deepcopy(record.ext)
-            ext = deepcopy(record.ext or {})
-            restart = ext.get("restart") or {}
-            guard = restart.get("guard") or {}
-            # Only our marker, original binding and original status can be
-            # failed. A concurrent restart/release keeps its state untouched.
-            if (guard.get("id") == guard_id
-                    and guard.get("status") == record.status
-                    and (ext.get("binding") or {}).get(stage) == guard.get("binding_id")):
-                restart.pop("restarting", None)
-                restart.pop("guard", None)
-                restart["precondition_error"] = {"stage": stage, "message": str(error)}
-                ext.pop("retry", None)
-                ext["error_message"] = str(error)
-                ext["source_status"] = record.status
-                self._update_publish_status(
-                    publish_id=publish_id, target_status=PublishStatus.FAILED,
-                    source_status=PublishStatus(record.status), ext=ext,
-                    expected_ext=expected_ext,
-                )  # Persistence/CAS errors propagate; never report a saved failure falsely.
-            return {"success": False, "message": str(error)}
-
-    async def _execute_restart(
         self,
         publish_id: int,
         stage: str,
         operator: str,
         in_place: bool = False,
-        *, guard_id: str,
     ) -> dict:
         """Durable Bot restart work (#197): re-deploy the existing bot via the
         upgrade interface, through the operation runner so a crash-resume adopts
@@ -325,11 +291,6 @@ class RestartMixin:
             return {"success": False, "message": "数字员工审批中，暂不能重启发布"}
 
         ext = self._get_latest_ext(publish_id)
-        blocked = (ext.get("restart") or {}).get("precondition_error") or {}
-        if publish_record.status == PublishStatus.FAILED.value and blocked.get("stage") == stage:
-            # A crash after the failure write but before queue acknowledgement
-            # must not retry a destructive operation with downgraded detection.
-            return {"success": False, "message": blocked["message"]}
         binding_id = (ext.get("binding") or {}).get(stage_enum.value)
         if not binding_id:
             return {"success": False, "message": f"No binding for stage {stage_enum.value}"}
@@ -349,17 +310,40 @@ class RestartMixin:
         if not migration_path and not config_artifact:
             return {"success": False, "message": f"Missing build artifact: publish_id={publish_id}"}
 
+        ctx, strategy = resolve_restart_strategy(bot)
+        return await strategy.execute_published_restart(
+            ctx,
+            partial(
+                self._execute_prepared_restart,
+                publish_id=publish_id, stage_enum=stage_enum, operator=operator,
+                in_place=in_place, publish_record=publish_record, bot=bot,
+                binding_id=binding_id, bot_uuid=bot_uuid, ext=ext,
+                acquire_workflow=partial(
+                    strategy.acquire_restart_workflow, ctx, runner=self._operation_runner,
+                ),
+            ),
+            services=PublishedRestartServices(
+                get_record=self._publish_service.get_publish_by_id,
+                mutate_ext=self._mutate_and_update_ext,
+                update_status=self._update_publish_status,
+            ),
+            publish_id=publish_id, stage=stage, binding_id=binding_id,
+            source_status=publish_record.status,
+        )
+
+    async def _execute_prepared_restart(
+        self, *, publish_id, stage_enum, operator, in_place, publish_record,
+        bot, binding_id, bot_uuid, ext, acquire_workflow,
+    ) -> dict:
+        """Common provider workflow; engine policy enters only through callbacks."""
+        migration_path = ext.get("migration_path")
         # Mark restart in progress, and note that every failure return above this
         # point leaves it untouched — the restart task's failure branch relies on
         # that to avoid clearing a concurrent restart's marker. Cleared on an
         # observed terminal workflow by sync_restart_progress, which the restart
         # poll now drives.
         def _set_restarting_flag(latest_ext: dict) -> None:
-            restart = latest_ext.setdefault("restart", {})
-            restart["restarting"] = True
-            restart["guard"] = {"id": guard_id, "binding_id": binding_id,
-                                "status": publish_record.status}
-            restart.pop("precondition_error", None)
+            latest_ext.setdefault("restart", {})["restarting"] = True
 
         self._mutate_and_update_ext(publish_id=publish_id, mutator=_set_restarting_flag)
 
@@ -504,6 +488,7 @@ class RestartMixin:
                 issue=_issue,
                 bot_uuid=bot_uuid,
                 bot_gone_reason="BOT_NOT_FOUND -> recreate",
+                acquire=acquire_workflow,
             )
         except TargetBotGoneError as e:
             logger.warning(

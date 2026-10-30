@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
+    from agentclaw.community.core.service_bot.repository.models import BotPublishRecord
 
 
 @dataclass(frozen=True)
@@ -19,9 +20,14 @@ class RestartServices:
     lifecycle: BotService
 
 
-class RestartPreconditionError(RuntimeError):
-    """An engine vetoed restart before mutation; message is safe for users.
+@dataclass(frozen=True)
+class PublishedRestartServices:
+    """Existing publish persistence supplied to an engine restart strategy.
 
-    Callers must preserve the old target and expose their existing failure
-    state. This is terminal, unlike an ambiguous provider submission failure.
+    The strategy owns its metadata and failure policy. Shared orchestration
+    supplies read, atomic ext mutation and status/ext CAS operations only.
     """
+
+    get_record: Callable[[int], BotPublishRecord | None]
+    mutate_ext: Callable[..., dict]
+    update_status: Callable[..., None]

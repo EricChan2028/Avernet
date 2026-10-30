@@ -605,9 +605,7 @@ async def test_instance_dispatch_uses_strategy_contract_not_coding_type():
     prepared.assert_called_once()
     assert prepared.call_args.args == (ctx,)
     kwargs = prepared.call_args.kwargs
-    dependencies = kwargs.pop('restart_dependencies')
-    assert kwargs == dict(device_id='target', operation_id=None, restart_key=None)
-    assert dependencies.baas_runtime() is runtime
+    assert kwargs == dict(device_id='target', target_runtime=runtime, operation_id=None, restart_key=None)
     assert not runtime.mock_calls
 
 

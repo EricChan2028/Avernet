@@ -21,7 +21,6 @@ from agentclaw.community.log import get_logger
 from .restart_arca import BoundArcaRestartExecutor, RestartBackupTargetChanged
 from .restart_dependencies import RestartBackupDependencies
 from .fastdisk_probe import detection_command, parse_detection_result
-from ..restart_contract import RestartPreconditionError
 from .restart_state import RestartSuperseded
 
 logger = get_logger()
@@ -40,7 +39,7 @@ class RestartBackupError(RuntimeError):
         self.reason = reason
 
 
-class RestartBackupBlocked(RestartBackupError, RestartPreconditionError):
+class RestartBackupBlocked(RestartBackupError):
     """Only a confirmed fastdisk target produces this terminal, sanitized veto."""
 
     def __init__(self, reason: str):
@@ -231,7 +230,7 @@ def _best_effort(callback, *, phase, bot_id, target_id, operation_id):
     """
     try:
         return callback()
-    except (RestartBackupTargetChanged, RestartPreconditionError, RestartSuperseded):
+    except (RestartBackupTargetChanged, RestartBackupBlocked, RestartSuperseded):
         raise
     except Exception as error:
         failure = error
@@ -249,7 +248,7 @@ def _backup_policy(callback, *, required, **identity):
         return _best_effort(callback, **identity)
     try:
         return callback()
-    except (RestartBackupTargetChanged, RestartPreconditionError, RestartSuperseded):
+    except (RestartBackupTargetChanged, RestartBackupBlocked, RestartSuperseded):
         raise
     except Exception as error:
         raise RestartBackupBlocked(error_reason(error)) from error
@@ -479,6 +478,10 @@ class AicodingRestartBackupMixin:
         return verify_and_fence
 
     async def prepare_restart_async(self, ctx, **kwargs):
+        if 'target_runtime' in kwargs:
+            kwargs['restart_dependencies'] = RestartBackupDependencies.for_instance(
+                kwargs.pop('target_runtime')
+            )
         verify = await asyncio.to_thread(self.prepare_restart, ctx, **kwargs)
         if verify is not None:
             await asyncio.to_thread(verify)
