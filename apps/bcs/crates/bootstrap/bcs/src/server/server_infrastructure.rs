@@ -718,6 +718,18 @@ impl BcsServer {
         // concrete Arc so the pipeline can be read off it before the
         // wider dyn MessageFlowService binding below.
         let caller_orchestration_pipeline = wired_message_flow.caller_dispatch_pipeline.clone();
+        // Owner→caller relay (design 2026-10-30): the same CallerRelayState
+        // the admission seam captured into — bot-submitted caller-aware runs
+        // redeem here. Absent relay state (relay disabled/unconfigured)
+        // stays None and every bot submission keeps caller-closed behavior.
+        let caller_relay_redeemer = wired_message_flow.caller_relay.as_ref().map(|relay| {
+            std::sync::Arc::new(
+                bcs_message_flow::caller_relay::CallerRelaySubmissionRedeemer::new(
+                    relay.ledger.clone(),
+                    relay.policy.clone(),
+                ),
+            ) as std::sync::Arc<dyn bcs_service_api::port::CallerRelayRedeemerPort>
+        });
         let message_flow: Arc<dyn MessageFlowService> = wired_message_flow;
         let speaking_leases = Some(lease_store);
         let mut delivery_startup_guard = crate::message_delivery_wiring::StartupGuard(Some(message_flow.clone()));
@@ -745,8 +757,7 @@ impl BcsServer {
                     )
                 }
             };
-            Arc::new(
-                CollaborationRuntime::new(
+            let collaboration_runtime_builder = CollaborationRuntime::new(
                     collaboration_store.clone(),
                     collaboration_store.clone(),
                     collaboration_store.clone(),
@@ -776,7 +787,17 @@ impl BcsServer {
                         .map(|pipeline| pipeline as Arc<
                             dyn bcs_service_api::port::OrchestrationInstanceRegistrar,
                         >),
-                )
+                );
+            // Owner→caller relay (design 2026-10-30): attach the redeemer
+            // AFTER the full-shape assembly so a relay capture can never
+            // register into a runtime that could not consume it; absent
+            // relay state keeps every bot submission caller-closed.
+            let collaboration_runtime = if let Some(redeemer) = caller_relay_redeemer.clone() {
+                collaboration_runtime_builder.with_caller_relay_redeemer(redeemer)
+            } else {
+                collaboration_runtime_builder
+            };
+            let collaboration_runtime = collaboration_runtime
                 .with_session_channel_outbound(session_channel_outbound)
                 .with_result_publisher(Arc::new(MessageFlowStateMachineResultPublisher::new(
                     message_flow.clone(),
@@ -785,8 +806,8 @@ impl BcsServer {
                 .with_frontend_delivery(frontend_delivery.clone())
                 .with_event_record_factory(
                     crate::eventing_wiring::event_record_factory(&config, event_repo.clone()),
-                ),
-            )
+                );
+            Arc::new(collaboration_runtime)
         };
         state_machine_terminal_observer.bind(collaboration_runtime.clone());
         let session_management = Arc::new(SessionManagementWithRuntimeCleanup::new(

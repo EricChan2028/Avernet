@@ -197,3 +197,36 @@ pub trait OrchestrationInstanceRegistrar: Send + Sync {
         workflow_run_id: &str,
     ) -> Result<bool, OrchestrationDispatchError>;
 }
+
+/// The redeemed capture for one relay-backed workflow submission (spec L62
+/// direction, design 2026-10-30): the session's current trusted human
+/// ingress plus the run-budget window the capture bounds. Identity material
+/// stays BCS-internal — a middle (submitting) bot never sees any of it.
+pub struct CallerRelayCapture {
+    pub ingress: crate::application::caller_identity::AuthenticatedHumanCallerIngress,
+    /// min(capture window, submission clock + instance ledger horizon) —
+    /// a run-budget fact, never an identity-validity verdict: the
+    /// credential's own expiry stays enforced where the token travels.
+    pub expires_at_ms: i64,
+}
+
+/// Owner→caller relay redemption for BOT-submitted orchestration runs (§8.5
+/// bridge入场券, spec L62 direction). One callback per submission with
+/// `caller_association` absent: the redeemer owns the deployment allowlist
+/// judgement — the submitting bot must be a declared `from_bot`, and EVERY
+/// execution-policy assignee of the parsed definition must fall inside
+/// that from_bot's `to_bot` side — plus the session-capture lookup.
+/// `None` is fail-closed (no live capture, expired, budget spent, or an
+/// unallowlisted edge) and the submission must refuse rather than degrade.
+#[async_trait::async_trait]
+pub trait CallerRelayRedeemerPort: Send + Sync {
+    async fn redeem_submission(
+        &self,
+        environment: &str,
+        group_id: &str,
+        session_id: &str,
+        submitted_by_bot: &str,
+        execution_assignees: &[String],
+        now_ms: i64,
+    ) -> Option<CallerRelayCapture>;
+}

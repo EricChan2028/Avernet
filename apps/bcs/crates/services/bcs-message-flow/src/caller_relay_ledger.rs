@@ -90,6 +90,29 @@ impl CallerRelayLedger {
         true
     }
 
+    /// Redemption receipt: the captured turn (for audit), the trusted
+    /// ingress itself, and the capture's own expiry — the window the
+    /// credential would mint, never a run-budget fiction.
+    pub fn redeem_capture(
+        &self,
+        env: &str,
+        session_id: &str,
+        now_ms: i64,
+    ) -> Option<(String, AuthenticatedHumanCallerIngress, i64)> {
+        let mut entries = self.entries.lock().expect("relay ledger lock");
+        let key = (env.to_string(), session_id.to_string());
+        let entry = entries.get_mut(&key)?;
+        if entry.expires_at_ms <= now_ms {
+            entries.remove(&key);
+            return None;
+        }
+        if entry.redeems_left == 0 {
+            return None;
+        }
+        entry.redeems_left -= 1;
+        Some((entry.root_turn_id.clone(), entry.ingress.clone(), entry.expires_at_ms))
+    }
+
     /// Take one relay redeem for the session's current human identity.
     /// Expired or budget-exhausted turns answer None and stay that way:
     /// an expired capture is REMOVED, not flagged — a later lookup inside

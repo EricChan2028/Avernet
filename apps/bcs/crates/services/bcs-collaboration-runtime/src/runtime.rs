@@ -180,6 +180,14 @@ pub struct CollaborationRuntime {
     /// association here at submission; without a registrar the run is
     /// Bot-only caller-closed by construction.
     caller_instance_registrar: Option<Arc<dyn bcs_service_api::port::OrchestrationInstanceRegistrar>>,
+    /// Owner→caller relay (spec L62 direction, design 2026-10-30): the
+    /// submission-time redemption seam for BOT-submitted caller-aware runs
+    /// whose `caller_association` the trusted adapter could not build. The
+    /// redeemer owns the deployment allowlist (the submitting bot plus
+    /// EVERY Execution-assignee edge) and the session's captured ingress;
+    /// None refuses the whole submission fail-closed. Absent = every bot
+    /// submission stays caller-closed exactly as today.
+    caller_relay_redeemer: Option<Arc<dyn bcs_service_api::port::CallerRelayRedeemerPort>>,
 }
 
 struct ResolvedDefinition {
@@ -237,6 +245,7 @@ impl CollaborationRuntime {
             caller_node_dispatch: None,
             caller_policy_resolver: None,
             caller_instance_registrar: None,
+            caller_relay_redeemer: None,
         }
     }
 
@@ -250,6 +259,23 @@ impl CollaborationRuntime {
         registrar: Arc<dyn bcs_service_api::port::OrchestrationInstanceRegistrar>,
     ) -> Self {
         self.caller_instance_registrar = Some(registrar);
+        self
+    }
+
+    /// Owner→caller relay (design 2026-10-30): attach the submission-time
+    /// redeemer. The full-shape caller assembly (registrar + resolver)
+    /// must already be wired — a redeemer without the bridge it feeds is a
+    /// misassembly and stays refused here so a relay capture can never
+    /// register into a composition that could not consume it.
+    pub fn with_caller_relay_redeemer(
+        mut self,
+        redeemer: Arc<dyn bcs_service_api::port::CallerRelayRedeemerPort>,
+    ) -> Self {
+        if self.caller_instance_registrar.is_some()
+            && self.caller_policy_resolver.is_some()
+        {
+            self.caller_relay_redeemer = Some(redeemer);
+        }
         self
     }
 
@@ -3229,6 +3255,33 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             completed_at: None,
         };
         let nodes = build_node_runs(&compiled, &run, &resolved_participant_bindings)?;
+        // Owner→caller relay (spec L62 direction, design 2026-10-30):
+        // pre-collect the Execution-policy assignees before `nodes` moves
+        // into the run store — a BOT-submitted caller-aware run whose
+        // association the adapter could not build redeems the session's
+        // captured identity for exactly these nodes. Runs without
+        // Execution assignees never touch the relay seam.
+        let relay_execution_assignees: Vec<String> = {
+            let mut assignees: Vec<String> = Vec::new();
+            if self.caller_relay_redeemer.is_some() {
+                if let Some(resolver) = self.caller_policy_resolver.as_ref() {
+                    let environment = bcs_config::resolve_env_str();
+                    for node in &nodes {
+                        let Some(assignee) = node.assignee_bot_id.as_deref() else { continue };
+                        if assignees.iter().any(|existing| existing == assignee) {
+                            continue;
+                        }
+                        if matches!(
+                            resolver.resolve(assignee, &environment).await,
+                            bcs_service_api::port::OrchestrationAssigneeResolution::Protected(_)
+                        ) {
+                            assignees.push(assignee.to_string());
+                        }
+                    }
+                }
+            }
+            assignees
+        };
         let node_count = nodes.len();
         let created = if is_one_shot_session_run {
             self.runs
@@ -3291,6 +3344,63 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 return Err(CollaborationRuntimeError::InvalidRequest(
                     "caller association supplied but no caller registrar is configured".into(),
                 ));
+            }
+        } else if let Some(redeemer) = self.caller_relay_redeemer.clone() {
+            // Owner→caller relay (spec L62 direction, design 2026-10-30): a
+            // BOT-submitted caller-aware run whose association the trusted
+            // adapter could not build. Only a run whose definition carries
+            // execution-policy caller NODES may (and needs to) redeem —
+            // every other bot submission keeps today's caller-closed
+            // behavior byte-for-byte. A refused redemption fails the whole
+            // submission: a half-caller run failing node-by-node is worse
+            // than one explicit refusal.
+            let environment = bcs_config::resolve_env_str();
+            if !relay_execution_assignees.is_empty() {
+                match redeemer
+                    .redeem_submission(
+                        &environment,
+                        &run.group_id,
+                        &run.session_id,
+                        // The submitting bot's id — the session-run command
+                        // carries it, the group-run path routes through
+                        // `caller_id`; a missing/blank id fails the
+                        // allowlist inside the redeemer, which is the
+                        // intended fail-closed shape for anonymous callers.
+                        cmd.caller_id.as_deref().unwrap_or(""),
+                        &relay_execution_assignees,
+                        bcs_protocol::now_ms() as i64,
+                    )
+                    .await
+                {
+                    Some(capture) => {
+                        if let Some(registrar) = self.caller_instance_registrar.clone() {
+                            let association = bcs_service_api::port::OrchestrationInstanceAssociation {
+                                workflow_run_id: run.run_id.clone(),
+                                environment,
+                                group_id: run.group_id.clone(),
+                                session_id: run.session_id.clone(),
+                                message_turn_id: format!("{}:000-panel", run.run_id),
+                                history_cutoff_seq: 0,
+                                expires_at_ms: capture.expires_at_ms,
+                                ingress: capture.ingress,
+                                now_ms: bcs_protocol::now_ms() as i64,
+                            };
+                            match registrar.register_instance(association).await {
+                                Ok(true) => tracing::info!(run_id = %run.run_id,
+                                    "state_machine: caller instance association relayed from the session capture (owner→caller relay)"),
+                                Ok(false) => tracing::warn!(run_id = %run.run_id,
+                                    "state_machine: relayed instance association refused (capacity); nodes stay caller-closed"),
+                                Err(error) => tracing::warn!(run_id = %run.run_id, %error,
+                                    "state_machine: relayed instance registration refused; nodes stay caller-closed"),
+                            }
+                        }
+                    }
+                    None => {
+                        return Err(CollaborationRuntimeError::InvalidRequest(
+                            "caller relay refused: no live captured identity for this session, or the submitter/execution assignees are not allowlisted".into(),
+                        ));
+                    }
+                }
             }
         }
         if !created {

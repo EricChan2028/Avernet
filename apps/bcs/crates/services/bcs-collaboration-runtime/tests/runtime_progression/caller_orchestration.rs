@@ -337,3 +337,189 @@ impl bcs_service_api::port::OrchestrationInstanceRegistrar for RecordingInstance
         Ok(true)
     }
 }
+
+// ---------------------------------------------------------------------------
+// Owner→caller relay for orchestration submissions (design 2026-10-30):
+// a BOT-submitted caller-aware run whose adapter association is absent
+// redeems the session's captured identity at submission. Some(capture) →
+// the instance association registers along the §8.5 bridge verbatim; None
+// refuses the whole run fail-closed; no execution assignees → the relay
+// seam stays untouched.
+// ---------------------------------------------------------------------------
+
+struct AllProtectedResolver;
+#[async_trait]
+impl bcs_service_api::port::OrchestrationCallerPolicyResolver for AllProtectedResolver {
+    async fn resolve(
+        &self,
+        _assignee_bot_id: &str,
+        _environment: &str,
+    ) -> bcs_service_api::port::OrchestrationAssigneeResolution {
+        bcs_service_api::port::OrchestrationAssigneeResolution::Protected(
+            bcs_service_api::port::OrchestrationAssigneePolicy::Execution,
+        )
+    }
+}
+
+struct OrdinaryResolver;
+#[async_trait]
+impl bcs_service_api::port::OrchestrationCallerPolicyResolver for OrdinaryResolver {
+    async fn resolve(
+        &self,
+        _assignee_bot_id: &str,
+        _environment: &str,
+    ) -> bcs_service_api::port::OrchestrationAssigneeResolution {
+        bcs_service_api::port::OrchestrationAssigneeResolution::Ordinary
+    }
+}
+
+struct CountingRedeemer {
+    calls: StdMutex<Vec<(String, Vec<String>)>>,
+    yields: bool,
+}
+impl CountingRedeemer {
+    fn yielding() -> Arc<Self> {
+        Arc::new(Self { calls: StdMutex::new(Vec::new()), yields: true })
+    }
+    fn refusing() -> Arc<Self> {
+        Arc::new(Self { calls: StdMutex::new(Vec::new()), yields: false })
+    }
+}
+#[async_trait]
+impl bcs_service_api::port::CallerRelayRedeemerPort for CountingRedeemer {
+    async fn redeem_submission(
+        &self,
+        _environment: &str,
+        _group_id: &str,
+        _session_id: &str,
+        submitted_by_bot: &str,
+        execution_assignees: &[String],
+        _now_ms: i64,
+    ) -> Option<bcs_service_api::port::CallerRelayCapture> {
+        self.calls
+            .lock()
+            .expect("redeemer lock")
+            .push((submitted_by_bot.to_string(), execution_assignees.to_vec()));
+        if !self.yields {
+            return None;
+        }
+        Some(bcs_service_api::port::CallerRelayCapture {
+            ingress: human_input_rearm_ingress(),
+            // Fixed sentinel: the registration must carry the capture's own
+            // window verbatim, and a constant makes that assertable.
+            expires_at_ms: 123_456_789,
+        })
+    }
+}
+
+#[tokio::test]
+async fn a_bot_submitted_caller_run_relays_the_session_capture_into_the_instance_association() {
+    let registrar = Arc::new(RecordingInstanceRegistrar::new());
+    let (runtime, _group_id, session_id) = human_input_rearm_setup(registrar.clone()).await;
+    let redeemer = CountingRedeemer::yielding();
+    let runtime = runtime_assembly_with_relay(runtime, redeemer.clone()).await;
+    runtime
+        .start_session_state_machine_run(StartSessionStateMachineRunCommand {
+            session_id: session_id.clone(),
+            caller_bot_id: "driver-bot".to_string(),
+            definition_yaml: one_shot_authoring_yaml(),
+participant_bindings: BTreeMap::from([(
+                "writer".to_string(),
+                RuntimeParticipantBinding {
+                    source: "manual".to_string(),
+                    bot_ids: vec!["driver-bot".to_string()],
+                    extensions: Default::default(),
+                },
+            )]),
+            opening_message: None,
+            input: Value::Null,
+            judge_available: false, caller_association: None,
+        })
+        .await
+        .expect("bot-submitted caller run redeems and starts");
+    let calls = redeemer.calls.lock().expect("redeemer lock");
+    assert_eq!(calls.len(), 1, "exactly one submission-level redemption");
+    assert_eq!(calls[0].0, "driver-bot", "the submitting bot is the relay from-side");
+    assert!(!calls[0].1.is_empty(), "at least one execution assignee was gated");
+    let registrations = registrar.registrations.lock().expect("registrar lock");
+    assert_eq!(registrations.len(), 1, "the relayed association registered along the §8.5 bridge");
+    assert_eq!(registrations[0].session_id, session_id);
+    assert_eq!(registrations[0].expires_at_ms, 123_456_789, "the capture's own window travels verbatim");
+    assert!(!registrations[0].workflow_run_id.trim().is_empty());
+    assert!(registrations[0].workflow_run_id.ends_with(":000-panel") || !registrations[0].message_turn_id.trim().is_empty());
+}
+
+#[tokio::test]
+async fn a_bot_submission_without_a_live_capture_refuses_the_whole_run() {
+    let registrar = Arc::new(RecordingInstanceRegistrar::new());
+    let (runtime, _group_id, session_id) = human_input_rearm_setup(registrar.clone()).await;
+    let runtime = runtime_assembly_with_relay(runtime, CountingRedeemer::refusing()).await;
+    let refused = runtime
+        .start_session_state_machine_run(StartSessionStateMachineRunCommand {
+            session_id: session_id.clone(),
+            caller_bot_id: "driver-bot".to_string(),
+            definition_yaml: one_shot_authoring_yaml(),
+participant_bindings: BTreeMap::from([(
+                "writer".to_string(),
+                RuntimeParticipantBinding {
+                    source: "manual".to_string(),
+                    bot_ids: vec!["driver-bot".to_string()],
+                    extensions: Default::default(),
+                },
+            )]),
+            opening_message: None,
+            input: Value::Null,
+            judge_available: false, caller_association: None,
+        })
+        .await
+        .expect_err("a refused relay redemption must fail the whole submission");
+    assert!(refused.to_string().contains("caller relay refused"), "{refused}");
+    let registrations = registrar.registrations.lock().expect("registrar lock");
+    assert!(registrations.is_empty(), "nothing registers on refusal");
+}
+
+/// Relay tests need the full-shape caller assembly (resolver + registrar)
+/// before the redeemer will attach — the same discipline the production
+/// wiring enforces. The dispatch port is a no-op: these tests assert the
+/// SUBMISSION-time effects, not the node wire.
+#[path = "../../../../test-support/message_flow_contract/registry_routing_fakes.rs"]
+mod registry_routing_fakes;
+
+struct NoopOrchestrationDispatch;
+#[async_trait]
+impl bcs_service_api::port::OrchestrationCallerDispatchPort for NoopOrchestrationDispatch {
+    async fn dispatch_orchestration_node(
+        &self,
+        _target: &BotDeliveryTarget,
+        _service_credential: &bcs_domain::RedactedToken,
+        _policy: bcs_service_api::port::OrchestrationAssigneePolicy,
+        _dispatch: bcs_service_api::port::OrchestrationNodeDispatch,
+    ) -> Result<bcs_service_api::port::CallerDispatchAck, bcs_service_api::port::OrchestrationDispatchError> {
+        Ok(bcs_service_api::port::CallerDispatchAck::Accepted {
+            control_revision: 0,
+            request_digest: "sha256:not-the-facts-one".into(),
+        })
+    }
+}
+
+async fn runtime_assembly_with_relay(
+    runtime: CollaborationRuntime,
+    redeemer: Arc<CountingRedeemer>,
+) -> CollaborationRuntime {
+    let registry = Arc::new(registry_routing_fakes::FakeRegistryService::default());
+    registry
+        .set_delivery_target(
+            "driver-bot",
+            registry_routing_fakes::FakeRegistryService::provider_target("driver-bot"),
+        )
+        .await;
+    let runtime = runtime
+        .with_bot_registry(registry)
+        .with_caller_node_dispatch(
+            Arc::new(NoopOrchestrationDispatch) as Arc<dyn bcs_service_api::port::OrchestrationCallerDispatchPort>,
+            Arc::new(AllProtectedResolver) as Arc<dyn bcs_service_api::port::OrchestrationCallerPolicyResolver>,
+        )
+        .with_caller_relay_redeemer(redeemer as Arc<dyn bcs_service_api::port::CallerRelayRedeemerPort>);
+    let _ = OrdinaryResolver;
+    runtime
+}

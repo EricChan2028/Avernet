@@ -5,6 +5,8 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
+
 use bcs_config_api::{CallerRelayConfig, CallerRelayRule};
 
 use crate::caller_relay_ledger::CallerRelayLedger;
@@ -50,5 +52,52 @@ impl CallerRelayState {
     /// The full relay check for one task-assign edge: exact (from, to) pair.
     pub fn allows_relay_edge(&self, from_bot: &str, to_bot: &str) -> bool {
         self.allows(|rule| rule.from_bot == from_bot && rule.to_bot == to_bot)
+    }
+}
+
+/// The production `CallerRelayRedeemerPort`: the owner→caller relay's
+/// orchestration-submission adapter (design 2026-10-30). The deployment
+/// allowlist decides — every execution assignee of the submitted run must
+/// be a declared `to_bot` of the submitting bot's rules — and the session
+/// ledger owns the capture. Identity material never leaves BCS: the
+/// middle (submitting) bot carries only the plain command.
+pub struct CallerRelaySubmissionRedeemer {
+    pub ledger: Arc<CallerRelayLedger>,
+    pub policy: CallerRelayConfig,
+}
+
+impl CallerRelaySubmissionRedeemer {
+    pub fn new(ledger: Arc<CallerRelayLedger>, policy: CallerRelayConfig) -> Self {
+        Self { ledger, policy }
+    }
+}
+
+#[async_trait::async_trait]
+impl bcs_service_api::port::CallerRelayRedeemerPort for CallerRelaySubmissionRedeemer {
+    async fn redeem_submission(
+        &self,
+        environment: &str,
+        _group_id: &str,
+        session_id: &str,
+        submitted_by_bot: &str,
+        execution_assignees: &[String],
+        now_ms: i64,
+    ) -> Option<bcs_service_api::port::CallerRelayCapture> {
+        if !self.policy.enabled || submitted_by_bot.trim().is_empty() {
+            return None;
+        }
+        // The to-side gate at submission time: every execution-policy
+        // assignee of this run must be a declared to_bot of the submitter.
+        if !execution_assignees.iter().all(|assignee| {
+            self.policy
+                .allow
+                .iter()
+                .any(|rule| rule.from_bot == submitted_by_bot && &rule.to_bot == assignee)
+        }) {
+            return None;
+        }
+        let (_turn, ingress, expires_at_ms) =
+            self.ledger.redeem_capture(environment, session_id, now_ms)?;
+        Some(bcs_service_api::port::CallerRelayCapture { ingress, expires_at_ms })
     }
 }
