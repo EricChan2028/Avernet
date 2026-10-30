@@ -578,9 +578,18 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(result.data["station_revoked_edges"], [7001, 7002])
         self.assertEqual(result.data["fresh_request_ids"], ["1002", "101002"])
 
-    def test_three_service_scope_cases_block_with_structured_gap(self):
+    def test_service_scope_fails_closed_at_each_executed_obligation(self):
         adapter, _ = self.adapter()
-        for method in ("run_ensure_bot", "run_tc_friend_auth_sync_readdress", "run_dept_scope_friend_ext"):
+        methods = (
+            "run_ensure_bot",
+            "run_tc_friend_request_create_accept",
+            "run_tc_friend_auth_sync_readdress",
+            "run_dept_scope_mixed_owner_patch",
+            "run_dept_scope_human_no_check",
+            "run_dept_scope_human_user_scope",
+            "run_dept_scope_bot_agent_scope",
+        )
+        for method in methods:
             with self.subTest(method=method):
                 with self.assertRaisesRegex(RunStateError, "PREPROD_SERVICE_SCOPE_GAP") as context:
                     getattr(adapter, method)()

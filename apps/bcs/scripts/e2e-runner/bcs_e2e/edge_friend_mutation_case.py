@@ -247,6 +247,80 @@ RELEASE_PARENT_IDS = tuple(row.parent for row in CASES[:7])
 BACKLOG_CASE_IDS = tuple(row.case_id for row in CASES[7:])
 BACKLOG_PARENT_IDS = tuple(row.parent for row in CASES[7:])
 
+TC_REQUIREMENT_ROWS = (
+    {
+        'id': 'EDGE_FRIEND_MUTATIONS.tc-friend-auth-sync-create-accept',
+        'kind': 'http', 'method': 'POST',
+        'path': '/collaboration/friend-connections/requests/{request_id}/accept',
+        'actor': 'FORWARDED_HUMAN',
+        'adapter_method': 'run_tc_friend_request_create_accept',
+        'expectation': (
+            'one forwarded Human request create and receiver-side accept build '
+            'the TC friendship before any sync receipt is claimed'),
+    },
+    {
+        'id': 'EDGE_FRIEND_MUTATIONS.tc-friend-auth-sync-principal',
+        'kind': 'http', 'method': 'GET',
+        'path': '/control/friend-auth-sync/requests',
+        'actor': 'MOCK_CONTROL',
+        'adapter_method': 'run_tc_friend_auth_sync_readdress',
+        'expectation': (
+            'accept produces exactly one TC friend-auth sync call and its '
+            'principal is re-addressed to bcs/backend while preserving the '
+            'approver subject'),
+    },
+)
+
+DEPT_REQUIREMENT_ROWS = (
+    {
+        'id': 'EDGE_FRIEND_MUTATIONS.dept-scope-mixed-owner-patch',
+        'kind': 'http', 'method': 'PATCH',
+        'path': '/openapi/v1/collaboration/bots/{bot_id}',
+        'actor': 'BOT_OWNER',
+        'adapter_method': 'run_dept_scope_mixed_owner_patch',
+        'expectation': (
+            'the owner writes mixed object, legacy-string and garbage '
+            'department-scope entries through one accepted Bot profile patch'),
+    },
+    {
+        'id': 'EDGE_FRIEND_MUTATIONS.dept-scope-human-no-check',
+        'kind': 'http', 'method': 'POST',
+        'path': '/collaboration/friend-connections/requests',
+        'actor': 'FORWARDED_HUMAN',
+        'adapter_method': 'run_dept_scope_human_no_check',
+        'expectation': (
+            'the Human create path runs no_check object/string parsing and '
+            'lands a bounded pending request'),
+    },
+    {
+        'id': 'EDGE_FRIEND_MUTATIONS.dept-scope-human-user-scope',
+        'kind': 'http', 'method': 'POST',
+        'path': '/collaboration/friend-connections/requests',
+        'actor': 'FORWARDED_HUMAN',
+        'adapter_method': 'run_dept_scope_human_user_scope',
+        'expectation': (
+            'the owner first writes non-empty user/agent object scopes, then '
+            'the Human create path parses user object/garbage entries in '
+            'isolation'),
+    },
+    {
+        'id': 'EDGE_FRIEND_MUTATIONS.dept-scope-bot-agent-scope',
+        'kind': 'http', 'method': 'POST',
+        'path': '/collaboration/friend-connections/requests',
+        'actor': 'BOT_CALLER',
+        'adapter_method': 'run_dept_scope_bot_agent_scope',
+        'expectation': (
+            'the Bot create path parses agent object/garbage entries in '
+            'isolation from the Human path'),
+    },
+)
+
+_REQUIREMENTS_BY_CASE = {
+    'LOCAL-EDGE-TC-FRIEND-AUTH-SYNC-01': TC_REQUIREMENT_ROWS,
+    'LOCAL-EDGE-DEPT-SCOPE-FRIEND-EXT-01': DEPT_REQUIREMENT_ROWS,
+}
+TOTAL_ASSERTION_COUNT = sum(len(_REQUIREMENTS_BY_CASE.get(row.case_id, (1,))) for row in CASES)
+
 
 def _source_digest() -> str:
     path = E2E_TEST_DIR / SOURCE_FILE
@@ -280,6 +354,22 @@ def edge_friend_mutation_case_spec(case_id: str) -> EdgeFriendMutationCase:
     return matches[0]
 
 
+def _case_requirements(spec: EdgeFriendMutationCase) -> tuple[dict, ...]:
+    """Return the executed assertion rows for one case without padding them."""
+    row = {
+        'id': spec.requirement_id,
+        'kind': spec.kind,
+        'method': spec.method,
+        'path': spec.path,
+        'actor': spec.actor,
+        'adapter_method': spec.adapter_method,
+        'expectation': spec.expectation,
+    }
+    if spec.case_id in _REQUIREMENTS_BY_CASE:
+        return _REQUIREMENTS_BY_CASE[spec.case_id]
+    return (row,)
+
+
 def edge_friend_mutation_source_binding(case_id: str) -> dict:
     """Bind one legacy entrypoint to its reviewed edge_permission.sh source."""
     spec = edge_friend_mutation_case_spec(case_id)
@@ -297,14 +387,7 @@ def edge_friend_mutation_source_binding(case_id: str) -> dict:
         'source_revision': digest,
         'parent': spec.parent,
         'sources': {SOURCE_FILE: digest},
-        'requirements': [{
-            'id': spec.requirement_id,
-            'kind': spec.kind,
-            'method': spec.method,
-            'path': spec.path,
-            'actor': spec.actor,
-            'expectation': spec.expectation,
-        }],
+        'requirements': [dict(row) for row in _case_requirements(spec)],
     }
 
 
@@ -312,28 +395,30 @@ def edge_friend_mutation_case_plan(case_id: str) -> CaseRewritePlan:
     """Build the declarative rewrite plan for one legacy entrypoint."""
     spec = edge_friend_mutation_case_spec(case_id)
     binding = edge_friend_mutation_source_binding(case_id)
+    rows = _case_requirements(spec)
+    requirements = tuple(CaseRewriteRequirement(
+        requirement_id=row['id'],
+        kind=row['kind'],
+        method=row['method'],
+        path=row['path'],
+        actor=row['actor'],
+        adapter_method=row['adapter_method'],
+        expectation=row['expectation'],
+    ) for row in rows)
     plan = CaseRewritePlan(
         case_id=spec.case_id,
         parent_id=spec.parent,
-        requirements=(CaseRewriteRequirement(
-            requirement_id=spec.requirement_id,
-            kind=spec.kind,
-            method=spec.method,
-            path=spec.path,
-            actor=spec.actor,
-            adapter_method=spec.adapter_method,
-            expectation=spec.expectation,
-        ),),
+        requirements=requirements,
         environments=_ENVS,
         binding=CaseRewriteBinding(
             case_id=spec.case_id,
             parent_id=spec.parent,
-            requirement_ids=(spec.requirement_id,),
+            requirement_ids=tuple(row['id'] for row in rows),
         ),
     )
     plan.validate()
-    row = binding['requirements'][0]
-    if (row['id'] != spec.requirement_id or plan.requirement_ids != (spec.requirement_id,)
-            or plan.adapters != {spec.requirement_id: spec.adapter_method}):
+    binding_ids = [row['id'] for row in binding['requirements']]
+    if (binding_ids != list(plan.requirement_ids)
+            or plan.adapters != {row['id']: row['adapter_method'] for row in rows}):
         raise RunStateError('edge friend-mutation source binding and case plan differ')
     return plan

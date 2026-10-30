@@ -13,6 +13,7 @@ from .edge_friend_mutation_case import (
     CASE_IDS,
     PARENTS,
     RELEASE_CASE_IDS,
+    TOTAL_ASSERTION_COUNT,
     edge_friend_mutation_case_plan,
 )
 from .inventory import current_manifest, executor_digest, reviewed_release_inventory
@@ -80,7 +81,7 @@ def _bound(root: Path):
              and binding.get('case_ids') == list(CASE_IDS)
              and binding.get('release_parent_case_ids') == list(RELEASE_CASE_IDS)
              and binding.get('backlog_case_ids') == list(BACKLOG_CASE_IDS)
-             and binding.get('expected_assertion_count') == len(CASE_IDS)
+             and binding.get('expected_assertion_count') == TOTAL_ASSERTION_COUNT
              and set(binding.get('source_bindings', {})) == set(CASE_IDS)
              and set(binding.get('selected_requirement_ids', {})) == set(CASE_IDS)
              and len(binding.get('legacy_inventory', [])) == len(current_manifest()['legacy_inventory'])

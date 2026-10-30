@@ -1,4 +1,4 @@
-"""The two backlog Edge TestCase adapters kept out of the reviewed 29-parent set.
+"""The two backlog Edge TestCase adapters kept out of the reviewed reviewed-release-parent set.
 
 They live in the same owned runtime and journal shape as the release parent
 cases, but remain independent slices: they do not enlarge the reviewed
@@ -32,7 +32,10 @@ _MIXED_SCOPE = {
             'F4858',
         ],
         'view_scope_user_friend_deps': [],
-        'view_scope_agent_friend_deps': [],
+        'view_scope_agent_friend_deps': [
+            {'deptNo': 'L3480'},
+            {'priority': 7},
+        ],
     },
 }
 _SCOPED_SHAPE = {
@@ -153,7 +156,7 @@ class OwnedEdgeFriendMutationExtrasMixin:
                           accepted_statuses=accepted_statuses,
                           extra_headers=headers)
 
-    def run_tc_friend_auth_sync_readdress(self) -> AdapterCall:
+    def run_tc_friend_request_create_accept(self) -> AdapterCall:
         row = self._begin()
         try:
             tc_bot = _TC_BOT_PREFIX + _TC_OWNER
@@ -164,14 +167,13 @@ class OwnedEdgeFriendMutationExtrasMixin:
             self._mock_request(method='POST',
                                path='/control/friend-auth-sync/clear', body={})
             approver = '153998'
-            principal = self._principal_token(user_id=approver,
-                                                username='tc-sync-approver',
-                                                issuer='backend')
+            principal = self._principal_token(
+                user_id=approver, username='tc-sync-approver', issuer='backend')
             _, created = self._forwarded_request(
                 method='POST', path='/collaboration/friend-connections/requests',
                 body={'to_bot': tc_bot, 'message': 'owned-local tc friend-auth sync'},
                 principal=principal, mock_user_id=approver, exact_status=200)
-            payload = created.get('data') or {}
+            payload = created.get('data') if isinstance(created, dict) else None
             request_ids = payload.get('request_ids') if isinstance(payload, dict) else None
             if (not isinstance(request_ids, list) or not request_ids
                     or not all(isinstance(item, str) and item for item in request_ids)
@@ -184,96 +186,214 @@ class OwnedEdgeFriendMutationExtrasMixin:
                      + quote(identifier(request_id, 'TC friend request ID'), safe='') + '/accept',
                 body={}, principal=principal, mock_user_id=approver,
                 exact_status=200)
-            accepted_data = accepted.get('data') or {}
+            accepted_data = accepted.get('data') if isinstance(accepted, dict) else None
             if (not isinstance(accepted_data, dict)
                     or not isinstance(accepted_data.get('edge_ids'), list)
                     or not accepted_data['edge_ids']):
                 raise RunStateError('TC friend accept did not build an edge')
-            view = self._mock_request(method='GET',
-                                      path='/control/friend-auth-sync/requests')
+            self._tc_state = {
+                'request_id': request_id, 'tc_bot': tc_bot,
+                'owner_work_no': _TC_OWNER, 'approver': approver,
+            }
+            return self._finish(row, evidence={
+                'http_status': 200, 'request_id': request_id,
+                'created_status': 'pending', 'accepted': True,
+                'bot_id': tc_bot, 'owner_work_no': _TC_OWNER,
+            }, data={
+                'request_id': request_id, 'created_status': 'pending',
+                'accepted': True, 'bot_id': tc_bot,
+                'owner_work_no': _TC_OWNER,
+            })
+        except BaseException as error:
+            self._blocked(row, error)
+            raise
+
+    def run_tc_friend_auth_sync_readdress(self) -> AdapterCall:
+        row = self._begin()
+        try:
+            state = getattr(self, '_tc_state', None)
+            if not isinstance(state, dict) or state.get('request_id') is None:
+                raise RunStateError('TC sync obligation requires its completed create/accept step')
+            view = self._mock_request(
+                method='GET', path='/control/friend-auth-sync/requests')
             requests = view.get('requests')
             if not isinstance(requests, list) or len(requests) != 1:
-                raise RunStateError('TC friend-auth sync did not produce exactly one bounded call')
+                raise RunStateError(
+                    'TC friend-auth sync did not produce exactly one bounded call')
             record = requests[0]
             body = record.get('body') if isinstance(record, dict) else None
-            if (not isinstance(body, dict) or body.get('bot_id') != _TC_BOT_PREFIX[:-1]
+            if (not isinstance(body, dict)
+                    or body.get('bot_id') != _TC_BOT_PREFIX[:-1]
                     or body.get('owner_work_no') != _TC_OWNER
                     or body.get('action') != 'grant'):
-                raise RunStateError('TC friend-auth sync body differs from the frozen contract')
+                raise RunStateError(
+                    'TC friend-auth sync body differs from the frozen contract')
             claims = self._principal_claims(record.get('principal') or '')
             principals = claims.get('principals')
             subject = principals[0].get('subject', {}) if (
                 isinstance(principals, list) and principals
                 and isinstance(principals[0], dict)) else {}
             if (claims.get('iss') != 'bcs' or claims.get('aud') != 'backend'
-                    or subject.get('id') != approver):
+                    or subject.get('id') != state['approver']):
                 raise RunStateError('TC principal re-address did not preserve the approver')
             return self._finish(row, evidence={
-                'http_status': 200, 'request_id': request_id,
+                'http_status': 200, 'request_id': state['request_id'],
                 'sync_call_count': 1, 'sync_issuer': 'bcs',
                 'sync_audience': 'backend', 'approver_preserved': True,
-                'bot_id': tc_bot, 'owner_work_no': _TC_OWNER,
+                'bot_id': state['tc_bot'], 'owner_work_no': state['owner_work_no'],
             }, data={
-                'request_id': request_id, 'sync_call_count': 1,
-                'bot_id': tc_bot, 'owner_work_no': _TC_OWNER,
+                'request_id': state['request_id'], 'sync_call_count': 1,
+                'bot_id': state['tc_bot'],
+                'owner_work_no': state['owner_work_no'],
+                'sync_issuer': 'bcs', 'sync_audience': 'backend',
+                'approver_subject_id': state['approver'],
             })
         except BaseException as error:
             self._blocked(row, error)
             raise
 
-    def run_dept_scope_friend_ext(self) -> AdapterCall:
+    def run_dept_scope_mixed_owner_patch(self) -> AdapterCall:
         row = self._begin()
         try:
             self.fixture_admission.ensure_case_bot(
                 case_id=self.case_id, bot_id=_FRIEND_EXT_BOT,
                 staff_no=_TC_OWNER, visibility='protected',
                 allow_write=True)
-            owner_principal = self._principal_token(user_id=_TC_OWNER,
-                                                      username='friend-ext-owner',
-                                                      issuer='gateway')
-            owner_headers = {'X-Avernet-Principal': owner_principal}
+            owner_principal = self._principal_token(
+                user_id=_TC_OWNER, username='friend-ext-owner', issuer='gateway')
             _, _ = self._wire(
                 method='PATCH',
                 path='/openapi/v1/collaboration/bots/' + quote(_FRIEND_EXT_BOT, safe=''),
-                body=_MIXED_SCOPE, extra_headers=owner_headers,
+                body=_MIXED_SCOPE,
+                extra_headers={'X-Avernet-Principal': owner_principal},
                 exact_status=200)
+            self._dept_state = {'bot_id': _FRIEND_EXT_BOT}
+            return self._finish(row, evidence={
+                'http_status': 200, 'owner_patch_status': 200,
+                'scope_shapes': ['object', 'legacy-string', 'garbage'],
+                'bot_uuid': _FRIEND_EXT_BOT,
+            }, data={
+                'owner_patch_status': 200,
+                'scope_shapes': ['object', 'legacy-string', 'garbage'],
+                'bot_uuid': _FRIEND_EXT_BOT,
+            })
+        except BaseException as error:
+            self._blocked(row, error)
+            raise
+
+    def _dept_payload(self, value: dict, name: str) -> tuple[object, str | None]:
+        payload = value.get('data') if isinstance(value, dict) else None
+        request_ids = payload.get('request_ids') if isinstance(payload, dict) else None
+        status = payload.get('status') if isinstance(payload, dict) else None
+        if (not isinstance(request_ids, list)
+                or not all(isinstance(item, str) and item for item in request_ids)
+                or not isinstance(status, str)):
+            raise RunStateError(name + ' did not expose a bounded request projection')
+        return status, request_ids[0] if request_ids else None
+
+    def run_dept_scope_human_no_check(self) -> AdapterCall:
+        row = self._begin()
+        try:
             applicant = '153998'
-            applicant_principal = self._principal_token(
+            principal = self._principal_token(
                 user_id=applicant, username='friend-ext-object-parser',
                 issuer='gateway')
-            self._forwarded_request(
+            _, created = self._forwarded_request(
                 method='POST', path='/collaboration/friend-connections/requests',
                 body={'to_bot': _FRIEND_EXT_BOT,
                       'message': 'owned-local object friend_ext parse'},
-                principal=applicant_principal, mock_user_id=applicant,
-                exact_status=200)
-            scoped_status, _ = self._wire(
+                principal=principal, mock_user_id=applicant, exact_status=200)
+            status, request_id = self._dept_payload(created, 'Human no-check create')
+            if status != 'pending' or request_id is None:
+                raise RunStateError('Human no-check create did not land a pending row')
+            return self._finish(row, evidence={
+                'http_status': 200, 'human_no_check_status': status,
+                'human_no_check_request_id': request_id,
+                'parser_path': 'human-no-check',
+            }, data={
+                'human_no_check_status': status,
+                'human_no_check_request_id': request_id,
+                'parser_path': 'human-no-check',
+            })
+        except BaseException as error:
+            self._blocked(row, error)
+            raise
+
+    def run_dept_scope_human_user_scope(self) -> AdapterCall:
+        row = self._begin()
+        try:
+            owner_principal = self._principal_token(
+                user_id=_TC_OWNER, username='friend-ext-owner', issuer='gateway')
+            _, _ = self._wire(
                 method='PATCH',
                 path='/openapi/v1/collaboration/bots/' + quote(_FRIEND_EXT_BOT, safe=''),
-                body=_SCOPED_SHAPE, extra_headers=owner_headers,
+                body=_SCOPED_SHAPE,
+                extra_headers={'X-Avernet-Principal': owner_principal},
                 exact_status=200)
-            second_status, _ = self._forwarded_request(
+            applicant = '511488'
+            principal = self._principal_token(
+                user_id=applicant, username='friend-ext-object-parser',
+                issuer='gateway')
+            human_http_status, scoped_status = self._forwarded_request(
                 method='POST', path='/collaboration/friend-connections/requests',
                 body={'to_bot': _FRIEND_EXT_BOT,
                       'message': 'owned-local scoped friend_ext parse'},
-                principal=applicant_principal, mock_user_id='511488',
+                principal=principal, mock_user_id=applicant,
                 exact_status=403, accepted_statuses=(200, 403))
-            bot_status, _ = self._wire(
+            if human_http_status == 200:
+                status, request_id = self._dept_payload(
+                    scoped_status, 'Human user-scope create')
+                if status not in ('pending', 'approved', 'public_no_edge'):
+                    raise RunStateError(
+                        'Human user-scope create did not land a bounded parser outcome')
+            else:
+                status, request_id = 'out_of_scope', None
+            return self._finish(row, evidence={
+                'http_status': human_http_status, 'scoped_patch_status': 200,
+                'human_user_scope_status': human_http_status,
+                'human_user_scope_outcome': status,
+                'human_user_scope_request_id': request_id,
+                'parser_path': 'human-user-scope',
+            }, data={
+                'scoped_patch_status': 200,
+                'human_user_scope_status': human_http_status,
+                'human_user_scope_outcome': status,
+                'human_user_scope_request_id': request_id,
+                'parser_path': 'human-user-scope',
+            })
+        except BaseException as error:
+            self._blocked(row, error)
+            raise
+
+    def run_dept_scope_bot_agent_scope(self) -> AdapterCall:
+        row = self._begin()
+        try:
+            bot_http_status, bot_created = self._wire(
                 method='POST', path='/collaboration/friend-connections/requests',
                 body={'to_bot': _FRIEND_EXT_BOT},
                 authorization=self._token('PM'),
                 exact_status=403, accepted_statuses=(200, 403))
+            if bot_http_status == 200:
+                status, request_id = self._dept_payload(
+                    bot_created, 'Bot agent-scope create')
+                if status not in ('pending', 'approved', 'public_no_edge'):
+                    raise RunStateError(
+                        'Bot agent-scope create did not land a bounded parser outcome')
+            else:
+                status, request_id = 'out_of_scope', None
             return self._finish(row, evidence={
-                'http_status': scoped_status,
-                'owner_patch_status': 200, 'human_object_status': 200,
-                'human_scoped_status': second_status,
-                'bot_scoped_status': bot_status,
-                'scope_shapes': ['object', 'legacy-string', 'garbage'],
-                'parser_paths': ['human-no-check', 'human-user-scope', 'bot-agent-scope'],
+                'http_status': bot_http_status,
+                'bot_agent_scope_status': bot_http_status,
+                'bot_agent_scope_outcome': status,
+                'bot_agent_scope_request_id': request_id,
+                'parser_path': 'bot-agent-scope',
                 'bot_uuid': _FRIEND_EXT_BOT,
             }, data={
-                'human_scoped_status': second_status,
-                'bot_scoped_status': bot_status,
+                'bot_agent_scope_status': bot_http_status,
+                'bot_agent_scope_outcome': status,
+                'bot_agent_scope_request_id': request_id,
+                'parser_path': 'bot-agent-scope',
+                'bot_uuid': _FRIEND_EXT_BOT,
             })
         except BaseException as error:
             self._blocked(row, error)

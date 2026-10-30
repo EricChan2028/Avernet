@@ -67,6 +67,34 @@ class HardFailureAdapter:
         raise RunStateError("station legacy revoke did not revoke exactly both edges")
 
 
+class BacklogGapAdapter:
+    def __init__(self, *args):
+        pass
+
+    def _gap(self):
+        error = RunStateError("PREPROD_SERVICE_SCOPE_GAP: unavailable material")
+        error.gap = {"gap": "PREPROD_SERVICE_SCOPE_GAP", "singlebox_closure": True}
+        raise error
+
+    def run_tc_friend_request_create_accept(self):
+        self._gap()
+
+    def run_tc_friend_auth_sync_readdress(self):
+        self._gap()
+
+    def run_dept_scope_mixed_owner_patch(self):
+        self._gap()
+
+    def run_dept_scope_human_no_check(self):
+        self._gap()
+
+    def run_dept_scope_human_user_scope(self):
+        self._gap()
+
+    def run_dept_scope_bot_agent_scope(self):
+        self._gap()
+
+
 class EdgeFriendMutationCaseRunTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -144,6 +172,33 @@ class EdgeFriendMutationCaseRunTests(unittest.TestCase):
         self.assertEqual(report["case_scope"]["public_operations"], [])
         self.assertEqual(report["documented_gaps"]["PREPROD_SERVICE_SCOPE_GAP"],
                          "ensure-bot, TC friend-auth sync, and department-scope extensions need a user-credential/mock-Provider batch unavailable in preprod.")
+
+    def test_backlog_case_receipts_expose_their_exact_parsed_density(self):
+        cases = (
+            ("tc-friend-auth-sync", "run_tc_friend_request_create_accept", 2,
+             "EDGE_FRIEND_MUTATIONS.tc-friend-auth-sync-create-accept"),
+            ("dept-scope-friend-ext", "run_dept_scope_mixed_owner_patch", 4,
+             "EDGE_FRIEND_MUTATIONS.dept-scope-mixed-owner-patch"),
+        )
+        for index, (case_key, adapter_method, expected, first_requirement) in enumerate(cases):
+            with self.subTest(case_key=case_key), patch(
+                    f"bcs_e2e.edge_friend_mutation_case_run.RemoteEdgeFriendMutationAdapter",
+                    BacklogGapAdapter):
+                state_dir = self.root / f"backlog-{index}"
+                report = dual_edge_friend_mutation_case_run(
+                    profile_path=self.gateway_path,
+                    station_profile_path=self.station_path,
+                    case_key=case_key,
+                    state_dir=state_dir,
+                    run_id=RUN_ID,
+                    allow_write=True,
+                    confirm_run_id=RUN_ID,
+                )
+            self.assertEqual(report["status"], "BLOCKED")
+            self.assertEqual(report["case"]["total_count"], expected)
+            self.assertEqual(report["execution"]["completed_count"], 0)
+            self.assertEqual(report["case"]["steps"][0]["requirement_id"], first_requirement)
+            self.assertEqual(report["resource_disposition"], "PREPROD_SERVICE_SCOPE_GAP")
 
     def test_non_gap_failure_keeps_unknown_mutations_disposition(self):
         report = self.invoke("friend-revoke", HardFailureAdapter())
