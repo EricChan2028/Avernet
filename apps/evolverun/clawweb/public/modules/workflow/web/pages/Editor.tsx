@@ -11,6 +11,7 @@ import WorkflowSettingsPanel from '../components/editor/WorkflowSettingsPanel'
 import { parseWorkflowYaml } from '../editor/yamlDraft'
 import { confirmDiscardEditor } from '../editor/navigation'
 import YamlEditor from '../components/YamlEditor'
+import ScriptFilesTab from '../components/ScriptFilesTab'
 import WorkflowHistoryPanel from '../components/WorkflowHistoryPanel'
 import { compactDiff, formatCurrentSpecForDiff, formatSpecForDiff, specsEqual, unifiedDiff } from '../components/WorkflowVersionDiff'
 import { api } from '@avernet/clawweb-shared/web/api/client'
@@ -54,6 +55,7 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [showMore, setShowMore] = useState(false)
   const [viewMode, setViewMode] = useState<ViewMode>('visual')
+  const [workspaceTab, setWorkspaceTab] = useState<'workflow' | 'scripts'>('workflow')
   const [showHistory, setShowHistory] = useState(false)
   const [showDeployGuide, setShowDeployGuide] = useState(false)
   const [deployCommandCopied, setDeployCommandCopied] = useState(false)
@@ -432,8 +434,23 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
 
   return (
     <div className={embedded ? 'flex h-full min-h-0 flex-col' : 'flex h-[calc(100vh-49px)] flex-col'}>
+      <div role="tablist" aria-label="编辑器工作区" className="flex shrink-0 gap-4 border-b border-border bg-card px-4">
+        {([['workflow', '工作流编排'], ['scripts', '脚本文件']] as const).map(([tab, label]) => <button
+          key={tab} id={`editor-tab-${tab}`} type="button" role="tab" aria-selected={workspaceTab === tab}
+          aria-controls={`editor-panel-${tab}`} tabIndex={workspaceTab === tab ? 0 : -1}
+          onClick={() => setWorkspaceTab(tab)}
+          onKeyDown={event => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+            event.preventDefault()
+            const next = tab === 'workflow' ? 'scripts' : 'workflow'
+            setWorkspaceTab(next)
+            document.getElementById(`editor-tab-${next}`)?.focus()
+          }}
+          className={`border-b-2 px-1 py-2.5 text-xs font-medium ${workspaceTab === tab ? 'border-primary text-primary' : 'border-transparent text-muted-foreground'}`}
+        >{label}</button>)}
+      </div>
       {/* Toolbar */}
-      <div className="flex min-h-12 items-center justify-between gap-4 border-b border-border bg-card px-4 py-2">
+      <div className="flex min-h-12 items-center justify-between gap-4 overflow-x-auto border-b border-border bg-card px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <span className="truncate font-mono text-xs font-medium text-slate-700">
             {spec ? `${spec.id}${spec.version !== undefined ? ` v${spec.version}` : ''}` : '未加载工作流'}
@@ -459,7 +476,7 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <div className="flex rounded-lg bg-slate-100 p-0.5" aria-label="编辑器视图">
+          <div hidden={workspaceTab !== 'workflow'} className={workspaceTab === 'workflow' ? 'flex rounded-lg bg-slate-100 p-0.5' : 'hidden'} aria-label="编辑器视图">
             <button
               onClick={() => setViewMode('visual')}
               className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'visual' ? 'bg-card text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
@@ -479,12 +496,12 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
               YAML
             </button>
           </div>
-          <button type="button" onClick={() => {
+          {workspaceTab === 'workflow' && <><button type="button" onClick={() => {
             if (hasPendingEdits) { setActionError?.('请先应用或放弃未完成的配置草稿'); return }
             setShowWorkflowSettings(open => !open)
           }} disabled={!spec} className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs text-muted-foreground disabled:opacity-40">流程设置</button>
           <button type="button" onClick={() => undo?.()} disabled={!canUndo || hasPendingEdits} aria-label="撤销" className="rounded px-2 py-1 text-muted-foreground disabled:opacity-30">↶</button>
-          <button type="button" onClick={() => redo?.()} disabled={!canRedo || hasPendingEdits} aria-label="重做" className="rounded px-2 py-1 text-muted-foreground disabled:opacity-30">↷</button>
+          <button type="button" onClick={() => redo?.()} disabled={!canRedo || hasPendingEdits} aria-label="重做" className="rounded px-2 py-1 text-muted-foreground disabled:opacity-30">↷</button></>}
           <button
             type="button"
             onClick={() => setShowHistory(true)}
@@ -508,7 +525,7 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
             disabled={!spec}
             className="rounded-lg bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
           >
-            {saveToDbMutation.isPending ? '保存中…' : '保存'}
+            {saveToDbMutation.isPending ? '保存中…' : workspaceTab === 'scripts' ? '保存工作流' : '保存'}
           </button>
           <button
             type="button"
@@ -516,7 +533,7 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
             disabled={!selectedWorkflowId || deployMutation.isPending}
             className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:text-slate-300"
           >
-            {deployMutation.isPending ? '部署中…' : '部署'}
+            {deployMutation.isPending ? '部署中…' : workspaceTab === 'scripts' ? '部署工作流' : '部署'}
           </button>
         </div>
       </div>
@@ -540,7 +557,7 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
       {hasPendingEdits && <div role="status" className="bg-warning/10 px-4 py-2 text-xs text-warning-foreground">有 {Object.keys(pendingEdits).length} 项未应用的配置。请在原编辑区域应用或放弃；画布修改、保存和部署已保护。</div>}
 
       {/* Main layout */}
-      <div className="flex flex-1 overflow-hidden">
+      <div id="editor-panel-workflow" role="tabpanel" aria-labelledby="editor-tab-workflow" hidden={workspaceTab !== 'workflow'} className={workspaceTab === 'workflow' ? 'flex min-h-0 flex-1 overflow-hidden' : 'hidden'}>
         {!embedded && (
           <WorkflowPackSidebar
             onSelectWorkflow={handleSelectWorkflow}
@@ -572,6 +589,10 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
             <button type="button" onClick={() => setShowWorkflowSettings(true)} disabled={!spec || hasPendingEdits} className="mt-5 rounded-lg border border-input px-3 py-2 text-xs text-muted-foreground disabled:opacity-40">查看流程设置</button>
           </aside>}
 
+      </div>
+
+      <div id="editor-panel-scripts" role="tabpanel" aria-labelledby="editor-tab-scripts" hidden={workspaceTab !== 'scripts'} className={workspaceTab === 'scripts' ? 'min-h-0 flex-1 overflow-hidden' : 'hidden'}>
+        {workspaceTab === 'scripts' && <ScriptFilesTab key={selectedWorkflowId ?? 'unsaved'} workflowId={selectedWorkflowId} />}
       </div>
 
       {/* YAML Import Modal */}

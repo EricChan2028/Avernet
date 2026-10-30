@@ -72,6 +72,7 @@ vi.mock('../../components/NodePropertyPanel', () => ({ default: () => null }))
 vi.mock('../../components/editor/WorkflowSettingsPanel', () => ({ default: () => null }))
 vi.mock('../../components/YamlEditor', () => ({ default: () => null }))
 vi.mock('../../components/WorkflowHistoryPanel', () => ({ default: () => null }))
+vi.mock('../../components/ScriptFilesTab', () => ({ default: ({ workflowId }: { workflowId: string | null }) => <div>脚本只读视图 {workflowId}</div> }))
 
 import Editor from '../Editor'
 
@@ -99,6 +100,19 @@ beforeEach(() => {
 })
 
 describe('editor save (DB + git snapshot) and server-side deploy', () => {
+  it('switches between workflow and script tabs without discarding workflow drafts', async () => {
+    mocks.pendingEdits = { yaml: '未应用' }
+    renderEditor()
+    expect(screen.getByRole('tab', { name: '工作流编排' })).toHaveAttribute('aria-selected', 'true')
+    await userEvent.click(screen.getByRole('tab', { name: '脚本文件' }))
+    expect(screen.getByText('脚本只读视图 wf-1')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '脚本文件' })).toHaveAttribute('aria-selected', 'true')
+    await userEvent.click(screen.getByRole('tab', { name: '工作流编排' }))
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    expect(screen.getByText('请先应用或放弃未完成的配置草稿，再保存。')).toBeInTheDocument()
+    expect(mocks.saveDb).not.toHaveBeenCalled()
+  })
+
   it('blocks save and deploy while configuration or YAML has an unapplied draft', async () => {
     mocks.pendingEdits = { yaml: '未应用' }
     renderEditor()

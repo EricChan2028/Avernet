@@ -14,6 +14,8 @@ import {
   createRunsRouter,
   createWorkflowsRouter,
 } from "@avernet/workflow/server";
+import { createPackScriptsRouter } from "@avernet/workflow/server/routes/pack-scripts";
+import { readPackScriptsFromRemote } from "@avernet/workflow/server/services/pack-script-read-service";
 import { createWorkflowNodeStatsRouter } from "@avernet/workflow/server/routes/workflow-node-stats";
 import { createWorkflowVersionComparisonService } from "@avernet/workflow/server/services/workflow-version-comparison-service";
 import { createWorkflowVersionSourceService } from "@avernet/workflow/server/services/workflow-version-source-service";
@@ -186,6 +188,17 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       const flowControlRepo = new FlowControlRepository(db);
       const execStepLogRepo = new ExecutionStepLogRepository(db);
       const facadeRepo = new FacadeBindingRepository(db);
+      // The public development identity can come from an unverified cookie.
+      // Do not expose scripts until a verified principal and Pack ACL exist.
+      app.use("/api/workflows", createPackScriptsRouter({
+        enabled: false,
+        resolvePrincipal: async () => null,
+        botPermRepo,
+        workflowSpecRepo,
+        readSnapshot: (workflowId, packId) => readPackScriptsFromRemote({
+          db, gitConfig: autoHealGitConfig, gitAuthor: autoHealAuthor, workflowId, packId,
+        }),
+      }));
       app.use("/api/workflows", createWorkflowsRouter(
         workflowSpecRepo,
         null,
