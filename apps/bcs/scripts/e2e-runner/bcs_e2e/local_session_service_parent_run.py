@@ -21,6 +21,7 @@ from .local_operator_cli_contract import (
     sessions_services_source_binding,
 )
 from .local_role_identity import OwnedLocalRoleIdentity
+from .local_session_service_completion import SESSION_SERVICE_ASSERTION_IDS
 from .local_session_service_parent_case import (
     PARENT_CASE_ID,
     PARENT_CASE_SUITE,
@@ -501,8 +502,10 @@ def local_session_service_parent_run(*, binary: Path, binary_sha256: str,
                   and read(runtime.root / BINDING_PATH) == binding
                   and read(runtime.root / CASE_PATH) == case
                   and case.get('status') == 'PASS'
-                  and case.get('completed_count') == 4
-                  and case.get('total_count') == 4
+                  and case.get('completed_count')
+                  == len(SESSION_SERVICE_ASSERTION_IDS)
+                  and case.get('total_count')
+                  == len(SESSION_SERVICE_ASSERTION_IDS)
                   and case.get('error_type') is None
                   and credentials.get('credential_memory') == 'CLEARED'
                   and shutdown.get('status') == 'STOPPED'

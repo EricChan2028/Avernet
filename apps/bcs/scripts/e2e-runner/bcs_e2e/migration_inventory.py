@@ -184,6 +184,7 @@ def migration_plan() -> dict:
         local_session_service_member_chat_adaptability,
     )
     from .local_session_service_completion import (
+        SESSION_SERVICE_ASSERTION_IDS,
         SESSION_SERVICE_COMPLETE_CASE_ID as SESSION_SERVICE_COMPLETE_CASE,
         SESSION_SERVICE_COMPLETE_REQUIREMENT as SESSION_SERVICE_COMPLETE_REQUIREMENT,
         SESSION_SERVICE_ROUNDTRIP_CASE_ID as SESSION_SERVICE_ROUNDTRIP_CASE,
@@ -335,6 +336,7 @@ def migration_plan() -> dict:
         SUITE as DRAFT_DELIVERY_SUITE,
         draft_delivery_source_binding,
     )
+    from .draft_delivery.dual_case_run import draft_delivery_adaptability
     from .provider_owner_contract import (
         CASE_ID as PROVIDER_OWNER_CASE_ID,
         REQUIREMENTS as PROVIDER_OWNER_REQUIREMENTS,
@@ -449,12 +451,12 @@ def migration_plan() -> dict:
         'status': 'LOCAL_EXECUTOR_ONLY_BACKLOG',
         'required_assertion_count': len(DRAFT_DELIVERY_REQUIREMENTS),
         'requirement_ids': list(DRAFT_DELIVERY_REQUIREMENTS),
-        'canonical_reporting': 'INTEGRATED_LOCAL',
-        'execution_command': 'local-draft-delivery-run',
-        'report_command': 'local-draft-delivery-report',
-        'required_parameters': ['binary', 'binary_sha256', 'state_dir', 'run_id',
-                                'confirm_run_id', 'allow_local_processes',
-                                'allow_fixture_write', 'allow_write'],
+        'canonical_reporting': 'DUAL_CASE_RECEIPT',
+        'execution_command': 'dual-draft-delivery-run',
+        'report_command': '',
+        'required_parameters': ['profile', 'binary', 'binary_sha256', 'cli_binary',
+                                'cli_binary_sha256', 'state_dir',
+                                'run_id', 'confirm_run_id', 'allow_write'],
         'binary_kind': 'bcs', 'auto_build': False,
         'environment': draft_delivery['environment'],
         'release_parent_denominator': False, 'independent_slice': True,
@@ -528,7 +530,7 @@ def migration_plan() -> dict:
              'report_command':'local-network-report','remote_validation':'NOT_RUN','grants_release_credit':False},
             {'suite':'owned-local-session-flow-v1','case_id':'LOCAL-SESSION-FLOW-01','case_version':1,
              'legacy_id':sessions['parent'],'status':'LOCAL_EXECUTOR_ONLY',
-             'required_assertion_count':9,'requirement_ids':[row['id'] for row in sessions['requirements']],
+             'required_assertion_count':87,'requirement_ids':[row['id'] for row in sessions['requirements']],
              'canonical_reporting':'INTEGRATED_LOCAL','execution_command':'local-session-run',
              'report_command':'local-session-report','remote_validation':'NOT_RUN','grants_release_credit':False},
             {'suite':'owned-local-provider-v1','case_id':'LOCAL-PROVIDER-01','case_version':1,
@@ -572,7 +574,7 @@ def migration_plan() -> dict:
              'remote_validation':'NOT_RUN','grants_release_credit':False},
             {'suite':SESSION_SERVICE_PARENT_CASE_SUITE,'case_id':SESSION_SERVICE_PARENT_CASE,'case_version':1,
              'legacy_id':sessions_services['parent'],'status':'LOCAL_EXECUTOR_ONLY',
-             'required_assertion_count':len(sessions_services['requirements']),
+             'required_assertion_count':len(SESSION_SERVICE_ASSERTION_IDS),
              'requirement_ids':[row['id'] for row in sessions_services['requirements']],
              'canonical_reporting':'INTEGRATED_LOCAL','execution_command':'execute_local_session_service_parent_case',
              'remote_validation':'NOT_RUN','grants_release_credit':False},
@@ -731,7 +733,8 @@ def migration_plan() -> dict:
                 operator_cli_adaptability(),
                 dual_direct_chat_adaptability(),
                 delivery_policy_adaptability(),
-                provider_subbots_adaptability()],
+                provider_subbots_adaptability(),
+                draft_delivery_adaptability()],
             'case_rewrite_plans': [{
                 'case_id': slow_judge_rewrite.case_id,
                 'parent_id': slow_judge_rewrite.parent_id,

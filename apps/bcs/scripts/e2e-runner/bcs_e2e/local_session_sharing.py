@@ -25,7 +25,8 @@ from .inventory import current_manifest, executor_digest
 from .ledger import Ledger, LedgerError
 from .local_cli import require_cli_binary
 from .local_role_identity import OwnedLocalRoleIdentity
-from .local_session_contract import REQUIREMENTS, session_source_binding
+from .local_session_contract import (
+    PUBLIC_ASSERTION_IDS, SHARING_ASSERTION_IDS, REQUIREMENTS, session_source_binding)
 from .profile import fingerprint, identifier, unique_keys
 from .run_state import RunStateError, read, write
 
@@ -58,6 +59,13 @@ CLI_OPERATIONS = (
     'h4-group-create', 'h5-group-create',
 )
 GROUP_HELPERS = ('h1', 'h2', 'h3', 'h4', 'h5')
+HELPER_ASSERTIONS = {
+    'h1': ('SESSION.cli-create-list-get',),
+    'h2': ('SESSION.group-invite',),
+    'h3': ('SESSION.cli-session-invite',),
+    'h4': ('SESSION.bot-groups', 'SESSION.bot-groups-contains'),
+    'h5': ('SESSION.invite-join',),
+}
 
 
 class LocalSessionSharingError(RunStateError):
@@ -172,7 +180,8 @@ class OwnedLocalSessionSharing:
                     or value.get('fixture_digest') != fingerprint(read(self.identities.fixtures.path))
                     or value.get('binding_digest') != fingerprint(self.public_binding)
                     or value.get('source_binding_digest') != fingerprint(self.source_binding)
-                    or value.get('assertions') != [{'id': REQUIREMENTS[0], 'status': 'PASS'}]
+                    or value.get('assertions') != [{'id': assertion_id, 'status': 'PASS'}
+                                                    for assertion_id in PUBLIC_ASSERTION_IDS]
                     or value.get('status') != 'LOCAL_SESSION_PUBLIC_PASS'
                     or value.get('storage_before_delete', {}).get('history', {}).get('row_count') != 4
                     or value.get('ledger', {}).get('resource_count') != 3
@@ -483,6 +492,14 @@ class OwnedLocalSessionSharing:
         self.state['checks'].append({'id': check_id, 'status': 'PASS', 'evidence': evidence})
         self._save()
 
+    def _assert(self, assertion_id: str, evidence: dict):
+        rows = [row for row in self.state['assertions'] if row['id'] == assertion_id]
+        if (assertion_id not in SHARING_ASSERTION_IDS or len(rows) != 1
+                or rows[0]['status'] != 'NOT_RUN'):
+            raise LocalSessionSharingError('Session sharing assertion ID is invalid or duplicated')
+        rows[0].update(status='PASS', evidence=evidence)
+        self._save()
+
     def _visibility(self, operation: str, method: str, expected: str) -> str:
         eng = self._id('ENG')
         if expected not in ('public', 'protected'):
@@ -710,13 +727,13 @@ class OwnedLocalSessionSharing:
             'helper': helper, 'group_id': group['id'], 'http_status': 200,
             'not_found_http_status': 404, 'sqlite': proof,
             'ledger_mark_order': ['session'] * len(child_handles) + ['group']})
-        requirement_index = GROUP_HELPERS.index(helper)
         self.state['helper_evidence'][helper]['cleanup_status'] = 'PASS'
-        self.state['assertions'][requirement_index]['status'] = 'PASS'
-        self._record_check(SELECTED[requirement_index], {
-            **self.state['helper_evidence'][helper],
-            'delete_http_status': 200, 'not_found_http_status': 404,
-            'sqlite_absence': 'PASS', 'ledger_children_before_parent': True})
+        evidence = {**self.state['helper_evidence'][helper],
+                    'delete_http_status': 200, 'not_found_http_status': 404,
+                    'sqlite_absence': 'PASS', 'ledger_children_before_parent': True}
+        for assertion_id in HELPER_ASSERTIONS[helper]:
+            self._assert(assertion_id, evidence)
+            self._record_check(assertion_id, evidence)
 
 
         after = owned_history_snapshot(self)
@@ -748,7 +765,8 @@ class OwnedLocalSessionSharing:
                             'retained_history': self.public_journal['storage_before_delete']['history']},
             'operations': [], 'checks': [], 'helper_evidence': {},
             'resources': {'groups': {}, 'sessions': {}},
-            'assertions': [{'id': requirement, 'status': 'NOT_RUN'} for requirement in SELECTED],
+            'assertions': [{'id': assertion_id, 'status': 'NOT_RUN'}
+                           for assertion_id in SHARING_ASSERTION_IDS],
             'full_parent_assertions': [{'id': requirement, 'status': 'NOT_RUN'} for requirement in REQUIREMENTS[6:]],
             'visibility': {'before': 'NOT_READ', 'admitted': 'NOT_RUN',
                            'after': 'NOT_READ', 'restored': False},
@@ -923,6 +941,8 @@ class OwnedLocalSessionSharing:
                         or not self.state['credential_contexts_cleared']['all_cleared']
                         or not self.state['visibility']['restored']
                         or len(self.state['deletion_proofs']) != 5
+                        or [row['id'] for row in self.state['assertions']]
+                        != list(SHARING_ASSERTION_IDS)
                         or any(row['status'] != 'PASS' for row in self.state['assertions'])):
                     raise LocalSessionSharingError('Session sharing final evidence is incomplete')
                 self.state.update(status='LOCAL_SESSION_SHARING_PASS',

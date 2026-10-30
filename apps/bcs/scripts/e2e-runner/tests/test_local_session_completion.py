@@ -108,14 +108,26 @@ class CompletionGuardTests(unittest.TestCase):
         spec=case._spec('lifecycle-session-delete')
         with self.assertRaisesRegex(LocalSessionCompletionError,'prior local deletion admission'):
             case._admit('lifecycle-session-delete',*spec)
+    def test_service_settings_accepts_exact_retired_410_and_ack_forms(self):
+        retired={'error':'service_policy_retired','message':'service_spec settings have been retired'}
+        self.assertEqual(OwnedLocalSessionCompletion._settings_form(410,retired),'retired_410')
+        self.assertEqual(OwnedLocalSessionCompletion._settings_form(200,{'service_spec':{'max_concurrency':2}}),'service_spec_ack')
+        with self.assertRaisesRegex(LocalSessionCompletionError,'retired service settings'):
+            OwnedLocalSessionCompletion._settings_form(410,{'error':'wrong','message':'private'})
+        with self.assertRaisesRegex(LocalSessionCompletionError,'acknowledgement'):
+            OwnedLocalSessionCompletion._settings_form(200,{'service_spec':{'max_concurrency':1}})
     def test_no_engine_queue_or_fake_reply_claims(self):
         source=(ROOT/'bcs_e2e/local_session_completion.py').read_text()
         self.assertIn("'engine':'NOT_STARTED'",source);self.assertIn("'service_business_execution':'NOT_CLAIMED'",source)
         self.assertIn("chat.get('delivered_count')!=0",source);self.assertNotIn('success ACK',source)
     def test_pass_is_written_only_after_cleanup_proof(self):
         source=(ROOT/'bcs_e2e/local_session_completion.py').read_text()
-        marker="self.state['assertions'][HELPERS.index(helper)]['status']='PASS'"
-        self.assertEqual(source.count(marker),1);self.assertGreater(source.index(marker),source.index('proof=deletion_proof'))
+        marker="self._record_check(helper,{'cleanup':'PASS','sqlite':proof})"
+        self.assertEqual(source.count(marker),1)
+        self.assertGreater(source.index(marker),source.index('proof=deletion_proof'))
+        cleanup_assert="self._assert('SESSION.complete-invoke.service-group-cleanup'"
+        self.assertEqual(source.count(cleanup_assert),1)
+        self.assertGreater(source.index(cleanup_assert),source.index("self._cleanup('complete'"))
 
 @unittest.skipUnless(BCS_BINARY and BCS_SHA and CLI_BINARY and CLI_SHA and shutil.which('lsof'),'approved actual binaries required')
 class CompletionLiveTests(unittest.TestCase):

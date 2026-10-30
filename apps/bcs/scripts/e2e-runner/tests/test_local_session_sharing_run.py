@@ -77,8 +77,8 @@ class SharingLifecycleLiveTests(unittest.TestCase):
         self.assertEqual(summary['status'], 'LOCAL_SLICE_PASS')
         self.assertEqual(result['shutdown']['status'], 'STOPPED')
         self.assertEqual(result['credentials']['credential_memory'], 'CLEARED')
-        self.assertEqual(summary['reports']['expected_assertion_count'], 6)
-        self.assertEqual(summary['reports']['observed_assertion_count'], 6)
+        self.assertEqual(summary['reports']['expected_assertion_count'], 37)
+        self.assertEqual(summary['reports']['observed_assertion_count'], 37)
         self.assertEqual(summary['reports']['parent_requirement_count'], 9)
         self.assertEqual(summary['requirements'], [{'id': name, 'status': 'PASS' if i < 6 else 'NOT_RUN'}
                                                    for i, name in enumerate(REQUIREMENTS)])

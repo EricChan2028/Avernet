@@ -365,7 +365,7 @@
     {
       "id": "story_collaboration_draft_delivery",
       "executor_migration": {
-        "mode": "LOCAL_ONLY",
+        "mode": "DUAL",
         "preprod_verdict": "NOT_RUN",
         "gates": [],
         "notes": []

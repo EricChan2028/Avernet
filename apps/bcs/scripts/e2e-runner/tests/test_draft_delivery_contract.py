@@ -21,22 +21,26 @@ sys.path.insert(0, str(ROOT))
 from bcs_e2e.inventory import (KNOWN_UNMAPPED_LEGACY_IDS, current_manifest,
                                reviewed_release_inventory)
 from bcs_e2e.run_state import RunStateError
+from bcs_e2e.draft_delivery.checks import OBLIGATION_CHECKS
 from bcs_e2e.draft_delivery.contract import (CONFIG_FRAGMENT, CONFIG_REQUIRED, ENVIRONMENT,
                                              FIXTURE_SOURCE, MARKER_PATTERNS,
                                              REDACTION_TOKENS, REQUIREMENTS, STORY_CHECKS,
-                                             STORY_MARKERS, STORY_SOURCE, draft_delivery_source_binding)
+                                             STORY_MARKERS, STORY_SOURCE,
+                                             draft_delivery_source_binding)
 from bcs_e2e.draft_delivery.story import EXPECTED_CHECKS
 
-GOOD_MARKER = 'Draft delivery story: 57 live HTTP assertions passed'
+GOOD_MARKER = 'Draft delivery story: 65 live HTTP assertions passed'
+ROW_KEYS = {'id', 'expectation', 'story_lines', 'anchors', 'markers'}
 
 
 class MarkerTests(unittest.TestCase):
     def test_marker_pattern_binds_the_exact_assertion_count(self):
         match = MARKER_PATTERNS[0].match(GOOD_MARKER)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), '57')
+        self.assertEqual(match.group(1), '65')
         self.assertIsNone(MARKER_PATTERNS[0].match(GOOD_MARKER[:-len(' passed')]))
         self.assertIsNone(MARKER_PATTERNS[0].match('Draft delivery story: 45 checks passed'))
+        self.assertIsNone(MARKER_PATTERNS[0].match('Draft delivery story: 65 checks passed'))
 
 
 class ContractTests(unittest.TestCase):
@@ -46,7 +50,7 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(value['suite'], 'owned-local-draft-delivery-v1')
         self.assertEqual(value['case_id'], 'LOCAL-DRAFT-DELIVERY-01')
         self.assertEqual([row['id'] for row in value['requirements']], list(REQUIREMENTS))
-        self.assertEqual(len(value['requirements']), 8)
+        self.assertEqual(len(value['requirements']), 32)
         self.assertEqual(value['story_checks'], STORY_CHECKS)
         self.assertEqual(value['story_markers'], list(STORY_MARKERS))
         self.assertEqual(value['environment'], ENVIRONMENT)
@@ -56,6 +60,14 @@ class ContractTests(unittest.TestCase):
         self.assertTrue(value['independent_slice'])
         self.assertEqual(value['redaction_tokens'], list(REDACTION_TOKENS))
         self.assertEqual(value['config_fragment']['required'], CONFIG_REQUIRED)
+
+    def test_requirement_rows_carry_anchors_and_markers(self):
+        for row in draft_delivery_source_binding()['requirements']:
+            self.assertEqual(set(row), ROW_KEYS, row['id'])
+            self.assertTrue(row['expectation'])
+            self.assertGreaterEqual(row['story_lines'][1], row['story_lines'][0])
+            self.assertTrue(row['anchors'])
+            self.assertEqual(row['markers'], ['draft-delivery-compliance'])
 
     def test_upstream_anchors_are_real_lines_inside_each_obligation(self):
         text = STORY_SOURCE.read_text(encoding='utf-8').splitlines()
@@ -69,22 +81,20 @@ class ContractTests(unittest.TestCase):
                 self.assertLessEqual(anchor['line'], end)
                 self.assertIn(anchor['literal'], text[anchor['line'] - 1], row['id'])
 
-    def test_all_eight_obligations_have_reverse_failure_semantics(self):
-        # Each obligation is implemented by one focused check function with
-        # explicit good and violating cases in test_draft_delivery_checks.py.
-        expected = {
-            'client-selected-idempotent-create', 'immutable-revision-append',
-            'stale-update-conflict', 'read-token-single-revision',
-            'revoked-or-deleted-unavailable', 'read-token-read-only',
-            'no-store-every-response', 'token-redaction',
-        }
-        self.assertEqual({name.split('.', 1)[1] for name in REQUIREMENTS}, expected)
+    def test_all_32_obligations_bind_one_check_function_each(self):
+        registered = {(obligation, function) for obligation, function in OBLIGATION_CHECKS}
+        self.assertEqual(len(registered), 32)
+        self.assertEqual({obligation for obligation, _ in registered}, set(REQUIREMENTS))
+        for name in REQUIREMENTS:
+            self.assertTrue(name.startswith('DRAFT-DELIVERY.'))
 
     def test_contract_tamper_matrix_is_rejected(self):
         original = draft_delivery_source_binding()
         mutations = {
             'drop-requirement': lambda value: value['requirements'].pop(),
-            'story-checks': lambda value: value.__setitem__('story_checks', 56),
+            'requirement-id': lambda value: value['requirements'][0].__setitem__(
+                'id', 'DRAFT-DELIVERY.offline-preview-wrong-id'),
+            'story-checks': lambda value: value.__setitem__('story_checks', 64),
             'credit': lambda value: value.__setitem__('grants_release_credit', True),
             'denominator': lambda value: value.__setitem__('release_parent_denominator', True),
             'independent': lambda value: value.__setitem__('independent_slice', False),
@@ -98,6 +108,7 @@ class ContractTests(unittest.TestCase):
             'sources-drop': lambda value: value['sources'].pop('indentation-regression.json'),
             'fixture-bytes': lambda value: value['fixture'].__setitem__('definition_yaml_bytes', 1),
             'runtime-auto-build': lambda value: value['owned_runtime_binary'].__setitem__('auto_build', True),
+            'cli-binary-package': lambda value: value['cli_runtime_binary'].__setitem__('package', 'bcs'),
         }
         for name, mutate in mutations.items():
             value = copy.deepcopy(original)
@@ -127,7 +138,7 @@ class ContractTests(unittest.TestCase):
 
     def test_story_checks_match_the_black_box_child_constant(self):
         self.assertEqual(STORY_CHECKS, EXPECTED_CHECKS)
-        self.assertEqual(STORY_CHECKS, 57)
+        self.assertEqual(STORY_CHECKS, 65)
 
     def test_parent_is_known_backlog_outside_release_denominator(self):
         manifest = current_manifest()
@@ -157,6 +168,21 @@ class ContractTests(unittest.TestCase):
         self.assertTrue(STORY_SOURCE.is_file())
         self.assertTrue(FIXTURE_SOURCE.is_file())
         self.assertTrue(CONFIG_FRAGMENT.is_file())
+
+
+    def test_cli_runtime_binary_block_is_frozen_with_the_separation_note(self):
+        cli_runtime = draft_delivery_source_binding()['cli_runtime_binary']
+        self.assertEqual(cli_runtime['package'], 'bcs-cli')
+        self.assertEqual(cli_runtime['build_command'], 'cargo build -p bcs-cli')
+        self.assertEqual(cli_runtime['hash_algorithm'], 'sha256')
+        self.assertEqual(cli_runtime['opt_in_env'],
+                         ['BCS_E2E_TEST_CLI_BINARY', 'BCS_E2E_TEST_CLI_BINARY_SHA256'])
+        self.assertFalse(cli_runtime['auto_build'])
+        self.assertEqual(cli_runtime['separation_note'],
+                         'The frozen journey splits runtime roles: bcs owns the server leg; '
+                         'bcs-cli owns every author-side Draft CLI step.')
+        self.assertEqual(cli_runtime['required_arguments'],
+                         ['--cli-binary', '--cli-binary-sha256'])
 
 
 if __name__ == '__main__':

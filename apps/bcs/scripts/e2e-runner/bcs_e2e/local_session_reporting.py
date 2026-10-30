@@ -12,6 +12,7 @@ import sqlite3
 
 from .inventory import current_manifest, executor_digest
 from .ledger import Ledger, LedgerError
+from .local_session_contract import PUBLIC_ASSERTION_IDS
 from .profile import fingerprint
 from .run_state import RunStateError, read
 
@@ -88,7 +89,7 @@ def _project(root, binding):
     _require(runtime.get('run_id') == binding['run_id']
              and runtime.get('binary_sha256') == binding['bcs_binary_sha256'],
              'Session public runtime binding differs')
-    expected = [{'id': V1_REQUIREMENTS[0], 'status': 'PASS'}]
+    expected = [{'id': name, 'status': 'PASS'} for name in PUBLIC_ASSERTION_IDS]
     assertions = case.get('assertions', [])
     complete = (case.get('status') == 'LOCAL_SESSION_PUBLIC_PASS' and assertions == expected
                 and case.get('run_id') == binding['run_id'] and case.get('case_id') == CASE_ID
@@ -101,12 +102,16 @@ def _project(root, binding):
     status = ('CANCELLED' if flow.get('status') == 'CANCELLED' else
               'PASS' if complete and stopped and cleared and flow.get('status') == 'LOCAL_SESSION_PUBLIC_PASS' else
               'FAIL' if any(r.get('status') == 'FAIL' for r in assertions) else 'BLOCKED')
+    public_all_pass = (len(assertions) == len(PUBLIC_ASSERTION_IDS)
+                       and all(r.get('status') == 'PASS' for r in assertions))
     return {'status': status, 'functional': 'PASS' if complete else 'INCOMPLETE',
             'evidence_status': 'PASS' if complete else 'INCOMPLETE',
             'cleanup': 'PASS' if complete and stopped and cleared else 'BLOCKED',
             'resource_disposition': case.get('disposition', 'UNVERIFIED'),
-            'requirements': [{'id': name, 'status': next((r['status'] for r in assertions if r.get('id') == name), 'NOT_RUN')}
-                             for name in V1_REQUIREMENTS], 'assertions': assertions}
+            'requirements': [{'id': name,
+                              'status': 'PASS' if (index == 0 and public_all_pass) else 'NOT_RUN'}
+                             for index, name in enumerate(V1_REQUIREMENTS)],
+            'assertions': assertions}
 
 
 V1_OPERATIONS = (
@@ -220,7 +225,7 @@ def _summary(binding, projected, issues):
                        'cleanup': projected.get('cleanup', 'BLOCKED'),
                        'resource_disposition': projected.get('resource_disposition', 'UNVERIFIED')}],
             'requirements': projected.get('requirements', [{'id': name, 'status': 'NOT_RUN'} for name in V1_REQUIREMENTS]),
-            'reports': {'expected_assertion_count': 1, 'parent_requirement_count': 9, 'observed_assertion_count': len(projected.get('assertions', []))},
+            'reports': {'expected_assertion_count': 31, 'parent_requirement_count': 9, 'observed_assertion_count': len(projected.get('assertions', []))},
             'integrity': {'status': 'BLOCKED' if issues else 'PASS', 'issues': issues}, 'routes': [],
             'cleanup': {'verification_scope': 'OWNED_PUBLIC_GROUP_SESSION_AND_RUNTIME_ONLY',
                         'physical_data_erasure': 'NOT_VERIFIED', 'associated_history_purge': 'NOT_PERFORMED'},

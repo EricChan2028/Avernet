@@ -1,4 +1,9 @@
-"""Canonical reports for the independent Draft delivery owned-local slice."""
+"""Canonical reports for the independent Draft delivery owned-local receipt.
+
+The dual preprod leg writes its machine-readable PASS or fail-closed BLOCKED
+evidence leaf under its own root outside this local receipt tree; this module
+stays the owned-local summary projection.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -77,8 +82,10 @@ def build_draft_delivery_summary(binding: dict, result: dict) -> dict:
             'executor_digest': binding['executor_digest'],
             'binary_kind': binding['binary_kind'],
             'bcs_binary_sha256': binding['bcs_binary_sha256'],
+            'cli_binary_sha256': binding['cli_binary_sha256'],
             'auto_build': False,
-            'required_arguments': ['--binary', '--binary-sha256'],
+            'required_arguments': ['--binary', '--binary-sha256',
+                                   '--cli-binary', '--cli-binary-sha256'],
         },
         'cases': [{
             'id': CASE_ID,
@@ -110,12 +117,12 @@ def build_draft_delivery_summary(binding: dict, result: dict) -> dict:
                              'live_verification': 'NOT_PERFORMED'},
         'verification_boundary': {
             'remote_validation': 'NOT_RUN',
-            'preprod': 'REMOTE_UNSUPPORTED',
+            'preprod': 'DUAL_PREPROD_LEG_OUTSIDE_THIS_LOCAL_RECEIPT',
             'grants_release_credit': False,
             'release_parent_denominator': False,
             'not_proven': [
                 'remote authentication and authorization',
-                'preprod Draft management reachability',
+                'preprod Draft management reachability (proven only by the dual preprod receipt leaf)',
                 'full release qualification',
             ],
         },

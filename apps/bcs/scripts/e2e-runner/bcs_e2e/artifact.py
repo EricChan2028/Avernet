@@ -127,6 +127,11 @@ def disk_digest() -> str:
     # focused source binding contract, owned adapter, run lifecycle and
     # offline report projection modules, so the allowance grows by exactly
     # those four files.
+    # The Session assertion-density backfill splits two reviewed 1,000-line
+    # modules instead of growing them: the product-CLI Session slices move to
+    # session_cli_contract and the public Session storage/deletion helpers to
+    # local_session_public_storage, so the flat count grows by exactly those
+    # two files (335 of 340).
     if len(paths) > 340:
         raise ValueError('executor artifact exceeds its source-file budget')
     digest = hashlib.sha256()

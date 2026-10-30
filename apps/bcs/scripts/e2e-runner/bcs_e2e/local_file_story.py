@@ -35,8 +35,10 @@ from .run_state import RunStateError, read, write
 CASE_ID = 'LOCAL-CLI-FILE-01'
 SUITE = 'owned-local-cli-file-v1'
 LEAVES = ('upload', 'list', 'capabilities', 'download', 'share', 'delete')
-REQUIREMENTS = ('setup', 'upload', 'list', 'capabilities', 'metadata', 'download',
-                'share', 'shared-metadata', 'shared-content', 'delete')
+REQUIREMENTS = ('setup', 'upload', 'list', 'capabilities',
+                'metadata-status', 'metadata-file-id', 'download', 'share',
+                'shared-metadata-status', 'shared-metadata-hides-session',
+                'shared-content-bytes', 'delete')
 PAYLOAD = b'bcs-e2e-session-file-payload\n'
 
 
@@ -162,6 +164,12 @@ class OwnedLocalFileStory:
             raise RunStateError('CLI-file HTTP observation was not successful')
         return raw if operation == 'shared-content' else json.loads(raw, object_pairs_hook=unique_keys)
 
+    def _last_status(self, operation: str) -> int | None:
+        for row in reversed(self.state['http_observations']):
+            if row.get('operation') == operation:
+                return row.get('http_status')
+        return None
+
     def _invoke(self, operation: str):
         from .local_file_exchange import LocalFileExchange
         self._active()
@@ -272,7 +280,9 @@ class OwnedLocalFileStory:
             self._assert('upload', bool(self.file_id) and self._expected().matches_metadata(metadata) and self._stored())
             self._assert('list', self._expected().matches_fresh_page(self._invoke('list')))
             self._assert('capabilities', self._expected().matches_local_capabilities(self._invoke('capabilities'), max_size=4096))
-            self._assert('metadata', self._expected().matches_metadata(self._http('metadata')))
+            observed_metadata = self._http('metadata')
+            self._assert('metadata-status', self._last_status('metadata') == 200)
+            self._assert('metadata-file-id', self._expected().matches_metadata(observed_metadata))
             self._invoke('download')
             self._assert('download', True)
             shared = self._invoke('share')
@@ -281,8 +291,14 @@ class OwnedLocalFileStory:
                          and isinstance(shared.get('share_url'), str) and bool(shared['share_url'])
                          and type(shared.get('expires_at')) is int and shared['expires_at'] > int(time.time()))
             self.capability = capability
-            self._assert('shared-metadata', self._expected().matches_shared_metadata(self._http('shared-metadata')))
-            self._assert('shared-content', self._http('shared-content') == PAYLOAD)
+            observed_shared_metadata = self._http('shared-metadata')
+            self._assert('shared-metadata-status', self._last_status('shared-metadata') == 200)
+            self._assert('shared-metadata-hides-session',
+                         isinstance(observed_shared_metadata, dict)
+                         and 'session_id' not in observed_shared_metadata
+                         and self._expected().matches_shared_metadata(observed_shared_metadata))
+            self._assert('shared-content-bytes',
+                         self._expected().matches_bytes(self._http('shared-content')))
             self._invoke('delete')
             deleted_metadata = self._http('deleted-metadata')
             deleted_shared_metadata = self._http('shared-deleted-metadata')

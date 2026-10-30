@@ -25,8 +25,11 @@ from .errors import has_cancellation
 from .inventory import current_manifest, executor_digest
 from .ledger import Ledger, LedgerError
 from .local_role_identity import OwnedLocalRoleIdentity
+from .local_session_public_storage import ROLES, LocalSessionPublicError
+from .local_session_public_storage import LocalSessionPublicStorageMixin
 from .local_session_contract import (
     PUBLIC_CASE as CASE_ID,
+    PUBLIC_ASSERTION_IDS,
     PUBLIC_SUITE as SUITE,
     REQUIREMENTS,
     session_source_binding,
@@ -37,7 +40,6 @@ from .profile import fingerprint, identifier, unique_keys
 from .run_state import RunStateError, read, write
 from .ws_transport import SessionWebSocketClient, WebSocketTransportError
 
-ROLES = ('CEO', 'PM', 'ENG', 'QA')
 CONTRACT = 'owned-local-session-public-v1'
 BINDING_NAME = 'session-binding.json'
 JOURNAL_NAME = 'local-session-public.json'
@@ -60,9 +62,6 @@ MUTATIONS = {'group-create', 'group-patch', 'session-create', 'session-patch',
              'session-delete', 'group-delete'}
 
 
-class LocalSessionPublicError(RunStateError):
-    pass
-
 
 def _credential(value: object, label: str) -> str:
     if (not isinstance(value, str) or not 1 <= len(value) <= 4096
@@ -76,7 +75,7 @@ def _json_copy(value):
     return json.loads(json.dumps(value, allow_nan=False))
 
 
-class OwnedLocalSessionPublic:
+class OwnedLocalSessionPublic(LocalSessionPublicStorageMixin):
     """Execute exactly ``SESSION.public-jwt-ws`` in one owned local runtime."""
 
     def __init__(self, identities: OwnedLocalRoleIdentity):
@@ -349,6 +348,7 @@ class OwnedLocalSessionPublic:
         data = cls._envelope(value, code=code)
         if data != {'error_code': error_code}:
             raise LocalSessionPublicError('Session public error envelope is not exact')
+        return data
 
     @staticmethod
     def _page_contains(data: object, field: str, expected: str):
@@ -437,6 +437,14 @@ class OwnedLocalSessionPublic:
         self.state['checks'].append({'id': check_id, 'status': 'PASS', 'evidence': evidence})
         self._save()
 
+    def _assert(self, assertion_id: str, evidence: dict):
+        rows = [row for row in self.state['assertions'] if row['id'] == assertion_id]
+        if (assertion_id not in PUBLIC_ASSERTION_IDS or len(rows) != 1
+                or rows[0]['status'] != 'NOT_RUN'):
+            raise LocalSessionPublicError('Session public assertion ID is invalid or duplicated')
+        rows[0].update(status='PASS', evidence=evidence)
+        self._save()
+
     def _fixture_snapshot(self) -> dict:
         self._active()
         receipt = read(self.identities.fixtures.path)
@@ -453,160 +461,6 @@ class OwnedLocalSessionPublic:
         return {'fixture_digest': fingerprint(receipt), 'role_ids': {
             role: roles[role]['bot_id'] for role in ROLES},
             'bot_rows_digest': fingerprint({'rows': rows}), 'bot_rows': len(rows)}
-
-    @staticmethod
-    def _bounded_rows(db, sql: str, params: tuple, maximum: int) -> list[dict]:
-        rows = [dict(row) for row in db.execute(sql, params).fetchmany(maximum + 1)]
-        if len(rows) > maximum:
-            raise LocalSessionPublicError('Session SQLite snapshot exceeded its finite bound')
-        return rows
-
-    def _unrelated_snapshot(self, *, exclude_group_id: str | None = None) -> dict:
-        """Finite control snapshot, excluding only this run's exact owned Group."""
-        if exclude_group_id is not None:
-            identifier(exclude_group_id, 'excluded owned Group ID')
-            group_clause, params = ' AND group_id<>?', ('local', exclude_group_id)
-        else:
-            group_clause, params = '', ('local',)
-        queries = {
-            'groups': ('SELECT group_id,status,driver_bot,group_kind,group_strategy '
-                       'FROM bcs_groups WHERE env=?' + group_clause + ' ORDER BY group_id', params, 8),
-            'group_participants': ('SELECT group_id,bot_uuid,role,actor_kind,mode '
-                                   'FROM bcs_group_participants WHERE env=?' + group_clause +
-                                   ' ORDER BY group_id,bot_uuid', params, 32),
-            'sessions': ('SELECT session_id,group_id,status,session_kind,session_title '
-                         'FROM bcs_group_sessions WHERE env=?' + group_clause +
-                         ' ORDER BY session_id', params, 16),
-            'session_participants': ('SELECT session_id,group_id,bot_uuid,role '
-                                     'FROM bcs_session_participants WHERE env=?' + group_clause +
-                                     ' ORDER BY session_id,bot_uuid', params, 64),
-            'messages': ('SELECT message_id,group_id,session_id,status FROM bcs_messages '
-                         'WHERE env=?' + group_clause + ' ORDER BY message_id', params, 64),
-            'deliveries': ('SELECT delivery_id,group_id,session_id,status FROM bcs_message_deliveries '
-                           'WHERE env=?' + group_clause + ' ORDER BY delivery_id', params, 64),
-            'state_machine_runs': ('SELECT run_id,group_id,session_id,status FROM bcs_state_machine_runs '
-                                   'WHERE env=?' + group_clause + ' ORDER BY run_id', params, 16),
-            'provider_bindings': ('SELECT bot_uuid FROM bcs_provider_bot_bindings '
-                                  'WHERE env=? ORDER BY bot_uuid', ('local',), 16),
-        }
-        result = {}
-        with OwnedSqliteDatabase(self.runtime)._connection() as db:
-            db.execute('BEGIN')
-            for name, (sql, values, maximum) in queries.items():
-                rows = self._bounded_rows(db, sql, values, maximum)
-                result[name] = {'row_count': len(rows), 'digest': fingerprint({'rows': rows})}
-        return result
-
-    def _owned_storage(self):
-        from .local_session_storage import owned_storage
-        return owned_storage(self)
-
-    def _deletion_admission(self, target: str) -> dict:
-        self._active()
-        if target not in ('session', 'group'):
-            raise LocalSessionPublicError('Session deletion target is not reviewed')
-        if (self.runtime.state != 'RUNNING' or not self.runtime.ready
-                or self.runtime.child is None or self.runtime.child.poll() is not None
-                or not self.runtime._owns_listener(1)):
-            raise LocalSessionPublicError('Session deletion requires live foreground-owned execution')
-        if self._ws_state != 'CLOSED' or self._ws_connection is not None:
-            raise LocalSessionPublicError('Session deletion requires the owned WebSocket to be closed first')
-        config = json.loads(self.runtime.inputs.config_path.read_text(), object_pairs_hook=unique_keys)
-        if (file_sha256(self.runtime.inputs.config_path) != self.identities.fixtures.config_digest
-                or config.get('store_messages') is not True
-                or config.get('eventing') != {'enabled': False, 'dispatcher_enabled': False}
-                or config.get('collaboration', {}).get('loop_execution_enabled') is not False
-                or config.get('llm') != {'type': 'none'}
-                or config.get('human_notify') != {'providers': []}
-                or config.get('security', {}).get('outbound_url') != {
-                    'block_private_networks': True, 'allow_loopback': False}):
-            raise LocalSessionPublicError('Session deletion requires isolated local transport-only configuration')
-        group_id = self._group_id()
-        bot_ids = [self._id(role) for role in ROLES]
-        with OwnedSqliteDatabase(self.runtime)._connection() as db:
-            providers = db.execute(
-                'SELECT bot_uuid FROM bcs_provider_bot_bindings WHERE env=? '
-                'AND bot_uuid IN (?,?,?,?) LIMIT 1', ('local', *bot_ids)).fetchall()
-            deliveries = db.execute(
-                'SELECT delivery_id FROM bcs_message_deliveries WHERE env=? AND group_id=? LIMIT 1',
-                ('local', group_id)).fetchall()
-            runs = db.execute(
-                'SELECT run_id FROM bcs_state_machine_runs WHERE env=? AND group_id=? LIMIT 1',
-                ('local', group_id)).fetchall()
-        if providers or deliveries or runs:
-            raise LocalSessionPublicError('Session deletion cannot admit Provider, queued delivery, or state-machine work')
-        return {'target': target, 'status': 'LOCAL_DELETION_ADMITTED',
-                'contract': 'owned-local-foreground-transport-only-v1',
-                'foreground_runtime': 'LIVE_OWNED_CHILD', 'websocket': 'CLOSED',
-                'isolated_config': True, 'store_messages': True, 'provider_bindings': 0,
-                'queued_deliveries': 0, 'state_machine_runs': 0,
-                'receiver_mode': 'NOT_OPENED', 'engine_started_by_executor': False,
-                'business_session_terminal': 'NOT_CLAIMED',
-                'remote_quiescence': 'NOT_APPLICABLE'}
-
-    def _verify_session_deleted_storage(self) -> dict:
-        group_id, initial_id = self._group_id(), self._initial_session_id()
-        session_id = self.state['resources']['session']['id']
-        self._resource(self._explicit_session_handle, kind='session', resource_id=session_id)
-        with OwnedSqliteDatabase(self.runtime)._connection() as db:
-            db.execute('BEGIN')
-            counts = {
-                'session_rows': db.execute('SELECT COUNT(*) FROM bcs_group_sessions WHERE env=? AND session_id=?',
-                                           ('local', session_id)).fetchone()[0],
-                'session_participant_rows': db.execute('SELECT COUNT(*) FROM bcs_session_participants WHERE env=? AND session_id=?',
-                                                       ('local', session_id)).fetchone()[0],
-                'message_rows': db.execute('SELECT COUNT(*) FROM bcs_messages WHERE env=? AND session_id=?',
-                                           ('local', session_id)).fetchone()[0],
-                'delivery_rows': db.execute('SELECT COUNT(*) FROM bcs_message_deliveries WHERE env=? AND session_id=?',
-                                            ('local', session_id)).fetchone()[0],
-                'state_machine_run_rows': db.execute('SELECT COUNT(*) FROM bcs_state_machine_runs WHERE env=? AND session_id=?',
-                                                     ('local', session_id)).fetchone()[0],
-                'group_rows': db.execute('SELECT COUNT(*) FROM bcs_groups WHERE env=? AND group_id=?',
-                                         ('local', group_id)).fetchone()[0],
-                'initial_session_rows': db.execute('SELECT COUNT(*) FROM bcs_group_sessions WHERE env=? AND session_id=?',
-                                                   ('local', initial_id)).fetchone()[0],
-            }
-        expected = {'session_rows': 0, 'session_participant_rows': 0,
-                    'message_rows': 2, 'delivery_rows': 0,
-                    'state_machine_run_rows': 0, 'group_rows': 1,
-                    'initial_session_rows': 1}
-        if counts != expected:
-            raise LocalSessionPublicError('Explicit Session deletion cascade is not exact')
-        from .local_session_storage import history_snapshot
-        if history_snapshot(self) != self.state['storage_before_delete']['history']:
-            raise LocalSessionPublicError('Explicit Session deletion changed retained bootstrap history')
-        return {'status': 'PASS', **counts, 'history_preserved': True}
-
-    def _verify_group_deleted_storage(self) -> dict:
-        group_id = self.state['resources']['group']['id']
-        session_ids = (self.state['resources']['group']['initial_session_id'],
-                       self.state['resources']['session']['id'])
-        with OwnedSqliteDatabase(self.runtime)._connection() as db:
-            db.execute('BEGIN')
-            counts = {
-                'group_rows': db.execute('SELECT COUNT(*) FROM bcs_groups WHERE env=? AND group_id=?',
-                                         ('local', group_id)).fetchone()[0],
-                'group_participant_rows': db.execute('SELECT COUNT(*) FROM bcs_group_participants WHERE env=? AND group_id=?',
-                                                     ('local', group_id)).fetchone()[0],
-                'session_rows': db.execute('SELECT COUNT(*) FROM bcs_group_sessions WHERE env=? AND group_id=?',
-                                           ('local', group_id)).fetchone()[0],
-                'session_participant_rows': db.execute('SELECT COUNT(*) FROM bcs_session_participants WHERE env=? AND group_id=?',
-                                                       ('local', group_id)).fetchone()[0],
-                'message_rows': db.execute('SELECT COUNT(*) FROM bcs_messages WHERE env=? AND group_id=?',
-                                           ('local', group_id)).fetchone()[0],
-                'delivery_rows': db.execute('SELECT COUNT(*) FROM bcs_message_deliveries WHERE env=? AND group_id=?',
-                                            ('local', group_id)).fetchone()[0],
-                'state_machine_run_rows': db.execute('SELECT COUNT(*) FROM bcs_state_machine_runs WHERE env=? AND group_id=?',
-                                                     ('local', group_id)).fetchone()[0],
-            }
-        if any(value != (4 if key == 'message_rows' else 0) for key, value in counts.items()):
-            raise LocalSessionPublicError('Group deletion cascade or retained history is not exact')
-        from .local_session_storage import history_snapshot
-        if history_snapshot(self) != self.state['storage_before_delete']['history']:
-            raise LocalSessionPublicError('Group deletion changed retained bootstrap history')
-        if len(set(session_ids)) != 2:
-            raise LocalSessionPublicError('Session deletion inventory lost distinct Session IDs')
-        return {'status': 'PASS', **counts, 'history_preserved': True}
 
     def _connect_websocket(self, token: str):
         if len(self.state['operations']) != OPERATIONS.index('session-ws-connect'):
@@ -704,7 +558,8 @@ class OwnedLocalSessionPublic:
             'fixture_digest': self.fixture_digest, 'requirement_id': REQUIREMENTS[0],
             'source_binding_digest': fingerprint(self.source_binding),
             'operations': [], 'checks': [], 'resources': {},
-            'assertions': [{'id': REQUIREMENTS[0], 'status': 'NOT_RUN'}],
+            'assertions': [{'id': assertion_id, 'status': 'NOT_RUN'}
+                           for assertion_id in PUBLIC_ASSERTION_IDS],
             'websocket': {'status': 'NOT_OPENED', 'messages_sent': 0,
                           'business_messages_received': 0},
             'deletion_admission': [], 'ledger': {'status': 'NOT_OPENED'},
@@ -727,12 +582,20 @@ class OwnedLocalSessionPublic:
                 self._save()
 
                 value, _ = self._request('groups-missing-principal')
-                self._error_envelope(value, code=40_100, error_code='unauthenticated')
+                error = self._error_envelope(value, code=40_100, error_code='unauthenticated')
                 self._check('missing-principal-401', {'http_status': 401, 'error_code': 'unauthenticated'})
+                self._assert('SESSION.public-jwt-ws.missing-principal-rejected',
+                             {'http_status': 401})
+                self._assert('SESSION.public-jwt-ws.missing-principal-envelope',
+                             {'error_code': error['error_code']})
 
                 value, _ = self._request('groups-unknown-field')
-                self._error_envelope(value, code=40_000, error_code='invalid_request')
+                error = self._error_envelope(value, code=40_000, error_code='invalid_request')
                 self._check('unknown-create-field-400', {'http_status': 400, 'error_code': 'invalid_request'})
+                self._assert('SESSION.public-jwt-ws.unknown-field-rejected',
+                             {'http_status': 400})
+                self._assert('SESSION.public-jwt-ws.unknown-field-envelope',
+                             {'error_code': error['error_code']})
 
                 value, _ = self._request('bots-mine')
                 mine = self._envelope(value, code=20_000, message='OK')
@@ -742,6 +605,8 @@ class OwnedLocalSessionPublic:
                 if not {self._id(role) for role in ROLES} <= owned_ids:
                     raise LocalSessionPublicError('Owned Bot list omitted workspace fixtures')
                 self._check('public-bots-mine', {'http_status': 200, 'owned_fixture_count': 4})
+                self._assert('SESSION.public-jwt-ws.bots-mine',
+                             {'owned_fixture_count': len(owned_ids)})
 
                 value, _ = self._request('bots-query')
                 queried = self._envelope(value, code=20_000, message='OK')
@@ -750,12 +615,18 @@ class OwnedLocalSessionPublic:
                         != {self._id('PM'), self._id('ENG')}):
                     raise LocalSessionPublicError('Public Bot query response differs from the exact request')
                 self._check('public-bots-query', {'http_status': 200, 'bot_count': 2})
+                self._assert('SESSION.public-jwt-ws.bots-query',
+                             {'bot_count': len(queried['items'])})
 
                 value, _ = self._request('bot-detail')
                 detail = self._envelope(value, code=20_000, message='OK')
                 if not isinstance(detail, dict) or detail.get('bot_id') != self._id('PM'):
                     raise LocalSessionPublicError('Public Bot detail did not identify PM')
                 self._check('public-bot-detail', {'http_status': 200, 'role': 'PM'})
+                self._assert('SESSION.public-jwt-ws.bot-detail',
+                             {'http_status': 200})
+                self._assert('SESSION.public-jwt-ws.bot-detail-product-manager',
+                             {'bot_id': detail['bot_id']})
 
                 group_request = 'e2e-session-public-group-' + uuid.uuid4().hex
                 handles = ledger.group_creation_intent(CASE_ID, 1, group_request)
@@ -779,22 +650,36 @@ class OwnedLocalSessionPublic:
                 event['candidate_ids'] = {'group': group_id, 'initial_session': initial_id}
                 self._save()
                 self._check('group-create-201', {'http_status': 201, 'implicit_initial_session': True})
+                self._assert('SESSION.public-jwt-ws.group-create',
+                             {'http_status': 201})
+                self._assert('SESSION.public-jwt-ws.group-create-id',
+                             {'group_id': group_id})
 
                 value, _ = self._request('group-list')
                 self._page_contains(self._envelope(value, code=20_000, message='OK'), 'group_id', group_id)
                 self._check('group-list', {'http_status': 200, 'contains_owned_group': True})
+                self._assert('SESSION.public-jwt-ws.group-list',
+                             {'contains_owned_group': True})
 
                 value, _ = self._request('group-detail')
                 group_detail = self._envelope(value, code=20_000, message='OK')
                 if not isinstance(group_detail, dict) or group_detail.get('group_id') != group_id:
                     raise LocalSessionPublicError('Public Group detail identity differs')
                 self._check('group-detail', {'http_status': 200, 'group_id_match': True})
+                self._assert('SESSION.public-jwt-ws.group-detail',
+                             {'http_status': 200})
+                self._assert('SESSION.public-jwt-ws.group-detail-id',
+                             {'group_id': group_detail['group_id']})
 
                 value, _ = self._request('group-patch')
                 patched = self._envelope(value, code=20_000, message='OK')
                 if not isinstance(patched, dict) or patched.get('name') != 'JWT connection E2E updated':
                     raise LocalSessionPublicError('Public Group update did not retain the new name')
                 self._check('group-patch', {'http_status': 200, 'name_updated': True})
+                self._assert('SESSION.public-jwt-ws.group-patch',
+                             {'http_status': 200})
+                self._assert('SESSION.public-jwt-ws.group-patch-name',
+                             {'name': patched['name']})
 
                 session_request = 'e2e-session-public-explicit-' + uuid.uuid4().hex
                 session_handle = ledger.intent(CASE_ID, 1, 'session', session_request, parent=handles[0])
@@ -815,6 +700,10 @@ class OwnedLocalSessionPublic:
                 event['candidate_ids'] = {'session': session_id}
                 self._save()
                 self._check('session-create-201', {'http_status': 201, 'explicit_session': True})
+                self._assert('SESSION.public-jwt-ws.session-create',
+                             {'http_status': 201})
+                self._assert('SESSION.public-jwt-ws.session-create-id',
+                             {'session_id': session_id})
 
                 value, _ = self._request('session-list')
                 # The original no-view request is Human-relative. This Human owns
@@ -827,18 +716,28 @@ class OwnedLocalSessionPublic:
                 self._page_contains(self._envelope(value, code=20_000, message='OK'),
                                     'session_id', session_id)
                 self._check('session-list', {'http_status': 200, 'contains_explicit_session': True, 'view_role': 'PM'})
+                self._assert('SESSION.public-jwt-ws.session-list',
+                             {'contains_explicit_session': True})
 
                 value, _ = self._request('session-detail')
                 session_detail = self._envelope(value, code=20_000, message='OK')
                 if not isinstance(session_detail, dict) or session_detail.get('session_id') != session_id:
                     raise LocalSessionPublicError('Public Session detail identity differs')
                 self._check('session-detail', {'http_status': 200, 'session_id_match': True})
+                self._assert('SESSION.public-jwt-ws.session-detail',
+                             {'http_status': 200})
+                self._assert('SESSION.public-jwt-ws.session-detail-id',
+                             {'session_id': session_detail['session_id']})
 
                 value, _ = self._request('session-patch')
                 patched = self._envelope(value, code=20_000, message='OK')
                 if not isinstance(patched, dict) or patched.get('title') != 'JWT connection E2E updated':
                     raise LocalSessionPublicError('Public Session update did not retain the new title')
                 self._check('session-patch', {'http_status': 200, 'title_updated': True})
+                self._assert('SESSION.public-jwt-ws.session-patch',
+                             {'http_status': 200})
+                self._assert('SESSION.public-jwt-ws.session-patch-title',
+                             {'title': patched['title']})
 
                 value, _ = self._request('session-messages')
                 messages = self._envelope(value, code=20_000, message='OK')
@@ -846,6 +745,8 @@ class OwnedLocalSessionPublic:
                 self.state['history_readback'] = verify_history(self, messages)
                 self._check('session-messages', {'http_status': 200, 'message_count': len(messages),
                                                 'kind': 'PERSISTED_PER_RECIPIENT_BOOTSTRAP'})
+                self._assert('SESSION.public-jwt-ws.session-messages',
+                             {'message_count': len(messages)})
 
                 value, response_headers = self._request('session-token')
                 token = self._token_response(self._envelope(value, code=20_000, message='OK'),
@@ -853,6 +754,13 @@ class OwnedLocalSessionPublic:
                 self._connection_token = token
                 self._check('session-token-no-store', {'http_status': 200, 'cache_control': 'no-store',
                                                        'pragma': 'no-cache', 'token_persisted': False})
+                self._assert('SESSION.public-jwt-ws.session-token',
+                             {'http_status': 200})
+                self._assert('SESSION.public-jwt-ws.session-token-no-store',
+                             {'cache_control': response_headers['cache-control'],
+                              'pragma': response_headers['pragma']})
+                self._assert('SESSION.public-jwt-ws.session-token-present',
+                             {'token_present': bool(token)})
                 self.state['storage_before_delete'] = self._owned_storage()
                 self._save()
 
@@ -860,6 +768,8 @@ class OwnedLocalSessionPublic:
                 token = ''
                 self._check('session-websocket-101-closed', {'http_status': 101, 'status': 'CLOSED',
                                                              'chat_messages_sent': 0})
+                self._assert('SESSION.public-jwt-ws.session-websocket-101',
+                             {'http_status': 101, 'status': 'CLOSED'})
 
                 admission = self._deletion_admission('session')
                 self.state['deletion_admission'].append(admission)
@@ -878,6 +788,10 @@ class OwnedLocalSessionPublic:
                 self._save()
                 self._check('session-delete-200-exact-404', {'deleted': True, 'http_status': 404,
                                                              'sqlite_cascade': 'PASS'})
+                self._assert('SESSION.public-jwt-ws.session-delete',
+                             {'deleted': True})
+                self._assert('SESSION.public-jwt-ws.session-delete-ack',
+                             {'http_status': 404, 'error_code': 'session_not_found'})
 
                 admission = self._deletion_admission('group')
                 self.state['deletion_admission'].append(admission)
@@ -897,6 +811,10 @@ class OwnedLocalSessionPublic:
                 self._save()
                 self._check('group-delete-200-exact-404', {'deleted': True, 'http_status': 404,
                                                            'sqlite_cascade': 'PASS'})
+                self._assert('SESSION.public-jwt-ws.group-delete',
+                             {'deleted': True})
+                self._assert('SESSION.public-jwt-ws.group-delete-ack',
+                             {'http_status': 404, 'error_code': 'group_not_found'})
 
                 fixture_after = self._fixture_snapshot()
                 unrelated_after = self._unrelated_snapshot(exclude_group_id=group_id)
@@ -912,11 +830,16 @@ class OwnedLocalSessionPublic:
                         or len(self.state['deletion_admission']) != 2
                         or self.state['ledger']['resource_count'] != 3
                         or any(row['state'] != 'deleted'
-                               for row in self.state['ledger']['resources'])):
+                               for row in self.state['ledger']['resources'])
+                        or [row['id'] for row in self.state['assertions']]
+                        != list(PUBLIC_ASSERTION_IDS)
+                        or any(row['status'] != 'PASS'
+                               for row in self.state['assertions'])):
                     raise LocalSessionPublicError('Session public final operation or Ledger inventory is incomplete')
                 self.state.update(
                     status='LOCAL_SESSION_PUBLIC_PASS',
-                    assertions=[{'id': REQUIREMENTS[0], 'status': 'PASS'}],
+                    assertions=[{'id': assertion_id, 'status': 'PASS'}
+                                for assertion_id in PUBLIC_ASSERTION_IDS],
                     disposition='GROUP_SESSIONS_DELETED_BOOTSTRAP_HISTORY_RETAINED',
                     resource_disposition='GROUP_SESSIONS_DELETED_BOOTSTRAP_HISTORY_RETAINED',
                     credential_persistence={'gateway_principal': False, 'connection_token': False,
@@ -936,8 +859,9 @@ class OwnedLocalSessionPublic:
             if self.state is not None:
                 self.state['status'] = 'CANCELLED' if has_cancellation(error) else 'BLOCKED'
                 self.state['error_type'] = type(error).__name__
-                self.state['assertions'] = [{'id': REQUIREMENTS[0],
-                                             'status': 'CANCELLED' if has_cancellation(error) else 'FAIL'}]
+                for row in self.state['assertions']:
+                    if row['status'] == 'NOT_RUN':
+                        row['status'] = 'CANCELLED' if has_cancellation(error) else 'FAIL'
                 if self.ledger is not None:
                     try:
                         self.state['ledger'] = self._ledger_evidence()

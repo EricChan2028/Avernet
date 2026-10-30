@@ -13,6 +13,19 @@ from .local_operator_cli_contract import (
     SESSIONS_SERVICES_REQUIREMENTS,
     sessions_services_source_binding,
 )
+from .local_session_service_cli import (
+    LIFECYCLE_ASSERTION_IDS,
+    MEMBER_CHAT_ASSERTION_IDS,
+    SESSION_SERVICE_LIFECYCLE_CASE_METHOD,
+    SESSION_SERVICE_MEMBER_CHAT_CASE_METHOD,
+)
+from .local_session_service_completion import (
+    COMPLETE_ASSERTION_IDS,
+    ROUNDTRIP_ASSERTION_IDS,
+    SESSION_SERVICE_ASSERTION_IDS,
+    SESSION_SERVICE_COMPLETE_CASE_METHOD,
+    SESSION_SERVICE_ROUNDTRIP_CASE_METHOD,
+)
 from .local_session_service_parent_run import (
     BINDING_CONTRACT,
     BINDING_PATH,
@@ -62,21 +75,22 @@ FIXTURE_EFFECTS = (
     'OWNED_SESSION_COMPLETION_THEN_GENERIC_GROUP_DELETE',
     'OWNED_SESSION_COMPLETION_AND_INVOCATION_THEN_CREATOR_SCOPED_CLEANUP',
 )
-DATA_REQUIREMENTS = (
-    {'group_id', 'session_id', 'session_created', 'session_listed',
-     'session_read', 'session_renamed', 'group_deleted',
-     'group_absence_verified'},
-    {'group_id', 'session_id', 'member_admitted', 'member_muted',
-     'chat_delivered', 'history_observable', 'invite_minted',
-     'member_removed', 'group_deleted', 'group_absence_verified'},
-    {'group_id', 'session_id', 'session_completed',
-     'completion_output_preserved', 'group_deleted',
-     'group_absence_verified'},
-    {'group_id', 'session_id', 'service_session_id',
-     'service_identity_preserved', 'bounded_wait_contract_exact',
-     'chat_session_deleted', 'service_session_deleted', 'group_deleted',
-     'group_absence_verified'},
+ASSERTION_GROUPS = (
+    (LIFECYCLE_ASSERTION_IDS, SESSION_SERVICE_LIFECYCLE_CASE_METHOD,
+     FIXTURE_EFFECTS[0], SESSIONS_SERVICES_REQUIREMENTS[0]),
+    (MEMBER_CHAT_ASSERTION_IDS, SESSION_SERVICE_MEMBER_CHAT_CASE_METHOD,
+     FIXTURE_EFFECTS[1], SESSIONS_SERVICES_REQUIREMENTS[1]),
+    (COMPLETE_ASSERTION_IDS, SESSION_SERVICE_COMPLETE_CASE_METHOD,
+     FIXTURE_EFFECTS[2], SESSIONS_SERVICES_REQUIREMENTS[2]),
+    (ROUNDTRIP_ASSERTION_IDS, SESSION_SERVICE_ROUNDTRIP_CASE_METHOD,
+     FIXTURE_EFFECTS[3], SESSIONS_SERVICES_REQUIREMENTS[3]),
 )
+ASSERTION_METHODS = {
+    assertion_id: (method, effect, requirement)
+    for assertion_ids, method, effect, requirement in ASSERTION_GROUPS
+    for assertion_id in assertion_ids
+}
+
 
 
 def _require(condition: bool, message: str) -> None:
@@ -204,21 +218,9 @@ def _request_valid(request: object, effect: str) -> bool:
     return False
 
 
-def _data_valid(index: int, data: object) -> bool:
-    if not isinstance(data, dict) or set(data) != DATA_REQUIREMENTS[index]:
-        return False
-    if not all(isinstance(data.get(name), str) and data.get(name)
-               for name in ('group_id', 'session_id')):
-        return False
-    if index == 3 and not (isinstance(data.get('service_session_id'), str)
-                           and data['service_session_id']):
-        return False
-    return all(data.get(name) is True for name in DATA_REQUIREMENTS[index]
-               if name not in {'group_id', 'session_id', 'service_session_id'})
-
-
 def _case_valid(root: Path, binding: dict, case: dict) -> bool:
     steps = case.get('steps')
+    expected_count = len(SESSION_SERVICE_ASSERTION_IDS)
     if (case.get('case_id') != binding['case_id']
             or case.get('parent_id') != SESSIONS_SERVICES_PARENT
             or case.get('status') != 'PASS'
@@ -229,32 +231,29 @@ def _case_valid(root: Path, binding: dict, case: dict) -> bool:
             != binding['validation_profile_contract']
             or case.get('execution_profile_contract')
             != binding['execution_profile_contract']
-            or case.get('completed_count') != case.get('total_count') != 4
+            or case.get('completed_count') != expected_count
+            or case.get('total_count') != expected_count
             or case.get('error_type') is not None
-            or not isinstance(steps, list) or len(steps) != 4):
+            or not isinstance(steps, list) or len(steps) != expected_count):
         return False
-    groups = []
-    for index, step in enumerate(steps):
+    groups: list[str] = []
+    for step, assertion_id in zip(steps, SESSION_SERVICE_ASSERTION_IDS):
+        method, effect, _requirement = ASSERTION_METHODS[assertion_id]
         if (not isinstance(step, dict)
                 or set(step) != {'requirement_id', 'method', 'status', 'data',
                                  'evidence', 'error_type', 'error_gap'}
-                or step.get('requirement_id')
-                != SESSIONS_SERVICES_REQUIREMENTS[index]
-                or step.get('method') != METHODS[index]
+                or step.get('requirement_id') != assertion_id
+                or step.get('method') != method
                 or step.get('status') != 'PASS'
                 or step.get('error_type') is not None
-                or not _data_valid(index, step.get('data'))):
+                or not isinstance(step.get('data'), dict)
+                or not _request_valid(step.get('evidence'), effect)):
             return False
-        evidence = step.get('evidence')
-        requests = evidence.get('requests') if isinstance(evidence, dict) else None
-        if (evidence.get('fixture_effect') != FIXTURE_EFFECTS[index]
-                or evidence.get('remote_validation') != 'NOT_RUN'
-                or evidence.get('grants_release_credit') is not False
-                or not isinstance(requests, list) or not requests
-                or not all(_request_valid(request, FIXTURE_EFFECTS[index])
-                           for request in requests)):
-            return False
-        groups.append(step['data']['group_id'])
+        group_id = step['data'].get('group_id')
+        if group_id is not None:
+            if not isinstance(group_id, str) or not group_id:
+                return False
+            groups.append(group_id)
     return len(set(groups)) == 4
 
 
@@ -305,14 +304,18 @@ def _project(root: Path, binding: dict) -> dict:
                              and flow.get('status') == SUCCESS_STATUS)
               else 'BLOCKED')
     steps = case.get('steps') if isinstance(case.get('steps'), list) else []
-    assertions = [{'id': SESSIONS_SERVICES_REQUIREMENTS[index],
+    assertions = [{'id': step.get('requirement_id'),
                    'status': step.get('status', 'NOT_RUN')}
-                  for index, step in enumerate(steps)
-                  if isinstance(step, dict)]
-    requirements = [{'id': name,
-                     'status': next((row.get('status') for row in assertions
-                                     if row.get('id') == name), 'NOT_RUN')}
-                    for name in SESSIONS_SERVICES_REQUIREMENTS]
+                  for step in steps if isinstance(step, dict)]
+    requirements = []
+    for assertion_ids, _method, _effect, requirement in ASSERTION_GROUPS:
+        rows = [row for row in assertions if row.get('id') in assertion_ids]
+        requirements.append({
+            'id': requirement,
+            'status': ('PASS' if len(rows) == len(assertion_ids)
+                       and all(row.get('status') == 'PASS' for row in rows)
+                       else 'NOT_RUN'),
+        })
     return {
         'status': status,
         'functional': 'PASS' if complete else 'INCOMPLETE',
@@ -355,7 +358,7 @@ def _summary(binding: dict, projected: dict, issues: list[str]) -> dict:
             [{'id': name, 'status': 'NOT_RUN'}
              for name in SESSIONS_SERVICES_REQUIREMENTS]),
         'reports': {
-            'expected_assertion_count': 4,
+            'expected_assertion_count': len(SESSION_SERVICE_ASSERTION_IDS),
             'observed_assertion_count': sum(
                 1 for row in projected.get('assertions', [])
                 if row.get('status') == 'PASS'),

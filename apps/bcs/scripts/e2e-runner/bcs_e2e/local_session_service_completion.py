@@ -8,8 +8,11 @@ from .case_adapters import AdapterCall
 from .case_executor import CaseExecution, StepOutcome
 from .local_operator_cli_contract import sessions_services_source_binding
 from .local_session_service_cli import (
+    LIFECYCLE_ASSERTION_IDS,
+    MEMBER_CHAT_ASSERTION_IDS,
     SESSION_SERVICE_LIFECYCLE_PARENT,
     RemoteLocalSessionServiceLifecycleAdapter,
+    service_assertion_steps,
 )
 from .run_state import RunStateError
 from .session_cli_profile import (
@@ -32,6 +35,17 @@ SESSION_SERVICE_ROUNDTRIP_EFFECT = (
     "OWNED_SESSION_COMPLETION_AND_INVOCATION_THEN_CREATOR_SCOPED_CLEANUP")
 SERVICE_TITLE = "CLI automated release audit"
 COMPLETION_OUTPUT = {"summary": "approved by CLI"}
+
+COMPLETE_ASSERTION_IDS = tuple('CLI-SESSION-SERVICE.complete.' + name for name in (
+    'complete', 'complete-status', 'complete-output'))
+ROUNDTRIP_ASSERTION_IDS = tuple('CLI-SESSION-SERVICE.roundtrip.' + name for name in (
+    'service-invoke', 'invoke-session-id', 'invoke-kind', 'service-status',
+    'status-session-id', 'status-group', 'service-wait', 'wait-contract',
+    'chat-cleanup', 'service-cleanup', 'group-cleanup'))
+SESSION_SERVICE_ASSERTION_IDS = (LIFECYCLE_ASSERTION_IDS + MEMBER_CHAT_ASSERTION_IDS
+                                 + COMPLETE_ASSERTION_IDS + ROUNDTRIP_ASSERTION_IDS)
+if len(SESSION_SERVICE_ASSERTION_IDS) != 44 or len(set(SESSION_SERVICE_ASSERTION_IDS)) != 44:
+    raise RuntimeError('Session Service parsed assertion inventory changed')
 
 
 def _source_requirement(requirement_id: str) -> dict:
@@ -378,11 +392,14 @@ def _validate_requests(adapter: object, calls: tuple[AdapterCall, ...],
 def execute_local_session_service_complete_case(adapter: object) -> CaseExecution:
     local_session_service_complete_case_plan()
     if not isinstance(adapter, RemoteLocalSessionServiceCompleteAdapter):
-        raise RunStateError(
-            "Session Service completion requires its shared adapter")
+        raise RunStateError("Session Service completion requires its shared adapter")
+    calls: tuple = ()
+    operations = (
+        "session-cli.group.create", "session-cli.session.create",
+        "session-cli.session.complete",
+        SESSION_CLI_GROUP_DELETE_OPERATION, SESSION_CLI_GROUP_VERIFY_DELETED_OPERATION,
+    )
     error_type: str | None = None
-    group_id = ""
-    session_id = ""
     try:
         calls = (
             adapter.create_owned_cli_group(),
@@ -391,48 +408,45 @@ def execute_local_session_service_complete_case(adapter: object) -> CaseExecutio
             adapter.delete_owned_group(),
             adapter.verify_group_deleted(),
         )
-        operations = (
-            "session-cli.group.create",
-            "session-cli.session.create",
-            "session-cli.session.complete",
-            SESSION_CLI_GROUP_DELETE_OPERATION,
-            SESSION_CLI_GROUP_VERIFY_DELETED_OPERATION,
-        )
-        records = _validate_requests(adapter, calls, operations)
-        group_id = adapter.group_id or ""
-        session_id = adapter.session_id or ""
+        _validate_requests(adapter, calls, operations)
     except Exception as error:
         error_type = type(error).__name__
-    status = "PASS" if error_type is None else "NOT_RUN"
-    step = StepOutcome(
-        requirement_id=SESSION_SERVICE_COMPLETE_REQUIREMENT,
-        method=SESSION_SERVICE_COMPLETE_CASE_METHOD,
-        status=status,
-        data=None if error_type is not None else {
-            "group_id": group_id,
-            "session_id": session_id,
-            "session_completed": True,
-            "completion_output_preserved": True,
-            "group_deleted": True,
-            "group_absence_verified": True,
-        },
-        evidence={} if error_type is not None else {
-            "requests": records,
-            "fixture_effect": adapter.fixture_effect,
-            "remote_validation": "NOT_RUN",
-            "grants_release_credit": False,
-        },
-        error_type=error_type,
-    )
+
+    def evidence(index: int) -> dict:
+        value = dict(calls[index].evidence)
+        value["operation"] = operations[index]
+        return value
+
+    def check_complete():
+        data = calls[2].data
+        if not isinstance(data, dict) or data.get("id") != adapter.session_id:
+            raise RunStateError("completion response lost the exact Session")
+        return {"id": data["id"]}, evidence(2)
+
+    def check_status():
+        data = calls[2].data
+        if data.get("status") != "completed":
+            raise RunStateError("completion status differs")
+        return {"status": data["status"]}, evidence(2)
+
+    def check_output():
+        data = calls[2].data
+        if data.get("output") != COMPLETION_OUTPUT:
+            raise RunStateError("completion output differs")
+        return {"output": data["output"]}, evidence(2)
+
+    steps, failed = service_assertion_steps(
+        COMPLETE_ASSERTION_IDS, SESSION_SERVICE_COMPLETE_CASE_METHOD,
+        (check_complete, check_status, check_output), error_type)
     execution = CaseExecution(
         case_id=SESSION_SERVICE_COMPLETE_CASE_ID,
         parent_id=SESSION_SERVICE_LIFECYCLE_PARENT,
-        status="PASS" if error_type is None else "BLOCKED",
-        steps=(step,),
-        completed_count=1 if error_type is None else 0,
-        total_count=1,
-        error_type=error_type,
-        ready_to_execute=error_type is None,
+        status="PASS" if failed is None else "BLOCKED",
+        steps=tuple(steps),
+        completed_count=sum(step.status == "PASS" for step in steps),
+        total_count=len(steps),
+        error_type=failed,
+        ready_to_execute=failed is None,
     )
     execution.validate()
     return execution
@@ -441,12 +455,18 @@ def execute_local_session_service_complete_case(adapter: object) -> CaseExecutio
 def execute_local_session_service_roundtrip_case(adapter: object) -> CaseExecution:
     local_session_service_roundtrip_case_plan()
     if not isinstance(adapter, RemoteLocalSessionServiceRoundtripAdapter):
-        raise RunStateError(
-            "Session Service roundtrip requires its shared adapter")
+        raise RunStateError("Session Service roundtrip requires its shared adapter")
+    calls: tuple = ()
+    operations = (
+        "session-cli.service.group.create", "session-cli.session.create",
+        "session-cli.session.complete", SESSION_CLI_GROUP_SETTINGS_PATCH_OPERATION,
+        "session-cli.service.invoke", "session-cli.service.status",
+        "session-cli.service.wait",
+        SESSION_CLI_SESSION_CREATOR_DELETE_OPERATION,
+        SESSION_CLI_SESSION_BOT_CREATOR_DELETE_OPERATION,
+        SESSION_CLI_GROUP_DELETE_OPERATION, SESSION_CLI_GROUP_VERIFY_DELETED_OPERATION,
+    )
     error_type: str | None = None
-    group_id = ""
-    session_id = ""
-    service_session_id = ""
     try:
         calls = (
             adapter.create_service_cli_group(),
@@ -461,60 +481,111 @@ def execute_local_session_service_roundtrip_case(adapter: object) -> CaseExecuti
             adapter.delete_owned_group(),
             adapter.verify_group_deleted(),
         )
-        operations = (
-            "session-cli.service.group.create",
-            "session-cli.session.create",
-            "session-cli.session.complete",
-            SESSION_CLI_GROUP_SETTINGS_PATCH_OPERATION,
-            "session-cli.service.invoke",
-            "session-cli.service.status",
-            "session-cli.service.wait",
-            SESSION_CLI_SESSION_CREATOR_DELETE_OPERATION,
-            SESSION_CLI_SESSION_BOT_CREATOR_DELETE_OPERATION,
-            SESSION_CLI_GROUP_DELETE_OPERATION,
-            SESSION_CLI_GROUP_VERIFY_DELETED_OPERATION,
-        )
-        records = _validate_requests(adapter, calls, operations)
-        group_id = adapter.group_id or ""
-        session_id = adapter.session_id or ""
-        service_session_id = adapter.service_session_id or ""
+        _validate_requests(adapter, calls, operations)
     except Exception as error:
         error_type = type(error).__name__
-    status = "PASS" if error_type is None else "NOT_RUN"
-    step = StepOutcome(
-        requirement_id=SESSION_SERVICE_ROUNDTRIP_REQUIREMENT,
-        method=SESSION_SERVICE_ROUNDTRIP_CASE_METHOD,
-        status=status,
-        data=None if error_type is not None else {
-            "group_id": group_id,
-            "session_id": session_id,
-            "service_session_id": service_session_id,
-            "service_identity_preserved": True,
-            "bounded_wait_contract_exact": True,
-            "settings_form": adapter.settings_form,
-            "chat_session_deleted": True,
-            "service_session_deleted": True,
-            "group_deleted": True,
-            "group_absence_verified": True,
-        },
-        evidence={} if error_type is not None else {
-            "requests": records,
-            "fixture_effect": adapter.fixture_effect,
-            "remote_validation": "NOT_RUN",
-            "grants_release_credit": False,
-        },
-        error_type=error_type,
-    )
+
+    def evidence(index: int) -> dict:
+        value = dict(calls[index].evidence)
+        value["operation"] = operations[index]
+        return value
+
+    def check_invoke():
+        data = calls[4].data
+        if not isinstance(data, dict) or not isinstance(data.get("session_id"), str):
+            raise RunStateError("service invoke did not return a session id")
+        return {"session_id": data["session_id"]}, evidence(4)
+
+    def check_invoke_session_id():
+        data = calls[4].data
+        if data.get("session_id") != adapter.service_session_id:
+            raise RunStateError("service invoke session id differs")
+        return {"session_id": data["session_id"]}, evidence(4)
+
+    def check_invoke_kind():
+        data = calls[4].data
+        if data.get("session_kind") != "service_invocation":
+            raise RunStateError("service invoke kind differs")
+        return {"session_kind": data["session_kind"]}, evidence(4)
+
+    def check_status():
+        data = calls[5].data
+        if not isinstance(data, dict) or data.get("status") not in {"queued", "running", "completed"}:
+            raise RunStateError("service status response is not terminal/observable")
+        return {"status": data["status"]}, evidence(5)
+
+    def check_status_session_id():
+        data = calls[5].data
+        if data.get("session_id") != adapter.service_session_id:
+            raise RunStateError("service status session id differs")
+        return {"session_id": data["session_id"]}, evidence(5)
+
+    def check_status_group():
+        data = calls[5].data
+        if data.get("group_id") != adapter.group_id:
+            raise RunStateError("service status group id differs")
+        return {"group_id": data["group_id"]}, evidence(5)
+
+    def check_wait():
+        data = calls[6].data
+        if not isinstance(data, dict) or data.get("session_id") != adapter.service_session_id:
+            raise RunStateError("bounded wait lost the invoked Session")
+        if data.get("status") not in {"timeout", "completed"}:
+            raise RunStateError("bounded wait status is not a reviewed terminal contract")
+        return {"status": data["status"]}, evidence(6)
+
+    def check_wait_contract():
+        data = calls[6].data
+        if data == {
+                "status": "timeout", "session_id": adapter.service_session_id,
+                "timeout_ms": 1,
+                "timeout_contract": "session-specific-bounded-timeout"}:
+            return {"timeout_contract": data["timeout_contract"]}, evidence(6)
+        if (data.get("group_id") != adapter.group_id
+                or data.get("session_title") != SERVICE_TITLE
+                or data.get("status") != "completed"):
+            raise RunStateError("bounded wait terminal contract fields differ")
+        return {"terminal_contract": "completed"}, evidence(6)
+
+    def check_chat_cleanup():
+        data = calls[7].data
+        if not isinstance(data, dict) or data.get("deleted") is not True or data.get("session_id") != adapter.session_id:
+            raise RunStateError("chat Session cleanup is not exact")
+        return {"deleted": True, "session_id": data["session_id"]}, evidence(7)
+
+    def check_service_cleanup():
+        data = calls[8].data
+        if not isinstance(data, dict) or data.get("deleted") is not True or data.get("session_id") != adapter.service_session_id:
+            raise RunStateError("service Session cleanup is not exact")
+        return {"deleted": True, "session_id": data["session_id"]}, evidence(8)
+
+    def check_group_cleanup():
+        deleted = calls[9].data
+        missing = calls[10].data
+        if (not isinstance(deleted, dict) or deleted.get("deleted") is not True
+                or deleted.get("id") != adapter.group_id):
+            raise RunStateError("Group deletion acknowledgement is not exact")
+        if (not isinstance(missing, dict) or missing.get("status") != 404
+                or missing.get("code") != "group_not_found"
+                or missing.get("params") != {"group_id": adapter.group_id}):
+            raise RunStateError("deleted Group absence proof is not exact")
+        return {"deleted": True, "absence_http_status": 404}, evidence(9)
+
+    checks = (check_invoke, check_invoke_session_id, check_invoke_kind,
+              check_status, check_status_session_id, check_status_group,
+              check_wait, check_wait_contract, check_chat_cleanup,
+              check_service_cleanup, check_group_cleanup)
+    steps, failed = service_assertion_steps(
+        ROUNDTRIP_ASSERTION_IDS, SESSION_SERVICE_ROUNDTRIP_CASE_METHOD, checks, error_type)
     execution = CaseExecution(
         case_id=SESSION_SERVICE_ROUNDTRIP_CASE_ID,
         parent_id=SESSION_SERVICE_LIFECYCLE_PARENT,
-        status="PASS" if error_type is None else "BLOCKED",
-        steps=(step,),
-        completed_count=1 if error_type is None else 0,
-        total_count=1,
-        error_type=error_type,
-        ready_to_execute=error_type is None,
+        status="PASS" if failed is None else "BLOCKED",
+        steps=tuple(steps),
+        completed_count=sum(step.status == "PASS" for step in steps),
+        total_count=len(steps),
+        error_type=failed,
+        ready_to_execute=failed is None,
     )
     execution.validate()
     return execution
-

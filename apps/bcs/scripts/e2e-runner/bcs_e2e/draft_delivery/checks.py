@@ -1,27 +1,24 @@
 """Semantic checks over non-credential Draft delivery observations.
 
-The black-box child emits only statuses, fixed revision metadata and hashes.
-These functions independently reject any observation that violates the eight
-frozen obligations; they never inspect or retain an authorization credential.
+The black-box child (``story.py``) emits schema-2 evidence: one raw observation
+record per frozen ``DRAFT-DELIVERY.*`` obligation, the Draft HTTP response
+matrix, and fixture identity hashes. These functions independently reject any
+observation that contradicts its frozen obligation; they never inspect or
+retain an authorization credential. Verified count: 32 obligations.
 """
 from __future__ import annotations
 
 import re
 
 from ..run_state import RunStateError
-from .contract import REDACTION_TOKENS
+from .contract import REDACTION_TOKENS, REQUIREMENTS
 
-OBLIGATION_CLIENT_ID = 'DRAFT-DELIVERY.client-selected-idempotent-create'
-OBLIGATION_APPEND = 'DRAFT-DELIVERY.immutable-revision-append'
-OBLIGATION_STALE = 'DRAFT-DELIVERY.stale-update-conflict'
-OBLIGATION_READ_TOKEN = 'DRAFT-DELIVERY.read-token-single-revision'
-OBLIGATION_UNAVAILABLE = 'DRAFT-DELIVERY.revoked-or-deleted-unavailable'
-OBLIGATION_READ_ONLY = 'DRAFT-DELIVERY.read-token-read-only'
-OBLIGATION_NO_STORE = 'DRAFT-DELIVERY.no-store-every-response'
-OBLIGATION_REDACTION = 'DRAFT-DELIVERY.token-redaction'
+OBLIGATION_PREFIX = 'DRAFT-DELIVERY.'
 REDACTION_STREAMS = ('story.stdout', 'story.stderr', 'owned.console')
 REDACTION_ARTIFACTS = ('child.receipt', 'flow.report', 'canonical.report')
+_HTTPS_STATUS_MATRIX = {200, 401, 404, 409}
 _UUID = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')
+_HEX64 = re.compile(r'^[0-9a-f]{64}$')
 
 
 class DraftDeliveryViolation(RunStateError):
@@ -32,261 +29,602 @@ def _fail(obligation: str, detail: str) -> None:
     raise DraftDeliveryViolation(obligation + ': ' + detail)
 
 
-def _mapping(value: object, field: str, obligation: str = OBLIGATION_CLIENT_ID) -> dict:
+def _mapping(value: object, field: str, obligation: str) -> dict:
     if not isinstance(value, dict):
         _fail(obligation, field + ' observation is missing')
     return value
 
 
-def _integer(value: object, field: str, obligation: str = OBLIGATION_CLIENT_ID) -> int:
+def _flag(value: object, field: str, obligation: str) -> bool:
+    if value is not True and value is not False:
+        _fail(obligation, field + ' must be a boolean')
+    return value
+
+
+def _integer(value: object, field: str, obligation: str) -> int:
     if type(value) is not int:
         _fail(obligation, field + ' must be an integer')
     return value
 
 
-def check_client_selected_idempotent_create(evidence: dict) -> None:
-    """Client selects one canonical UUID; create replay is idempotent."""
-    create = _mapping(evidence.get('create'), 'create')
-    draft_id = create.get('draft_id')
+def _text(value: object, field: str, obligation: str) -> str:
+    if not isinstance(value, str) or not value:
+        _fail(obligation, field + ' must be a non-empty string')
+    return value
+
+
+def _record(evidence: dict, obligation: str) -> dict:
+    obligations = _mapping(evidence.get('obligations'), 'obligations', obligation)
+    if obligation not in obligations:
+        _fail(obligation, 'observation record is missing')
+    return _mapping(obligations.get(obligation), 'observation', obligation)
+
+
+def _fixture(evidence: dict, obligation: str) -> dict:
+    return _mapping(evidence.get('fixture'), 'fixture', obligation)
+
+
+def _offline_cli(record: dict, obligation: str) -> None:
+    if record.get('transport') != 'offline-cli':
+        _fail(obligation, 'offline preview observation did not come from the product CLI')
+
+
+def _product_cli(record: dict, obligation: str) -> None:
+    if record.get('transport') != 'product-cli':
+        _fail(obligation, 'observation did not come from the product CLI')
+
+
+def _product_http(record: dict, obligation: str) -> None:
+    if record.get('transport') != 'product-http':
+        _fail(obligation, 'observation did not come from the product HTTP surface')
+
+
+# ------------------------------------------------- O1-O3 offline schema-1 preview
+def check_offline_preview_schema1_snapshot(evidence: dict) -> None:
+    """Offline preview emits a schema-1 snapshot without a server round trip."""
+    record = _record(evidence, 'DRAFT-DELIVERY.offline-preview-schema1-snapshot')
+    _offline_cli(record, 'DRAFT-DELIVERY.offline-preview-schema1-snapshot')
+    if _integer(record.get('exit_code'), 'exit code',
+                'DRAFT-DELIVERY.offline-preview-schema1-snapshot') != 0:
+        _fail('DRAFT-DELIVERY.offline-preview-schema1-snapshot', 'offline preview exited non-zero')
+    if _flag(record.get('snapshot_present'), 'snapshot presence',
+             'DRAFT-DELIVERY.offline-preview-schema1-snapshot') is not True:
+        _fail('DRAFT-DELIVERY.offline-preview-schema1-snapshot',
+              'offline preview did not emit a snapshot')
+
+
+def check_offline_preview_retains_schema1(evidence: dict) -> None:
+    """Offline preview retains the frozen schema-1 snapshot schemaVersion."""
+    record = _record(evidence, 'DRAFT-DELIVERY.offline-preview-retains-schema1')
+    _offline_cli(record, 'DRAFT-DELIVERY.offline-preview-retains-schema1')
+    if _integer(record.get('schema_version'), 'schema version',
+                'DRAFT-DELIVERY.offline-preview-retains-schema1') != 1:
+        _fail('DRAFT-DELIVERY.offline-preview-retains-schema1',
+              'offline preview did not retain schema 1')
+
+
+def check_offline_preview_preserves_bytes(evidence: dict) -> None:
+    """Offline preview reproduces the incident source bytes exactly."""
+    record = _record(evidence, 'DRAFT-DELIVERY.offline-preview-preserves-bytes')
+    _offline_cli(record, 'DRAFT-DELIVERY.offline-preview-preserves-bytes')
+    if _integer(record.get('definition_yaml_bytes'), 'definition bytes',
+                'DRAFT-DELIVERY.offline-preview-preserves-bytes') != 2174:
+        _fail('DRAFT-DELIVERY.offline-preview-preserves-bytes',
+              'offline preview did not observe the incident byte count')
+    if _flag(record.get('previewed_bytes_equal'), 'preview byte equality',
+             'DRAFT-DELIVERY.offline-preview-preserves-bytes') is not True:
+        _fail('DRAFT-DELIVERY.offline-preview-preserves-bytes',
+              'offline preview did not preserve the incident bytes')
+
+
+# ------------------------------------------------- O4-O7 selected-ID create path
+def check_author_upload_incident_file(evidence: dict) -> None:
+    """Author product-CLI create uploads the incident file under the client UUID."""
+    obligation = 'DRAFT-DELIVERY.author-upload-incident-file'
+    record = _record(evidence, obligation)
+    _product_cli(record, obligation)
+    if _integer(record.get('exit_code'), 'exit code', obligation) != 0:
+        _fail(obligation, 'author upload exited non-zero')
+    if _flag(record.get('saved'), 'saved flag', obligation) is not True:
+        _fail(obligation, 'author upload did not save')
+    if record.get('phase') != 'ready':
+        _fail(obligation, 'author upload did not complete the ready phase')
+    draft_id = _text(record.get('draft_id'), 'draft ID', obligation)
+    if draft_id != evidence.get('draft_id') or _UUID.fullmatch(draft_id) is None:
+        _fail(obligation, 'create did not bind the client-selected UUID')
+    if _flag(record.get('create_stdout_token_field_present'), 'create stdout redaction',
+             obligation) is not False:
+        _fail(obligation, 'create CLI output exposed the fixed-length card token field')
+
+
+def check_saved_source_2174_bytes(evidence: dict) -> None:
+    """Saved first revision keeps the exact incident byte count."""
+    record = _record(evidence, 'DRAFT-DELIVERY.saved-source-2174-bytes')
+    _product_cli(record, 'DRAFT-DELIVERY.saved-source-2174-bytes')
+    if _integer(record.get('size_bytes'), 'size bytes',
+                'DRAFT-DELIVERY.saved-source-2174-bytes') != 2174:
+        _fail('DRAFT-DELIVERY.saved-source-2174-bytes', 'saved source is not 2174 bytes')
+
+
+def check_saved_source_validates(evidence: dict) -> None:
+    """Saved first revision passes server-side source validation."""
+    record = _record(evidence, 'DRAFT-DELIVERY.saved-source-validates')
+    _product_cli(record, 'DRAFT-DELIVERY.saved-source-validates')
+    if _flag(record.get('valid'), 'validation flag',
+             'DRAFT-DELIVERY.saved-source-validates') is not True:
+        _fail('DRAFT-DELIVERY.saved-source-validates', 'saved source did not validate')
+
+
+def check_first_revision_immutable(evidence: dict) -> None:
+    """Replay is idempotent, foreign content conflicts, revision 1 never mutates."""
+    obligation = 'DRAFT-DELIVERY.first-revision-immutable'
+    record = _record(evidence, obligation)
+    _product_cli(record, obligation)
+    fixture = _fixture(evidence, obligation)
+    if _integer(record.get('create_revision'), 'create revision', obligation) != 1:
+        _fail(obligation, 'first create did not bind revision 1')
+    if _integer(record.get('replay_exit_code'), 'replay exit code', obligation) != 0:
+        _fail(obligation, 'exact create replay failed')
+    if _integer(record.get('replay_revision'), 'replay revision', obligation) != 1:
+        _fail(obligation, 'exact create replay renumbered the Draft')
+    if _flag(record.get('replay_saved'), 'replay saved flag', obligation) is not True:
+        _fail(obligation, 'exact create replay did not save revision 1')
+    # bcs-cli attributes matched_existing_revision only to fixed
+    # next-revision update recovery; a create replay keeps it false.
+    if _flag(record.get('replay_matched_existing'), 'replay match flag', obligation) is not False:
+        _fail(obligation, 'exact create replay was not idempotent')
+    if record.get('replay_content_hash') != fixture.get('content_hash'):
+        _fail(obligation, 'replay content hash drifted from the incident hash')
+    if _integer(record.get('conflict_exit_code'), 'conflict exit code', obligation) == 0:
+        _fail(obligation, 'different content for the selected ID did not fail create')
+    if _integer(record.get('conflict_http_status'), 'conflict HTTP status', obligation) != 409:
+        _fail(obligation, 'conflicting create did not surface HTTP 409')
+    if _integer(record.get('history_revision'), 'history revision', obligation) != 1:
+        _fail(obligation, 'revision 1 was renumbered after probes')
+    if _integer(record.get('history_size_bytes'), 'history size', obligation) != 2174:
+        _fail(obligation, 'revision 1 byte count changed after probes')
+    if record.get('history_content_hash') != fixture.get('content_hash'):
+        _fail(obligation, 'revision 1 content mutated after replay and conflict probes')
+
+
+# ------------------------------------------------- O8-O15 metadata and public card face
+def check_author_reads_metadata(evidence: dict) -> None:
+    """The author credential reads disposable Draft metadata."""
+    record = _record(evidence, 'DRAFT-DELIVERY.author-reads-metadata')
+    _product_http(record, 'DRAFT-DELIVERY.author-reads-metadata')
+    if _integer(record.get('status'), 'status', 'DRAFT-DELIVERY.author-reads-metadata') != 200:
+        _fail('DRAFT-DELIVERY.author-reads-metadata', 'author metadata read failed')
+
+
+def check_metadata_head_revision_one(evidence: dict) -> None:
+    """Metadata pins an undeleted revision-1 head."""
+    record = _record(evidence, 'DRAFT-DELIVERY.metadata-head-revision-one')
+    _product_http(record, 'DRAFT-DELIVERY.metadata-head-revision-one')
+    if _integer(record.get('head_revision'), 'head revision',
+                'DRAFT-DELIVERY.metadata-head-revision-one') != 1:
+        _fail('DRAFT-DELIVERY.metadata-head-revision-one', 'metadata head is not revision 1')
+    if _flag(record.get('deleted'), 'deleted flag',
+             'DRAFT-DELIVERY.metadata-head-revision-one') is not False:
+        _fail('DRAFT-DELIVERY.metadata-head-revision-one', 'metadata reports a deleted Draft')
+
+
+def check_card_holder_tokenless_read(evidence: dict) -> None:
+    """A card holder reads revision 1 with ID plus revision only, no credential."""
+    record = _record(evidence, 'DRAFT-DELIVERY.card-holder-tokenless-read')
+    _product_http(record, 'DRAFT-DELIVERY.card-holder-tokenless-read')
+    if _integer(record.get('status'), 'status',
+                'DRAFT-DELIVERY.card-holder-tokenless-read') != 200:
+        _fail('DRAFT-DELIVERY.card-holder-tokenless-read', 'tokenless fixed read failed')
+
+
+def check_shared_read_preserves_hash(evidence: dict) -> None:
+    """Tokenless fixed read returns exactly the incident bytes and hash."""
+    obligation = 'DRAFT-DELIVERY.shared-read-preserves-hash'
+    record = _record(evidence, obligation)
+    _product_http(record, obligation)
+    if record.get('content_hash') != _fixture(evidence, obligation).get('content_hash'):
+        _fail(obligation, 'tokenless fixed read changed the content hash')
+    if _integer(record.get('size_bytes'), 'size bytes', obligation) != 2174:
+        _fail(obligation, 'tokenless fixed read changed the incident byte count')
+
+
+def check_shared_source_no_store(evidence: dict) -> None:
+    """Every shared fixed read response is uncacheable."""
+    record = _record(evidence, 'DRAFT-DELIVERY.shared-source-no-store')
+    _product_http(record, 'DRAFT-DELIVERY.shared-source-no-store')
+    cache_control = record.get('cache_control')
+    if not isinstance(cache_control, str) or 'no-store' not in cache_control.lower():
+        _fail('DRAFT-DELIVERY.shared-source-no-store', 'shared read was cacheable')
+
+
+def check_card_holder_validates_source(evidence: dict) -> None:
+    """A card holder validates revision 1 without any credential."""
+    record = _record(evidence, 'DRAFT-DELIVERY.card-holder-validates-source')
+    _product_http(record, 'DRAFT-DELIVERY.card-holder-validates-source')
+    if _integer(record.get('status'), 'status',
+                'DRAFT-DELIVERY.card-holder-validates-source') != 200:
+        _fail('DRAFT-DELIVERY.card-holder-validates-source',
+              'tokenless validation request failed')
+
+
+def check_shared_validation_binds_rev1(evidence: dict) -> None:
+    """Tokenless validation binds revision 1 and returns valid."""
+    obligation = 'DRAFT-DELIVERY.shared-validation-binds-rev1'
+    record = _record(evidence, obligation)
+    _product_http(record, obligation)
+    if _integer(record.get('revision'), 'revision', obligation) != 1:
+        _fail(obligation, 'shared validation did not bind revision 1')
+    if _flag(record.get('valid'), 'validation result', obligation) is not True:
+        _fail(obligation, 'shared validation did not report the source valid')
+
+
+def check_public_cannot_delete(evidence: dict) -> None:
+    """Public readers and inert bearer-shaped tokens cannot manage the Draft."""
+    obligation = 'DRAFT-DELIVERY.public-cannot-delete'
+    record = _record(evidence, obligation)
+    _product_http(record, obligation)
+    if _integer(record.get('public_delete_status'), 'public delete status',
+                obligation) != 401:
+        _fail(obligation, 'public delete was not rejected as unauthorized')
+    if _integer(record.get('inert_delete_status'), 'inert delete status',
+                obligation) not in (401, 403):
+        _fail(obligation, 'an inert bearer-shaped card token delete was not rejected')
+    if _integer(record.get('inert_update_status'), 'inert update status',
+                obligation) not in (401, 403):
+        _fail(obligation, 'an inert bearer-shaped card token append was not rejected')
+    if _integer(record.get('head_after'), 'head after rejection', obligation) != 1:
+        _fail(obligation, 'rejected management operation advanced the head')
+    if _flag(record.get('deleted_after'), 'deleted after rejection', obligation) is not False:
+        _fail(obligation, 'rejected management operation deleted the Draft')
+
+
+# ------------------------------------------------- O16-O18 fixed-revision downloads
+def check_author_download_fixed_bytes(evidence: dict) -> None:
+    """Product CLI downloads revision 1 to a receipt-referenced file."""
+    record = _record(evidence, 'DRAFT-DELIVERY.author-download-fixed-bytes')
+    _product_cli(record, 'DRAFT-DELIVERY.author-download-fixed-bytes')
+    if _integer(record.get('exit_code'), 'exit code',
+                'DRAFT-DELIVERY.author-download-fixed-bytes') != 0:
+        _fail('DRAFT-DELIVERY.author-download-fixed-bytes',
+              'fixed-revision download exited non-zero')
+    if _flag(record.get('output_path_in_receipt'), 'output receipt flag',
+             'DRAFT-DELIVERY.author-download-fixed-bytes') is not True:
+        _fail('DRAFT-DELIVERY.author-download-fixed-bytes',
+              'download receipt did not reference the output file')
+
+
+def check_download_matches_incident_bytes(evidence: dict) -> None:
+    """Downloaded revision-1 bytes equal the incident file byte for byte."""
+    record = _record(evidence, 'DRAFT-DELIVERY.download-matches-incident-bytes')
+    _product_cli(record, 'DRAFT-DELIVERY.download-matches-incident-bytes')
+    if _flag(record.get('bytes_equal'), 'byte equality',
+             'DRAFT-DELIVERY.download-matches-incident-bytes') is not True:
+        _fail('DRAFT-DELIVERY.download-matches-incident-bytes',
+              'downloaded bytes differ from the incident file')
+    if _integer(record.get('size_bytes'), 'size bytes',
+                'DRAFT-DELIVERY.download-matches-incident-bytes') != 2174:
+        _fail('DRAFT-DELIVERY.download-matches-incident-bytes',
+              'downloaded byte count differs from the incident file')
+
+
+def check_author_validates_fixed_revision(evidence: dict) -> None:
+    """Product CLI validates the fixed revision and reports it valid."""
+    record = _record(evidence, 'DRAFT-DELIVERY.author-validates-fixed-revision')
+    _product_cli(record, 'DRAFT-DELIVERY.author-validates-fixed-revision')
+    if _integer(record.get('exit_code'), 'exit code',
+                'DRAFT-DELIVERY.author-validates-fixed-revision') != 0:
+        _fail('DRAFT-DELIVERY.author-validates-fixed-revision',
+              'fixed-revision CLI validation exited non-zero')
+    if _flag(record.get('valid'), 'validation result',
+             'DRAFT-DELIVERY.author-validates-fixed-revision') is not True:
+        _fail('DRAFT-DELIVERY.author-validates-fixed-revision',
+              'fixed-revision CLI validation did not pass')
+
+
+# ------------------------------------------------- O19-O20 CAS append
+def check_author_appends_revision(evidence: dict) -> None:
+    """Author append with expected_revision 1 saves and reaches ready."""
+    obligation = 'DRAFT-DELIVERY.author-appends-revision'
+    record = _record(evidence, obligation)
+    _product_cli(record, obligation)
+    if _integer(record.get('exit_code'), 'exit code', obligation) != 0:
+        _fail(obligation, 'revision append exited non-zero')
+    if _flag(record.get('saved'), 'saved flag', obligation) is not True:
+        _fail(obligation, 'revision append did not save')
+    if record.get('phase') != 'ready':
+        _fail(obligation, 'revision append did not complete the ready phase')
+
+
+def check_update_advances_exactly_once(evidence: dict) -> None:
+    """CAS append advances the head exactly once to revision 2."""
+    obligation = 'DRAFT-DELIVERY.update-advances-exactly-once'
+    record = _record(evidence, obligation)
+    if record.get('transport') != 'product-cli':
+        _fail(obligation, 'append observation did not come from the product CLI')
+    if _integer(record.get('revision'), 'append revision', obligation) != 2:
+        _fail(obligation, 'append did not create revision 2')
+    if _integer(record.get('head_after'), 'head after append', obligation) != 2:
+        _fail(obligation, 'append did not advance the head to revision 2')
+    if record.get('latest_content_hash') != _fixture(evidence, obligation).get(
+            'updated_content_hash'):
+        _fail(obligation, 'revision 2 content hash does not bind the appended source')
+
+
+# ------------------------------------------------- O21-O23 historical card reissue
+def check_author_reissues_historical_card(evidence: dict) -> None:
+    """Offline preview reissues a card pinned to revision 1."""
+    obligation = 'DRAFT-DELIVERY.author-reissues-historical-card'
+    record = _record(evidence, obligation)
+    _product_cli(record, obligation)
+    if _integer(record.get('exit_code'), 'exit code', obligation) != 0:
+        _fail(obligation, 'historical card reissue exited non-zero')
+    if record.get('phase') != 'ready':
+        _fail(obligation, 'historical card reissue did not complete')
+    reference = _mapping(record.get('reference'), 'reference', obligation)
+    if reference.get('draft_id') != evidence.get('draft_id'):
+        _fail(obligation, 'reissued CLI card bound a different Draft ID')
+    if _integer(reference.get('revision'), 'CLI card revision', obligation) != 1:
+        _fail(obligation, 'reissued CLI card did not stay on revision 1')
+    if reference.get('http_draft_id') != evidence.get('draft_id'):
+        _fail(obligation, 'reissued HTTP card bound a different Draft ID')
+    if _integer(reference.get('http_revision'), 'HTTP card revision', obligation) != 1:
+        _fail(obligation, 'reissued HTTP card did not stay on revision 1')
+    if _flag(reference.get('card_token_field_present'), 'card token presence',
+             obligation) is not True:
+        _fail(obligation, 'reissued card did not carry its read token field')
+    if _integer(reference.get('card_token_field_length'), 'card token length',
+                obligation) != 43:
+        _fail(obligation, 'reissued card did not carry a fixed-length read token field')
+
+
+def check_historical_preview_original_bytes(evidence: dict) -> None:
+    """The reissued historical card still describes the original 2174 source."""
+    record = _record(evidence, 'DRAFT-DELIVERY.historical-preview-original-bytes')
+    _product_cli(record, 'DRAFT-DELIVERY.historical-preview-original-bytes')
+    if _integer(record.get('size_bytes'), 'size bytes',
+                'DRAFT-DELIVERY.historical-preview-original-bytes') != 2174:
+        _fail('DRAFT-DELIVERY.historical-preview-original-bytes',
+              'historical preview did not return the original byte count')
+
+
+def check_reissued_card_fixed_version(evidence: dict) -> None:
+    """The reissued card pins schemaVersion 2 + revision 1; revision 2 keeps its own."""
+    obligation = 'DRAFT-DELIVERY.reissued-card-fixed-version'
+    record = _record(evidence, obligation)
+    _product_cli(record, obligation)
+    if _integer(record.get('reference_revision'), 'card revision', obligation) != 1:
+        _fail(obligation, 'reissued card did not pin revision 1')
+    if _integer(record.get('reference_schema_version'), 'card schema version',
+                obligation) != 2:
+        _fail(obligation, 'reissued card did not pin schemaVersion 2')
+    if _integer(record.get('other_revision_card_revision'), 'other card revision',
+                obligation) != 2:
+        _fail(obligation, 'revision 2 card did not keep its own fixed revision')
+
+
+# ------------------------------------------------- O24 stale CAS writer
+def check_stale_write_rejected(evidence: dict) -> None:
+    """A stale expected_revision write fails 409 and never displaces revision 2."""
+    obligation = 'DRAFT-DELIVERY.stale-write-rejected'
+    record = _record(evidence, obligation)
+    _product_http(record, obligation)
+    if _integer(record.get('status'), 'status', obligation) != 409:
+        _fail(obligation, 'stale writer did not get HTTP 409')
+    if record.get('error') != 'DRAFT_CONFLICT':
+        _fail(obligation, 'stale writer did not report DRAFT_CONFLICT')
+    if _integer(record.get('head_after'), 'head after rejection', obligation) != 2:
+        _fail(obligation, 'stale writer advanced or renumbered the head')
+    if record.get('latest_content_hash') != _fixture(evidence, obligation).get(
+            'updated_content_hash'):
+        _fail(obligation, 'stale writer replaced the newer revision content')
+
+
+# ------------------------------------------------- O25-O28 scoped revocation
+def check_revoke_second_revision(evidence: dict) -> None:
+    """Author revokes exactly revision 2 through the product CLI."""
+    record = _record(evidence, 'DRAFT-DELIVERY.revoke-second-revision')
+    _product_cli(record, 'DRAFT-DELIVERY.revoke-second-revision')
+    if _integer(record.get('exit_code'), 'exit code',
+                'DRAFT-DELIVERY.revoke-second-revision') != 0:
+        _fail('DRAFT-DELIVERY.revoke-second-revision', 'revocation exited non-zero')
+    if _flag(record.get('revoked'), 'revoked flag',
+             'DRAFT-DELIVERY.revoke-second-revision') is not True:
+        _fail('DRAFT-DELIVERY.revoke-second-revision', 'revocation did not complete')
+
+
+def check_revoke_idempotent(evidence: dict) -> None:
+    """Repeated revocation of the same revision stays idempotent."""
+    record = _record(evidence, 'DRAFT-DELIVERY.revoke-idempotent')
+    _product_cli(record, 'DRAFT-DELIVERY.revoke-idempotent')
+    if _integer(record.get('exit_code'), 'exit code',
+                'DRAFT-DELIVERY.revoke-idempotent') != 0:
+        _fail('DRAFT-DELIVERY.revoke-idempotent', 'repeated revocation exited non-zero')
+    if _flag(record.get('revoked'), 'revoked flag',
+             'DRAFT-DELIVERY.revoke-idempotent') is not True:
+        _fail('DRAFT-DELIVERY.revoke-idempotent', 'repeated revocation was not idempotent')
+
+
+def check_revoked_card_unavailable(evidence: dict) -> None:
+    """A revoked card reads back 404 with the frozen unavailability error."""
+    obligation = 'DRAFT-DELIVERY.revoked-card-unavailable'
+    record = _record(evidence, obligation)
+    _product_http(record, obligation)
+    if _integer(record.get('status'), 'status', obligation) != 404:
+        _fail(obligation, 'revoked card did not read back 404')
+    if record.get('error') != 'DRAFT_REFERENCE_UNAVAILABLE':
+        _fail(obligation, 'revoked card leaked a different error')
+
+
+def check_old_shared_revision_readable(evidence: dict) -> None:
+    """Revoking revision 2 leaves the shared revision-1 card fully readable."""
+    obligation = 'DRAFT-DELIVERY.old-shared-revision-readable'
+    record = _record(evidence, obligation)
+    _product_http(record, obligation)
+    if _integer(record.get('status'), 'status', obligation) != 200:
+        _fail(obligation, 'revoking revision 2 made revision 1 unreadable')
+    if record.get('content_hash') != _fixture(evidence, obligation).get('content_hash'):
+        _fail(obligation, 'revoking revision 2 changed revision 1 content')
+    if _integer(record.get('size_bytes'), 'size bytes', obligation) != 2174:
+        _fail(obligation, 'revoking revision 2 changed the revision-1 byte count')
+    cache_control = record.get('cache_control')
+    if not isinstance(cache_control, str) or 'no-store' not in cache_control.lower():
+        _fail(obligation, 'sibling fixed read was cacheable')
+
+
+# ------------------------------------------------- O29-O31 deletion tombstone
+def check_author_deletes_draft(evidence: dict) -> None:
+    """Author deletes the disposable Draft through the product CLI."""
+    record = _record(evidence, 'DRAFT-DELIVERY.author-deletes-draft')
+    _product_cli(record, 'DRAFT-DELIVERY.author-deletes-draft')
+    if _integer(record.get('exit_code'), 'exit code',
+                'DRAFT-DELIVERY.author-deletes-draft') != 0:
+        _fail('DRAFT-DELIVERY.author-deletes-draft', 'deletion exited non-zero')
+    if _flag(record.get('deleted'), 'deleted flag',
+             'DRAFT-DELIVERY.author-deletes-draft') is not True:
+        _fail('DRAFT-DELIVERY.author-deletes-draft', 'deletion did not complete')
+
+
+def check_deletion_revokes_all_cards(evidence: dict) -> None:
+    """Deletion tombstone revokes every historical card on the shared surface."""
+    obligation = 'DRAFT-DELIVERY.deletion-revokes-all-cards'
+    record = _record(evidence, obligation)
+    _product_http(record, obligation)
+    if _integer(record.get('revision_one_status'), 'revision 1 status',
+                obligation) != 404:
+        _fail(obligation, 'deleted revision 1 card remained readable')
+    if _integer(record.get('revision_two_status'), 'revision 2 status',
+                obligation) != 404:
+        _fail(obligation, 'deleted revision 2 card remained readable')
+    metadata_status = _integer(record.get('metadata_status'), 'metadata status', obligation)
+    deleted_flag = record.get('deleted_flag')
+    if metadata_status == 200 and deleted_flag is not True:
+        _fail(obligation, 'tombstone metadata survived without the deleted flag')
+    if metadata_status not in (200, 404):
+        _fail(obligation, 'post-deletion metadata status is invalid')
+
+
+def check_late_create_cannot_revive(evidence: dict) -> None:
+    """A late create against the tombstone cannot resurrect the Draft."""
+    obligation = 'DRAFT-DELIVERY.late-create-cannot-revive'
+    record = _record(evidence, obligation)
+    _product_http(record, obligation)
+    if record.get('method') != 'PUT':
+        _fail(obligation, 'late-create guard did not observe the create method')
+    if _integer(record.get('status'), 'status', obligation) != 404:
+        _fail(obligation, 'late create was not rejected as unavailable')
+    if record.get('error') != 'DRAFT_REFERENCE_UNAVAILABLE':
+        _fail(obligation, 'late create leaked a different error')
+
+
+# ------------------------------------------------- O32 journey hygiene
+def check_journey_completes(evidence: dict) -> None:
+    """The full journey completes with no-store responses and canary-free observation."""
+    obligation = 'DRAFT-DELIVERY.journey-completes'
+    record = _record(evidence, obligation)
+    _product_http(record, obligation)
+    if _flag(record.get('responses_no_store'), 'no-store coverage', obligation) is not True:
+        _fail(obligation, 'a Draft response omitted Cache-Control: no-store')
+    matrix = record.get('status_matrix')
+    if not isinstance(matrix, list) or not all(
+            type(item) is int for item in matrix):
+        _fail(obligation, 'response status matrix is malformed')
+    if not _HTTPS_STATUS_MATRIX.issubset(set(matrix)):
+        _fail(obligation, 'response matrix omitted success or error status coverage')
+    if _flag(record.get('token_canary_free'), 'token canary flag', obligation) is not True:
+        _fail(obligation, 'response observation captured credential-shaped material')
+
+
+_CHECK_REGISTRY = {
+    'DRAFT-DELIVERY.offline-preview-schema1-snapshot': check_offline_preview_schema1_snapshot,
+    'DRAFT-DELIVERY.offline-preview-retains-schema1': check_offline_preview_retains_schema1,
+    'DRAFT-DELIVERY.offline-preview-preserves-bytes': check_offline_preview_preserves_bytes,
+    'DRAFT-DELIVERY.author-upload-incident-file': check_author_upload_incident_file,
+    'DRAFT-DELIVERY.saved-source-2174-bytes': check_saved_source_2174_bytes,
+    'DRAFT-DELIVERY.saved-source-validates': check_saved_source_validates,
+    'DRAFT-DELIVERY.first-revision-immutable': check_first_revision_immutable,
+    'DRAFT-DELIVERY.author-reads-metadata': check_author_reads_metadata,
+    'DRAFT-DELIVERY.metadata-head-revision-one': check_metadata_head_revision_one,
+    'DRAFT-DELIVERY.card-holder-tokenless-read': check_card_holder_tokenless_read,
+    'DRAFT-DELIVERY.shared-read-preserves-hash': check_shared_read_preserves_hash,
+    'DRAFT-DELIVERY.shared-source-no-store': check_shared_source_no_store,
+    'DRAFT-DELIVERY.card-holder-validates-source': check_card_holder_validates_source,
+    'DRAFT-DELIVERY.shared-validation-binds-rev1': check_shared_validation_binds_rev1,
+    'DRAFT-DELIVERY.public-cannot-delete': check_public_cannot_delete,
+    'DRAFT-DELIVERY.author-download-fixed-bytes': check_author_download_fixed_bytes,
+    'DRAFT-DELIVERY.download-matches-incident-bytes': check_download_matches_incident_bytes,
+    'DRAFT-DELIVERY.author-validates-fixed-revision': check_author_validates_fixed_revision,
+    'DRAFT-DELIVERY.author-appends-revision': check_author_appends_revision,
+    'DRAFT-DELIVERY.update-advances-exactly-once': check_update_advances_exactly_once,
+    'DRAFT-DELIVERY.author-reissues-historical-card': check_author_reissues_historical_card,
+    'DRAFT-DELIVERY.historical-preview-original-bytes': check_historical_preview_original_bytes,
+    'DRAFT-DELIVERY.reissued-card-fixed-version': check_reissued_card_fixed_version,
+    'DRAFT-DELIVERY.stale-write-rejected': check_stale_write_rejected,
+    'DRAFT-DELIVERY.revoke-second-revision': check_revoke_second_revision,
+    'DRAFT-DELIVERY.revoke-idempotent': check_revoke_idempotent,
+    'DRAFT-DELIVERY.revoked-card-unavailable': check_revoked_card_unavailable,
+    'DRAFT-DELIVERY.old-shared-revision-readable': check_old_shared_revision_readable,
+    'DRAFT-DELIVERY.author-deletes-draft': check_author_deletes_draft,
+    'DRAFT-DELIVERY.deletion-revokes-all-cards': check_deletion_revokes_all_cards,
+    'DRAFT-DELIVERY.late-create-cannot-revive': check_late_create_cannot_revive,
+    'DRAFT-DELIVERY.journey-completes': check_journey_completes,
+}
+
+
+def _envelope(evidence: dict) -> None:
+    if not isinstance(evidence, dict):
+        raise DraftDeliveryViolation('Draft delivery evidence must be an object')
+    if type(evidence.get('schema_version')) is not int or evidence.get('schema_version') != 2:
+        raise DraftDeliveryViolation('Draft delivery evidence envelope must be schema_version 2')
+    draft_id = evidence.get('draft_id')
     if not isinstance(draft_id, str) or _UUID.fullmatch(draft_id) is None:
-        _fail(OBLIGATION_CLIENT_ID, 'draft ID is not a canonical lowercase UUIDv4')
-    attempts = create.get('attempts')
-    if not isinstance(attempts, list) or len(attempts) != 2:
-        _fail(OBLIGATION_CLIENT_ID, 'create must be attempted exactly twice')
-    first = _mapping(attempts[0], 'first create')
-    replay = _mapping(attempts[1], 'create replay')
-    if _integer(first.get('status'), 'first create status') != 201:
-        _fail(OBLIGATION_CLIENT_ID, 'first create must return 201')
-    if _integer(replay.get('status'), 'replay status') != 200:
-        _fail(OBLIGATION_CLIENT_ID, 'exact create replay must return 200')
-    for label, observation in (('first create', first), ('create replay', replay)):
-        if observation.get('draft_id') != draft_id:
-            _fail(OBLIGATION_CLIENT_ID, label + ' used a different draft ID')
-        if _integer(observation.get('revision'), label + ' revision') != 1:
-            _fail(OBLIGATION_CLIENT_ID, label + ' must bind revision 1')
-        if _integer(observation.get('size_bytes'), label + ' size') != 2174:
-            _fail(OBLIGATION_CLIENT_ID, label + ' changed the fixture byte count')
-        if observation.get('content_hash') != create.get('content_hash'):
-            _fail(OBLIGATION_CLIENT_ID, label + ' changed the immutable content hash')
-        if observation.get('valid') is not True:
-            _fail(OBLIGATION_CLIENT_ID, label + ' source did not validate')
-    conflict = _mapping(create.get('different_content'), 'different-content create')
-    if _integer(conflict.get('status'), 'different-content status') != 409:
-        _fail(OBLIGATION_CLIENT_ID, 'different content for the selected ID must conflict')
-
-
-def check_immutable_revision_append(evidence: dict) -> None:
-    """An update appends exactly head+1 and never mutates or renumbers history."""
-    append = _mapping(evidence.get('append'), 'append', OBLIGATION_APPEND)
-    if _integer(append.get('head_before'), 'head before append', OBLIGATION_APPEND) != 1:
-        _fail(OBLIGATION_APPEND, 'append did not start from revision 1')
-    if _integer(append.get('expected_revision'), 'expected revision', OBLIGATION_APPEND) != 1:
-        _fail(OBLIGATION_APPEND, 'append expected revision differs from the immutable head')
-    if _integer(append.get('status'), 'append status', OBLIGATION_APPEND) != 200:
-        _fail(OBLIGATION_APPEND, 'append must return 200')
-    if _integer(append.get('revision'), 'append result revision', OBLIGATION_APPEND) != 2:
-        _fail(OBLIGATION_APPEND, 'append must create exactly revision 2')
-    if _integer(append.get('head_after'), 'head after append', OBLIGATION_APPEND) != 2:
-        _fail(OBLIGATION_APPEND, 'append must advance the head exactly once')
-    original = _mapping(append.get('original_after'), 'original after append', OBLIGATION_APPEND)
-    if _integer(original.get('status'), 'original status', OBLIGATION_APPEND) != 200:
-        _fail(OBLIGATION_APPEND, 'historical revision 1 became unreadable')
-    if _integer(original.get('revision'), 'original revision', OBLIGATION_APPEND) != 1:
-        _fail(OBLIGATION_APPEND, 'historical revision was renumbered')
-    if _integer(original.get('size_bytes'), 'original size', OBLIGATION_APPEND) != 2174:
-        _fail(OBLIGATION_APPEND, 'historical revision byte count changed')
-    if original.get('content_hash') != evidence.get('fixture', {}).get('content_hash'):
-        _fail(OBLIGATION_APPEND, 'historical revision content hash changed')
-    updated = _mapping(append.get('updated_after'), 'updated after append', OBLIGATION_APPEND)
-    new_hash = append.get('new_content_hash')
-    if not isinstance(new_hash, str) or len(new_hash) != 64:
-        _fail(OBLIGATION_APPEND, 'appended revision hash is invalid')
-    if new_hash == original.get('content_hash'):
-        _fail(OBLIGATION_APPEND, 'appended revision did not change content')
-    if (_integer(updated.get('status'), 'updated status', OBLIGATION_APPEND) != 200
-            or _integer(updated.get('revision'), 'updated revision', OBLIGATION_APPEND) != 2
-            or updated.get('content_hash') != new_hash):
-        _fail(OBLIGATION_APPEND, 'revision 2 does not bind the appended content')
-
-
-def check_stale_update_conflict(evidence: dict) -> None:
-    """A stale expected_revision returns 409 without advancing or replacing head."""
-    stale = _mapping(evidence.get('stale'), 'stale update', OBLIGATION_STALE)
-    if _integer(stale.get('status'), 'stale status', OBLIGATION_STALE) != 409:
-        _fail(OBLIGATION_STALE, 'stale update must return HTTP 409')
-    if stale.get('expected_revision') != 1:
-        _fail(OBLIGATION_STALE, 'stale observation did not use revision 1 as expected head')
-    if _integer(stale.get('head_after'), 'head after stale update', OBLIGATION_STALE) != 2:
-        _fail(OBLIGATION_STALE, 'stale update advanced the head')
-    latest = _mapping(stale.get('latest_after'), 'latest revision after stale update', OBLIGATION_STALE)
-    if _integer(latest.get('status'), 'latest status', OBLIGATION_STALE) != 200:
-        _fail(OBLIGATION_STALE, 'newer revision became unreadable after stale update')
-    if _integer(latest.get('revision'), 'latest revision', OBLIGATION_STALE) != 2:
-        _fail(OBLIGATION_STALE, 'stale update renumbered the newer revision')
-    if latest.get('content_hash') != stale.get('new_content_hash'):
-        _fail(OBLIGATION_STALE, 'stale update replaced the newer revision')
-    if latest.get('content_hash') == stale.get('original_content_hash'):
-        _fail(OBLIGATION_STALE, 'stale observation cannot distinguish original and newer content')
-
-
-def check_read_token_single_revision(evidence: dict) -> None:
-    """A historical card stays pinned to one revision and its token is inert."""
-    cards = _mapping(evidence.get('cards'), 'card observations', OBLIGATION_READ_TOKEN)
-    if _integer(cards.get('head_revision'), 'card head revision', OBLIGATION_READ_TOKEN) != 2:
-        _fail(OBLIGATION_READ_TOKEN, 'historical card was not reissued after head advanced to 2')
-    historical = _mapping(cards.get('historical'), 'historical card', OBLIGATION_READ_TOKEN)
-    if historical.get('draft_id') != evidence.get('create', {}).get('draft_id'):
-        _fail(OBLIGATION_READ_TOKEN, 'historical card bound a different draft ID')
-    if _integer(historical.get('revision'), 'historical card revision', OBLIGATION_READ_TOKEN) != 1:
-        _fail(OBLIGATION_READ_TOKEN, 'historical card followed the live head instead of staying on revision 1')
-    if historical.get('compat_field_present') is not True:
-        _fail(OBLIGATION_READ_TOKEN, 'compatibility card is missing the deprecated readToken field')
-    if _integer(historical.get('compat_revision'), 'read token revision',
-                OBLIGATION_READ_TOKEN) != 1:
-        _fail(OBLIGATION_READ_TOKEN, 'readToken is not pinned to the card revision')
-    if historical.get('read_with_token_as_header') is not False:
-        _fail(OBLIGATION_READ_TOKEN, 'readToken was used as an authorization header')
-    read = _mapping(historical.get('read_without_token'), 'read without token',
-                    OBLIGATION_READ_TOKEN)
-    if _integer(read.get('status'), 'read without token status', OBLIGATION_READ_TOKEN) != 200:
-        _fail(OBLIGATION_READ_TOKEN, 'ID plus revision did not authorize the fixed read')
-    if _integer(read.get('revision'), 'read revision', OBLIGATION_READ_TOKEN) != 1:
-        _fail(OBLIGATION_READ_TOKEN, 'read returned a different revision')
-    if _integer(read.get('size_bytes'), 'read size', OBLIGATION_READ_TOKEN) != 2174:
-        _fail(OBLIGATION_READ_TOKEN, 'read returned different source bytes')
-    if read.get('content_hash') != historical.get('content_hash'):
-        _fail(OBLIGATION_READ_TOKEN, 'read content differs from the card-bound revision')
-    other = _mapping(cards.get('other_revision'), 'other revision card', OBLIGATION_READ_TOKEN)
-    if _integer(other.get('revision'), 'other card revision', OBLIGATION_READ_TOKEN) != 2:
-        _fail(OBLIGATION_READ_TOKEN, 'a second card was not bound to revision 2')
-    if other.get('compat_revision') != 2:
-        _fail(OBLIGATION_READ_TOKEN, 'readToken was reused across revisions')
-
-
-def check_revoked_or_deleted_unavailable(evidence: dict) -> None:
-    """Revoked and deleted fixed reads are uniformly unavailable without leaks."""
-    availability = _mapping(evidence.get('availability'), 'availability observations',
-                            OBLIGATION_UNAVAILABLE)
-    revoked = _mapping(availability.get('revoked'), 'revoked revision', OBLIGATION_UNAVAILABLE)
-    if _integer(revoked.get('status'), 'revoked status', OBLIGATION_UNAVAILABLE) != 404:
-        _fail(OBLIGATION_UNAVAILABLE, 'revoked revision must be unavailable with 404')
-    if revoked.get('error') != 'DRAFT_REFERENCE_UNAVAILABLE':
-        _fail(OBLIGATION_UNAVAILABLE, 'revoked read leaked a different error')
-    sibling = _mapping(availability.get('historical_sibling'), 'historical sibling',
-                       OBLIGATION_UNAVAILABLE)
-    if _integer(sibling.get('status'), 'historical sibling status',
-                OBLIGATION_UNAVAILABLE) != 200:
-        _fail(OBLIGATION_UNAVAILABLE, 'revoking one revision made a sibling unavailable')
-    if sibling.get('content_hash') != evidence.get('fixture', {}).get('content_hash'):
-        _fail(OBLIGATION_UNAVAILABLE, 'historical sibling changed content')
-    deleted = _mapping(availability.get('deleted'), 'deleted draft', OBLIGATION_UNAVAILABLE)
-    if _integer(deleted.get('status'), 'deleted status', OBLIGATION_UNAVAILABLE) != 404:
-        _fail(OBLIGATION_UNAVAILABLE, 'deleted Draft revision must be unavailable with 404')
-    if deleted.get('error') != 'DRAFT_REFERENCE_UNAVAILABLE':
-        _fail(OBLIGATION_UNAVAILABLE, 'deleted read leaked a different error')
-    late = _mapping(availability.get('late_create'), 'late create', OBLIGATION_UNAVAILABLE)
-    if late.get('method') != 'PUT' or _integer(late.get('status'), 'late create status',
-                                               OBLIGATION_UNAVAILABLE) != 404:
-        _fail(OBLIGATION_UNAVAILABLE, 'late create revived a deleted Draft')
-
-
-def check_read_token_read_only(evidence: dict) -> None:
-    """No draft token can authorize delete or revision management."""
-    management = _mapping(evidence.get('management'), 'management observations',
-                          OBLIGATION_READ_ONLY)
-    for field, label in (('public_delete', 'public delete'),
-                         ('token_delete', 'readToken delete'),
-                         ('token_update', 'readToken update')):
-        observation = _mapping(management.get(field), label, OBLIGATION_READ_ONLY)
-        status = _integer(observation.get('status'), label + ' status', OBLIGATION_READ_ONLY)
-        if status not in (401, 403):
-            _fail(OBLIGATION_READ_ONLY, label + ' was not rejected as unauthorized')
-    if _integer(management.get('head_after'), 'head after management rejection',
-                OBLIGATION_READ_ONLY) != 2:
-        _fail(OBLIGATION_READ_ONLY, 'rejected management operation changed the head')
-    if management.get('deleted_after') is not False:
-        _fail(OBLIGATION_READ_ONLY, 'rejected management operation deleted the Draft')
-
-
-def check_no_store_every_response(evidence: dict) -> None:
-    """Every observed success and error response carries Cache-Control: no-store."""
+        raise DraftDeliveryViolation('Draft delivery evidence lacks the canonical Draft UUID')
+    if evidence.get('identity_mode') not in ('register', 'bearer'):
+        raise DraftDeliveryViolation('Draft delivery evidence identity mode is invalid')
+    fixture = _mapping(evidence.get('fixture'), 'fixture', 'DRAFT-DELIVERY.journey-completes')
+    for field in ('content_hash', 'updated_content_hash'):
+        value = fixture.get(field)
+        if not isinstance(value, str) or _HEX64.fullmatch(value) is None:
+            raise DraftDeliveryViolation('Draft delivery fixture hash observation is invalid')
+    if fixture.get('content_hash') == fixture.get('updated_content_hash'):
+        raise DraftDeliveryViolation('Draft delivery fixture revisions did not differ')
+    if _integer(fixture.get('size_bytes'), 'fixture size bytes',
+                'DRAFT-DELIVERY.journey-completes') != 2174:
+        raise DraftDeliveryViolation('Draft delivery fixture byte observation is invalid')
     responses = evidence.get('responses')
-    if not isinstance(responses, list) or not responses:
-        _fail(OBLIGATION_NO_STORE, 'no Draft HTTP responses were observed')
-    observed_statuses = set()
-    for index, value in enumerate(responses):
-        response = _mapping(value, 'response ' + str(index), OBLIGATION_NO_STORE)
-        method, path = response.get('method'), response.get('path')
-        if not isinstance(method, str) or method not in {'GET', 'PUT', 'POST', 'DELETE'}:
-            _fail(OBLIGATION_NO_STORE, 'response method is invalid')
-        if not isinstance(path, str) or not path.startswith('/collaboration/drafts/'):
-            _fail(OBLIGATION_NO_STORE, 'response path is outside the Draft surface')
-        status = _integer(response.get('status'), 'response status', OBLIGATION_NO_STORE)
-        observed_statuses.add(status)
-        if response.get('cache_control') != 'no-store':
-            _fail(OBLIGATION_NO_STORE,
-                  method + ' ' + path + ' response did not carry no-store')
-    required = {200, 201, 204, 401, 404, 409}
-    if not required.issubset(observed_statuses):
-        _fail(OBLIGATION_NO_STORE, 'response matrix omitted success or error status coverage')
+    if not isinstance(responses, list):
+        raise DraftDeliveryViolation('Draft delivery response matrix is missing')
+    obligations = evidence.get('obligations')
+    if not isinstance(obligations, dict) or set(obligations) != set(REQUIREMENTS):
+        raise DraftDeliveryViolation('Draft delivery obligations do not match the frozen map')
+
+
+OBLIGATION_CHECKS = tuple(
+    (obligation, _CHECK_REGISTRY[obligation]) for obligation in REQUIREMENTS
+)
 
 
 def verify_all_obligations(evidence: dict) -> dict:
     """Run every independent obligation check and return a non-secret receipt."""
-    if not isinstance(evidence, dict):
-        raise DraftDeliveryViolation('Draft delivery evidence must be an object')
-    checks = (
-        (OBLIGATION_CLIENT_ID, check_client_selected_idempotent_create),
-        (OBLIGATION_APPEND, check_immutable_revision_append),
-        (OBLIGATION_STALE, check_stale_update_conflict),
-        (OBLIGATION_READ_TOKEN, check_read_token_single_revision),
-        (OBLIGATION_UNAVAILABLE, check_revoked_or_deleted_unavailable),
-        (OBLIGATION_READ_ONLY, check_read_token_read_only),
-        (OBLIGATION_NO_STORE, check_no_store_every_response),
-        (OBLIGATION_REDACTION, check_token_redaction),
-    )
-    for obligation, check in checks:
+    _envelope(evidence)
+    for obligation, check in OBLIGATION_CHECKS:
+        if _CHECK_REGISTRY.get(obligation) is None:
+            raise DraftDeliveryViolation(obligation + ': no verification function registered')
         try:
             check(evidence)
         except DraftDeliveryViolation:
             raise
         except (KeyError, TypeError, ValueError, AttributeError):
             raise DraftDeliveryViolation(obligation + ': malformed observation') from None
-    return {'status': 'PASS', 'checked': [name for name, _ in checks]}
+    return {'status': 'PASS', 'checked': list(REQUIREMENTS)}
 
 
 def scan_redaction(name: str, payload: bytes, *,
                    tokens: tuple[str, ...] = REDACTION_TOKENS) -> dict:
     """Return a non-secret observation of whether a byte stream leaks a canary."""
     if not isinstance(name, str) or not name:
-        _fail(OBLIGATION_REDACTION, 'redaction scan name is invalid')
+        _fail('DRAFT-DELIVERY.token-redaction', 'redaction scan name is invalid')
     if not isinstance(payload, bytes):
-        _fail(OBLIGATION_REDACTION, 'redaction scan payload must be bytes')
+        _fail('DRAFT-DELIVERY.token-redaction', 'redaction scan payload must be bytes')
     return {'name': name, 'clean': all(token.encode('utf-8') not in payload
                                        for token in tokens),
             'bytes': len(payload)}
-
-
-def check_token_redaction(evidence: dict) -> None:
-    """All child streams and persisted artifacts are free of draft-token canaries."""
-    redaction = _mapping(evidence.get('redaction'), 'redaction observations',
-                         OBLIGATION_REDACTION)
-    if redaction.get('token_material_captured') is not False:
-        _fail(OBLIGATION_REDACTION, 'the child captured token material')
-    for group, required in (('streams', REDACTION_STREAMS),
-                            ('artifacts', REDACTION_ARTIFACTS)):
-        entries = redaction.get(group)
-        if not isinstance(entries, list):
-            _fail(OBLIGATION_REDACTION, group + ' redaction observations are missing')
-        by_name = {}
-        for index, value in enumerate(entries):
-            entry = _mapping(value, group + ' redaction entry ' + str(index),
-                             OBLIGATION_REDACTION)
-            name = entry.get('name')
-            if not isinstance(name, str) or not name or name in by_name:
-                _fail(OBLIGATION_REDACTION, group + ' redaction names are invalid')
-            by_name[name] = entry
-            if entry.get('clean') is not True:
-                _fail(OBLIGATION_REDACTION, name + ' leaked a draft-token canary')
-        if not set(required).issubset(by_name):
-            _fail(OBLIGATION_REDACTION, group + ' redaction coverage is incomplete')

@@ -354,7 +354,8 @@ class SessionFileCoreTests(unittest.TestCase):
         guard = ROOT.parents[3] / "scripts/ci/e2e_runner_case_guard.py"
         files = (ROOT / "bcs_e2e/workspace_cli_profile.py",
                   ROOT / "bcs_e2e/workspace_cli_runner.py",
-                  ROOT / "bcs_e2e/session_file_core_contract.py")
+                  ROOT / "bcs_e2e/session_file_core_contract.py",
+                  ROOT / "bcs_e2e/session_cli_contract.py")
         result = subprocess.run([sys.executable, str(guard), *map(str, files)],
                                  text=True, capture_output=True, check=False)
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
@@ -367,6 +368,14 @@ class SessionFileCoreTests(unittest.TestCase):
             "CLI-FILE.capabilities", "CLI-FILE.metadata", "CLI-FILE.download",
             "CLI-FILE.share", "CLI-FILE.shared-metadata",
             "CLI-FILE.shared-content", "CLI-FILE.delete"])
+        self.assertEqual(value["assertion_ids"], [
+            "CLI-FILE.setup", "CLI-FILE.upload", "CLI-FILE.list",
+            "CLI-FILE.capabilities", "CLI-FILE.metadata-status",
+            "CLI-FILE.metadata-file-id", "CLI-FILE.download", "CLI-FILE.share",
+            "CLI-FILE.shared-metadata-status",
+            "CLI-FILE.shared-metadata-hides-session",
+            "CLI-FILE.shared-content-bytes", "CLI-FILE.delete"])
+        self.assertEqual(value["assertion_count"], 12)
         self.assertEqual(value["remote_validation"], "NOT_RUN")
         self.assertFalse(value["grants_release_credit"])
         rows = migration_plan()["cross_environment_product_cli_case_slices"]
@@ -377,7 +386,8 @@ class SessionFileCoreTests(unittest.TestCase):
     def test_local_core_sequence_and_capabilities(self):
         execution, runner, commands, contexts = self.run_case()
         self.assertEqual(execution.status, "PASS")
-        self.assertEqual(execution.completed_count, 10)
+        self.assertEqual(execution.completed_count, 12)
+        self.assertEqual(execution.total_count, 12)
         self.assertEqual(runner.executed, [
             "session-file.group.create", "session-file.session.create",
             "session-file.upload", "session-file.list",
@@ -394,38 +404,40 @@ class SessionFileCoreTests(unittest.TestCase):
         self.assertEqual(snapshot["steps"][0]["data"]["explicit_session"]["session_id"],
                          EXPLICIT_SESSION)
         self.assertFalse("session_id" in json.dumps(snapshot["steps"][1]["data"]))
-        self.assertEqual(snapshot["steps"][4]["data"]["file_id"], FILE)
+        self.assertEqual(snapshot["steps"][5]["data"]["file_id"], FILE)
         self.assertEqual(snapshot["steps"][4]["evidence"]["transport"], "PRODUCT_HTTP")
         self.assertEqual(snapshot["steps"][4]["evidence"]["operation"], "file.metadata")
         self.assertEqual(snapshot["steps"][4]["evidence"]["credential_kind"],
                          "owned_local_bot_token")
-        self.assertEqual(snapshot["steps"][5]["data"]["sha256"],
+        self.assertEqual(snapshot["steps"][4]["evidence"]["http_status"], 200)
+        self.assertEqual(snapshot["steps"][5]["data"]["file_id"], FILE)
+        self.assertEqual(snapshot["steps"][6]["data"]["sha256"],
                          hashlib.sha256(b"bcs-e2e-session-file-payload\n").hexdigest())
-        self.assertEqual(snapshot["steps"][6]["data"], {
+        self.assertEqual(snapshot["steps"][7]["data"], {
             "share_granted": True, "share_token_present": True,
             "expires_at": EXPIRES_AT,
         })
-        self.assertEqual(snapshot["steps"][7]["data"]["file_id"], FILE)
-        self.assertNotIn("session_id", snapshot["steps"][7]["data"])
-        self.assertEqual(snapshot["steps"][7]["evidence"]["transport"], "PRODUCT_HTTP")
-        self.assertEqual(snapshot["steps"][7]["evidence"]["operation"], "file.shared_metadata")
-        self.assertEqual(snapshot["steps"][7]["evidence"]["credential_kind"], "share_token")
-        self.assertEqual(snapshot["steps"][8]["data"]["size"], 29)
+        self.assertEqual(snapshot["steps"][8]["data"]["file_id"], FILE)
+        self.assertNotIn("session_id", snapshot["steps"][9]["data"])
         self.assertEqual(snapshot["steps"][8]["evidence"]["transport"], "PRODUCT_HTTP")
-        self.assertEqual(snapshot["steps"][8]["evidence"]["operation"], "file.shared_download")
+        self.assertEqual(snapshot["steps"][8]["evidence"]["operation"], "file.shared_metadata")
         self.assertEqual(snapshot["steps"][8]["evidence"]["credential_kind"], "share_token")
-        self.assertEqual(snapshot["steps"][8]["evidence"]["caller_role"], "public_share")
-        self.assertEqual(snapshot["steps"][9]["data"], {
+        self.assertEqual(snapshot["steps"][10]["data"]["size"], 29)
+        self.assertEqual(snapshot["steps"][10]["evidence"]["transport"], "PRODUCT_HTTP")
+        self.assertEqual(snapshot["steps"][10]["evidence"]["operation"], "file.shared_download")
+        self.assertEqual(snapshot["steps"][10]["evidence"]["credential_kind"], "share_token")
+        self.assertEqual(snapshot["steps"][10]["evidence"]["caller_role"], "public_share")
+        self.assertEqual(snapshot["steps"][11]["data"], {
             "file_deleted": True, "invalidation_count": 3,
         })
-        self.assertEqual(snapshot["steps"][9]["evidence"]["operation"], "session-file.delete")
-        self.assertEqual(snapshot["steps"][9]["evidence"]["http_method_declared"], "DELETE")
-        self.assertEqual(snapshot["steps"][9]["evidence"]["route_declared"],
+        self.assertEqual(snapshot["steps"][11]["evidence"]["operation"], "session-file.delete")
+        self.assertEqual(snapshot["steps"][11]["evidence"]["http_method_declared"], "DELETE")
+        self.assertEqual(snapshot["steps"][11]["evidence"]["route_declared"],
                          f"/sessions/{EXPLICIT_SESSION}/files/{FILE}")
-        self.assertEqual(snapshot["steps"][9]["evidence"]["fixture_effect"],
+        self.assertEqual(snapshot["steps"][11]["evidence"]["fixture_effect"],
                          "RETAINED_DYNAMIC_GROUP_SESSIONS_DELETED_FILE")
         self.assertEqual([(item["operation"], item["http_status"])
-                          for item in snapshot["steps"][9]["evidence"]["invalidations"]],
+                          for item in snapshot["steps"][11]["evidence"]["invalidations"]],
                          [("file.verify_deleted", 404),
                           ("file.shared_metadata_verify_deleted", 404),
                           ("file.shared_verify_deleted", 404)])
@@ -452,7 +464,7 @@ class SessionFileCoreTests(unittest.TestCase):
         self.assertEqual(
             snapshot["steps"][4]["evidence"]["credential_kind"],
             "human_cookie_with_owned_driver_bot_token")
-        self.assertEqual(snapshot["steps"][8]["evidence"]["caller_role"], "public_share")
+        self.assertEqual(snapshot["steps"][10]["evidence"]["caller_role"], "public_share")
         self.assertNotIn(GATEWAY_SHARE_URL, json.dumps(snapshot, sort_keys=True))
         self.assertNotIn("share_url", json.dumps(snapshot, sort_keys=True))
         self.assertNotIn(COOKIE, json.dumps(snapshot, sort_keys=True))
@@ -460,7 +472,7 @@ class SessionFileCoreTests(unittest.TestCase):
     def test_gateway_accepts_running_explicit_session(self):
         execution = self.run_case(gateway=True, session_status="running")[0]
         self.assertEqual(execution.status, "PASS")
-        self.assertEqual(execution.completed_count, 10)
+        self.assertEqual(execution.completed_count, 12)
 
     def test_gateway_rejects_unknown_explicit_session_status(self):
         execution = self.run_case(gateway=True, session_status="pending")[0]
@@ -470,7 +482,7 @@ class SessionFileCoreTests(unittest.TestCase):
     def test_gateway_accepts_preprod_ready_file_status(self):
         execution = self.run_case(gateway=True, file_status="Ready")[0]
         self.assertEqual(execution.status, "PASS")
-        self.assertEqual(execution.completed_count, 10)
+        self.assertEqual(execution.completed_count, 12)
 
     def test_inexact_after_setup_blocks_remaining_steps(self):
         cases = {
@@ -500,7 +512,7 @@ class SessionFileCoreTests(unittest.TestCase):
         self.assertEqual(execution.status, "BLOCKED")
         self.assertEqual(execution.completed_count, 0)
         self.assertEqual([step["status"] for step in execution.snapshot()["steps"]],
-                         ["NOT_RUN"] * 10)
+                         ["NOT_RUN"] * 12)
 
     def test_nonzero_session_file_output_is_rejected(self):
         execution, _, _, _ = self.run_case(returncode=1)

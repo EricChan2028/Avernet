@@ -61,7 +61,7 @@ class SessionAdmissionTests(unittest.TestCase):
         row = next(r for r in plan['local_registered_executors']
                    if r['case_id'] == 'LOCAL-SESSION-FLOW-01')
         self.assertEqual(row['requirement_ids'], list(REQUIREMENTS))
-        self.assertEqual(row['required_assertion_count'], 9)
+        self.assertEqual(row['required_assertion_count'], 87)
         self.assertFalse(row['grants_release_credit'])
         self.assertNotIn(PUBLIC_CASE,
                          [item['case_id'] for item in plan['local_partial_executors']])
@@ -97,7 +97,7 @@ class SessionPublicLifecycleLiveTests(unittest.TestCase):
         self.assertEqual(summary['requirements'], [{'id': r, 'status': 'PASS' if i == 0 else 'NOT_RUN'}
                                                    for i, r in enumerate(REQUIREMENTS)])
         self.assertEqual(summary['reports']['parent_requirement_count'], 9)
-        self.assertEqual(summary['reports']['observed_assertion_count'], 1)
+        self.assertEqual(summary['reports']['observed_assertion_count'], 31)
         self.assertEqual(set(self.result['outputs']['outputs']), {'json', 'junit', 'markdown'})
         tree = ET.parse(self.root/'reports/junit.xml').getroot()
         self.assertEqual([tree.attrib[k] for k in ('tests', 'failures', 'errors', 'skipped')], ['1', '0', '0', '0'])

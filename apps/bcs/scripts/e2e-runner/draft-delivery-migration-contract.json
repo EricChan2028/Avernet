@@ -15,7 +15,7 @@
   "source_file_revisions": {
     "collaboration_draft_story.sh": "a6d4ff2242aa8bb23674154abf08c35a66244a42"
   },
-  "story_checks": 57,
+  "story_checks": 65,
   "story_markers": [
     "Draft delivery story: {checks} live HTTP assertions passed"
   ],
@@ -31,6 +31,21 @@
     "required_arguments": [
       "--binary",
       "--binary-sha256"
+    ]
+  },
+  "cli_runtime_binary": {
+    "package": "bcs-cli",
+    "build_command": "cargo build -p bcs-cli",
+    "hash_algorithm": "sha256",
+    "opt_in_env": [
+      "BCS_E2E_TEST_CLI_BINARY",
+      "BCS_E2E_TEST_CLI_BINARY_SHA256"
+    ],
+    "auto_build": false,
+    "separation_note": "The frozen journey splits runtime roles: bcs owns the server leg; bcs-cli owns every author-side Draft CLI step.",
+    "required_arguments": [
+      "--cli-binary",
+      "--cli-binary-sha256"
     ]
   },
   "fixture": {
@@ -55,17 +70,68 @@
   ],
   "requirements": [
     {
-      "id": "DRAFT-DELIVERY.client-selected-idempotent-create",
-      "expectation": "The client selects the canonical lowercase UUID before any write; the first PUT creates revision 1, an exact same-content/same-title replay returns 200 with that unchanged revision 1, and different bytes for the same ID conflict instead of replacing it.",
+      "id": "DRAFT-DELIVERY.offline-preview-schema1-snapshot",
+      "expectation": "The offline product-CLI preview of the frozen incident file emits a snapshot without any server round trip, proving the schema-1 offline path stays executable beside the owned runtime.",
       "story_lines": [
-        28,
-        48
+        36,
+        37
       ],
       "anchors": [
         {
-          "line": 28,
-          "literal": "id=\"$(python3 -c 'import uuid; print(uuid.uuid4())')\""
+          "line": 36,
+          "literal": "collaboration preview"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.offline-preview-retains-schema1",
+      "expectation": "The offline snapshot retains schemaVersion 1 exactly; the legacy schema is never forcibly rewritten to the current reference schema.",
+      "story_lines": [
+        38,
+        38
+      ],
+      "anchors": [
+        {
+          "line": 38,
+          "literal": "snapshot.schemaVersion 1"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.offline-preview-preserves-bytes",
+      "expectation": "The offline snapshot round-trips definitionYaml byte-for-byte equal to the 2174-byte incident source, preserving fragile indentation.",
+      "story_lines": [
+        39,
+        42
+      ],
+      "anchors": [
+        {
+          "line": 40,
+          "literal": "definitionYaml"
         },
+        {
+          "line": 42,
+          "literal": "offline preview preserves the incident source"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.author-upload-incident-file",
+      "expectation": "The author chooses the canonical lowercase UUIDv4 client-side and the product CLI create binds revision 1 to that exact ID under the owner credential; the create stdout never carries readToken.",
+      "story_lines": [
+        43,
+        48
+      ],
+      "anchors": [
         {
           "line": 43,
           "literal": "collaboration draft create"
@@ -75,123 +141,8 @@
           "literal": "--draft-id \"$id\""
         },
         {
-          "line": 45,
-          "literal": "size_bytes 2174"
-        },
-        {
-          "line": 47,
-          "literal": "revision 1"
-        }
-      ],
-      "markers": [
-        "draft-delivery-compliance"
-      ]
-    },
-    {
-      "id": "DRAFT-DELIVERY.immutable-revision-append",
-      "expectation": "Revisions are immutable: revision 1 remains byte-for-byte readable after revision 2 is appended, and an update with expected_revision=1 produces exactly revision 2 rather than mutating or renumbering history.",
-      "story_lines": [
-        45,
-        75
-      ],
-      "anchors": [
-        {
-          "line": 45,
-          "literal": "size_bytes 2174"
-        },
-        {
-          "line": 47,
-          "literal": "revision 1"
-        },
-        {
-          "line": 66,
-          "literal": "collaboration draft get"
-        },
-        {
-          "line": 68,
-          "literal": "cmp \"$directory/original.yaml\" \"$directory/download.yaml\""
-        },
-        {
-          "line": 72,
-          "literal": "update advances exactly once"
-        },
-        {
-          "line": 74,
-          "literal": "size_bytes 2174"
-        },
-        {
-          "line": 75,
-          "literal": "reference.revision 1"
-        }
-      ],
-      "markers": [
-        "draft-delivery-compliance"
-      ]
-    },
-    {
-      "id": "DRAFT-DELIVERY.stale-update-conflict",
-      "expectation": "A stale update whose expected_revision no longer equals the live head is rejected with HTTP 409; it neither advances the head nor replaces the newer revision.",
-      "story_lines": [
-        70,
-        78
-      ],
-      "anchors": [
-        {
-          "line": 70,
-          "literal": "collaboration draft update"
-        },
-        {
-          "line": 71,
-          "literal": "--expected-revision 1"
-        },
-        {
-          "line": 76,
-          "literal": "/collaboration/drafts/$id/revisions"
-        },
-        {
-          "line": 77,
-          "literal": "expected_revision\":1"
-        },
-        {
-          "line": 78,
-          "literal": "require_status \"stale writer cannot replace the newer revision\" 409"
-        }
-      ],
-      "markers": [
-        "draft-delivery-compliance"
-      ]
-    },
-    {
-      "id": "DRAFT-DELIVERY.read-token-single-revision",
-      "expectation": "A reference/card is bound to exactly one fixed revision: reissuing the historical card after head advances still reports revision 1, the readToken placeholder is revision-scoped compatibility data, and reads require only the client-selected draft ID plus revision.",
-      "story_lines": [
-        48,
-        75
-      ],
-      "anchors": [
-        {
           "line": 48,
           "literal": "readToken"
-        },
-        {
-          "line": 55,
-          "literal": "/collaboration/drafts/$id/revisions/1"
-        },
-        {
-          "line": 57,
-          "literal": "content_hash"
-        },
-        {
-          "line": 60,
-          "literal": "/collaboration/drafts/$id/revisions/1/validate"
-        },
-        {
-          "line": 73,
-          "literal": "collaboration draft preview"
-        },
-        {
-          "line": 75,
-          "literal": "reference.revision 1"
         }
       ],
       "markers": [
@@ -199,44 +150,16 @@
       ]
     },
     {
-      "id": "DRAFT-DELIVERY.revoked-or-deleted-unavailable",
-      "expectation": "Revoked revisions and every revision of a deleted Draft are uniformly unavailable to public reads (404 DRAFT_REFERENCE_UNAVAILABLE); revoking one revision leaves its historical sibling readable, while deletion makes all historical cards unreadable and a late PUT cannot resurrect the ID.",
+      "id": "DRAFT-DELIVERY.saved-source-2174-bytes",
+      "expectation": "The saved revision-1 source is exactly the 2174-byte incident file.",
       "story_lines": [
-        80,
-        91
+        45,
+        45
       ],
       "anchors": [
         {
-          "line": 80,
-          "literal": "collaboration draft revoke"
-        },
-        {
-          "line": 83,
-          "literal": "require_status \"revoked card becomes unavailable\" 404"
-        },
-        {
-          "line": 84,
-          "literal": "/collaboration/drafts/$id/revisions/1"
-        },
-        {
-          "line": 85,
-          "literal": "require_status \"old shared revision remains readable\" 200"
-        },
-        {
-          "line": 86,
-          "literal": "collaboration draft delete"
-        },
-        {
-          "line": 88,
-          "literal": "require_status \"deletion revokes every historical card\" 404"
-        },
-        {
-          "line": 89,
-          "literal": "PUT \"/collaboration/drafts/$id\""
-        },
-        {
-          "line": 91,
-          "literal": "require_status \"late create cannot revive a deleted Draft\" 404"
+          "line": 45,
+          "literal": "size_bytes 2174"
         }
       ],
       "markers": [
@@ -244,11 +167,45 @@
       ]
     },
     {
-      "id": "DRAFT-DELIVERY.read-token-read-only",
-      "expectation": "A draft read token/reference is read-only: it never authorizes DELETE or revision management, and management remains behind the owner Bot credential; a public caller is rejected (401/403) and the Draft remains unchanged.",
+      "id": "DRAFT-DELIVERY.saved-source-validates",
+      "expectation": "The saved revision-1 source passes server-side validation.",
+      "story_lines": [
+        46,
+        46
+      ],
+      "anchors": [
+        {
+          "line": 46,
+          "literal": "validation.validation.valid true"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.first-revision-immutable",
+      "expectation": "Revision 1 is immutable: an exact same-content replay matches the existing revision 1 idempotently, different bytes for the same ID conflict with HTTP 409, and revision 1 stays byte-identical and readable afterwards.",
+      "story_lines": [
+        47,
+        47
+      ],
+      "anchors": [
+        {
+          "line": 47,
+          "literal": "revision 1"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.author-reads-metadata",
+      "expectation": "The author credential reads the disposable Draft metadata over the legacy Draft surface.",
       "story_lines": [
         52,
-        91
+        53
       ],
       "anchors": [
         {
@@ -256,20 +213,8 @@
           "literal": "Authorization: Bearer $owner_token"
         },
         {
-          "line": 63,
-          "literal": "DELETE \"/collaboration/drafts/$id\""
-        },
-        {
-          "line": 64,
-          "literal": "require_status \"public reader cannot delete\" 401"
-        },
-        {
-          "line": 89,
-          "literal": "PUT \"/collaboration/drafts/$id\""
-        },
-        {
-          "line": 91,
-          "literal": "require_status \"late create cannot revive a deleted Draft\" 404"
+          "line": 53,
+          "literal": "author reads Draft metadata"
         }
       ],
       "markers": [
@@ -277,11 +222,28 @@
       ]
     },
     {
-      "id": "DRAFT-DELIVERY.no-store-every-response",
-      "expectation": "Every Draft HTTP response, including success and error responses on management and public read/validate surfaces, carries Cache-Control: no-store so immutable source and reference material is never cached.",
+      "id": "DRAFT-DELIVERY.metadata-head-revision-one",
+      "expectation": "Metadata head_revision is 1 and deleted is false before any append.",
+      "story_lines": [
+        54,
+        54
+      ],
+      "anchors": [
+        {
+          "line": 54,
+          "literal": "head_revision 1"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.card-holder-tokenless-read",
+      "expectation": "A card holder reads revision 1 with only the draft ID and revision, without Bot credentials or Session membership.",
       "story_lines": [
         55,
-        59
+        56
       ],
       "anchors": [
         {
@@ -290,8 +252,42 @@
         },
         {
           "line": 56,
-          "literal": "require_status \"a card holder reads without Bot credentials or Session membership\" 200"
+          "literal": "without Bot credentials or Session membership"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.shared-read-preserves-hash",
+      "expectation": "The shared tokenless read returns the frozen incident content hash and the exact 2174-byte source.",
+      "story_lines": [
+        57,
+        58
+      ],
+      "anchors": [
+        {
+          "line": 57,
+          "literal": "content_hash"
         },
+        {
+          "line": 58,
+          "literal": "761dc9bc0f748c06ee5152a6ea9dc8bb1c1bba5e385c001930a26c17be43e7b7"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.shared-source-no-store",
+      "expectation": "The shared source read response carries Cache-Control: no-store.",
+      "story_lines": [
+        59,
+        59
+      ],
+      "anchors": [
         {
           "line": 59,
           "literal": "no-store"
@@ -302,36 +298,383 @@
       ]
     },
     {
-      "id": "DRAFT-DELIVERY.token-redaction",
-      "expectation": "No draft token (owner Bot token, revision readToken placeholder, or authorization header value) enters child logs, run receipts, evidence journals, or canonical reports; the redaction gate refuses any credential-shaped output and the child only emits a non-secret completion marker.",
+      "id": "DRAFT-DELIVERY.card-holder-validates-source",
+      "expectation": "A card holder validates revision 1 over the public validate route without credentials and receives success.",
       "story_lines": [
-        43,
+        60,
+        61
+      ],
+      "anchors": [
+        {
+          "line": 60,
+          "literal": "/revisions/1/validate"
+        },
+        {
+          "line": 61,
+          "literal": "card holder validates the stored source"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.shared-validation-binds-rev1",
+      "expectation": "The public validation response binds revision 1 and reports the source valid.",
+      "story_lines": [
+        62,
+        62
+      ],
+      "anchors": [
+        {
+          "line": 62,
+          "literal": "binds revision one"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.public-cannot-delete",
+      "expectation": "Public callers cannot delete (401); a readToken-shaped bearer authorizes neither delete nor append (401/403); metadata head stays revision 1 and the Draft stays undeleted.",
+      "story_lines": [
+        63,
         64
       ],
       "anchors": [
         {
-          "line": 43,
-          "literal": "collaboration draft create"
-        },
-        {
-          "line": 48,
-          "literal": "readToken"
-        },
-        {
-          "line": 49,
-          "literal": "owner_token=\"$(get_bot_token PM)\""
-        },
-        {
-          "line": 52,
-          "literal": "Authorization: Bearer $owner_token"
-        },
-        {
-          "line": 55,
-          "literal": "/collaboration/drafts/$id/revisions/1"
+          "line": 63,
+          "literal": "DELETE \"/collaboration/drafts/$id\""
         },
         {
           "line": 64,
-          "literal": "require_status \"public reader cannot delete\" 401"
+          "literal": "public reader cannot delete"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.author-download-fixed-bytes",
+      "expectation": "The author downloads revision-1 bytes to a receipt-referenced output file through the product CLI.",
+      "story_lines": [
+        66,
+        67
+      ],
+      "anchors": [
+        {
+          "line": 66,
+          "literal": "collaboration draft get"
+        },
+        {
+          "line": 67,
+          "literal": "--revision 1 --output"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.download-matches-incident-bytes",
+      "expectation": "The downloaded revision-1 file equals the incident source byte-for-byte.",
+      "story_lines": [
+        68,
+        68
+      ],
+      "anchors": [
+        {
+          "line": 68,
+          "literal": "download matches incident file byte for byte"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.author-validates-fixed-revision",
+      "expectation": "The author validates the fixed revision through the product CLI and validation passes.",
+      "story_lines": [
+        69,
+        69
+      ],
+      "anchors": [
+        {
+          "line": 69,
+          "literal": "collaboration draft validate"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.author-appends-revision",
+      "expectation": "The author appends an explicit new revision through the CLI with expected_revision 1; the append saves and reaches phase ready.",
+      "story_lines": [
+        70,
+        71
+      ],
+      "anchors": [
+        {
+          "line": 70,
+          "literal": "collaboration draft update"
+        },
+        {
+          "line": 71,
+          "literal": "--expected-revision 1"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.update-advances-exactly-once",
+      "expectation": "The CAS append advances the head exactly once: append creates revision 2, metadata head_revision becomes 2, and revision 2 hashes the appended source.",
+      "story_lines": [
+        72,
+        72
+      ],
+      "anchors": [
+        {
+          "line": 72,
+          "literal": "update advances exactly once"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.author-reissues-historical-card",
+      "expectation": "The author reissues the historical card with preview --revision 1 after the head advanced; CLI and HTTP reference observations both bind the draft ID plus revision 1 with a fixed-length card token field.",
+      "story_lines": [
+        73,
+        73
+      ],
+      "anchors": [
+        {
+          "line": 73,
+          "literal": "collaboration draft preview"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.historical-preview-original-bytes",
+      "expectation": "The historical card preview still reports the original 2174-byte incident source.",
+      "story_lines": [
+        74,
+        74
+      ],
+      "anchors": [
+        {
+          "line": 74,
+          "literal": "historical preview still returns the original bytes"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.reissued-card-fixed-version",
+      "expectation": "The reissued card pins reference schemaVersion 2 and revision 1 while the revision-2 reference card keeps revision 2.",
+      "story_lines": [
+        75,
+        75
+      ],
+      "anchors": [
+        {
+          "line": 75,
+          "literal": "reference.revision 1"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.stale-write-rejected",
+      "expectation": "A stale write whose expected_revision no longer equals the live head is rejected with HTTP 409 DRAFT_CONFLICT; the head stays 2 and revision-2 content is untouched.",
+      "story_lines": [
+        76,
+        78
+      ],
+      "anchors": [
+        {
+          "line": 76,
+          "literal": "POST \"/collaboration/drafts/$id/revisions\""
+        },
+        {
+          "line": 77,
+          "literal": "\"expected_revision\":1"
+        },
+        {
+          "line": 78,
+          "literal": "stale writer cannot replace the newer revision"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.revoke-second-revision",
+      "expectation": "The author revokes exactly revision 2 through the CLI (exit 0, revoked true).",
+      "story_lines": [
+        80,
+        80
+      ],
+      "anchors": [
+        {
+          "line": 80,
+          "literal": "collaboration draft revoke"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.revoke-idempotent",
+      "expectation": "Repeating the revocation of revision 2 stays idempotent (exit 0, revoked true) and never errors.",
+      "story_lines": [
+        81,
+        81
+      ],
+      "anchors": [
+        {
+          "line": 81,
+          "literal": "repeated revocation is idempotent"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.revoked-card-unavailable",
+      "expectation": "The revoked revision-2 card reads back 404 with the frozen unavailability error.",
+      "story_lines": [
+        82,
+        83
+      ],
+      "anchors": [
+        {
+          "line": 82,
+          "literal": "/collaboration/drafts/$id/revisions/2"
+        },
+        {
+          "line": 83,
+          "literal": "revoked card becomes unavailable"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.old-shared-revision-readable",
+      "expectation": "Revoking revision 2 leaves the shared revision-1 card readable with the original hash, 2174 bytes, and no-store.",
+      "story_lines": [
+        84,
+        85
+      ],
+      "anchors": [
+        {
+          "line": 84,
+          "literal": "/collaboration/drafts/$id/revisions/1"
+        },
+        {
+          "line": 85,
+          "literal": "old shared revision remains readable"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.author-deletes-draft",
+      "expectation": "The author deletes the disposable Draft through the CLI (deleted true).",
+      "story_lines": [
+        86,
+        86
+      ],
+      "anchors": [
+        {
+          "line": 86,
+          "literal": "collaboration draft delete"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.deletion-revokes-all-cards",
+      "expectation": "Deletion revokes every historical card: revision 1 and revision 2 fixed reads return 404 and metadata is either gone or flagged deleted.",
+      "story_lines": [
+        87,
+        88
+      ],
+      "anchors": [
+        {
+          "line": 87,
+          "literal": "GET \"/collaboration/drafts/$id/revisions/1\""
+        },
+        {
+          "line": 88,
+          "literal": "deletion revokes every historical card"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.late-create-cannot-revive",
+      "expectation": "A late create/PUT against the tombstone returns 404 DRAFT_REFERENCE_UNAVAILABLE and cannot revive the ID.",
+      "story_lines": [
+        89,
+        91
+      ],
+      "anchors": [
+        {
+          "line": 89,
+          "literal": "PUT \"/collaboration/drafts/$id\""
+        },
+        {
+          "line": 90,
+          "literal": "\"definition_yaml\":\"late request\""
+        },
+        {
+          "line": 91,
+          "literal": "late create cannot revive a deleted Draft"
+        }
+      ],
+      "markers": [
+        "draft-delivery-compliance"
+      ]
+    },
+    {
+      "id": "DRAFT-DELIVERY.journey-completes",
+      "expectation": "The whole journey completes: every observed Draft response carries Cache-Control: no-store, the status matrix covers success, authentication, availability and conflict outcomes, and no credential-shaped canary appears in any observation.",
+      "story_lines": [
+        23,
+        23
+      ],
+      "anchors": [
+        {
+          "line": 23,
+          "literal": "Draft delivery journey completes"
         }
       ],
       "markers": [

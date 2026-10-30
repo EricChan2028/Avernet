@@ -334,9 +334,13 @@ class LocalSessionServiceCompletionTests(unittest.TestCase):
                           '{"summary":"approved by CLI"}'])
         snapshot = execution.snapshot()
         self.assertEqual(snapshot["case_id"], SESSION_SERVICE_COMPLETE_CASE_ID)
-        self.assertEqual(snapshot["steps"][0]["method"],
-                         SESSION_SERVICE_COMPLETE_CASE_METHOD)
-        self.assertEqual(snapshot["steps"][0]["data"]["session_completed"], True)
+        self.assertEqual(len(snapshot["steps"]), 3)
+        self.assertEqual({step["method"] for step in snapshot["steps"]},
+                         {SESSION_SERVICE_COMPLETE_CASE_METHOD})
+        self.assertEqual(snapshot["steps"][0]["data"]["id"], SESSION)
+        self.assertEqual(snapshot["steps"][1]["data"]["status"], "completed")
+        self.assertEqual(snapshot["steps"][2]["data"]["output"],
+                         {"summary": "approved by CLI"})
         self.assertNotIn(TOKEN, json.dumps(snapshot, sort_keys=True))
 
     # Face-scoped to Singlebox; see the completion test note above.
@@ -355,30 +359,30 @@ class LocalSessionServiceCompletionTests(unittest.TestCase):
                 self.assertEqual(stderr_selections,
                                  [False, False, False, False, False, True])
                 snapshot = execution.snapshot()
-                requests = snapshot["steps"][0]["evidence"]["requests"]
-                self.assertEqual(requests[6]["case_class"], "session-cli.service.wait")
-                self.assertEqual(requests[6]["exit_status"], 1 if timeout else 0)
-                self.assertEqual(snapshot["steps"][0]["data"]["bounded_wait_contract_exact"], True)
-                self.assertEqual(snapshot["steps"][0]["data"]["settings_form"],
-                                 "service_spec_ack")
+                self.assertEqual(len(snapshot["steps"]), 11)
+                wait = next(step for step in snapshot["steps"]
+                            if step["requirement_id"]
+                            == "CLI-SESSION-SERVICE.roundtrip.service-wait")
+                self.assertEqual(wait["evidence"]["case_class"],
+                                 "session-cli.service.wait")
+                self.assertEqual(wait["evidence"]["exit_status"],
+                                 1 if timeout else 0)
+                self.assertIn(wait["data"]["status"], {"timeout", "completed"})
+                self.assertEqual(adapter.settings_form, "service_spec_ack")
                 self.assertNotIn(TOKEN, json.dumps(snapshot, sort_keys=True))
 
     def test_retired_service_settings_410_form_is_accepted(self):
         def http_deform(operation, data, status):
             if operation == SESSION_CLI_GROUP_SETTINGS_PATCH_OPERATION:
                 return {"status": 410, "data": None}
-        execution, _, _, _ = self._run_roundtrip(http_deform=http_deform)
+        execution, adapter, _, _ = self._run_roundtrip(http_deform=http_deform)
         self.assertEqual(execution.status, "PASS")
-        self.assertEqual(
-            execution.snapshot()["steps"][0]["data"]["settings_form"],
-            "retired_410")
+        self.assertEqual(adapter.settings_form, "retired_410")
 
     def test_acknowledged_service_settings_form_is_projected(self):
-        execution, _, _, _ = self._run_roundtrip()
+        execution, adapter, _, _ = self._run_roundtrip()
         self.assertEqual(execution.status, "PASS")
-        self.assertEqual(
-            execution.snapshot()["steps"][0]["data"]["settings_form"],
-            "service_spec_ack")
+        self.assertEqual(adapter.settings_form, "service_spec_ack")
 
     def test_completion_accepts_canonical_id_without_legacy_alias(self):
         def deform(index, raw):
@@ -445,7 +449,7 @@ class LocalSessionServiceCompletionTests(unittest.TestCase):
         plan = migration_plan()
         parent = next(item for item in plan["local_registered_executors"]
                       if item["case_id"] == "LOCAL-SESSION-SERVICE-PARENT-01")
-        self.assertEqual(parent["required_assertion_count"], 4)
+        self.assertEqual(parent["required_assertion_count"], 44)
         self.assertEqual(parent["execution_command"], "execute_local_session_service_parent_case")
         partial_ids = {item["case_id"] for item in plan["local_partial_executors"]}
         self.assertNotIn(SESSION_SERVICE_COMPLETE_CASE_ID, partial_ids)

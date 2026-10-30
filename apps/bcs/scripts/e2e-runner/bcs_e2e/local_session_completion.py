@@ -13,7 +13,9 @@ from .inventory import current_manifest, executor_digest
 from .ledger import Ledger, LedgerError
 from .local_cli import require_cli_binary
 from .local_role_identity import OwnedLocalRoleIdentity
-from .local_session_contract import REQUIREMENTS, session_source_binding
+from .local_session_contract import (
+    COMPLETION_ASSERTION_IDS, PUBLIC_ASSERTION_IDS, REQUIREMENTS,
+    SHARING_ASSERTION_IDS, session_source_binding)
 from .profile import fingerprint, identifier, unique_keys
 from .run_state import RunStateError, read, write
 
@@ -64,8 +66,8 @@ class OwnedLocalSessionCompletion:
         self.public_binding_path=self.root/'session-binding.json'; self.public_path=self.root/'local-session-public.json'
         self.sharing_binding_path=self.root/'session-sharing-binding.json'; self.sharing_path=self.root/'local-session-sharing.json'
         self.binding=self._binding(); self.binding_digest=fingerprint(self.binding); self.plan=self._plan(); self.plan_digest=fingerprint(self.plan)
-        self.public_journal=self._predecessor(self.public_path,self.public_binding_path,'LOCAL_SESSION_PUBLIC_PASS',REQUIREMENTS[:1],3)
-        self.sharing_journal=self._predecessor(self.sharing_path,self.sharing_binding_path,'LOCAL_SESSION_SHARING_PASS',REQUIREMENTS[1:6],13)
+        self.public_journal=self._predecessor(self.public_path,self.public_binding_path,'LOCAL_SESSION_PUBLIC_PASS',PUBLIC_ASSERTION_IDS,3)
+        self.sharing_journal=self._predecessor(self.sharing_path,self.sharing_binding_path,'LOCAL_SESSION_SHARING_PASS',SHARING_ASSERTION_IDS,13)
         if (fingerprint(self.public_journal)!=self.binding['public_journal_digest']
                 or fingerprint(self.sharing_journal)!=self.binding['sharing_journal_digest']):
             raise LocalSessionCompletionError('Session predecessor digest differs from completion binding')
@@ -102,7 +104,8 @@ class OwnedLocalSessionCompletion:
                     or value.get('run_id')!=self.runtime.run_id or value.get('executor_digest')!=self.executor_digest
                     or value.get('binding_digest')!=fingerprint(binding)
                     or value.get('source_binding_digest')!=fingerprint(self.source_binding)
-                    or value.get('assertions')!=[{'id':x,'status':'PASS'} for x in expected_ids]
+                    or [row.get('id') for row in value.get('assertions',[])]!=list(expected_ids)
+                    or any(row.get('status')!='PASS' for row in value.get('assertions',[]))
                     or value.get('resources',{}).get('ledger_resource_count',value.get('ledger',{}).get('resource_count'))!=resources
                     or any(r.get('state')!='deleted' for r in value.get('resources',{}).get('ledger',value.get('ledger',{}).get('resources',[])))): raise ValueError
             return value
@@ -188,7 +191,7 @@ class OwnedLocalSessionCompletion:
         'complete-manual-resolve':('POST','/openapi/v1/collaboration/messages/not-a-message/deliveries/not-a-delivery/resolve',{'session_id':s['id'],'expected_state_version':3,'resolution':'confirmed_not_sent','reason':'Bot must not manually release uncertain work'},'PM',403),
         'complete-chat-complete':('POST',f'/sessions/{sid}/complete',{'output':{'summary':'release approved'}},'PM',200),
         'complete-chat-read':('GET',f'/sessions/{sid}',None,None,200),
-        'complete-settings':('PATCH',f'/groups/{gid}/settings',{'service_spec':{'max_concurrency':2}},None,200),
+        'complete-settings':('PATCH',f'/groups/{gid}/settings',{'service_spec':{'max_concurrency':2}},None,(200,410)),
         'collection-initial-empty':('GET',f'/groups/{gid}/sessions?'+urlencode({'participant':pm,'collected':'true'}),None,None,200),
         'collection-missing-participant':('GET',f'/groups/{gid}/sessions?collected=true',None,None,400),
         'collection-collect':('POST',f'/sessions/{sid}/collect',{},'PM',200),
@@ -275,13 +278,14 @@ class OwnedLocalSessionCompletion:
         if body is not None: headers['Content-Type']='application/json'; raw=json.dumps(body,separators=(',',':'),allow_nan=False).encode()
         try:
             request=Request(self.identities.origin+path,method=method,data=raw,headers=headers)
+            expected_statuses=status if isinstance(status,tuple) else (status,)
             try: response=self.identities.opener.open(request,timeout=5)
             except HTTPError as error:
-                if error.code!=status: raise
+                if error.code not in expected_statuses: raise
                 response=error
             with response: actual=response.status; payload=response.read(MAX_RESPONSE_BYTES+1)
             self._active()
-            if actual!=status or len(payload)>MAX_RESPONSE_BYTES: raise LocalSessionCompletionError('HTTP status or byte budget differs')
+            if actual not in expected_statuses or len(payload)>MAX_RESPONSE_BYTES: raise LocalSessionCompletionError('HTTP status or byte budget differs')
             value=json.loads(payload.decode(),object_pairs_hook=unique_keys)
             if not isinstance(value,(dict,list)): raise LocalSessionCompletionError('HTTP response JSON shape unsupported')
             event.update(status='ACKNOWLEDGED',http_status=actual); event['transitions'].append({'status':'ACKNOWLEDGED','http_status':actual})
@@ -333,7 +337,7 @@ class OwnedLocalSessionCompletion:
             sid=identifier(reply.get('session_id'),'service Session ID')
             if reply.get('session_kind')!='service_invocation' or reply.get('group_id')!=group['id']:raise ValueError
             self.ledger.observed(handle,sid,origin='created',actual_request_id=request_id)
-            self.state['resources']['service_session']={'id':sid,'handle':handle,'group_id':group['id'],'attempt':1}
+            self.state['resources']['service_session']={'id':sid,'handle':handle,'group_id':group['id'],'attempt':1,'session_kind':reply.get('session_kind')}
             event=self.state['operations'][-1];event['candidate_ids']={'session':sid};event['resource_binding']='BOUND';self._save();return reply
         except BaseException:
             try:self.ledger.unknown(handle)
@@ -351,7 +355,26 @@ class OwnedLocalSessionCompletion:
         self.state['cleanup_admitted'][helper]=admission
         self.state['deletion_admissions'].append(admission);self._save()
     def _record_check(self,helper,evidence):
-        self.state['checks'].append({'id':SELECTED[HELPERS.index(helper)],'status':'PASS','evidence':evidence});self._save()
+        self.state['checks'].append({'id':helper,'status':'PASS','evidence':evidence});self._save()
+    @staticmethod
+    def _settings_form(http_status,value):
+        # Dev PR #3173 retired Group service_spec policies station-wide. The
+        # current station answers this legacy patch with exact HTTP 410, while
+        # an acknowledged 200 remains accepted for compatible builds.
+        if http_status==410:
+            if value!={'error':'service_policy_retired','message':'service_spec settings have been retired'}:
+                raise LocalSessionCompletionError('retired service settings response differs')
+            return 'retired_410'
+        if (http_status==200 and isinstance(value,dict)
+                and value.get('service_spec',{}).get('max_concurrency')==2):
+            return 'service_spec_ack'
+        raise LocalSessionCompletionError('service concurrency acknowledgement differs')
+    def _assert(self, assertion_id, evidence):
+        rows=[r for r in self.state['assertions'] if r['id']==assertion_id]
+        if (assertion_id not in COMPLETION_ASSERTION_IDS or len(rows)!=1
+                or rows[0]['status']!='NOT_RUN'):
+            raise LocalSessionCompletionError('completion assertion ID is invalid or duplicated')
+        rows[0].update(status='PASS',evidence=evidence);self._save()
     def _cleanup(self,helper,session_handles,admission=None,history=None):
         from .local_session_completion_storage import deletion_admission,deletion_proof,group_history
         if admission is None: admission=deletion_admission(self,helper)
@@ -366,7 +389,8 @@ class OwnedLocalSessionCompletion:
         for h in session_handles:self.ledger.mark_deleted(h)
         self.ledger.mark_deleted(self._group(helper)['handle'])
         self.state['deletion_proofs'].append({'helper':helper,'sqlite':proof,'ledger_mark_order':['session']*len(session_handles)+['group']})
-        self.state['assertions'][HELPERS.index(helper)]['status']='PASS';self._record_check(helper,{'cleanup':'PASS','sqlite':proof})
+        self.state['helper_evidence'].setdefault(helper,{})['cleanup']={'cleanup':'PASS','sqlite':proof}
+        self._record_check(helper,{'cleanup':'PASS','sqlite':proof})
 
     def run(self):
         from .local_session_completion_cli import CompletionCliDriver
@@ -377,7 +401,7 @@ class OwnedLocalSessionCompletion:
         self.state={'schema_version':1,'contract':CONTRACT,'suite':SUITE,'case_id':CASE_ID,'run_id':self.runtime.run_id,'status':'RUNNING',
           'executor_digest':self.executor_digest,'binding_digest':self.binding_digest,'plan_digest':self.plan_digest,
           'source_binding_digest':fingerprint(self.source_binding),'predecessors':{'public':self.binding['public_journal_digest'],'sharing':self.binding['sharing_journal_digest']},
-          'operations':[],'checks':[],'resources':{'groups':{},'sessions':{}},'assertions':[{'id':x,'status':'NOT_RUN'} for x in SELECTED],
+          'operations':[],'checks':[],'resources':{'groups':{},'sessions':{}},'assertions':[{'id':x,'status':'NOT_RUN'} for x in COMPLETION_ASSERTION_IDS],
           'deletion_admissions':[],'cleanup_admitted':{},'deletion_proofs':[],'visibility':{},'histories':{},'fixture_state':{'preserved':False},'unrelated_state':{'preserved':False},
           'execution_scope':{'runtime':'OWNED_LOCAL_FOREGROUND','engine':'NOT_STARTED','receiver':'NOT_OPENED','transport':'NOT_TESTED_WITH_CONNECTED_ENGINES',
                              'service_business_execution':'NOT_CLAIMED','manual_chat_terminality':'ONLY_COMPLETE_HELPER'},
@@ -392,63 +416,134 @@ class OwnedLocalSessionCompletion:
                 self.state['visibility']['lifecycle']={'before':self._visibility('lifecycle-visibility-before','protected')}
                 self.state['visibility']['lifecycle']['admitted']=self._visibility('lifecycle-visibility-public','public');self.state['visibility']['lifecycle']['public_read']=self._visibility('lifecycle-visibility-public-read','public')
                 g=self._intent_group('lifecycle',cli);s=self._intent_session('lifecycle')
-                if self._http('lifecycle-session-patch').get('session_title')!='renamed-sess':raise LocalSessionCompletionError('session rename differs')
-                if not any(p.get('bot_uuid')==self._id('ENG') for p in self._http('lifecycle-member-add').get('participants',[])):raise LocalSessionCompletionError('ENG add differs')
-                if not any(p.get('bot_uuid')==self._id('ENG') and p.get('mode')=='muted' for p in self._http('lifecycle-member-mute').get('participants',[])):raise LocalSessionCompletionError('ENG mute differs')
+                self._assert('SESSION.lifecycle.session-create',{'session_id':s['id'],'group_id':g['id']})
+                patched=self._http('lifecycle-session-patch')
+                if patched.get('session_title')!='renamed-sess':raise LocalSessionCompletionError('session rename differs')
+                self._assert('SESSION.lifecycle.session-patch',{'session_title':patched['session_title']})
+                added=self._http('lifecycle-member-add')
+                if not any(p.get('bot_uuid')==self._id('ENG') for p in added.get('participants',[])):raise LocalSessionCompletionError('ENG add differs')
+                self._assert('SESSION.lifecycle.member-add',{'participant_count':len(added.get('participants',[]))})
+                muted=self._http('lifecycle-member-mute')
+                if not any(p.get('bot_uuid')==self._id('ENG') and p.get('mode')=='muted' for p in muted.get('participants',[])):raise LocalSessionCompletionError('ENG mute differs')
+                self._assert('SESSION.lifecycle.member-mute',{'mode':'muted'})
                 chat=self._http('lifecycle-chat')
                 if chat.get('session_id')!=s['id'] or chat.get('delivered_count')!=0 or chat.get('delivered') is not False:raise LocalSessionCompletionError('disconnected lifecycle delivery response differs')
+                self._assert('SESSION.lifecycle.chat',{'session_id':chat['session_id'],'delivered_count':chat['delivered_count']})
                 messages=self._http('lifecycle-messages');message_proof=verify_lifecycle_message(self,messages)
-                if any(p.get('bot_uuid')==self._id('ENG') for p in self._http('lifecycle-member-remove').get('participants',[])):raise LocalSessionCompletionError('ENG removal differs')
+                self._assert('SESSION.lifecycle.messages',{'message_proof':message_proof})
+                removed=self._http('lifecycle-member-remove')
+                if any(p.get('bot_uuid')==self._id('ENG') for p in removed.get('participants',[])):raise LocalSessionCompletionError('ENG removal differs')
+                self._assert('SESSION.lifecycle.member-remove',{'eng_absent':True})
                 from .local_session_completion_storage import deletion_admission,group_history
                 admission=deletion_admission(self,'lifecycle');history=group_history(self,'lifecycle');self._record_admission(admission)
-                if self._http('lifecycle-session-delete')!={'deleted':True,'session_id':s['id']}:raise LocalSessionCompletionError('creator session delete differs')
+                lifecycle_deleted=self._http('lifecycle-session-delete')
+                if lifecycle_deleted!={'deleted':True,'session_id':s['id']}:raise LocalSessionCompletionError('creator session delete differs')
+                self._assert('SESSION.lifecycle.session-delete',{'deleted':True,'session_id':s['id']})
                 self.ledger.mark_deleted(s['handle'])
-                if any((x.get('session_id') or x.get('id'))==s['id'] for x in self._items(self._http('lifecycle-session-list-absence'))):raise LocalSessionCompletionError('deleted Session remains listed')
+                lifecycle_absence=self._items(self._http('lifecycle-session-list-absence'))
+                if any((x.get('session_id') or x.get('id'))==s['id'] for x in lifecycle_absence):raise LocalSessionCompletionError('deleted Session remains listed')
+                self._assert('SESSION.lifecycle.session-delete-verified',{'listed':False})
                 self.state['helper_evidence']={'lifecycle':{'chat_http_status':200,'delivery_count':0,'transport':'NOT_TESTED','message':message_proof}}
                 self._cleanup('lifecycle',(g['initial_session_handle'],),admission,history)
                 self.state['visibility']['lifecycle']['after']=self._visibility('lifecycle-visibility-restore','protected');self.state['visibility']['lifecycle']['restored']=self._visibility('lifecycle-visibility-restored-read','protected')=='protected'
                 # complete and invoke
                 self.state['visibility']['complete']={'before':self._visibility('complete-visibility-before','protected')};self.state['visibility']['complete']['admitted']=self._visibility('complete-visibility-public','public');self.state['visibility']['complete']['public_read']=self._visibility('complete-visibility-public-read','public')
                 g=self._intent_group('complete');s=self._intent_session('complete')
-                if self._http('complete-delivery-get')!=[] or self._http('complete-delivery-batch')!=[]:raise LocalSessionCompletionError('delivery query fabricated state')
-                for op in ('complete-cancel-one','complete-cancel-message'):
-                    if self._http(op).get('error')!='Bad Request':raise LocalSessionCompletionError('missing-message cancellation response differs')
-                if self._http('complete-manual-resolve').get('error')!='Forbidden':raise LocalSessionCompletionError('Bot manual resolution guard differs')
+                self._assert('SESSION.complete-invoke.service-group-create',{'group_id':g['id']})
+                self._assert('SESSION.complete-invoke.service-group-id',{'group_id':g['id']})
+                self._assert('SESSION.complete-invoke.signoff-session-create',{'session_id':s['id']})
+                delivery_one=self._http('complete-delivery-get');delivery_batch=self._http('complete-delivery-batch')
+                if delivery_one!=[] or delivery_batch!=[]:raise LocalSessionCompletionError('delivery query fabricated state')
+                self._assert('SESSION.complete-invoke.unmanaged-message-inspect',{'http_status':200})
+                self._assert('SESSION.complete-invoke.unmanaged-message-no-deliveries',{'delivery_rows':len(delivery_one)})
+                self._assert('SESSION.complete-invoke.delivery-batch-query',{'http_status':200})
+                self._assert('SESSION.complete-invoke.delivery-batch-no-rows',{'delivery_rows':len(delivery_batch)})
+                cancel_one=self._http('complete-cancel-one')
+                if cancel_one.get('error')!='Bad Request':raise LocalSessionCompletionError('missing-message cancellation response differs')
+                self._assert('SESSION.complete-invoke.cancel-missing-delivery',{'error':cancel_one['error']})
+                cancel_message=self._http('complete-cancel-message')
+                if cancel_message.get('error')!='Bad Request':raise LocalSessionCompletionError('missing-message cancellation response differs')
+                self._assert('SESSION.complete-invoke.cancel-missing-message',{'error':cancel_message['error']})
+                manual=self._http('complete-manual-resolve')
+                if manual.get('error')!='Forbidden':raise LocalSessionCompletionError('Bot manual resolution guard differs')
+                self._assert('SESSION.complete-invoke.manual-resolve-forbidden',{'error':manual['error']})
                 complete=self._http('complete-chat-complete')
                 if complete.get('status')!='completed' or complete.get('output',{}).get('summary')!='release approved':raise LocalSessionCompletionError('chat completion differs')
+                self._assert('SESSION.complete-invoke.chat-complete',{'http_status':200})
+                self._assert('SESSION.complete-invoke.chat-status-completed',{'status':complete['status']})
+                self._assert('SESSION.complete-invoke.chat-output-stored',{'output':complete['output']})
                 readback=self._http('complete-chat-read')
                 if readback.get('status')!='completed' or readback.get('output',{}).get('summary')!='release approved':raise LocalSessionCompletionError('completion readback differs')
+                self._assert('SESSION.complete-invoke.chat-readback',{'http_status':200})
+                self._assert('SESSION.complete-invoke.chat-readback-status',{'status':readback['status']})
+                self._assert('SESSION.complete-invoke.chat-readback-output',{'output':readback['output']})
                 settings=self._http('complete-settings')
-                if settings.get('service_spec',{}).get('max_concurrency')!=2:raise LocalSessionCompletionError('service concurrency differs')
+                settings_form=self._settings_form(self.state['operations'][-1]['http_status'],settings)
                 service=self._service_intent();ssid=service['session_id']
+                self._assert('SESSION.complete-invoke.service-start',{'session_id':ssid,'settings_form':settings_form})
+                self._assert('SESSION.complete-invoke.service-session-id',{'session_id':ssid})
+                self._assert('SESSION.complete-invoke.service-kind',{'session_kind':self.state['resources']['service_session'].get('session_kind')})
                 own=self._http('complete-service-read')
                 if own.get('group_id')!=g['id'] or own.get('session_title')!='Automated release audit':raise LocalSessionCompletionError('service caller read differs')
-                if self._http('complete-service-foreign').get('error')!='forbidden':raise LocalSessionCompletionError('foreign service caller guard differs')
+                self._assert('SESSION.complete-invoke.service-caller-read',{'http_status':200})
+                self._assert('SESSION.complete-invoke.service-belongs-group',{'group_id':own['group_id']})
+                self._assert('SESSION.complete-invoke.service-title',{'session_title':own['session_title']})
+                foreign=self._http('complete-service-foreign')
+                if foreign.get('error')!='forbidden':raise LocalSessionCompletionError('foreign service caller guard differs')
+                self._assert('SESSION.complete-invoke.service-foreign-forbidden',{'error':foreign['error']})
+                self._assert('SESSION.complete-invoke.service-isolation',{'caller_scope':'OTHER_BOT'})
                 wrong=self._http('complete-service-wrong-complete')
                 if wrong.get('error')!='forbidden' or 'service sessions cannot be completed via this endpoint' not in wrong.get('message',''):raise LocalSessionCompletionError('wrong completion endpoint guard differs')
+                self._assert('SESSION.complete-invoke.service-wrong-complete',{'error':wrong['error']})
+                self._assert('SESSION.complete-invoke.service-completion-guard',{'guard':'CHAT_COMPLETION_ENDPOINT'})
+                self._assert('SESSION.complete-invoke.service-guard-endpoint',{'message':wrong['message']})
                 admission=deletion_admission(self,'complete');history=group_history(self,'complete');self._record_admission(admission)
-                if self._http('complete-chat-delete')!={'deleted':True,'session_id':s['id']}:raise LocalSessionCompletionError('completed chat cleanup differs')
+                chat_deleted=self._http('complete-chat-delete')
+                if chat_deleted!={'deleted':True,'session_id':s['id']}:raise LocalSessionCompletionError('completed chat cleanup differs')
+                self._assert('SESSION.complete-invoke.chat-cleanup',{'deleted':True,'session_id':s['id']})
                 self.ledger.mark_deleted(s['handle'])
-                if self._http('complete-service-delete')!={'deleted':True,'session_id':ssid}:raise LocalSessionCompletionError('service cleanup differs')
+                service_deleted=self._http('complete-service-delete')
+                if service_deleted!={'deleted':True,'session_id':ssid}:raise LocalSessionCompletionError('service cleanup differs')
+                self._assert('SESSION.complete-invoke.service-cleanup',{'deleted':True,'session_id':ssid})
                 self.ledger.mark_deleted(self.state['resources']['service_session']['handle'])
                 self.state['helper_evidence']['complete']={'manual_chat_terminality':'COMPLETED','service_business_execution':'NOT_CLAIMED','empty_delivery_rows':True}
                 self._cleanup('complete',(g['initial_session_handle'],),admission,history)
+                self._assert('SESSION.complete-invoke.service-group-cleanup',{'group_id':g['id'],'http_status':404})
                 self.state['visibility']['complete']['after']=self._visibility('complete-visibility-restore','protected');self.state['visibility']['complete']['restored']=self._visibility('complete-visibility-restored-read','protected')=='protected'
                 # collection
                 self.state['visibility']['collection']={'before':self._visibility('collection-visibility-before','protected')};self.state['visibility']['collection']['admitted']=self._visibility('collection-visibility-public','public');self.state['visibility']['collection']['public_read']=self._visibility('collection-visibility-public-read','public')
                 g=self._intent_group('collection',cli);s=self._intent_session('collection')
-                if self._items(self._http('collection-initial-empty'))!=[]:raise LocalSessionCompletionError('initial collected list not empty')
+                self._assert('SESSION.collection.session-create',{'session_id':s['id'],'group_id':g['id']})
+                initial=self._items(self._http('collection-initial-empty'))
+                if initial!=[]:raise LocalSessionCompletionError('initial collected list not empty')
+                self._assert('SESSION.collection.initial-empty',{'items':len(initial)})
                 missing=self._http('collection-missing-participant')
                 if missing.get('error')!='invalid_params' or 'participant' not in missing.get('message',''):raise LocalSessionCompletionError('missing participant guard differs')
-                for op in ('collection-collect','collection-collect-repeat'):
-                    if self._http(op)!={'collected':True,'session_id':s['id']}:raise LocalSessionCompletionError('collect idempotency differs')
+                self._assert('SESSION.collection.missing-participant-rejected',{'error':missing['error']})
+                collect_one=self._http('collection-collect')
+                if collect_one!={'collected':True,'session_id':s['id']}:raise LocalSessionCompletionError('collect idempotency differs')
+                self._assert('SESSION.collection.collect',{'collected':True,'session_id':collect_one['session_id']})
+                collect_repeat=self._http('collection-collect-repeat')
+                if collect_repeat!={'collected':True,'session_id':s['id']}:raise LocalSessionCompletionError('collect idempotency differs')
+                self._assert('SESSION.collection.collect-idempotent',{'http_status':200,'collected':True})
                 pmitems=self._items(self._http('collection-pm-contains'))
                 if not any((x.get('session_id') or x.get('id'))==s['id'] and x.get('collected') is True for x in pmitems):raise LocalSessionCompletionError('PM collected list missing Session')
-                if any((x.get('session_id') or x.get('id'))==s['id'] for x in self._items(self._http('collection-eng-empty'))):raise LocalSessionCompletionError('ENG collection isolation differs')
-                if self._http('collection-qa-nonparticipant') != {'error':'participant '+self._id('QA')+' not in session '+s['id']}:raise LocalSessionCompletionError('QA nonparticipant response differs')
-                for op in ('collection-uncollect','collection-uncollect-repeat'):
-                    if self._http(op)!={'collected':False,'session_id':s['id']}:raise LocalSessionCompletionError('uncollect idempotency differs')
-                if self._items(self._http('collection-final-empty'))!=[]:raise LocalSessionCompletionError('final collected list not empty')
+                self._assert('SESSION.collection.pm-contains',{'session_id':s['id'],'collected':True})
+                engitems=self._items(self._http('collection-eng-empty'))
+                if any((x.get('session_id') or x.get('id'))==s['id'] for x in engitems):raise LocalSessionCompletionError('ENG collection isolation differs')
+                self._assert('SESSION.collection.eng-isolation',{'items':len(engitems)})
+                qa=self._http('collection-qa-nonparticipant')
+                if qa != {'error':'participant '+self._id('QA')+' not in session '+s['id']}:raise LocalSessionCompletionError('QA nonparticipant response differs')
+                self._assert('SESSION.collection.qa-nonparticipant',{'http_status':404,'error':qa['error']})
+                uncollect_one=self._http('collection-uncollect')
+                if uncollect_one!={'collected':False,'session_id':s['id']}:raise LocalSessionCompletionError('uncollect idempotency differs')
+                self._assert('SESSION.collection.uncollect',{'collected':False,'session_id':uncollect_one['session_id']})
+                uncollect_repeat=self._http('collection-uncollect-repeat')
+                if uncollect_repeat!={'collected':False,'session_id':s['id']}:raise LocalSessionCompletionError('uncollect idempotency differs')
+                self._assert('SESSION.collection.uncollect-idempotent',{'http_status':200,'collected':False})
+                final=self._items(self._http('collection-final-empty'))
+                if final!=[]:raise LocalSessionCompletionError('final collected list not empty')
+                self._assert('SESSION.collection.final-empty',{'items':len(final)})
                 self.state['helper_evidence']['collection']={'initial_empty':True,'idempotent_collect':True,'per_bot_isolation':True,'qa_nonparticipant_404':True,'final_empty':True}
                 self._cleanup('collection',(g['initial_session_handle'],s['handle']))
                 self.state['visibility']['collection']['after']=self._visibility('collection-visibility-restore','protected');self.state['visibility']['collection']['restored']=self._visibility('collection-visibility-restored-read','protected')=='protected'
@@ -462,7 +557,7 @@ class OwnedLocalSessionCompletion:
                 if ([r['operation'] for r in self.state['operations']]!=list(OPERATIONS) or any(r['status']!='ACKNOWLEDGED' for r in self.state['operations'])
                         or self.state['cli']!={'operation_count':2,'acknowledged_count':2,'credential_contexts_cleared':True}
                         or len(rows)!=10 or any(r['origin']!='created' or r['state']!='deleted' or r['attempt']!=1 for r in rows)
-                        or any(r['status']!='PASS' for r in self.state['assertions']) or len(self.state['deletion_proofs'])!=3):
+                        or [r['id'] for r in self.state['assertions']]!=list(COMPLETION_ASSERTION_IDS) or any(r['status']!='PASS' for r in self.state['assertions']) or len(self.state['deletion_proofs'])!=3):
                     raise LocalSessionCompletionError('final completion evidence incomplete')
                 self.state.update(status='LOCAL_SESSION_COMPLETION_PASS',disposition='THREE_GROUPS_SEVEN_SESSIONS_DELETED_HISTORY_RETAINED',resource_disposition='LEDGER_10_TOMBSTONES')
                 self._save();return _copy(self.state)

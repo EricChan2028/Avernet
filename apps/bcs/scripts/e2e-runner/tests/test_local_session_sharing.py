@@ -166,7 +166,7 @@ class LocalSessionSharingGuardTests(unittest.TestCase):
 
     def test_success_schema_defers_requirement_pass_until_delete_proof(self):
         source = (ROOT / 'bcs_e2e' / 'local_session_sharing.py').read_text()
-        pass_line = "self.state['assertions'][requirement_index]['status'] = 'PASS'"
+        pass_line = 'self._assert(assertion_id, evidence)'
         self.assertEqual(source.count(pass_line), 1)
         self.assertGreater(source.index(pass_line), source.index('proof = deletion_proof'))
         self.assertIn("'cleanup_timing': 'ORIGINAL_PER_HELPER_BEFORE_NEXT_CREATE'", source)

@@ -46,7 +46,7 @@ class SessionFlowAdmissionTests(unittest.TestCase):
         plan = migration_plan()
         item = next(row for row in plan['local_registered_executors'] if row['case_id'] == 'LOCAL-SESSION-FLOW-01')
         self.assertEqual(item['requirement_ids'], list(REQUIREMENTS))
-        self.assertEqual(item['required_assertion_count'], 9)
+        self.assertEqual(item['required_assertion_count'], 87)
         self.assertEqual(item['canonical_reporting'], 'INTEGRATED_LOCAL')
         self.assertFalse(item['grants_release_credit'])
         superseded = {'LOCAL-SESSION-PUBLIC-01', 'LOCAL-SESSION-SHARING-01'}
@@ -79,8 +79,8 @@ class SessionFlowLiveTests(unittest.TestCase):
         self.assertEqual(summary['status'], 'LOCAL_SUITE_PASS')
         self.assertEqual(result['shutdown']['status'], 'STOPPED')
         self.assertEqual(result['credentials']['credential_memory'], 'CLEARED')
-        self.assertEqual(summary['reports'], {'expected_assertion_count': 9, 'parent_requirement_count': 9,
-                                              'observed_assertion_count': 9})
+        self.assertEqual(summary['reports'], {'expected_assertion_count': 87, 'parent_requirement_count': 9,
+                                              'observed_assertion_count': 87})
         self.assertEqual(summary['requirements'], [{'id': name, 'status': 'PASS'} for name in REQUIREMENTS])
         self.assertEqual(summary['scope']['full_story_status'], 'LOCAL_INTEGRATED')
         self.assertEqual(summary['scope']['full_release_status'], 'NOT_QUALIFIED')

@@ -24,7 +24,8 @@ BACKLOG_STORY_COMMANDS = frozenset({
 })
 
 
-def _register_run(commands, name: str, help_text: str) -> None:
+def _register_run(commands, name: str, help_text: str, *,
+                  cli_binary: bool = False) -> None:
     run = commands.add_parser(name, help=help_text)
     for argument in ('binary', 'state-dir'):
         run.add_argument('--' + argument, type=Path, required=True)
@@ -32,6 +33,9 @@ def _register_run(commands, name: str, help_text: str) -> None:
         run.add_argument('--' + argument, required=True)
     for argument in ('allow-local-processes', 'allow-fixture-write', 'allow-write'):
         run.add_argument('--' + argument, action='store_true')
+    if cli_binary:
+        run.add_argument('--cli-binary', type=Path, required=True)
+        run.add_argument('--cli-binary-sha256', required=True)
 
 
 def _register_report(commands, name: str, help_text: str) -> None:
@@ -49,7 +53,8 @@ def register_backlog_story_commands(commands) -> None:
         'Verify frozen owned-local Session-owner evidence offline')
     _register_run(
         commands, 'local-draft-delivery-run',
-        'Run the frozen Draft delivery Story beside one owned BCS runtime')
+        'Run the frozen Draft delivery Story beside one owned BCS runtime',
+        cli_binary=True)
     _register_report(
         commands, 'local-draft-delivery-report',
         'Verify frozen owned-local Draft delivery evidence offline')
@@ -100,6 +105,7 @@ def dispatch_backlog_story_command(args: Namespace, *,
         from .draft_delivery.run import local_draft_delivery_run
         report = local_draft_delivery_run(
             binary=args.binary, binary_sha256=args.binary_sha256,
+            cli_binary=args.cli_binary, cli_binary_sha256=args.cli_binary_sha256,
             state_dir=args.state_dir, run_id=args.run_id,
             confirm_run_id=args.confirm_run_id,
             allow_local_processes=args.allow_local_processes,

@@ -1,10 +1,11 @@
-"""Source and obligation contract for the Draft delivery owned-local slice.
+"""Source and obligation contract for the Draft delivery dual slice.
 
 The upstream entry is a shell story: it selects the Draft UUID on the client,
 creates immutable revisions through the product CLI, exercises public fixed
 revision reads/validation, appends through CAS, rejects a stale writer, revokes
 one revision and deletes the Draft tombstone. This module freezes that source
-and a stricter eight-obligation semantic map before any owned runtime starts.
+and a stricter 32-obligation semantic map (one per parsed upstream assertion)
+before any owned or remote runtime starts.
 """
 from __future__ import annotations
 
@@ -25,14 +26,38 @@ FIXTURE_SOURCE = ROOT.parents[1] / 'tests' / 'fixtures' / 'collaboration-definit
 CONFIG_FRAGMENT = Path(__file__).with_name('collaboration-drafts.enabled.json')
 REQUIREMENTS = tuple(
     'DRAFT-DELIVERY.' + name for name in (
-        'client-selected-idempotent-create',
-        'immutable-revision-append',
-        'stale-update-conflict',
-        'read-token-single-revision',
-        'revoked-or-deleted-unavailable',
-        'read-token-read-only',
-        'no-store-every-response',
-        'token-redaction',
+        'offline-preview-schema1-snapshot',
+        'offline-preview-retains-schema1',
+        'offline-preview-preserves-bytes',
+        'author-upload-incident-file',
+        'saved-source-2174-bytes',
+        'saved-source-validates',
+        'first-revision-immutable',
+        'author-reads-metadata',
+        'metadata-head-revision-one',
+        'card-holder-tokenless-read',
+        'shared-read-preserves-hash',
+        'shared-source-no-store',
+        'card-holder-validates-source',
+        'shared-validation-binds-rev1',
+        'public-cannot-delete',
+        'author-download-fixed-bytes',
+        'download-matches-incident-bytes',
+        'author-validates-fixed-revision',
+        'author-appends-revision',
+        'update-advances-exactly-once',
+        'author-reissues-historical-card',
+        'historical-preview-original-bytes',
+        'reissued-card-fixed-version',
+        'stale-write-rejected',
+        'revoke-second-revision',
+        'revoke-idempotent',
+        'revoked-card-unavailable',
+        'old-shared-revision-readable',
+        'author-deletes-draft',
+        'deletion-revokes-all-cards',
+        'late-create-cannot-revive',
+        'journey-completes',
     )
 )
 MARKER_KEYS = ('draft-delivery-compliance',)
@@ -42,7 +67,7 @@ MARKER_PATTERNS = (
 STORY_MARKERS = ('Draft delivery story: {checks} live HTTP assertions passed',)
 MARKER_PREFIX = 'Draft delivery story: '
 MARKER_SUFFIX = ' live HTTP assertions passed'
-STORY_CHECKS = 57
+STORY_CHECKS = 65
 CONFIG_REQUIRED = {'collaboration_drafts': {'enabled': True}}
 REDACTION_TOKENS = ('bot_token', 'readToken', 'read_token', 'Bearer ')
 ENVIRONMENT = {'local': 'LOCAL_EXECUTOR_ONLY', 'preprod': 'REMOTE_UNSUPPORTED'}
@@ -96,14 +121,15 @@ def _validate_anchors(rows: list, source: Path) -> None:
 
 
 def draft_delivery_source_binding() -> dict:
-    """Freeze and validate the shell story, fixture and eight obligations."""
+    """Freeze and validate the shell story, fixture and 32 obligations."""
     try:
         value = read(ROOT / 'draft-delivery-migration-contract.json')
         source_paths = _source_paths()
         if (set(value) != {'schema_version', 'parent', 'suite', 'case_id', 'environment',
                            'sources', 'source_revision', 'source_file_revisions',
                            'story_checks', 'story_markers', 'owned_runtime_binary',
-                           'fixture', 'config_fragment', 'redaction_tokens',
+                           'cli_runtime_binary', 'fixture', 'config_fragment',
+                           'redaction_tokens',
                            'requirements', 'remote_validation', 'grants_release_credit',
                            'release_parent_denominator', 'independent_slice',
                            'evidence_granularity'}
@@ -134,6 +160,20 @@ def draft_delivery_source_binding() -> dict:
                                              'BCS_E2E_TEST_BINARY_SHA256']
                 or runtime['auto_build'] is not False
                 or runtime['required_arguments'] != ['--binary', '--binary-sha256']):
+            raise ValueError
+        cli_runtime = value['cli_runtime_binary']
+        if (set(cli_runtime) != {'package', 'build_command', 'hash_algorithm', 'opt_in_env',
+                                 'auto_build', 'required_arguments', 'separation_note'}
+                or cli_runtime['package'] != 'bcs-cli'
+                or cli_runtime['build_command'] != 'cargo build -p bcs-cli'
+                or cli_runtime['hash_algorithm'] != 'sha256'
+                or cli_runtime['opt_in_env'] != ['BCS_E2E_TEST_CLI_BINARY',
+                                                 'BCS_E2E_TEST_CLI_BINARY_SHA256']
+                or cli_runtime['auto_build'] is not False
+                or cli_runtime['separation_note'] != (
+                    'The frozen journey splits runtime roles: bcs owns the server leg; '
+                    'bcs-cli owns every author-side Draft CLI step.')
+                or cli_runtime['required_arguments'] != ['--cli-binary', '--cli-binary-sha256']):
             raise ValueError
         for name, digest in value['sources'].items():
             path = source_paths[name]

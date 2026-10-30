@@ -304,9 +304,13 @@ class RemoteLocalSessionServiceLifecycleTests(unittest.TestCase):
                 self.assertEqual(commands[-1][-1], "CLI release sign-off")
                 snapshot = result.snapshot()
                 self.assertEqual(snapshot["case_id"], SESSION_SERVICE_LIFECYCLE_CASE_ID)
-                self.assertEqual(snapshot["steps"][0]["evidence"]["requests"][4]["case_class"],
+                self.assertEqual(len(snapshot["steps"]), 12)
+                self.assertEqual(snapshot["steps"][10]["evidence"]["case_class"],
                                  "session-cli.session.patch")
-                self.assertTrue(snapshot["steps"][0]["data"]["group_absence_verified"])
+                self.assertEqual(snapshot["steps"][10]["data"]["id"], SESSION)
+                self.assertEqual(snapshot["steps"][0]["data"]["group_id"], GROUP)
+                self.assertEqual(snapshot["steps"][11]["data"]["session_title"],
+                                 NEW_TITLE)
                 self.assertNotIn(COOKIE, json.dumps(snapshot, sort_keys=True))
                 if preprod:
                     self.assertEqual(contexts[0][1], COOKIE)
@@ -369,7 +373,7 @@ class RemoteLocalSessionServiceLifecycleTests(unittest.TestCase):
         row = next(item for item in plan["local_registered_executors"]
                    if item["case_id"] == "LOCAL-SESSION-SERVICE-PARENT-01")
         self.assertEqual(row["legacy_id"], SESSION_SERVICE_LIFECYCLE_PARENT)
-        self.assertEqual(row["required_assertion_count"], 4)
+        self.assertEqual(row["required_assertion_count"], 44)
         self.assertNotIn(SESSION_SERVICE_LIFECYCLE_CASE_ID,
                          [item["case_id"] for item in plan["local_partial_executors"]])
         self.assertEqual(row["execution_command"], "execute_local_session_service_parent_case")

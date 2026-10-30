@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 from types import SimpleNamespace
+from dataclasses import replace
 from unittest.mock import patch
 
 TEST_ROOT = Path(__file__).resolve().parent
@@ -18,6 +19,19 @@ sys.path.insert(0, str(TEST_ROOT))
 sys.path.insert(0, str(ROOT))
 
 from bcs_e2e.case_executor import CaseExecution, StepOutcome
+from bcs_e2e.local_session_service_cli import (
+    LIFECYCLE_ASSERTION_IDS,
+    MEMBER_CHAT_ASSERTION_IDS,
+    SESSION_SERVICE_LIFECYCLE_CASE_METHOD,
+    SESSION_SERVICE_MEMBER_CHAT_CASE_METHOD,
+)
+from bcs_e2e.local_session_service_completion import (
+    COMPLETE_ASSERTION_IDS,
+    ROUNDTRIP_ASSERTION_IDS,
+    SESSION_SERVICE_ASSERTION_IDS,
+    SESSION_SERVICE_COMPLETE_CASE_METHOD,
+    SESSION_SERVICE_ROUNDTRIP_CASE_METHOD,
+)
 from bcs_e2e.local_session_service_parent_case import PARENT_CASE_ID
 from bcs_e2e.local_session_service_parent_reporting import (
     build_session_service_parent_report,
@@ -67,51 +81,39 @@ def write(path: Path, value: dict) -> None:
                     encoding='utf-8')
 
 
-def step(index: int, status: str = 'PASS') -> dict:
-    effect = FIXTURE_EFFECTS[index]
-    data_keys = (
-        ('group_id', 'session_id', 'session_created', 'session_listed',
-         'session_read', 'session_renamed', 'group_deleted',
-         'group_absence_verified'),
-        ('group_id', 'session_id', 'member_admitted', 'member_muted',
-         'chat_delivered', 'history_observable', 'invite_minted',
-         'member_removed', 'group_deleted', 'group_absence_verified'),
-        ('group_id', 'session_id', 'session_completed',
-         'completion_output_preserved', 'group_deleted',
-         'group_absence_verified'),
-        ('group_id', 'session_id', 'service_session_id',
-         'service_identity_preserved', 'bounded_wait_contract_exact',
-         'chat_session_deleted', 'service_session_deleted', 'group_deleted',
-         'group_absence_verified'),
-    )[index]
-    data = {'group_id': f'group-{index + 1}',
-            'session_id': f'group-{index + 1}:session',
-            **{key: True for key in data_keys[2:]}}
-    if index == 3:
-        data['service_session_id'] = f'group-{index + 1}:service'
+ASSERTION_GROUPS = (
+    (LIFECYCLE_ASSERTION_IDS, SESSION_SERVICE_LIFECYCLE_CASE_METHOD,
+     FIXTURE_EFFECTS[0], 'group-1'),
+    (MEMBER_CHAT_ASSERTION_IDS, SESSION_SERVICE_MEMBER_CHAT_CASE_METHOD,
+     FIXTURE_EFFECTS[1], 'group-2'),
+    (COMPLETE_ASSERTION_IDS, SESSION_SERVICE_COMPLETE_CASE_METHOD,
+     FIXTURE_EFFECTS[2], 'group-3'),
+    (ROUNDTRIP_ASSERTION_IDS, SESSION_SERVICE_ROUNDTRIP_CASE_METHOD,
+     FIXTURE_EFFECTS[3], 'group-4'),
+)
+
+
+def step(group_index: int, assertion_id: str, method: str,
+         effect: str, group_id: str, status: str = 'PASS') -> dict:
     evidence = {} if status != 'PASS' else {
-        'requests': [{
-            'operation': f'operation-{index}',
-            'case_class': f'class-{index}',
-            'transport': 'PRODUCT_CLI',
-            'credential_kind': 'owned_local_bot_token',
-            'fixture_effect': effect,
-            'exit_status': 0,
-            'command_arguments': ['session'],
-            'http_method_declared': 'POST',
-            'route_declared': '/groups',
-            'remote_validation': 'NOT_RUN',
-            'grants_release_credit': False,
-        }],
+        'transport': 'PRODUCT_CLI',
+        'operation': f'operation-{group_index}',
+        'case_class': f'class-{group_index}',
+        'caller_role': 'driver',
+        'credential_kind': 'owned_local_bot_token',
         'fixture_effect': effect,
+        'exit_status': 0,
+        'command_arguments': ['session'],
+        'http_method_declared': 'POST',
+        'route_declared': '/groups',
         'remote_validation': 'NOT_RUN',
         'grants_release_credit': False,
     }
     return {
-        'requirement_id': SESSIONS_SERVICES_REQUIREMENTS[index],
-        'method': METHODS[index],
+        'requirement_id': assertion_id,
+        'method': method,
         'status': status,
-        'data': data if status == 'PASS' else None,
+        'data': {'group_id': group_id} if status == 'PASS' else None,
         'evidence': evidence,
         'error_type': None if status == 'PASS' else 'RunStateError',
     }
@@ -119,26 +121,28 @@ def step(index: int, status: str = 'PASS') -> dict:
 
 def execution(completed: int = 4) -> CaseExecution:
     rows = []
-    for index in range(4):
-        rows.append(StepOutcome(
-            requirement_id=SESSIONS_SERVICES_REQUIREMENTS[index],
-            method=METHODS[index],
-            status='PASS' if index < completed else 'NOT_RUN',
-            data=None if index >= completed else (
-                step(index)['data']
-            ),
-            evidence={} if index >= completed else (
-                step(index)['evidence']
-            ),
-            error_type=None if index < completed else 'RunStateError',
-        ))
+    completed_count = 0
+    for group_index, (assertion_ids, method, effect, group_id) in enumerate(ASSERTION_GROUPS):
+        group_status = 'PASS' if group_index < completed else 'NOT_RUN'
+        for assertion_id in assertion_ids:
+            rows.append(StepOutcome(
+                requirement_id=assertion_id,
+                method=method,
+                status=group_status,
+                data={'group_id': group_id} if group_status == 'PASS' else None,
+                evidence=step(group_index, assertion_id, method, effect,
+                              group_id, group_status)['evidence'],
+                error_type=None if group_status == 'PASS' else 'RunStateError',
+            ))
+            if group_status == 'PASS':
+                completed_count += 1
     value = CaseExecution(
         case_id=PARENT_CASE_ID,
         parent_id=SESSIONS_SERVICES_PARENT,
         status='PASS' if completed == 4 else 'BLOCKED',
         steps=tuple(rows),
-        completed_count=completed,
-        total_count=4,
+        completed_count=completed_count,
+        total_count=len(SESSION_SERVICE_ASSERTION_IDS),
         error_type=None if completed == 4 else 'RunStateError',
         ready_to_execute=completed == 4,
     )
@@ -465,22 +469,18 @@ class SessionServiceRunTests(unittest.TestCase):
 
     def test_bounded_service_wait_timeout_evidence_projects_full_pass(self):
         parent = execution(4)
-        request = parent.steps[3].evidence['requests'][0]
-        request['operation'] = 'session-cli.service.wait'
-        request['case_class'] = 'session-cli.service.wait'
-        request['exit_status'] = 1
-        parent.steps[3].evidence['requests'].append({
-            'operation': 'session_cli.group.delete',
-            'case_class': 'cleanup-delete',
-            'transport': 'PRODUCT_HTTP',
-            'credential_kind': 'owned_local_bot_token',
-            'fixture_effect': FIXTURE_EFFECTS[3],
-            'http_status': 200,
-            'method': 'DELETE',
-            'path': '/groups/group-4',
-            'remote_validation': 'NOT_RUN',
-            'grants_release_credit': False,
-        })
+        wait = next(step for step in parent.steps
+                    if step.requirement_id
+                    == 'CLI-SESSION-SERVICE.roundtrip.service-wait')
+        evidence = dict(wait.evidence)
+        evidence['operation'] = 'session-cli.service.wait'
+        evidence['case_class'] = 'session-cli.service.wait'
+        evidence['exit_status'] = 1
+        parent = replace(parent, steps=tuple(
+            replace(step, evidence=evidence) if step.requirement_id
+            == 'CLI-SESSION-SERVICE.roundtrip.service-wait' else step
+            for step in parent.steps))
+        parent.validate()
         result, _root, _captured = self.run_parent(4, parent_override=parent)
         self.assertEqual(result['status'],
                          'LOCAL_SESSION_SERVICE_PARENT_PASS')

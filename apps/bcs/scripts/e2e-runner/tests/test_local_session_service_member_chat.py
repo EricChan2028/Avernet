@@ -326,9 +326,12 @@ class SessionServiceMemberChatTests(unittest.TestCase):
                 self.assertEqual(commands[6][-5:], [SESSION, "--view-bot", DRIVER, "--limit", "50"])
                 snapshot = result.snapshot()
                 self.assertEqual(snapshot["case_id"], SESSION_SERVICE_MEMBER_CHAT_CASE_ID)
+                self.assertEqual(len(snapshot["steps"]), 18)
                 self.assertEqual(snapshot["steps"][0]["method"], SESSION_SERVICE_MEMBER_CHAT_CASE_METHOD)
-                self.assertEqual(snapshot["steps"][0]["data"]["member_removed"], True)
-                self.assertEqual(snapshot["steps"][0]["data"]["invite_minted"], True)
+                self.assertEqual(snapshot["steps"][15]["data"]["member_absent"], True)
+                self.assertEqual(snapshot["steps"][12]["data"]["fields"],
+                                 ["expires_at", "invite_token", "join_url"])
+                self.assertTrue(snapshot["steps"][13]["data"]["token_present"])
                 self.assertNotIn(COOKIE, json.dumps(snapshot, sort_keys=True))
                 if preprod:
                     self.assertEqual(contexts[0][1], COOKIE)
@@ -387,7 +390,7 @@ class SessionServiceMemberChatTests(unittest.TestCase):
         row = next(item for item in plan["local_registered_executors"]
                    if item["case_id"] == "LOCAL-SESSION-SERVICE-PARENT-01")
         self.assertEqual(row["legacy_id"], "story_cli_operator_runs_sessions_and_services")
-        self.assertEqual(row["required_assertion_count"], 4)
+        self.assertEqual(row["required_assertion_count"], 44)
         self.assertNotIn(SESSION_SERVICE_MEMBER_CHAT_CASE_ID,
                          [item["case_id"] for item in plan["local_partial_executors"]])
         self.assertEqual(row["execution_command"], "execute_local_session_service_parent_case")

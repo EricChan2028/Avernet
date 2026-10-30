@@ -7,6 +7,7 @@ from .ledger import Ledger, LedgerError
 from .local_session_reporting import (
     _sha, _exclusive, _require, V1_REQUIREMENTS, SOURCES as PUBLIC_SOURCES,
     OUTPUTS as PUBLIC_OUTPUTS, build_session_public_report)
+from .local_session_contract import PUBLIC_ASSERTION_IDS, SHARING_ASSERTION_IDS
 from .profile import fingerprint
 from .run_state import RunStateError, read
 
@@ -57,7 +58,7 @@ def _business(root, binding, case):
     operations = case.get('operations', [])
     checks = case.get('checks', [])
     if ([op.get('operation') for op in operations] != list(V1_OPERATIONS)
-            or [row.get('id') for row in checks] != list(V1_REQUIREMENTS[1:6])
+            or [row.get('id') for row in checks] != list(SHARING_ASSERTION_IDS)
             or any(row.get('status') != 'PASS' for row in checks)):
         return False
     for op in operations:
@@ -142,9 +143,11 @@ def _project(root, binding):
              and flow.get('run_id') == binding['run_id'] and flow.get('case_id') == CASE_ID
              and flow.get('executor_digest') == binding['executor_digest'],
              'Session sharing flow differs from original journals')
-    expected = [{'id': name, 'status': 'PASS'} for name in V1_REQUIREMENTS[1:6]]
+    assertions = case.get('assertions', [])
     complete = (public['status'] == 'LOCAL_SLICE_PASS' and case.get('status') == 'LOCAL_SESSION_SHARING_PASS'
-                and case.get('assertions') == expected and case.get('run_id') == binding['run_id']
+                and [row.get('id') for row in assertions] == list(SHARING_ASSERTION_IDS)
+                and all(row.get('status') == 'PASS' for row in assertions)
+                and case.get('run_id') == binding['run_id']
                 and case.get('case_id') == CASE_ID and case.get('executor_digest') == binding['executor_digest']
                 and set(SOURCES) == _sources(root))
     if complete:
@@ -155,13 +158,18 @@ def _project(root, binding):
     status = ('CANCELLED' if flow.get('status') == 'CANCELLED' else
               'PASS' if complete and stopped and cleared and flow.get('status') == 'LOCAL_SESSION_SHARING_PASS' else
               'FAIL' if any(row.get('status') == 'FAIL' for row in case.get('assertions', [])) else 'BLOCKED')
-    observed = public['requirements'][:1] + case.get('assertions', [])
+    public_status = public['requirements'][0]['status'] if public.get('requirements') else 'NOT_RUN'
+    sharing_assertions = case.get('assertions', [])
+    sharing_all_pass = (len(sharing_assertions) == len(SHARING_ASSERTION_IDS)
+                        and all(r.get('status') == 'PASS' for r in sharing_assertions))
     return {'status': status, 'functional': 'PASS' if complete else 'INCOMPLETE',
             'evidence_status': 'PASS' if complete else 'INCOMPLETE',
             'cleanup': 'PASS' if complete and stopped and cleared else 'BLOCKED',
             'resource_disposition': case.get('resource_disposition', 'UNVERIFIED'),
-            'requirements': [{'id': name, 'status': next((r['status'] for r in observed if r.get('id') == name), 'NOT_RUN')}
-                             for name in V1_REQUIREMENTS]}
+            'requirements': [{'id': name,
+                              'status': (public_status if index == 0 else
+                                         'PASS' if 1 <= index <= 5 and sharing_all_pass else 'NOT_RUN')}
+                             for index, name in enumerate(V1_REQUIREMENTS)]}
 
 
 def _summary(binding, projected, issues):
@@ -179,8 +187,11 @@ def _summary(binding, projected, issues):
                        'cleanup': projected.get('cleanup', 'BLOCKED'),
                        'resource_disposition': projected.get('resource_disposition', 'UNVERIFIED')}],
             'requirements': projected.get('requirements', [{'id': name, 'status': 'NOT_RUN'} for name in V1_REQUIREMENTS]),
-            'reports': {'expected_assertion_count': 6, 'parent_requirement_count': 9,
-                        'observed_assertion_count': sum(row['status'] != 'NOT_RUN' for row in projected.get('requirements', []))},
+            'reports': {'expected_assertion_count': 37, 'parent_requirement_count': 9,
+                        'observed_assertion_count': (
+                            (31 if projected.get('requirements') and projected['requirements'][0]['status'] == 'PASS' else 0)
+                            + (6 if len(projected.get('requirements', [])) >= 6
+                               and all(r['status'] == 'PASS' for r in projected['requirements'][1:6]) else 0))},
             'integrity': {'status': 'BLOCKED' if issues else 'PASS', 'issues': issues}, 'routes': [],
             'cleanup': {'verification_scope': 'OWNED_GROUPS_SESSIONS_AND_RUNTIME_ONLY',
                         'physical_data_erasure': 'NOT_VERIFIED', 'associated_history_purge': 'NOT_PERFORMED'},

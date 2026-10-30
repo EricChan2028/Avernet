@@ -17,6 +17,60 @@ FUNCTIONS = ('_story_connect_with_group_session_jwt', 'test_group_session_via_cl
 PUBLIC_CASE = 'LOCAL-SESSION-PUBLIC-01'
 PUBLIC_SUITE = 'owned-local-session-public-v1'
 
+# Parsed assertion points from the original shell story (87 total). These are
+# field-level obligations: each is evaluated against one observed response,
+# operation receipt, or cleanup proof, never a declaration-only count.
+PUBLIC_ASSERTION_IDS = tuple('SESSION.public-jwt-ws.' + name for name in (
+    'missing-principal-rejected', 'missing-principal-envelope',
+    'unknown-field-rejected', 'unknown-field-envelope',
+    'bots-mine', 'bots-query', 'bot-detail', 'bot-detail-product-manager',
+    'group-create', 'group-create-id', 'group-list', 'group-detail',
+    'group-detail-id', 'group-patch', 'group-patch-name',
+    'session-create', 'session-create-id', 'session-list',
+    'session-detail', 'session-detail-id', 'session-patch',
+    'session-patch-title', 'session-messages', 'session-token',
+    'session-token-no-store', 'session-token-present',
+    'session-websocket-101', 'session-delete', 'session-delete-ack',
+    'group-delete', 'group-delete-ack'))
+SHARING_ASSERTION_IDS = (
+    'SESSION.cli-create-list-get', 'SESSION.group-invite',
+    'SESSION.cli-session-invite', 'SESSION.bot-groups',
+    'SESSION.bot-groups-contains', 'SESSION.invite-join')
+COMPLETION_ASSERTION_IDS = tuple(
+    ['SESSION.lifecycle.' + name for name in (
+        'session-create', 'session-patch', 'member-add', 'member-mute',
+        'chat', 'messages', 'member-remove', 'session-delete',
+        'session-delete-verified')]
+    + ['SESSION.complete-invoke.' + name for name in (
+        'service-group-create', 'service-group-id', 'signoff-session-create',
+        'unmanaged-message-inspect', 'unmanaged-message-no-deliveries',
+        'delivery-batch-query', 'delivery-batch-no-rows',
+        'cancel-missing-delivery', 'cancel-missing-message',
+        'manual-resolve-forbidden', 'chat-complete',
+        'chat-status-completed', 'chat-output-stored', 'chat-readback',
+        'chat-readback-status', 'chat-readback-output', 'service-start',
+        'service-session-id', 'service-kind', 'service-caller-read',
+        'service-belongs-group', 'service-title', 'service-foreign-forbidden',
+        'service-isolation', 'service-wrong-complete',
+        'service-completion-guard', 'service-guard-endpoint',
+        'chat-cleanup', 'service-cleanup', 'service-group-cleanup')]
+    + ['SESSION.collection.' + name for name in (
+        'session-create', 'initial-empty', 'missing-participant-rejected',
+        'collect', 'collect-idempotent', 'pm-contains', 'eng-isolation',
+        'qa-nonparticipant', 'uncollect', 'uncollect-idempotent',
+        'final-empty')])
+SESSION_ASSERTION_IDS = (PUBLIC_ASSERTION_IDS + SHARING_ASSERTION_IDS
+                         + COMPLETION_ASSERTION_IDS)
+
+
+def session_assertion_ids() -> tuple[str, ...]:
+    if (len(PUBLIC_ASSERTION_IDS), len(SHARING_ASSERTION_IDS),
+            len(COMPLETION_ASSERTION_IDS), len(SESSION_ASSERTION_IDS)) != (31, 6, 50, 87):
+        raise RunStateError('Session parsed assertion inventory changed')
+    if len(set(SESSION_ASSERTION_IDS)) != 87:
+        raise RunStateError('Session parsed assertion IDs are not unique')
+    return SESSION_ASSERTION_IDS
+
 
 def session_source_binding():
     try:

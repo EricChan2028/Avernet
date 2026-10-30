@@ -25,6 +25,42 @@ SESSION_SERVICE_LIFECYCLE_REQUIREMENT = "CLI-SESSION-SERVICE.session-lifecycle"
 SESSION_SERVICE_LIFECYCLE_CASE_METHOD = "execute_local_session_service_lifecycle_case"
 FIXTURE_EFFECT = "OWNED_SESSION_LIFECYCLE_THEN_GENERIC_GROUP_DELETE"
 
+LIFECYCLE_ASSERTION_IDS = tuple('CLI-SESSION-SERVICE.lifecycle.' + name for name in (
+    'group-create', 'group-id', 'session-create', 'session-id',
+    'session-group-binding', 'session-list', 'session-list-contains',
+    'session-get', 'session-get-id', 'session-get-title',
+    'session-patch', 'session-patch-title'))
+MEMBER_CHAT_ASSERTION_IDS = tuple('CLI-SESSION-SERVICE.member-chat.' + name for name in (
+    'add-member', 'add-member-returns-verification', 'mute',
+    'read-updated-membership', 'read-shows-muted', 'chat',
+    'chat-session-id', 'chat-group-id', 'chat-delivery-results',
+    'messages', 'messages-json-array', 'history-contains-message',
+    'invite', 'invite-token', 'invite-join-url', 'remove-member',
+    'verify-removal', 'removed-absent'))
+
+
+def service_assertion_steps(assertion_ids, method, checks, error_type=None):
+    """Evaluate one predicate per parsed assertion point, in order."""
+    steps = []
+    failed = error_type
+    for assertion_id, check in zip(assertion_ids, checks):
+        if failed is not None:
+            steps.append(StepOutcome(
+                requirement_id=assertion_id, method=method, status="NOT_RUN",
+                data=None, evidence={}, error_type=None))
+            continue
+        try:
+            data, evidence = check()
+            steps.append(StepOutcome(
+                requirement_id=assertion_id, method=method, status="PASS",
+                data=data, evidence=evidence, error_type=None))
+        except Exception as error:
+            failed = type(error).__name__
+            steps.append(StepOutcome(
+                requirement_id=assertion_id, method=method, status="NOT_RUN",
+                data=None, evidence={}, error_type=failed))
+    return steps, failed
+
 
 def local_session_service_lifecycle_case_plan() -> dict:
     binding = sessions_services_source_binding()
@@ -261,9 +297,17 @@ def execute_local_session_service_lifecycle_case(adapter: object) -> CaseExecuti
     local_session_service_lifecycle_case_plan()
     if not isinstance(adapter, RemoteLocalSessionServiceLifecycleAdapter):
         raise RunStateError("Session Service lifecycle requires its shared adapter")
-    records: list[dict] = []
+    calls: tuple = ()
+    operations = (
+        "session-cli.group.create",
+        "session-cli.session.create",
+        "session-cli.session.list",
+        "session-cli.session.get",
+        "session-cli.session.patch",
+        SESSION_CLI_GROUP_DELETE_OPERATION,
+        SESSION_CLI_GROUP_VERIFY_DELETED_OPERATION,
+    )
     error_type: str | None = None
-    group_id = ""
     try:
         calls = (
             adapter.create_owned_cli_group(),
@@ -274,15 +318,6 @@ def execute_local_session_service_lifecycle_case(adapter: object) -> CaseExecuti
             adapter.delete_owned_group(),
             adapter.verify_group_deleted(),
         )
-        operations = (
-            "session-cli.group.create",
-            "session-cli.session.create",
-            "session-cli.session.list",
-            "session-cli.session.get",
-            "session-cli.session.patch",
-            SESSION_CLI_GROUP_DELETE_OPERATION,
-            SESSION_CLI_GROUP_VERIFY_DELETED_OPERATION,
-        )
         for call, operation in zip(calls, operations):
             if not isinstance(call, AdapterCall):
                 raise RunStateError(f"Session Service CLI {operation} did not return AdapterCall")
@@ -292,42 +327,104 @@ def execute_local_session_service_lifecycle_case(adapter: object) -> CaseExecuti
                     or call.evidence.get("grants_release_credit") is not False
                     or call.evidence.get("fixture_effect") != adapter.fixture_effect):
                 raise RunStateError(f"Session Service CLI evidence for {operation} is invalid")
-            records.append(dict(call.evidence))
-        group_id = adapter.group_id or ""
     except Exception as error:
         error_type = type(error).__name__
-    status = "PASS" if error_type is None else "NOT_RUN"
-    step = StepOutcome(
-        requirement_id=SESSION_SERVICE_LIFECYCLE_REQUIREMENT,
-        method=SESSION_SERVICE_LIFECYCLE_CASE_METHOD,
-        status=status,
-        data=None if error_type is not None else {
-            "group_id": group_id,
-            "session_id": adapter.session_id or "",
-            "session_created": True,
-            "session_listed": True,
-            "session_read": True,
-            "session_renamed": True,
-            "group_deleted": True,
-            "group_absence_verified": True,
-        },
-        evidence={} if error_type is not None else {
-            "requests": records,
-            "fixture_effect": adapter.fixture_effect,
-            "remote_validation": "NOT_RUN",
-            "grants_release_credit": False,
-        },
-        error_type=error_type,
-    )
+
+    def evidence(index: int) -> dict:
+        value = dict(calls[index].evidence)
+        value["operation"] = operations[index]
+        return value
+
+    def check_group_create():
+        data = calls[0].data
+        if not isinstance(data, dict) or not isinstance(data.get("group_id"), str) or not data["group_id"]:
+            raise RunStateError("group create did not return an id")
+        return {"group_id": data["group_id"]}, evidence(0)
+
+    def check_group_id():
+        data = calls[0].data
+        if data.get("group_id") != adapter.group_id:
+            raise RunStateError("group id differs from the adapter binding")
+        return {"group_id": data["group_id"]}, evidence(0)
+
+    def check_session_create():
+        data = calls[1].data
+        if not isinstance(data, dict) or not isinstance(data.get("session_id"), str):
+            raise RunStateError("session create did not return an id")
+        return {"session_id": data["session_id"]}, evidence(1)
+
+    def check_session_id():
+        data = calls[1].data
+        if data.get("session_id") != adapter.session_id or data.get("id") != data.get("session_id"):
+            raise RunStateError("session id differs from the created Session")
+        return {"session_id": data["session_id"]}, evidence(1)
+
+    def check_session_binding():
+        data = calls[1].data
+        if (data.get("group_id") != adapter.group_id
+                or not data["session_id"].startswith(adapter.group_id + ":")):
+            raise RunStateError("Session is not bound to the managed Group")
+        return {"group_id": data["group_id"], "session_id": data["session_id"]}, evidence(1)
+
+    def check_session_list():
+        data = calls[2].data
+        if not isinstance(data, dict) or set(data) != {"items", "group_id"} or data.get("group_id") != adapter.group_id:
+            raise RunStateError("session list response is not exact")
+        return {"group_id": data["group_id"], "item_count": len(data["items"])}, evidence(2)
+
+    def check_list_contains():
+        data = calls[2].data
+        exact = [row for row in data["items"] if isinstance(row, dict)
+                 and (row.get("session_id") or row.get("id")) == adapter.session_id]
+        if len(exact) != 1 or exact[0].get("group_id") != adapter.group_id:
+            raise RunStateError("session list did not contain the exact Session")
+        return {"session_id": adapter.session_id}, evidence(2)
+
+    def check_session_get():
+        data = calls[3].data
+        if not isinstance(data, dict) or data.get("id") != adapter.session_id:
+            raise RunStateError("session get did not return the exact Session")
+        return {"id": data["id"]}, evidence(3)
+
+    def check_get_id():
+        data = calls[3].data
+        if data.get("session_id") != adapter.session_id:
+            raise RunStateError("session get session_id differs")
+        return {"session_id": data["session_id"]}, evidence(3)
+
+    def check_get_title():
+        data = calls[3].data
+        if data.get("session_title") != "CLI full session":
+            raise RunStateError("session get title differs")
+        return {"session_title": data["session_title"]}, evidence(3)
+
+    def check_session_patch():
+        data = calls[4].data
+        if not isinstance(data, dict) or data.get("id") != adapter.session_id:
+            raise RunStateError("session patch did not return the exact Session")
+        return {"id": data["id"]}, evidence(4)
+
+    def check_patch_title():
+        data = calls[4].data
+        if data.get("session_title") != "CLI release sign-off":
+            raise RunStateError("session patch title differs")
+        return {"session_title": data["session_title"]}, evidence(4)
+
+    checks = (check_group_create, check_group_id, check_session_create, check_session_id,
+              check_session_binding, check_session_list, check_list_contains,
+              check_session_get, check_get_id, check_get_title,
+              check_session_patch, check_patch_title)
+    steps, failed = service_assertion_steps(
+        LIFECYCLE_ASSERTION_IDS, SESSION_SERVICE_LIFECYCLE_CASE_METHOD, checks, error_type)
     execution = CaseExecution(
         case_id=SESSION_SERVICE_LIFECYCLE_CASE_ID,
         parent_id=SESSION_SERVICE_LIFECYCLE_PARENT,
-        status="PASS" if error_type is None else "BLOCKED",
-        steps=(step,),
-        completed_count=1 if error_type is None else 0,
-        total_count=1,
-        error_type=error_type,
-        ready_to_execute=error_type is None,
+        status="PASS" if failed is None else "BLOCKED",
+        steps=tuple(steps),
+        completed_count=sum(step.status == "PASS" for step in steps),
+        total_count=len(steps),
+        error_type=failed,
+        ready_to_execute=failed is None,
     )
     execution.validate()
     return execution
@@ -541,12 +638,17 @@ class RemoteLocalSessionServiceMemberChatAdapter(
 def execute_local_session_service_member_chat_case(adapter: object) -> CaseExecution:
     local_session_service_member_chat_case_plan()
     if not isinstance(adapter, RemoteLocalSessionServiceMemberChatAdapter):
-        raise RunStateError(
-            "Session Service member-chat requires its shared adapter")
-    records: list[dict] = []
+        raise RunStateError("Session Service member-chat requires its shared adapter")
+    calls: tuple = ()
+    operations = (
+        "session-cli.group.create", "session-cli.session.create",
+        "session-cli.session.member.add", "session-cli.session.member.patch_mode",
+        "session-cli.session.get.muted", "session-cli.session.chat",
+        "session-cli.session.messages", "session-cli.session.invite",
+        "session-cli.session.member.remove", "session-cli.session.get.removed",
+        SESSION_CLI_GROUP_DELETE_OPERATION, SESSION_CLI_GROUP_VERIFY_DELETED_OPERATION,
+    )
     error_type: str | None = None
-    group_id = ""
-    session_id = ""
     try:
         calls = (
             adapter.create_owned_cli_group(),
@@ -562,73 +664,163 @@ def execute_local_session_service_member_chat_case(adapter: object) -> CaseExecu
             adapter.delete_owned_group(),
             adapter.verify_group_deleted(),
         )
-        operations = (
-            "session-cli.group.create",
-            "session-cli.session.create",
-            "session-cli.session.member.add",
-            "session-cli.session.member.patch_mode",
-            "session-cli.session.get.muted",
-            "session-cli.session.chat",
-            "session-cli.session.messages",
-            "session-cli.session.invite",
-            "session-cli.session.member.remove",
-            "session-cli.session.get.removed",
-            SESSION_CLI_GROUP_DELETE_OPERATION,
-            SESSION_CLI_GROUP_VERIFY_DELETED_OPERATION,
-        )
         for call, operation in zip(calls, operations):
             if not isinstance(call, AdapterCall):
-                raise RunStateError(
-                    f"Session Service member-chat {operation} did not return AdapterCall"
-                )
+                raise RunStateError(f"Session Service member-chat {operation} did not return AdapterCall")
             call.validate()
             if (call.evidence.get("credential_kind") != adapter._credential_kind()
                     or call.evidence.get("remote_validation") != "NOT_RUN"
                     or call.evidence.get("grants_release_credit") is not False
-                    or call.evidence.get("fixture_effect")
-                    != adapter.fixture_effect):
-                raise RunStateError(
-                    f"Session Service member-chat evidence for {operation} is invalid"
-                )
-            records.append(dict(call.evidence))
-        group_id = adapter.group_id or ""
-        session_id = adapter.session_id or ""
+                    or call.evidence.get("fixture_effect") != adapter.fixture_effect):
+                raise RunStateError(f"Session Service member-chat evidence for {operation} is invalid")
     except Exception as error:
         error_type = type(error).__name__
-    status = "PASS" if error_type is None else "NOT_RUN"
-    step = StepOutcome(
-        requirement_id=SESSION_SERVICE_MEMBER_CHAT_REQUIREMENT,
-        method=SESSION_SERVICE_MEMBER_CHAT_CASE_METHOD,
-        status=status,
-        data=None if error_type is not None else {
-            "group_id": group_id,
-            "session_id": session_id,
-            "member_admitted": True,
-            "member_muted": True,
-            "chat_delivered": True,
-            "history_observable": True,
-            "invite_minted": True,
-            "member_removed": True,
-            "group_deleted": True,
-            "group_absence_verified": True,
-        },
-        evidence={} if error_type is not None else {
-            "requests": records,
-            "fixture_effect": adapter.fixture_effect,
-            "remote_validation": "NOT_RUN",
-            "grants_release_credit": False,
-        },
-        error_type=error_type,
-    )
+
+    def evidence(index: int) -> dict:
+        value = dict(calls[index].evidence)
+        value["operation"] = operations[index]
+        return value
+
+    def member_rows(data: dict) -> list[dict]:
+        rows = data.get("participants")
+        if (not isinstance(rows, list) or data.get("id") != adapter.session_id
+                or data.get("session_id") != adapter.session_id
+                or data.get("group_id") != adapter.group_id):
+            raise RunStateError("member-chat response is not bound to the exact Session")
+        return [row for row in rows if isinstance(row, dict) and row.get("bot_uuid") == adapter.member_id]
+
+    def check_add_member():
+        rows = member_rows(calls[2].data)
+        if len(rows) != 1 or rows[0].get("role") != "consultant":
+            raise RunStateError("verification member was not admitted")
+        return {"member_id": adapter.member_id, "role": rows[0]["role"]}, evidence(2)
+
+    def check_add_returns_verification():
+        rows = member_rows(calls[2].data)
+        if len(rows) != 1 or rows[0].get("actor_kind") != "bot":
+            raise RunStateError("verification member actor kind differs")
+        return {"actor_kind": rows[0]["actor_kind"]}, evidence(2)
+
+    def check_mute():
+        rows = member_rows(calls[3].data)
+        if len(rows) != 1 or rows[0].get("mode") != "muted":
+            raise RunStateError("verification member was not muted")
+        return {"mode": rows[0]["mode"]}, evidence(3)
+
+    def check_read_updated():
+        rows = member_rows(calls[4].data)
+        if len(rows) != 1:
+            raise RunStateError("updated membership read lost the member")
+        return {"member_present": True}, evidence(4)
+
+    def check_read_shows_muted():
+        rows = member_rows(calls[4].data)
+        if len(rows) != 1 or rows[0].get("mode") != "muted":
+            raise RunStateError("readback did not show muted mode")
+        return {"mode": rows[0]["mode"]}, evidence(4)
+
+    def check_chat():
+        data = calls[5].data
+        if not isinstance(data, dict) or data.get("session_id") != adapter.session_id:
+            raise RunStateError("chat response lost the Session id")
+        return {"session_id": data["session_id"]}, evidence(5)
+
+    def check_chat_session_id():
+        data = calls[5].data
+        if data.get("session_id") != adapter.session_id:
+            raise RunStateError("chat session id differs")
+        return {"session_id": data["session_id"]}, evidence(5)
+
+    def check_chat_group_id():
+        data = calls[5].data
+        if data.get("group_id") != adapter.group_id:
+            raise RunStateError("chat group id differs")
+        return {"group_id": data["group_id"]}, evidence(5)
+
+    def check_delivery_results():
+        data = calls[5].data
+        results = data.get("delivery_results")
+        if not isinstance(results, list) or any(
+                not isinstance(row, dict) or not row.get("bot_uuid")
+                or not row.get("delivery_type") or not isinstance(row.get("success"), bool)
+                for row in results):
+            raise RunStateError("chat delivery results are not exact")
+        return {"delivery_result_count": len(results)}, evidence(5)
+
+    def check_messages():
+        data = calls[6].data
+        if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+            raise RunStateError("message history is not an items list")
+        return {"message_count": len(data["items"])}, evidence(6)
+
+    def check_messages_array():
+        data = calls[6].data
+        if not isinstance(data["items"], list):
+            raise RunStateError("message history is not a JSON array")
+        return {"items_is_array": True}, evidence(6)
+
+    def check_history_contains():
+        items = calls[6].data["items"]
+        if not any(isinstance(item, dict) and item.get("content") == adapter.chat_message for item in items):
+            raise RunStateError("history did not contain the submitted message")
+        return {"message": adapter.chat_message}, evidence(6)
+
+    def check_invite():
+        data = calls[7].data
+        if not isinstance(data, dict) or set(data) != {"invite_token", "expires_at", "join_url"}:
+            raise RunStateError("invite response fields differ")
+        return {"fields": sorted(data)}, evidence(7)
+
+    def check_invite_token():
+        token = calls[7].data.get("invite_token")
+        if (not isinstance(token, str) or not token.isascii() or not 1 <= len(token) <= 4096
+                or any(ord(char) <= 32 or ord(char) == 127 for char in token)):
+            raise RunStateError("invite token is not exact")
+        return {"token_present": True}, evidence(7)
+
+    def check_invite_url():
+        data = calls[7].data
+        if not _invite_url_matches_product_shape(
+                data["join_url"], "sessions", data["invite_token"],
+                adapter.profile["environment"]["tier"]):
+            raise RunStateError("invite URL shape differs")
+        return {"join_url_present": True}, evidence(7)
+
+    def check_remove_member():
+        rows = member_rows(calls[8].data)
+        if rows:
+            raise RunStateError("removed member is still present")
+        return {"member_absent": True}, evidence(8)
+
+    def check_verify_removal():
+        rows = member_rows(calls[9].data)
+        if rows:
+            raise RunStateError("removed member is still present on readback")
+        return {"member_absent": True}, evidence(9)
+
+    def check_removed_absent():
+        rows = member_rows(calls[9].data)
+        if any(row.get("bot_uuid") == adapter.member_id for row in rows):
+            raise RunStateError("removed participant remains in CLI read")
+        return {"removed_participant_absent": True}, evidence(9)
+
+    checks = (check_add_member, check_add_returns_verification, check_mute,
+              check_read_updated, check_read_shows_muted, check_chat,
+              check_chat_session_id, check_chat_group_id, check_delivery_results,
+              check_messages, check_messages_array, check_history_contains,
+              check_invite, check_invite_token, check_invite_url,
+              check_remove_member, check_verify_removal, check_removed_absent)
+    steps, failed = service_assertion_steps(
+        MEMBER_CHAT_ASSERTION_IDS, SESSION_SERVICE_MEMBER_CHAT_CASE_METHOD, checks, error_type)
     execution = CaseExecution(
         case_id=SESSION_SERVICE_MEMBER_CHAT_CASE_ID,
         parent_id=SESSION_SERVICE_LIFECYCLE_PARENT,
-        status="PASS" if error_type is None else "BLOCKED",
-        steps=(step,),
-        completed_count=1 if error_type is None else 0,
-        total_count=1,
-        error_type=error_type,
-        ready_to_execute=error_type is None,
+        status="PASS" if failed is None else "BLOCKED",
+        steps=tuple(steps),
+        completed_count=sum(step.status == "PASS" for step in steps),
+        total_count=len(steps),
+        error_type=failed,
+        ready_to_execute=failed is None,
     )
     execution.validate()
     return execution

@@ -36,18 +36,21 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def validate_draft_delivery_binary(binary: Path, binary_sha256: str) -> Path:
+def validate_draft_delivery_binary(binary: Path, binary_sha256: str,
+                                   *, label: str = 'BCS') -> Path:
     binary = Path(binary).absolute()
     if binary.is_symlink() or not binary.is_file() or not os.access(binary, os.X_OK):
-        raise RunStateError('draft-delivery BCS binary must be an executable regular file')
+        raise RunStateError(f'draft-delivery {label} binary must be an executable regular file')
     if not isinstance(binary_sha256, str) or len(binary_sha256) != 64:
-        raise RunStateError('draft-delivery BCS binary digest is invalid')
+        raise RunStateError(f'draft-delivery {label} binary digest is invalid')
     if file_sha256(binary) != binary_sha256:
-        raise RunStateError('draft-delivery BCS binary digest differs from its frozen declaration')
+        raise RunStateError(f'draft-delivery {label} binary digest differs from its frozen declaration')
     return binary
 
 
-def _parse_story_marker(text: str) -> tuple[bool, int]:
+def _parse_story_marker(text) -> tuple[bool, int]:
+    if isinstance(text, bytes):
+        text = text.decode('utf-8', errors='replace')
     match = MARKER_PATTERNS[0].search(text)
     if match is None:
         return False, 0
@@ -114,7 +117,8 @@ def _redaction_entries(stream_items: list[tuple[str, bytes]],
     return streams, artifacts, all(row['clean'] is True for row in streams + artifacts)
 
 
-def local_draft_delivery_run(*, binary: Path, binary_sha256: str, state_dir: Path,
+def local_draft_delivery_run(*, binary: Path, binary_sha256: str,
+                             cli_binary: Path, cli_binary_sha256: str, state_dir: Path,
                              run_id: str, confirm_run_id: str,
                              allow_local_processes: bool, allow_fixture_write: bool,
                              allow_write: bool) -> dict:
@@ -129,6 +133,8 @@ def local_draft_delivery_run(*, binary: Path, binary_sha256: str, state_dir: Pat
     if parent.is_symlink() or (parent.exists() and not parent.is_dir()):
         raise RunStateError('Draft delivery requires a non-symlink directory parent for its state')
     binary = validate_draft_delivery_binary(Path(binary), binary_sha256)
+    cli_binary = validate_draft_delivery_binary(Path(cli_binary), cli_binary_sha256,
+                                                label='CLI')
     source = executor_digest()
     original = draft_delivery_source_binding()
     legacy = current_manifest()['legacy_inventory']
@@ -145,6 +151,7 @@ def local_draft_delivery_run(*, binary: Path, binary_sha256: str, state_dir: Pat
         'executor_digest': source,
         'binary_kind': BINARY_KIND,
         'bcs_binary_sha256': binary_sha256,
+        'cli_binary_sha256': cli_binary_sha256,
         'auto_build': False,
         'source_binding': original,
         'selected_requirement_ids': list(REQUIREMENTS),
@@ -174,7 +181,9 @@ def local_draft_delivery_run(*, binary: Path, binary_sha256: str, state_dir: Pat
                                   '--base-url', owned_runtime.inputs.origin,
                                   '--human', owned_runtime.inputs.human_id,
                                   '--fixture', str(FIXTURE_SOURCE),
-                                  '--evidence-file', str(evidence_path)]
+                                  '--evidence-file', str(evidence_path),
+                                  '--cli-binary', str(cli_binary),
+                                  '--identity-mode', 'register']
                     story = _launch_story(story_argv, cwd=root, deadline=STORY_DEADLINE_SECONDS)
         except BaseException as failure:
             error = failure
@@ -205,6 +214,7 @@ def local_draft_delivery_run(*, binary: Path, binary_sha256: str, state_dir: Pat
                 'schema_version': 1, 'status': STATUS, 'run_id': run_id,
                 'case_id': CASE_ID, 'executor_digest': source,
                 'binary_kind': BINARY_KIND, 'bcs_binary_sha256': binary_sha256,
+                'cli_binary_sha256': cli_binary_sha256,
                 'auto_build': False,
                 'requirements': [{'id': name, 'status': 'PASS'} for name in REQUIREMENTS],
                 'story_lines': {row['id']: list(row['story_lines'])
@@ -230,7 +240,8 @@ def local_draft_delivery_run(*, binary: Path, binary_sha256: str, state_dir: Pat
             'schema_version': 1, 'status': STATUS if child_exit_ok else 'BLOCKED',
             'run_id': run_id, 'case_id': CASE_ID, 'suite': SUITE,
             'executor_digest': source, 'binary_kind': BINARY_KIND,
-            'bcs_binary_sha256': binary_sha256, 'auto_build': False,
+            'bcs_binary_sha256': binary_sha256,
+            'cli_binary_sha256': cli_binary_sha256, 'auto_build': False,
             'child_receipt': child_receipt, 'case': provisional_case,
             'checks': {'status': 'PASS' if child_exit_ok else 'BLOCKED', 'checked': []},
             'redaction': {'status': 'PASS' if story is not None else 'BLOCKED'},
@@ -270,8 +281,9 @@ def local_draft_delivery_run(*, binary: Path, binary_sha256: str, state_dir: Pat
                       and owned_record.get('status') == 'STOPPED'
                       and owned_record.get('returncode') == 0
                       and executor_digest() == source
-                      and read(root / BINDING_NAME) == binding
-                      and file_sha256(binary) == binary_sha256)
+                          and read(root / BINDING_NAME) == binding
+                          and file_sha256(binary) == binary_sha256
+                          and file_sha256(cli_binary) == cli_binary_sha256)
         case = dict(provisional_case) if child_pass else {}
         if child_pass:
             case['checks'] = checks
@@ -300,7 +312,8 @@ def local_draft_delivery_run(*, binary: Path, binary_sha256: str, state_dir: Pat
         write(root / FLOW_NAME, result)
         binding_unchanged = read(root / BINDING_NAME) == binding
         artifact_unchanged = (executor_digest() == source
-                              and file_sha256(binary) == binary_sha256)
+                              and file_sha256(binary) == binary_sha256
+                              and file_sha256(cli_binary) == cli_binary_sha256)
         if not (binding_unchanged and artifact_unchanged):
             result['status'] = 'BLOCKED'
             result['error_type'] = 'DriftFenceError'

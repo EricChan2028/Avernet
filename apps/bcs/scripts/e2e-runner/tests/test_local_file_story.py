@@ -35,7 +35,7 @@ class LocalFileStoryAdmissionTests(unittest.TestCase):
         plan = migration_plan()
         item = next(v for v in plan['local_registered_executors'] if v['case_id']==CASE_ID)
         self.assertEqual(item['requirement_ids'], ['CLI-FILE.'+r for r in REQUIREMENTS])
-        self.assertEqual(item['required_assertion_count'], 10)
+        self.assertEqual(item['required_assertion_count'], 12)
         self.assertFalse(item['grants_release_credit'])
         self.assertEqual(plan['migrated_story_count'], 0)
         self.assertEqual(plan['passed_assertion_count'], 0)
@@ -96,7 +96,7 @@ class LocalFileStoryLiveTests(unittest.TestCase):
             self.assertEqual(read(path)['token'], '')
         self.assertFalse(any('e2e-local' in t.name for t in threading.enumerate()))
 
-    def test_actual_six_cli_leaves_and_all_ten_parent_requirements(self):
+    def test_actual_six_cli_leaves_and_all_twelve_parent_assertions(self):
         rc, result = self.execute()
         self.assertEqual(rc, 0, result)
         self.assertEqual(result['status'], 'LOCAL_SUITE_PASS')
@@ -120,7 +120,7 @@ class LocalFileStoryLiveTests(unittest.TestCase):
         self.assertEqual(summary['status'], 'LOCAL_SUITE_PASS')
         self.assertEqual(summary['scope']['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(summary['scope']['full_release_status'], 'NOT_QUALIFIED')
-        self.assertEqual(summary['reports']['expected_assertion_count'], 10)
+        self.assertEqual(summary['reports']['expected_assertion_count'], 12)
         for path in (self.root/'reports').iterdir():
             contents = path.read_text()
             self.assertNotIn('share_token', contents)
@@ -165,7 +165,7 @@ class LocalFileStoryLiveTests(unittest.TestCase):
             rc, result = self.execute()
         self.assertEqual(rc, 2, result)
         case = read(self.root/'local-file-story.json')
-        self.assertEqual(case['assertions'][-1], {'id':'CLI-FILE.shared-content','status':'FAIL'})
+        self.assertEqual(case['assertions'][-1], {'id':'CLI-FILE.shared-content-bytes','status':'FAIL'})
         self.assertEqual([op['operation'] for op in case['operations']], list(LEAVES[:-1]))
         self.closed()
 

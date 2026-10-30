@@ -7,6 +7,7 @@ from .ledger import Ledger, LedgerError
 from .local_session_reporting import _sha, _exclusive, _require, V1_REQUIREMENTS
 from .local_session_sharing_reporting import (SOURCES as SHARING_SOURCES,
     OUTPUTS as SHARING_OUTPUTS, build_sharing_report)
+from .local_session_contract import COMPLETION_ASSERTION_IDS
 from .profile import fingerprint
 from .run_state import RunStateError, read
 
@@ -103,17 +104,27 @@ V1_OPERATIONS = ('lifecycle-visibility-before',
 def _business(root, binding, case):
     operations, checks = case.get('operations', []), case.get('checks', [])
     if ([row.get('operation') for row in operations] != list(V1_OPERATIONS)
-            or [row.get('id') for row in checks] != list(V1_REQUIREMENTS[6:])
+            or [row.get('id') for row in checks] != ['lifecycle', 'complete', 'collection']
             or any(row.get('status') != 'PASS' for row in checks)):
         return False
     status_codes = {'complete-cancel-one': 400, 'complete-cancel-message': 400,
                     'complete-manual-resolve': 403, 'complete-service-create': 202,
                     'complete-service-foreign': 403, 'complete-service-wrong-complete': 403,
                     'collection-missing-participant': 400, 'collection-qa-nonparticipant': 404}
+    settings_form = next((row.get('evidence', {}).get('settings_form')
+                          for row in case.get('assertions', [])
+                          if row.get('id') == 'SESSION.complete-invoke.service-start'), None)
     for op in operations:
         name = op['operation']
         status = 404 if name.endswith('group-deleted-404') else 201 if name.endswith('session-create') else status_codes.get(name, 200)
-        if (op.get('status') != 'ACKNOWLEDGED' or op.get('http_status') != status
+        if name == 'complete-settings':
+            expected_form = 'retired_410' if op.get('http_status') == 410 else 'service_spec_ack'
+            if (op.get('http_status') not in (200, 410)
+                    or settings_form != expected_form):
+                return False
+        elif op.get('http_status') != status:
+            return False
+        if (op.get('status') != 'ACKNOWLEDGED'
                 or [row.get('status') for row in op.get('transitions', [])] != ['INTENDED', 'ACKNOWLEDGED']
                 or not isinstance(op.get('submitted_request_id'), str) or not op['submitted_request_id']):
             return False
@@ -197,9 +208,11 @@ def _project(root, binding):
              and flow.get('run_id') == binding['run_id'] and flow.get('case_id') == CASE_ID
              and flow.get('executor_digest') == binding['executor_digest'],
              'Session flow flow differs from original journals')
-    expected = [{'id': name, 'status': 'PASS'} for name in V1_REQUIREMENTS[6:]]
+    assertions = case.get('assertions', [])
     complete = (predecessor['status'] == 'LOCAL_SLICE_PASS' and case.get('status') == 'LOCAL_SESSION_COMPLETION_PASS'
-                and case.get('assertions') == expected and case.get('run_id') == binding['run_id']
+                and [row.get('id') for row in assertions] == list(COMPLETION_ASSERTION_IDS)
+                and all(row.get('status') == 'PASS' for row in assertions)
+                and case.get('run_id') == binding['run_id']
                 and case.get('case_id') == CASE_ID and case.get('executor_digest') == binding['executor_digest']
                 and set(SOURCES) == _sources(root))
     if complete:
@@ -210,13 +223,18 @@ def _project(root, binding):
     status = ('CANCELLED' if flow.get('status') == 'CANCELLED' else
               'PASS' if complete and stopped and cleared and flow.get('status') == 'LOCAL_SESSION_FLOW_PASS' else
               'FAIL' if any(row.get('status') == 'FAIL' for row in case.get('assertions', [])) else 'BLOCKED')
-    observed = predecessor['requirements'][:6] + case.get('assertions', [])
+    completion_assertions = case.get('assertions', [])
+    completion_all_pass = (len(completion_assertions) == len(COMPLETION_ASSERTION_IDS)
+                           and all(r.get('status') == 'PASS' for r in completion_assertions))
+    prior = predecessor.get('requirements', [])
     return {'status': status, 'functional': 'PASS' if complete else 'INCOMPLETE',
             'evidence_status': 'PASS' if complete else 'INCOMPLETE',
             'cleanup': 'PASS' if complete and stopped and cleared else 'BLOCKED',
             'resource_disposition': case.get('resource_disposition', 'UNVERIFIED'),
-            'requirements': [{'id': name, 'status': next((r['status'] for r in observed if r.get('id') == name), 'NOT_RUN')}
-                             for name in V1_REQUIREMENTS]}
+            'requirements': [{'id': name,
+                              'status': (prior[index]['status'] if index < 6
+                                         else 'PASS' if 6 <= index <= 8 and completion_all_pass else 'NOT_RUN')}
+                             for index, name in enumerate(V1_REQUIREMENTS)]}
 
 
 def _summary(binding, projected, issues):
@@ -234,8 +252,13 @@ def _summary(binding, projected, issues):
                        'cleanup': projected.get('cleanup', 'BLOCKED'),
                        'resource_disposition': projected.get('resource_disposition', 'UNVERIFIED')}],
             'requirements': projected.get('requirements', [{'id': name, 'status': 'NOT_RUN'} for name in V1_REQUIREMENTS]),
-            'reports': {'expected_assertion_count': 9, 'parent_requirement_count': 9,
-                        'observed_assertion_count': sum(row['status'] != 'NOT_RUN' for row in projected.get('requirements', []))},
+            'reports': {'expected_assertion_count': 87, 'parent_requirement_count': 9,
+                        'observed_assertion_count': (
+                            (31 if projected.get('requirements') and projected['requirements'][0]['status'] == 'PASS' else 0)
+                            + (6 if len(projected.get('requirements', [])) >= 6
+                               and all(r['status'] == 'PASS' for r in projected['requirements'][1:6]) else 0)
+                            + (50 if len(projected.get('requirements', [])) >= 9
+                               and all(r['status'] == 'PASS' for r in projected['requirements'][6:9]) else 0))},
             'integrity': {'status': 'BLOCKED' if issues else 'PASS', 'issues': issues}, 'routes': [],
             'cleanup': {'verification_scope': 'OWNED_GROUPS_SESSIONS_AND_RUNTIME_ONLY',
                         'physical_data_erasure': 'NOT_VERIFIED', 'associated_history_purge': 'NOT_PERFORMED'},

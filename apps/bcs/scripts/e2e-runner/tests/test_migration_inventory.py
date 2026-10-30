@@ -135,7 +135,7 @@ class MigrationInventoryTests(unittest.TestCase):
                      if r['case_id'] == 'LOCAL-SESSION-SERVICE-PARENT-01')
         self.assertEqual(local['legacy_id'], 'story_cli_operator_runs_sessions_and_services')
         self.assertEqual(local['status'], 'LOCAL_EXECUTOR_ONLY')
-        self.assertEqual(local['required_assertion_count'], 4)
+        self.assertEqual(local['required_assertion_count'], 44)
         self.assertEqual(local['execution_command'], 'execute_local_session_service_parent_case')
         self.assertEqual(local['requirement_ids'], [
             'CLI-SESSION-SERVICE.session-lifecycle',
@@ -619,8 +619,8 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
         self.assertEqual(counts, Counter({
             ('DUAL', 'PASS'): 18,
             ('DUAL', 'BLOCKED_INVENTORIED'): 7,
-            ('DUAL', 'NOT_RUN'): 2,
-            ('LOCAL_ONLY', 'NOT_RUN'): 9,
+            ('DUAL', 'NOT_RUN'): 3,
+            ('LOCAL_ONLY', 'NOT_RUN'): 8,
             ('DYNAMIC_OWNED_LOCAL', 'NOT_APPLICABLE'): 4,
             ('EDGE_OBLIGATION_IN_FAMILY', 'NOT_APPLICABLE'): 1,
         }))

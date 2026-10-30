@@ -5,7 +5,10 @@ import signal
 from .errors import has_cancellation
 from .inventory import current_manifest, executor_digest, reviewed_release_inventory
 from .local_fixtures import OwnedLocalFixtures
-from .local_session_contract import PUBLIC_CASE as CASE_ID, PARENT, PUBLIC_SUITE as SUITE, REQUIREMENTS, session_source_binding
+from .local_session_contract import (
+    COMPLETION_ASSERTION_IDS, PARENT, PUBLIC_ASSERTION_IDS,
+    PUBLIC_CASE as CASE_ID, PUBLIC_SUITE as SUITE, REQUIREMENTS,
+    SHARING_ASSERTION_IDS, session_source_binding)
 from .local_role_identity import OwnedLocalRoleIdentity
 from .owned_bcs import OwnedBcsProcess
 from .profile import identifier
@@ -105,7 +108,7 @@ def local_session_public_run(*, binary: Path, binary_sha256: str,
                 case = saved
         shutdown = runtime._record()
         credentials = identities.summary() if identities else {'credential_memory': 'NOT_CAPTURED'}
-        expected = [{'id': REQUIREMENTS[0], 'status': 'PASS'}]
+        expected = [{'id': name, 'status': 'PASS'} for name in PUBLIC_ASSERTION_IDS]
         passed = ((error is None or with_sharing and bool(case)) and executor_digest() == source
                   and read(runtime.root/'session-binding.json') == binding
                   and bool(case) and read(runtime.root/'local-session-public.json') == case
@@ -144,7 +147,8 @@ def local_session_public_run(*, binary: Path, binary_sha256: str,
                 sharing_case = read(runtime.root/'local-session-sharing.json')
             sharing_pass = ((error is None or with_completion and bool(sharing_case)) and canonical['status'] == 'LOCAL_SLICE_PASS'
                             and sharing_case.get('status') == 'LOCAL_SESSION_SHARING_PASS'
-                            and sharing_case.get('assertions') == [{'id': name, 'status': 'PASS'} for name in REQUIREMENTS[1:6]]
+                            and [row.get('id') for row in sharing_case.get('assertions', [])] == list(SHARING_ASSERTION_IDS)
+                            and all(row.get('status') == 'PASS' for row in sharing_case.get('assertions', []))
                             and read(runtime.root/'local-session-sharing.json') == sharing_case)
             result = {'schema_version': 1, 'case_id': 'LOCAL-SESSION-SHARING-01', 'run_id': run_id,
                       'executor_digest': source, 'status': 'LOCAL_SESSION_SHARING_PASS' if sharing_pass else
@@ -169,7 +173,8 @@ def local_session_public_run(*, binary: Path, binary_sha256: str,
                 completion_case = read(runtime.root/'local-session-completion.json')
             completion_pass = (error is None and combined['status'] == 'LOCAL_SLICE_PASS'
                 and completion_case.get('status') == 'LOCAL_SESSION_COMPLETION_PASS'
-                and completion_case.get('assertions') == [{'id': name, 'status': 'PASS'} for name in REQUIREMENTS[6:]]
+                and [row.get('id') for row in completion_case.get('assertions', [])] == list(COMPLETION_ASSERTION_IDS)
+                and all(row.get('status') == 'PASS' for row in completion_case.get('assertions', []))
                 and read(runtime.root/'local-session-completion.json') == completion_case)
             result = {'schema_version': 1, 'case_id': 'LOCAL-SESSION-FLOW-01', 'run_id': run_id,
                       'executor_digest': source, 'status': 'LOCAL_SESSION_FLOW_PASS' if completion_pass else

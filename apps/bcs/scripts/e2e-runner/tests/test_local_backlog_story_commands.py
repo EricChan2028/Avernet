@@ -26,6 +26,16 @@ def parser():
     return value
 
 
+def _draft_run_args() -> list[str]:
+    return [
+        'local-draft-delivery-run', '--binary', '/bcs', '--binary-sha256', 'bcs-sha',
+        '--cli-binary', '/bcs-cli', '--cli-binary-sha256', 'cli-sha',
+        '--state-dir', '/state', '--run-id', 'run-1',
+        '--confirm-run-id', 'run-1', '--allow-local-processes',
+        '--allow-fixture-write', '--allow-write',
+    ]
+
+
 def run_args(command: str) -> list[str]:
     return [
         command, '--binary', '/bcs', '--binary-sha256', 'bcs-sha',
@@ -104,12 +114,13 @@ class DraftDeliveryCommandTests(unittest.TestCase):
     def test_commands_are_in_the_shared_local_registry(self):
         self.assertIn('local-draft-delivery-run', LOCAL_STORY_COMMANDS)
         self.assertIn('local-draft-delivery-report', LOCAL_STORY_COMMANDS)
-        parsed = parser().parse_args(run_args('local-draft-delivery-run'))
+        parsed = parser().parse_args(_draft_run_args())
         self.assertEqual(parsed.binary, Path('/bcs'))
+        self.assertEqual(parsed.cli_binary, Path('/bcs-cli'))
         self.assertTrue(parsed.allow_fixture_write)
 
     def test_run_dispatch_forwards_exact_arguments(self):
-        args = parser().parse_args(run_args('local-draft-delivery-run'))
+        args = parser().parse_args(_draft_run_args())
         for status, expected_rc in (
                 ('LOCAL_DRAFT_DELIVERY_PASS', 0), ('BLOCKED', 2), ('CANCELLED', 130)):
             with self.subTest(status=status), patch(
@@ -120,6 +131,7 @@ class DraftDeliveryCommandTests(unittest.TestCase):
             self.assertEqual((report, rc), ({'status': status}, expected_rc))
             execute.assert_called_once_with(
                 binary=Path('/bcs'), binary_sha256='bcs-sha',
+                cli_binary=Path('/bcs-cli'), cli_binary_sha256='cli-sha',
                 state_dir=Path('/state'), run_id='run-1', confirm_run_id='run-1',
                 allow_local_processes=True, allow_fixture_write=True,
                 allow_write=True)
@@ -154,8 +166,12 @@ class DraftDeliveryCommandTests(unittest.TestCase):
         self.assertEqual(row['suite'], 'owned-local-draft-delivery-v1')
         self.assertEqual(row['legacy_id'], 'story_collaboration_draft_delivery')
         self.assertEqual(row['status'], 'LOCAL_EXECUTOR_ONLY_BACKLOG')
-        self.assertEqual(row['execution_command'], 'local-draft-delivery-run')
-        self.assertEqual(row['report_command'], 'local-draft-delivery-report')
+        self.assertEqual(row['canonical_reporting'], 'DUAL_CASE_RECEIPT')
+        self.assertEqual(row['execution_command'], 'dual-draft-delivery-run')
+        self.assertEqual(row['report_command'], '')
+        self.assertEqual(row['required_parameters'], [
+            'profile', 'binary', 'binary_sha256', 'cli_binary', 'cli_binary_sha256',
+            'state_dir', 'run_id', 'confirm_run_id', 'allow_write'])
         self.assertEqual(row['environment'], {
             'local': 'LOCAL_EXECUTOR_ONLY', 'preprod': 'REMOTE_UNSUPPORTED'})
         self.assertFalse(row['release_parent_denominator'])
