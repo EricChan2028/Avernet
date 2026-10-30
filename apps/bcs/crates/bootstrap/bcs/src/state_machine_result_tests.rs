@@ -493,7 +493,7 @@ fn queued_limits() -> Option<BTreeMap<String, u32>> {
 
 #[tokio::test]
 async fn queued_run_result_targets_only_the_manager_and_stays_out_of_history() {
-    let (publisher, messages, managed, delivery, _) =
+    let (publisher, messages, managed, delivery, flow) =
         publication_fixture_with_options(GroupStrategy::ManagerWorker, queued_limits()).await;
     let outcome = publisher.publish_state_machine_run_result(run_result_payload("bot-driver")).await.unwrap();
     assert_eq!(outcome, bcs_service_api::StateMachineRunResultOutcome::Delivered);
@@ -508,6 +508,13 @@ async fn queued_run_result_targets_only_the_manager_and_stays_out_of_history() {
     assert_eq!(managed.snapshot(None).await.unwrap().len(), 1, "a replay admits no second delivery");
     let history = messages.query_messages(run_result_history_query()).await.unwrap();
     assert!(history.messages.iter().all(|message| message.message_type != bcs_domain::RUN_RESULT_MESSAGE_TYPE));
+
+    // The scheduler prepares the admitted row like any one-shot result and sends the RunResult text.
+    let preparer = bcs_message_flow::queued_group::QueuedGroupPreparation { flow: Arc::downgrade(&flow), deliveries: managed };
+    let prepared = preparer.prepare(&rows[0]).await.unwrap();
+    assert!(serde_json::to_string(&prepared.command.frame).unwrap().contains("[State Machine Run Result]"));
+    assert!(delivery.deliver(prepared.command).await.unwrap().delivered);
+    assert_eq!(delivery.targets().await[0].bot_id(), "bot-driver");
 }
 
 #[tokio::test]
