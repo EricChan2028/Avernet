@@ -1,5 +1,6 @@
 """Source-bound parent Stories cannot be replaced by pilot slices or soft PASS."""
 import copy
+from collections import Counter
 import json
 from pathlib import Path
 import shutil
@@ -11,7 +12,13 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from bcs_e2e.cli import plan
-from bcs_e2e.inventory import current_manifest
+from bcs_e2e.inventory import (
+    KNOWN_UNMAPPED_LEGACY_IDS,
+    current_manifest,
+    legacy_inventory_with_executor_migration,
+    load_executor_migration,
+    reviewed_release_inventory,
+)
 from bcs_e2e.local_caller_execution_contract import caller_execution_source_binding
 from bcs_e2e.local_draft_group_contract import draft_group_source_binding
 from bcs_e2e.local_nested_fixed_loop_contract import (
@@ -40,7 +47,7 @@ class MigrationInventoryTests(unittest.TestCase):
     def test_original_source_and_complete_three_parent_inventory_match(self):
         self.assertEqual(validate_contract(self.contract, source_root=self.source), self.contract)
         result = migration_plan()
-        self.assertEqual(result['legacy_inventory_count'], 34)
+        self.assertEqual(result['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(result['mapped_story_count'], 3)
         self.assertEqual([len(s['steps']) for s in result['stories']], [16, 5, 1])
         self.assertEqual([len(s['requirements']) for s in result['stories']], [17, 5, 10])
@@ -83,7 +90,7 @@ class MigrationInventoryTests(unittest.TestCase):
         row = next(r for r in result['additional_source_maps']
                    if r['parent'] == 'story_cli_operator_builds_collaboration_team')
         self.assertEqual(len(row['requirements']), 8)
-        self.assertEqual(result['legacy_inventory_count'], 34)
+        self.assertEqual(result['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(result['migrated_story_count'], 0)
         self.assertEqual(result['mapped_story_count'], 3)
         self.assertEqual(result['passed_assertion_count'], 0)
@@ -117,7 +124,7 @@ class MigrationInventoryTests(unittest.TestCase):
         row = next(r for r in result['additional_source_maps']
                    if r['parent'] == 'story_cli_operator_runs_sessions_and_services')
         self.assertEqual(len(row['requirements']), 4)
-        self.assertEqual(result['legacy_inventory_count'], 34)
+        self.assertEqual(result['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(result['migrated_story_count'], 0)
         self.assertEqual(result['mapped_story_count'], 3)
         self.assertEqual(result['passed_assertion_count'], 0)
@@ -230,7 +237,7 @@ class MigrationInventoryTests(unittest.TestCase):
         self.assertEqual(custom_slice['remote_validation'], 'NOT_RUN')
         self.assertFalse(custom_slice['grants_release_credit'])
         self.assertIn('preprod', custom_slice['blocker'])
-        self.assertEqual(result['legacy_inventory_count'], 34)
+        self.assertEqual(result['legacy_inventory_count'], len(current_manifest()['legacy_inventory']))
         self.assertEqual(result['migrated_story_count'], 0)
         self.assertEqual(result['passed_assertion_count'], 0)
 
@@ -257,22 +264,22 @@ class MigrationInventoryTests(unittest.TestCase):
         self.assertFalse(slow_judge['grants_release_credit'])
         self.assertFalse(result['ready_to_execute'])
 
-    def test_local_migration_set_covers_the_29_reviewed_release_parent_stories(self):
+    def test_local_migration_set_matches_the_current_a_tree_registered_release_parents(self):
         result = migration_plan()
         self.assertEqual(len(result['local_registered_executors']), 29)
         self.assertEqual(result['local_partial_executors'], [])
         all_inventory = {row['id'] for row in current_manifest()['legacy_inventory']}
-        known_unmapped = {
-            'story_cli_operator_manages_group_context',
-            'story_nested_fixed_loop_workflows',
-            'story_state_machine_result_queue',
-            'test_ep_tc_friend_auth_sync_readdressed_principal',
-            'test_ep_dept_scope_parses_object_friend_ext_entries',
+        known_unmapped = set(KNOWN_UNMAPPED_LEGACY_IDS)
+        # These reviewed rows are present in the refreshed 41-row roster but
+        # remain owned-local-only pending this tree's command registration wave.
+        pending_local_registry = {
+            'story_authority_user_journey',
+            'story_retired_service_policy',
         }
-        expected_parents = all_inventory - known_unmapped
+        expected_parents = all_inventory - known_unmapped - pending_local_registry
         actual_parents = {row['legacy_id'] for row in result['local_registered_executors']}
         self.assertEqual(actual_parents, expected_parents)
-        self.assertEqual(all_inventory - expected_parents, known_unmapped)
+        self.assertEqual(all_inventory - expected_parents, known_unmapped | pending_local_registry)
         duplicate_cases = [row['case_id'] for row in result['local_registered_executors']]
         self.assertEqual(len(duplicate_cases), len(set(duplicate_cases)))
         self.assertTrue(all(row['remote_validation'] == 'NOT_RUN'
@@ -403,7 +410,7 @@ class MigrationInventoryTests(unittest.TestCase):
                                     'environment', 'release_parent_denominator',
                                     'independent_slice', 'remote_validation',
                                     'grants_release_credit', 'source_map'})
-        # The slice never joins the 29-case release coverage registry.
+        # The slice never joins the reviewed-release coverage registry.
         self.assertNotIn('LOCAL-CALLER-EXEC-01', {case.case_id for case in CASES})
         for suite in ('preprod-pilot-v1', 'owned-local-trusted-team-v1'):
             manifest = current_manifest(suite)
@@ -464,7 +471,7 @@ class MigrationInventoryTests(unittest.TestCase):
                                     'environment', 'release_parent_denominator',
                                     'independent_slice', 'remote_validation',
                                     'grants_release_credit', 'source_map'})
-        # The slice never joins the 29-case release coverage registry.
+        # The slice never joins the reviewed-release coverage registry.
         self.assertNotIn('LOCAL-DRAFT-GROUP-01', {case.case_id for case in CASES})
         for suite in ('preprod-pilot-v1', 'owned-local-trusted-team-v1'):
             manifest = current_manifest(suite)
@@ -526,8 +533,8 @@ class MigrationInventoryTests(unittest.TestCase):
                                     'environment', 'release_parent_denominator',
                                     'independent_slice', 'remote_validation',
                                     'grants_release_credit', 'source_map'})
-        # The slice never joins the 29-case release coverage registry; its parent stays a
-        # known unmapped backlog row inside the 34-story legacy inventory.
+        # The slice never joins the reviewed-release coverage registry; its parent stays a
+        # known unmapped backlog row inside the 41-story legacy inventory.
         self.assertNotIn('LOCAL-RESULT-QUEUE-01', {case.case_id for case in CASES})
         for suite in ('preprod-pilot-v1', 'owned-local-trusted-team-v1'):
             manifest = current_manifest(suite)
@@ -578,3 +585,103 @@ class MigrationInventoryTests(unittest.TestCase):
         self.assertIn('story_nested_fixed_loop_workflows', {entry['id'] for entry in legacy})
         self.assertEqual(nested_fixed_loop_source_binding()['parent'],
                          'story_nested_fixed_loop_workflows')
+
+
+class ExecutorMigrationInventoryTests(unittest.TestCase):
+    def test_all_41_legacy_rows_join_one_orthogonal_status_source(self):
+        legacy = legacy_inventory_with_executor_migration()
+        self.assertEqual(len(legacy), 41)
+        self.assertEqual({row['migration_status'] for row in legacy},
+                         {'NOT_MIGRATED'})
+        self.assertTrue(all(
+            set(row['executor_migration']) == {
+                'mode', 'preprod_verdict', 'gates', 'notes'}
+            for row in legacy))
+        counts = Counter(
+            (row['executor_migration']['mode'],
+             row['executor_migration']['preprod_verdict'])
+            for row in legacy)
+        self.assertEqual(counts, Counter({
+            ('DUAL', 'PASS'): 18,
+            ('DUAL', 'BLOCKED_INVENTORIED'): 7,
+            ('DUAL', 'NOT_RUN'): 1,
+            ('LOCAL_ONLY', 'NOT_RUN'): 10,
+            ('DYNAMIC_OWNED_LOCAL', 'NOT_APPLICABLE'): 4,
+            ('EDGE_OBLIGATION_IN_FAMILY', 'NOT_APPLICABLE'): 1,
+        }))
+        gated = {
+            row['id'] for row in legacy
+            if row['executor_migration']['gates']}
+        self.assertEqual(gated, {
+            'story_user_receives_group_event_webhooks',
+            'story_provider_callback_survives_slow_judge',
+        })
+        rows = {row['id']: row['executor_migration'] for row in legacy}
+        self.assertEqual(
+            rows['story_user_runs_structured_collaboration']['notes'],
+            ['STATION_DEFECT_R5_CAVEAT'])
+        self.assertEqual(
+            rows['story_user_builds_trusted_team']['notes'],
+            ['FRESH_FIXTURE_R5G'])
+        self.assertEqual(
+            rows['story_cli_operator_manages_group_context']['notes'],
+            ['ROSTER_LAG'])
+        self.assertEqual(rows['test_ep_ensure_bot'], {
+            'mode': 'EDGE_OBLIGATION_IN_FAMILY',
+            'preprod_verdict': 'NOT_APPLICABLE',
+            'gates': [],
+            'notes': [],
+        })
+
+    def test_reviewed_view_keeps_status_join_and_roster_facts(self):
+        reviewed = reviewed_release_inventory()
+        self.assertEqual(len(reviewed), 31)
+        self.assertTrue(all('executor_migration' in row for row in reviewed))
+        counts = Counter(
+            (row['executor_migration']['mode'],
+             row['executor_migration']['preprod_verdict'])
+            for row in reviewed)
+        self.assertEqual(counts, Counter({
+            ('DUAL', 'PASS'): 17,
+            ('DUAL', 'BLOCKED_INVENTORIED'): 7,
+            ('DUAL', 'NOT_RUN'): 1,
+            ('LOCAL_ONLY', 'NOT_RUN'): 4,
+            ('DYNAMIC_OWNED_LOCAL', 'NOT_APPLICABLE'): 1,
+            ('EDGE_OBLIGATION_IN_FAMILY', 'NOT_APPLICABLE'): 1,
+        }))
+        ids = {row['id'] for row in reviewed}
+        self.assertNotIn(
+            'story_cli_operator_manages_group_context', ids)
+        self.assertIn('story_fixed_loop_human_editor_workflow', ids)
+
+    def test_manifests_do_not_duplicate_executor_migration(self):
+        for suite in (
+                'preprod-pilot-v1',
+                'preprod-retained-v1',
+                'preprod-retained-file-v1',
+                'owned-local-trusted-team-v1'):
+            with self.subTest(suite=suite):
+                raw = current_manifest(suite)['legacy_inventory']
+                self.assertEqual(len(raw), 41)
+                self.assertTrue(all(
+                    'executor_migration' not in row for row in raw))
+
+    def test_missing_or_extra_status_row_fails_loudly_at_join(self):
+        statuses = load_executor_migration()
+        missing = dict(statuses)
+        missing.pop('story_human_manages_delivery_policy')
+        extra = dict(statuses)
+        extra['story_unexpected_status_row'] = {
+            'mode': 'DUAL', 'preprod_verdict': 'PASS',
+            'gates': [], 'notes': [],
+        }
+        for value, message in (
+                (missing, 'join is incomplete: missing=1 extra=0'),
+                (extra, 'join is incomplete: missing=0 extra=1')):
+            with (
+                self.subTest(message=message),
+                patch('bcs_e2e.inventory.load_executor_migration',
+                      return_value=value),
+                self.assertRaisesRegex(RunStateError, message),
+            ):
+                legacy_inventory_with_executor_migration()

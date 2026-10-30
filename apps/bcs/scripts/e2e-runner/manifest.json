@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "baseline_commit": "a7369c67712db5aaccaedbfbccf4bacef6f9d0f2",
+  "baseline_commit": "8559a7a5258a2cb6750befec187e50aa85060cc6",
   "suite": "preprod-pilot-v1",
   "legacy_inventory": [
     {
@@ -205,6 +205,48 @@
       "id": "test_ep_dept_scope_parses_object_friend_ext_entries",
       "source": "edge_permission.sh",
       "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_authority_user_journey",
+      "source": "authority.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_provider_owner_isolation",
+      "source": "provider_scope_story.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_session_owner_permissions",
+      "source": "session_owner_story.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_provider_operator_manages_subbots",
+      "source": "e2e.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_retired_service_policy",
+      "source": "service_policy_story.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_collaboration_draft_delivery",
+      "source": "collaboration_draft_story.sh",
+      "conditional": false,
+      "migration_status": "NOT_MIGRATED"
+    },
+    {
+      "id": "story_collaboration_draft_group_launch",
+      "source": "collaboration_draft_story.sh",
+      "conditional": true,
       "migration_status": "NOT_MIGRATED"
     }
   ],
