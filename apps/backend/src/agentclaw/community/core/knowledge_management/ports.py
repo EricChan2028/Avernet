@@ -79,6 +79,14 @@ class KnowledgeDisplaySource(Protocol):
         """
         ...
 
+    def has_enabled_selection(self, *, bot) -> bool:
+        """Read whether this exact tenant/env/Bot/space has any enabled selection.
+
+        Consumers must establish conversation access before querying this state.
+        This is a bounded local existence check, not provider authorization.
+        """
+        ...
+
     def selections(self, *, bot, kb_ids) -> dict:
         """Read persisted selections for the specified Bot and bases."""
         ...
