@@ -619,8 +619,8 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
         self.assertEqual(counts, Counter({
             ('DUAL', 'PASS'): 18,
             ('DUAL', 'BLOCKED_INVENTORIED'): 7,
-            ('DUAL', 'NOT_RUN'): 1,
-            ('LOCAL_ONLY', 'NOT_RUN'): 10,
+            ('DUAL', 'NOT_RUN'): 2,
+            ('LOCAL_ONLY', 'NOT_RUN'): 9,
             ('DYNAMIC_OWNED_LOCAL', 'NOT_APPLICABLE'): 4,
             ('EDGE_OBLIGATION_IN_FAMILY', 'NOT_APPLICABLE'): 1,
         }))
@@ -644,6 +644,12 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
         self.assertEqual(rows['test_ep_ensure_bot'], {
             'mode': 'EDGE_OBLIGATION_IN_FAMILY',
             'preprod_verdict': 'NOT_APPLICABLE',
+            'gates': [],
+            'notes': [],
+        })
+        self.assertEqual(rows['story_provider_operator_manages_subbots'], {
+            'mode': 'DUAL',
+            'preprod_verdict': 'NOT_RUN',
             'gates': [],
             'notes': [],
         })
