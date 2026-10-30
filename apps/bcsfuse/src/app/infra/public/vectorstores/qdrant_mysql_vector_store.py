@@ -395,6 +395,25 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
                 return point
         return None
 
+    def load_fallback_points(self, batch_size: int = 256) -> List[VectorPoint]:
+        """Load active durable points without accessing either Qdrant index.
+
+        This supplies the process-local literal snapshot during a Qdrant outage.
+        The read is paged for bounded database work, but the return represents the
+        complete active snapshot required for deterministic final fallback.
+        """
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+        if not isinstance(self._persistence, BatchedVectorPersistenceBackend):
+            raise TypeError("persistence backend must support bounded iter_batches")
+
+        points: List[VectorPoint] = []
+        for page in self._persistence.iter_batches(batch_size):
+            if not page or len(page) > batch_size:
+                raise ValueError("persistence backend yielded an invalid vector page")
+            points.extend(page)
+        return points
+
     def save_snapshot(self, path: str) -> None:
         """Not implemented for MySQL backend (data is already durable)."""
         logger.warning("[QdrantMySQLVectorStore] save_snapshot not implemented")

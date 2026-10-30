@@ -49,21 +49,20 @@ async def test_rebuild_runs_after_delegate_initialization() -> None:
 
 
 @pytest.mark.asyncio
-async def test_rebuild_failure_rolls_back_delegate_and_blocks_startup() -> None:
+async def test_rebuild_failure_keeps_delegate_alive_and_degrades_startup() -> None:
     events: list[str] = []
-    provider = VectorIndexStartupProvider(
-        StartupSpy(events),
-        VectorStoreSpy(events, fail_rebuild=True),
-    )
+    vector_store = VectorStoreSpy(events, fail_rebuild=True)
+    provider = VectorIndexStartupProvider(StartupSpy(events), vector_store)
 
-    with pytest.raises(RuntimeError, match="rebuild failed"):
-        await provider.initialize()
+    await provider.initialize()
 
-    assert events == [
-        "delegate.initialize",
-        "vector.rebuild",
-        "delegate.shutdown",
-    ]
+    assert events == ["delegate.initialize", "vector.rebuild"]
+    assert vector_store.startup_rebuild_failed is True
+    assert vector_store.startup_rebuild_error_type == "RuntimeError"
+
+    await provider.shutdown()
+
+    assert events[-2:] == ["vector.close", "delegate.shutdown"]
 
 
 class LeaseAwareVectorStoreSpy:

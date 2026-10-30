@@ -108,6 +108,32 @@ class RegexFallbackIndex:
             for score, point in matches[:limit]
         ]
 
+    def default_search(self, limit, filters, allowed_ids=None):
+        """Return deterministic configured defaults without query overlap.
+
+        This is the terminal availability path used when both semantic and
+        lexical retrieval are unavailable. No model, remote service, or
+        query-token interpretation is involved; caller filters and trusted
+        allowed IDs still decide eligibility.
+        """
+        if limit is None or limit <= 0:
+            return []
+        if allowed_ids == frozenset():
+            return []
+        matches = [
+            point for point in self._points
+            if self._eligible(point, filters or {}, allowed_ids)
+        ]
+        matches.sort(key=lambda point: point.id)
+        return [
+            VectorSearchHit(
+                id=point.id,
+                score=0.01,
+                payload=dict(point.payload),
+            )
+            for point in matches[:limit]
+        ]
+
     def vector_search(self, vector, limit, filters, allowed_ids):
         # The final path is explicitly lexical; a caller cannot make it depend
         # on an unavailable embedding service by reaching this class directly.

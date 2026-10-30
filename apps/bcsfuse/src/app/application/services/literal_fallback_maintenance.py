@@ -104,8 +104,24 @@ class LiteralFallbackSnapshot:
         self.remove_ids(removed)
 
     def reload_from_store(self, store: VectorStoreAdapter) -> None:
+        load_fallback_points = getattr(store, "load_fallback_points", None)
+        if callable(load_fallback_points):
+            points = load_fallback_points()
+            physical: dict[str, dict[str, Any]] = {}
+            for point in points:
+                profile_key = _profile_key(point)
+                if profile_key is None:
+                    continue
+                physical[str(point.id)] = {
+                    "profile_key": profile_key,
+                    "payload": dict(point.payload or {}),
+                }
+            self._physical = physical
+            self._reindex()
+            return
+
         point_ids = store.get_vector_ids()
-        physical: dict[str, dict[str, Any]] = {}
+        physical = {}
         for point_id in point_ids:
             point = store.get(point_id)
             profile_key = _profile_key(point) if point is not None else None
@@ -150,6 +166,9 @@ class LiteralFallbackSnapshot:
 
     def keyword_search(self, query, limit, filters, allowed_ids):
         return self._index.keyword_search(query, limit, filters, allowed_ids)
+
+    def default_search(self, limit, filters, allowed_ids=None):
+        return self._index.default_search(limit, filters, allowed_ids)
 
 
 class LiteralFallbackMaintainingVectorStore:

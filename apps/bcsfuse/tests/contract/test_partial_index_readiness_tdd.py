@@ -37,7 +37,9 @@ class PartialVectorStore:
         keyword_ready: bool,
         index_stale: bool = False,
         index_state_unavailable: bool = False,
+        startup_rebuild_failed: bool = False,
     ) -> None:
+        self.startup_rebuild_failed = startup_rebuild_failed
         self.connection = type("Connection", (), {"mode": "server"})()
         self.keyword_connection = type("Connection", (), {"mode": "server"})()
         self.collection_name = "worker_profiles"
@@ -138,6 +140,22 @@ def test_healthy_split_clusters_are_not_marked_degraded() -> None:
     assert body["degraded"] is False
     assert body["dense_qdrant_unavailable"] is False
     assert body["keyword_qdrant_unavailable"] is False
+
+
+def test_startup_rebuild_failure_makes_pod_degraded_and_not_ready() -> None:
+    response = ready_response(
+        PartialVectorStore(
+            dense_ready=True,
+            keyword_ready=True,
+            startup_rebuild_failed=True,
+        )
+    )
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["ready"] is False
+    assert body["degraded"] is True
+    assert body["startup_rebuild_failed"] is True
 
 
 def test_partial_readiness_does_not_override_stale_index_state() -> None:

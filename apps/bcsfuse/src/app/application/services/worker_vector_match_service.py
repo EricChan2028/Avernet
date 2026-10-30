@@ -661,6 +661,7 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
             "semantic_unavailable": True,
             "keyword_unavailable": not keyword_outcome.available,
             "literal_fallback_used": False,
+            "literal_fallback_default_used": False,
         }
         if runtime_config is not None:
             runtime_config["_retrieval"] = diagnostics
@@ -679,6 +680,7 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
             filters=filters or {},
             excluded=excluded,
             allowed=allowed,
+            diagnostics=diagnostics,
         )
 
     def _match_legacy(

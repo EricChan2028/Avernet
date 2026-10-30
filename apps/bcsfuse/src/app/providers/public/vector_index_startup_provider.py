@@ -31,10 +31,18 @@ class VectorIndexStartupProvider:
                 raise TypeError("durable vector store does not support rebuild")
             result = rebuild()
             logger.info("[VectorIndexStartup] Rebuild completed: %s", result)
-        except Exception:
+        except Exception as error:
             self._stop_owner_lease_heartbeat()
-            await self._delegate.shutdown()
-            raise
+            self._mark_startup_rebuild_failed(self._vector_store, error)
+            logger.exception(
+                "[VectorIndexStartup] Rebuild failed; starting degraded with local fallback"
+            )
+
+    @staticmethod
+    def _mark_startup_rebuild_failed(vector_store: Any, error: Exception) -> None:
+        """Surface the failed durable rebuild in readiness and diagnostics."""
+        setattr(vector_store, "startup_rebuild_failed", True)
+        setattr(vector_store, "startup_rebuild_error_type", type(error).__name__)
 
     async def shutdown(self) -> None:
         try:

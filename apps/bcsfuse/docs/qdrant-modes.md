@@ -79,6 +79,17 @@ Worker-ID lookup; the TC adapter retains its existing exact Worker-ID priority.
   lock-free rebuilds, cross-process synchronization or automatic version rollback.
 - A failed durable write or index update is returned as an error. TC index update
   failure marks the keyword index unready until reconstruction succeeds.
+- A startup rebuild failure no longer terminates the application. The process stays
+  alive, records `startup_rebuild_failed=true` and
+  `startup_rebuild_error_type=<ExceptionName>` on the vector-store view, and
+  `/ready` returns 503 with `degraded=true`. The durable vector backend can also
+  supply the process-local literal snapshot without probing either Qdrant index.
+  If both dense and lexical retrieval fail, the bounded literal path first serves
+  token-overlap results; when none overlap, it returns a stable default profile
+  set that still honors filters, exclusions, registry state and trusted allowed
+  IDs. Search responses mark this terminal path with
+  `literal_fallback_default_used=true` and result reason
+  `literal_fallback_default`; it is never reported as a normal healthy result.
 - `/health` reports process liveness. `/ready` probes the dense and keyword
   Server collections separately. Dense Qdrant is the hard serving dependency:
   a dense outage returns 503, while a keyword-only outage returns 200 with

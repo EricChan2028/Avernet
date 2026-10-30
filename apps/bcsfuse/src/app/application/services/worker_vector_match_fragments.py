@@ -255,6 +255,7 @@ class FragmentMatchingMixin:
             "semantic_unavailable": not dense_available,
             "keyword_unavailable": not keyword_outcome.available,
             "literal_fallback_used": False,
+            "literal_fallback_default_used": False,
         }
         if runtime_config is not None:
             runtime_config["_retrieval"] = diagnostics
@@ -272,6 +273,7 @@ class FragmentMatchingMixin:
                 filters=filters or {},
                 excluded=excluded_set,
                 allowed=candidate_keys,
+                diagnostics=diagnostics,
             )
             results = self._apply_registry_filter(self._rerank(results))
             return results[:top_k]
@@ -343,8 +345,10 @@ class FragmentMatchingMixin:
         filters: dict[str, Any],
         excluded: set[str],
         allowed: set[str] | None,
+        diagnostics: dict | None = None,
     ) -> list[MatchResult]:
         """Build the final local result without invoking embedding or rerank."""
+        fallback_reason = "literal_fallback"
         try:
             hits = self._fallback_index.keyword_search(
                 query=query,
@@ -352,6 +356,17 @@ class FragmentMatchingMixin:
                 filters=filters,
                 allowed_ids=None,
             )
+            if not hits:
+                default_search = getattr(self._fallback_index, "default_search", None)
+                if callable(default_search):
+                    hits = default_search(
+                        limit=top_k,
+                        filters=filters,
+                        allowed_ids=None,
+                    )
+                    fallback_reason = "literal_fallback_default"
+                    if diagnostics is not None:
+                        diagnostics["literal_fallback_default_used"] = bool(hits)
         except Exception as error:
             log_stage(
                 logger,
@@ -393,7 +408,7 @@ class FragmentMatchingMixin:
                 metadata=metadata,
                 score=hit.score,
                 aggregated_score=hit.score,
-                reasons=["literal_fallback"],
+                reasons=[fallback_reason],
                 fragment_matches=[fragment],
             ))
             if len(results) >= top_k:

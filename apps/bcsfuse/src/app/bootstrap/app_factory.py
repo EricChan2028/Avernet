@@ -130,7 +130,12 @@ async def _index_readiness(context: ApplicationContext) -> tuple[bool, dict]:
 
     connection = getattr(vector_store, "connection", None)
     index_stale = bool(getattr(vector_store, "index_stale", False))
+    startup_rebuild_failed = bool(
+        getattr(vector_store, "startup_rebuild_failed", False)
+    )
     if index_stale:
+        is_ready = False
+    if startup_rebuild_failed:
         is_ready = False
     vector_store_info: dict = {
         "vector_store_available": True,
@@ -146,6 +151,10 @@ async def _index_readiness(context: ApplicationContext) -> tuple[bool, dict]:
         "index_version": getattr(vector_store, "index_version", None),
         "index_lag_seconds": getattr(vector_store, "index_lag_seconds", None),
         "index_stale": index_stale,
+        "startup_rebuild_failed": startup_rebuild_failed,
+        "startup_rebuild_error_type": getattr(
+            vector_store, "startup_rebuild_error_type", None
+        ),
         "stale_after_seconds": getattr(
             vector_store, "stale_after_seconds", None
         ),
@@ -174,6 +183,8 @@ async def _index_readiness(context: ApplicationContext) -> tuple[bool, dict]:
         is_ready = False
     if vector_store_info.get("index_state_unavailable", False):
         is_ready = False
+    if vector_store_info.get("startup_rebuild_failed", False):
+        vector_store_info["degraded"] = True
     return is_ready, vector_store_info
 
 
