@@ -1,7 +1,7 @@
 # StateMachine 运行失败或取消时可靠唤醒 manager
 
 - 日期：2026-10-30
-- 状态：设计稿，待维护者评审（Issue #2610，队伍 Wake-Up Call）
+- 状态：设计稿，待维护者评审（Issue #2610，队伍 Wake-Up Call）；已有对应实现，见第 15 节
 - 所属模块：BCS（`bcs-collaboration-runtime`、`bcs-collaboration-store`、`bcs-message-flow`、
   `bootstrap/bcs`）；singlebox「谁是卧底」主持人技能
 - 目标分支：`oss-camp2026`
@@ -232,6 +232,9 @@ completed_nodes: speak_1, speak_2
   （`bcs-message-store` 的 MySQL 与 Memory 实现各两处）。这样人类时间线和副屏历史都看不到它，
   实现「只给 Bot」。可见性同时显式设为 `StateMachine` / `FullOnly`，作为第二道保险。
 - 不写 `message.created` 公开事件。人类可见的信号统一由 8 节的 run 事件提供。
+- 消息存储的准入校验（`bcs-message-store/src/delivery/admission.rs`）显式接受这种形态，并且只接受这种形态：
+  Group 流、单个 Send 目标、`StateMachine` / `FullOnly`、Bot 发送者、带 `run_id`、字符串内容、没有消息事件。
+  其他组合一律拒绝。
 - **不预写历史行**。这是 2026-10-14 规范的教训：预写会让队列的幂等查询命中历史行，返回
   `duplicate=true` 且投递为空。admission 结果沿用 `ResultMessage::validate_admission`，
   重复但投递为空时按错误处理。
@@ -339,7 +342,12 @@ delivering 且租约过期 ──▶ failed_uncertain（不重发）
 ### 10.2 自动重开流程（改写 SX 卡住诊断）
 
 `phase-machine.md` 的 `## SX 卡住诊断`（第 258–296 行）改为两个入口：RunResult 优先，
-人类的「卡住了」作为兜底。自动入口：
+人类的「卡住了」作为兜底。
+
+实现时把自动入口压成**一次工具调用**：`uc recover --session S --run-id R --failure-reason REASON`。
+它在脚本里完成下面第 1–5 步（核对 `user_aborted`、过期 run、次数上限，按阶段重开或返回补念内容），
+主持人收到 RunResult 后的第一个工具调用就是它。原因见第 13 节：模型服务限流时，每多一次模型调用
+都可能多等几十秒。各步骤的语义不变：
 
 1. `reason: user_aborted`：只查一次状态，向人类说一句平实的话，**不重试**，结束激活。
 2. 运行 `uc status`。若 RunResult 的 `run_id` 不是当前阶段记录的 run，说明是过期消息，
@@ -476,6 +484,14 @@ BCS 在终态事务提交**之后**才投递 RunResult，所以主持人处理�
 
 建议采用 A 加 D，并用 B 加固运行环境。按 Issue 要求，本节只给方案，不实现。
 
+实现阶段又观察到一个直接相关的因素：本次环境使用的模型服务每分钟只能成功 5～6 个请求，其余返回 429。
+主持人的一次激活需要好几次模型调用，被限流时单次调用就可能等待约 60 秒。所以实现里做了两件事：
+
+- `uc recover` 把「查状态、选命令、重开」压成一次工具调用，新的 Run 在主持人第一次模型调用之后就会提交；
+- 测试环境的模型中转对 429 做固定间隔的短重试，作为方案 B 的一个实例。
+
+这两项都不改变平台语义，但直接决定了「60 秒内重开」能否稳定达成。
+
 ## 14. 待维护者确认
 
 1. 新增 `message_type = "run_result"`，还是复用 `run_reply`。
@@ -484,10 +500,15 @@ BCS 在终态事务提交**之后**才投递 RunResult，所以主持人处理�
 4. `aborted` 事件是否需要区分 `session_closed` / `group_closed`，还是统一为一个原因。
 5. 第二版是否把 RunResult 扩展到非 Chat 会话。
 
-## 15. 交付拆分
+## 15. 交付拆分与实现
 
 - **PR 1（BCS）**：`TerminateRun` 与三个 store 实现、原因类别、检查点与扫描、publisher 端口与
   message-flow 投递、两个公开事件与契约、第 11 节第 1–6 项测试。
 - **PR 2（主持人技能与副屏）**：第 10 节全部改动与第 11 节第 7 项测试。
 - **PR 3（故障注入）**：故障注入脚本与第 11 节第 8 项的 10 次报告，以及不超过 2 分钟的演示视频。
 - 文档：本设计、[repro.md](repro.md)，以及 AI 使用策略报告。
+
+实现分支（基于 `oss-camp2026`）：
+
+- #3334（`feat/2610-run-result-bcs`）：第 5–9 节与第 11 节第 1–6 项。
+- #3335（`feat/2610-undercover-auto-recover`）：第 10 节、`uc recover`、副屏文案与 `tools/fault_inject.py`。
