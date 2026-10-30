@@ -24,6 +24,7 @@ from .edge_friend_mutation_case import (
     CASE_IDS,
     RELEASE_CASE_IDS,
     RELEASE_PARENT_IDS,
+    TOTAL_ASSERTION_COUNT,
     edge_friend_mutation_case_plan,
     edge_friend_mutation_source_binding,
 )
@@ -268,7 +269,7 @@ def local_edge_friend_mutations_run(*, binary: Path, binary_sha256: str,
                 'run_id': run_id, 'case_ids': list(CASE_IDS),
                 'release_parent_case_ids': list(RELEASE_CASE_IDS),
                 'backlog_case_ids': list(BACKLOG_CASE_IDS),
-                'expected_assertion_count': len(CASE_IDS),
+                'expected_assertion_count': TOTAL_ASSERTION_COUNT,
                 'executor_digest': source, 'bcs_binary_sha256': binary_sha256,
                 'selected_requirement_ids': {
                     case_id: [row['id'] for row in bindings[case_id]['requirements']]

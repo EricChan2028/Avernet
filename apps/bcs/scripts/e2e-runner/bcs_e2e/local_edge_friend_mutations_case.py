@@ -92,6 +92,7 @@ class _OwnedEdgeFriendMutationsSevenAdapter:
         self.parent_id = spec.parent
         self.requirement_id = spec.requirement_id
         self.adapter_method = spec.adapter_method
+        self.adapters = dict(self.plan.adapters)
         self.run_id = runtime.run_id
         self.root = runtime.root
         self.origin = runtime.inputs.origin
@@ -139,18 +140,30 @@ class _OwnedEdgeFriendMutationsSevenAdapter:
         self._digest = encoded
 
     def _begin(self) -> dict:
-        self._active(self.adapter_method)
+        requirement = self._next_requirement()
+        method = requirement.adapter_method
+        self._active(method)
         row = {
-            'method': self.adapter_method, 'requirement_id': self.requirement_id,
+            'method': method,
+            'requirement_id': requirement.requirement_id,
             'status': 'INTENDED', 'http_status': None, 'evidence_keys': [],
         }
         self.state['steps'].append(row)
-        self._attempted.add(self.adapter_method)
+        self._attempted.add(method)
         self._save()
         return row
 
+    def _next_requirement(self):
+        index = len(self.state['steps'])
+        requirements = self.plan.requirements
+        if index >= len(requirements):
+            raise RunStateError(
+                'Edge friend-mutation adapter attempted more obligations than the frozen plan')
+        return requirements[index]
+
     def _finish(self, row: dict, *, evidence: dict, data: object) -> AdapterCall:
-        requirement = self.plan.requirements[0]
+        requirement = next(item for item in self.plan.requirements
+                           if item.requirement_id == row['requirement_id'])
         row['status'] = 'PASS'
         row['http_status'] = evidence.get('http_status')
         row['evidence'] = {

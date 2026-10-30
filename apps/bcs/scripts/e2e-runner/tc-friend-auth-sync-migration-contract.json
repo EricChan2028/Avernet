@@ -387,12 +387,12 @@
       "sources": [
         {
           "file": "apps/bcs/scripts/e2e-runner/bcs_e2e/local_edge_friend_mutation_extras.py",
-          "line_start": 192,
-          "line_end": 210,
+          "line_start": 217,
+          "line_end": 238,
           "contains": [
             "/control/friend-auth-sync/requests",
             "claims.get('iss') != 'bcs'",
-            "subject.get('id') != approver"
+            "subject.get('id') != state['approver']"
           ]
         }
       ]

@@ -49,8 +49,12 @@ _GATEWAY_HUMAN_DISCOVER_REJECTIONS = {
 
 _PREPROD_BLOCKED_METHODS = {
     "run_ensure_bot": "admin Bot ensure requires the X-BCS-Service-Key user-credential batch",
-    "run_tc_friend_auth_sync_readdress": "forwarded Human authentication and TC friend-auth sync require a mock Provider and the user-credential batch",
-    "run_dept_scope_friend_ext": "mock Provider and internal department headers require the user-credential batch",
+    "run_tc_friend_request_create_accept": "forwarded Human authentication and TC friend request mutation require a mock Provider and the user-credential batch",
+    "run_tc_friend_auth_sync_readdress": "the preprod TC friend-auth sync control plane needs a reachable mock Provider unavailable from the user-credential batch",
+    "run_dept_scope_mixed_owner_patch": "legacy forwarded-Principal department headers require the user-credential batch unavailable in preprod",
+    "run_dept_scope_human_no_check": "forwarded Human department headers require the user-credential batch unavailable in preprod",
+    "run_dept_scope_human_user_scope": "forwarded user-scope department headers require the user-credential batch unavailable in preprod",
+    "run_dept_scope_bot_agent_scope": "the scoped Bot tenant/department fixture required by the agent-scope parser is unavailable in preprod",
 }
 
 
@@ -693,8 +697,20 @@ class RemoteEdgeFriendMutationAdapter:
     def run_ensure_bot(self) -> AdapterCall:
         raise self._service_gap("run_ensure_bot")
 
+    def run_tc_friend_request_create_accept(self) -> AdapterCall:
+        raise self._service_gap("run_tc_friend_request_create_accept")
+
     def run_tc_friend_auth_sync_readdress(self) -> AdapterCall:
         raise self._service_gap("run_tc_friend_auth_sync_readdress")
 
-    def run_dept_scope_friend_ext(self) -> AdapterCall:
-        raise self._service_gap("run_dept_scope_friend_ext")
+    def run_dept_scope_mixed_owner_patch(self) -> AdapterCall:
+        raise self._service_gap("run_dept_scope_mixed_owner_patch")
+
+    def run_dept_scope_human_no_check(self) -> AdapterCall:
+        raise self._service_gap("run_dept_scope_human_no_check")
+
+    def run_dept_scope_human_user_scope(self) -> AdapterCall:
+        raise self._service_gap("run_dept_scope_human_user_scope")
+
+    def run_dept_scope_bot_agent_scope(self) -> AdapterCall:
+        raise self._service_gap("run_dept_scope_bot_agent_scope")
