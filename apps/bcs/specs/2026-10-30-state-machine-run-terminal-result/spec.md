@@ -507,7 +507,7 @@ BCS 在终态事务提交**之后**才投递 RunResult，所以主持人处理�
   message-flow 投递、两个公开事件与契约、第 11 节第 1–6 项测试。
 - **PR 2（主持人技能与副屏）**：第 10 节全部改动与第 11 节第 7 项测试。
 - **PR 3（故障注入）**：故障注入脚本与第 11 节第 8 项的 10 次报告，以及不超过 2 分钟的演示视频。
-- 文档：本设计、[repro.md](repro.md)、[fault-injection.md](fault-injection.md)，以及 AI 使用策略报告。
+- 文档：本设计、[repro.md](repro.md)、[fault-injection.md](fault-injection.md)。
 
 实现分支（基于 `oss-camp2026`）：
 
