@@ -507,6 +507,87 @@ class TestUploadSkillValidation:
             assert body["success"] is False
             assert body["error_code"] == SkillUploadErrorCode.UPLOAD_FAILED
 
+    def test_upload_runtime_unavailable_logs_cause_not_unexpected(self, mock_ctx, caplog):
+        # Regression for the opaque CDO "[skills.upload_skill] Unexpected
+        # error:" (Dima 2026102900120185304): LocalSkillRuntimeUnavailableError
+        # carries an empty str(e); the upstream device reason lives in
+        # __cause__ and must surface in the log instead of the meaningless
+        # empty envelope.
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (
+            client,
+            mock_svc,
+            _,
+            _,
+        ):
+            error = LocalSkillRuntimeUnavailableError()
+            error.__cause__ = RuntimeError("teclaw apply failed")
+            mock_svc.upload_local_skill_files.side_effect = error
+
+            response = client.post(
+                "/api/skills/upload",
+                files=[
+                    (
+                        "files",
+                        (
+                            "SKILL.md",
+                            b"---\nname: a\ndescription: a\n---",
+                            "text/markdown",
+                        ),
+                    )
+                ],
+                data={"file_paths": json.dumps(["SKILL.md"])},
+            )
+
+            body = response.json()
+            # Client-facing envelope is unchanged (degraded runtime message).
+            assert body["success"] is False
+            assert body["error_code"] == SkillUploadErrorCode.RUNTIME_UNAVAILABLE
+            assert (
+                body["message"]
+                == "当前 Bot 的运行环境暂不可用，请重新启动 Bot 后重试。"
+            )
+            # The cause is surfaced, not swallowed into the empty envelope.
+            assert "runtime/storage unavailable" in caplog.text
+            assert "LocalSkillRuntimeUnavailableError()" in caplog.text
+            assert "teclaw apply failed" in caplog.text
+            assert "Unexpected error: " not in caplog.text
+
+    def test_upload_bare_storage_failure_logs_cause_not_unexpected(
+        self, mock_ctx, caplog
+    ):
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (
+            client,
+            mock_svc,
+            _,
+            _,
+        ):
+            error = LocalSkillStorageError()
+            error.__cause__ = RuntimeError("database write failed")
+            mock_svc.upload_local_skill_files.side_effect = error
+
+            response = client.post(
+                "/api/skills/upload",
+                files=[
+                    (
+                        "files",
+                        (
+                            "SKILL.md",
+                            b"---\nname: a\ndescription: a\n---",
+                            "text/markdown",
+                        ),
+                    )
+                ],
+                data={"file_paths": json.dumps(["SKILL.md"])},
+            )
+
+            body = response.json()
+            # Behavior preserved: bare storage failure stays UPLOAD_FAILED.
+            assert body["success"] is False
+            assert body["error_code"] == SkillUploadErrorCode.UPLOAD_FAILED
+            assert "runtime/storage unavailable" in caplog.text
+            assert "database write failed" in caplog.text
+            assert "Unexpected error: " not in caplog.text
+
     @pytest.mark.parametrize(
         ("message", "expected_code"),
         [
