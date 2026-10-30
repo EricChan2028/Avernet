@@ -90,19 +90,17 @@ NON_SECRET_VALUE_RE = re.compile(
 SECRET_REFERENCE_RE = re.compile(r"^other_manual_agentclaw_[a-z0-9_]+$")
 PYTHON_ATTRIBUTE_RE = re.compile(r"^\(*[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+\)*$")
 
+# Multi-segment, letter-led identifier-shaped values (env field names,
+# obligation ids, synthetic fixture labels, versioned names) are names, not
+# credentials. Genuine secrets stay in scope: digit-led first segments
+# (UUIDs), long digit-only segments (hex blobs) and single unseparated
+# high-entropy blobs all fail this shape.
+IDENTIFIER_SHAPED_VALUE_RE = re.compile(
+    r"(?i)^[A-Za-z][A-Za-z0-9]*(?:[._-](?:[A-Za-z][A-Za-z0-9]*|[0-9]{1,4}))+[._-]?$"
+)
 
-# Uniform-case reference names (environment variable names, configuration
-# keys, ledger state markers) are identifiers, not credential material; real
-# credential material is randomly mixed-case, so word-like uniform-case names
-# stay exempt only while their entropy remains below the random band.
-BENIGN_NAME_RE = re.compile(
-    r"(?x)^(?:[A-Z0-9]+(?:_[A-Z0-9]+)+|[a-z0-9]+(?:[._-][a-z0-9]+)+)$"
-)
-# Route templates and the scanner's own [REDACTED-...] markers interpolate
-# identifiers only; they never carry credential material.
-SAFE_TEMPLATE_RE = re.compile(
-    r"^(?:[A-Za-z0-9_?&=./\-]|\{[A-Za-z_]\w*\}|\[REDACTED[-A-Za-z0-9_]*\])+$"
-)
+# A bare RHS name is a variable reference, never a plaintext credential.
+PYTHON_NAME_RE = re.compile(r"^[A-Za-z_]\w*$")
 
 
 def _entropy(value: str) -> float:
@@ -123,13 +121,10 @@ def _looks_like_plaintext_value(value: str) -> bool:
     if (len(value) < 12 or PLACEHOLDER_RE.fullmatch(value)
             or NON_SECRET_VALUE_RE.fullmatch(value) or SECRET_REFERENCE_RE.fullmatch(value)):
         return False
-    # Only genuinely interpolated templates and explicit redaction markers
-    # qualify; a plain hyphenated lowercase string is word salad, not a
-    # template, and stays subject to the entropy/length heuristics.
-    if (("{" in value or "[REDACTED" in value)
-            and SAFE_TEMPLATE_RE.fullmatch(value)):
+    # Brace templates bind parameters; the shape itself is a format string.
+    if "{" in value and "}" in value:
         return False
-    if BENIGN_NAME_RE.fullmatch(value) and _entropy(value) < 3.9:
+    if len(value) <= 64 and IDENTIFIER_SHAPED_VALUE_RE.fullmatch(value):
         return False
     # A high-entropy value is a strong signal. Password/secret assignments are
     # also suspicious at a lower threshold because human-generated secrets can
@@ -222,87 +217,6 @@ def _added_lines(diff: str) -> list[tuple[str, int, str]]:
     return added
 
 
-def _balanced_expression(content: str, start: int) -> str:
-    """Capture one lexically bounded expression; no container-tail truncation.
-
-    Assignment detection anchors on the value, but dict/kwargs tails such as a
-    trailing ``}`` or ``)`` belong to the enclosing structure, not the value.
-    The capture stops at a depth-zero comma or semicolon and honors quotes.
-    """
-    depth = 0
-    quote = ""
-    index = start
-    while index < len(content):
-        char = content[index]
-        if quote:
-            if char == "\\":
-                index += 2
-                continue
-            if char == quote:
-                quote = ""
-            index += 1
-            continue
-        if char in "'\"":
-            quote = char
-        elif char in "([{":
-            depth += 1
-        elif char in ")]}":
-            if depth == 0:
-                break
-            depth -= 1
-        elif char in ",;" and depth == 0:
-            break
-        elif char == "\n" and depth == 0:
-            break
-        index += 1
-    return content[start:index]
-
-
-def _net_open_parens(expression: str) -> int:
-    """Count unclosed parens outside string bodies; unknown inside strings."""
-    depth = 0
-    quote = ""
-    index = 0
-    while index < len(expression):
-        char = expression[index]
-        if quote:
-            if char == "\\":
-                index += 2
-                continue
-            if char == quote:
-                quote = ""
-        elif char in "'\"":
-            quote = char
-        elif char == "(":
-            depth += 1
-        elif char == ")":
-            depth -= 1
-        index += 1
-    return depth if not quote and depth > 0 else 0
-
-
-def _parse_candidates(expression: str) -> list[str]:
-    """Trim enclosing-container artifacts so the fragment can parse alone.
-
-    Diff fragments cut multi-line calls at the line boundary; appended
-    closers re-balance that truncation so a genuine runtime expression
-    parses instead of keeping the conservative regex behavior.
-    """
-    stripped = expression.strip()
-    candidates = [stripped]
-    work = stripped
-    for _ in range(4):
-        if not work or work[-1] not in ",;)]}":
-            break
-        work = work[:-1]
-        candidates.append(work)
-    for candidate in list(candidates):
-        net = _net_open_parens(candidate)
-        if net > 0:
-            candidates.append(candidate + ")" * net)
-    return candidates
-
-
 def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
     """Recognize expressions, not secrets, without evaluating Python source.
 
@@ -325,16 +239,74 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
                 )
     if assignment.group("quoted") is not None:
         return False
-    expression = _balanced_expression(content, assignment.start("bare"))
+    # The regex bare capture truncates at the first comma/quote, which turns
+    # keyword arguments and index chains into unparseable fragments. Recover
+    # from the physical-line remainder at the RHS start, then retry on
+    # progressively shorter prefixes: cut at top-level commas, drop trailing
+    # structural junk, and finally grind through mid-junk characters, while
+    # the remaining prefix still fails to parse as an expression.
+    expressions = []
+    completion = None
+    remainder = ""
+    if assignment.group("bare") is not None:
+        remainder = content[assignment.start("bare"):].strip().rstrip(",")
+    if remainder:
+        if ";" in remainder:
+            remainder = remainder.split(";")[0].strip()
+        expressions.append(remainder)
+        # A truncated physical line often ends mid-call with unclosed
+        # brackets. Complete the bracket structure when the scan never
+        # dropped below zero balance and strings are closed, so the whole
+        # RHS parses as an expression instead of grinding into junk.
+        bracket_stack = []
+        truncated = True
+        in_string = None
+        escaped = False
+        for index, char in enumerate(remainder):
+            if in_string is not None:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == in_string:
+                    in_string = None
+                continue
+            if char in "'\"":
+                in_string = char
+            elif char in "([{":
+                bracket_stack.append(char)
+            elif char in ")]}":
+                if not bracket_stack:
+                    truncated = False
+                    break
+                bracket_stack.pop()
+            elif char == "," and not bracket_stack:
+                prefix = remainder[:index].rstrip()
+                if prefix:
+                    expressions.append(prefix)
+        if truncated and bracket_stack and in_string is None:
+            completion = remainder + "".join(
+                {"(": ")", "[": "]", "{": "}"}[opener]
+                for opener in reversed(bracket_stack)
+            )
+    candidates = ([completion] if completion is not None else []) + expressions
     node = None
-    for candidate in _parse_candidates(expression):
-        try:
-            node = ast.parse(candidate, mode="eval").body
+    for expression in candidates:
+        while expression:
+            try:
+                node = ast.parse(expression, mode="eval").body
+            except (SyntaxError, ValueError):
+                node = None
+            if node is not None:
+                break
+            if expression[-1] not in ",;)]}('\"":
+                break
+            expression = expression[:-1].strip()
+        if node is not None:
             break
-        except (SyntaxError, ValueError):
-            continue
     if node is None:
         return False
+
 
     def safe(value: ast.AST) -> bool:
         if isinstance(value, ast.Name):
@@ -343,12 +315,12 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
             return safe(value.value)
         if isinstance(value, ast.Subscript):
             return safe(value.value) and safe(value.slice)
+        if isinstance(value, ast.BinOp) and isinstance(value.op, ast.Add):
+            return safe(value.left) and safe(value.right)
         if isinstance(value, ast.BoolOp):
             return all(safe(item) for item in value.values)
         if isinstance(value, ast.IfExp):
             return safe(value.body) and safe(value.orelse)
-        if isinstance(value, ast.BinOp):
-            return safe(value.left) and safe(value.right)
         if isinstance(value, ast.JoinedStr):
             return all(safe(item) for item in value.values)
         if isinstance(value, ast.FormattedValue):
@@ -369,13 +341,9 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
             )
         return False
 
-    if SAFE_TEMPLATE_RE.fullmatch(expression.strip()) and (
-            "{" in expression or "[REDACTED" in expression):
-        return True
     return isinstance(
         node,
-        (ast.Name, ast.Attribute, ast.Call, ast.Subscript, ast.BoolOp, ast.JoinedStr,
-         ast.IfExp, ast.BinOp),
+        (ast.Name, ast.Attribute, ast.Call, ast.Subscript, ast.List, ast.Tuple, ast.BoolOp, ast.BinOp, ast.IfExp, ast.JoinedStr),
     ) and safe(node)
 
 
@@ -438,6 +406,48 @@ def _rust_assignment(content: str, assignment: re.Match[str]) -> tuple[bool, boo
     return bool(runtime and supported), False
 
 
+_STRING_LITERAL_SPAN_RE = re.compile(r'"(?:[^"\\\r\n]|\\.)*"|\'(?:[^\'\\\r\n]|\\.)*\'')
+_ASSIGNMENT_KEYWORD_TAIL_RE = re.compile(
+    r"(?i)(?:api[._-]?key|access[._-]?key|secret(?:[._-]?key)?|"
+    r"private[._-]?key|client[._-]?secret|auth[._-]?token|"
+    r"password|passwd|credential|token)\s*$"
+)
+
+
+def _keyword_match_inside_string_literal(content: str, assignment: re.Match[str]) -> bool:
+    """True when the credential-named LHS sits inside a string literal.
+
+    URL templates such as ``"?token=" + register_token`` and payload keys
+    such as ``{"X-BCS-Bot-Token": driver_env}`` embed the keyword in string
+    text; they name fields, they do not assign a plaintext credential. Real
+    assignments keep the keyword in code position and stay in scope.
+    """
+    rhs_start = -1
+    for group in ("quoted", "bare"):
+        start = assignment.start(group) if assignment.group(group) is not None else -1
+        if start >= 0 and (rhs_start < 0 or start < rhs_start):
+            rhs_start = start
+    if rhs_start < 0:
+        return False
+    lhs = content[assignment.start():rhs_start]
+    separator = re.search(r"\s*[\"']?\s*(?:[:=]|=>)\s*$", lhs)
+    if separator is None:
+        return False
+    keyword = re.search(
+        r"(?i)(?:api[._-]?key|access[._-]?key|secret(?:[._-]?key)?|"
+        r"private[._-]?key|client[._-]?secret|auth[._-]?token|"
+        r"password|passwd|credential|token)\s*[\"']?\s*$",
+        lhs[:separator.start()],
+    )
+    if keyword is None:
+        return False
+    keyword_abs_start = assignment.start() + keyword.start()
+    for span in _STRING_LITERAL_SPAN_RE.finditer(content):
+        if span.start() <= keyword_abs_start < span.end():
+            return True
+    return False
+
+
 def _findings(diff: str) -> list[Finding]:
     findings: list[Finding] = []
     for path, line, content in _added_lines(diff):
@@ -453,11 +463,17 @@ def _findings(diff: str) -> list[Finding]:
             for rule, assignment_pattern in assignment_rules:
                 detected = False
                 for assignment in assignment_pattern.finditer(content):
+                    if _keyword_match_inside_string_literal(content, assignment) and not (
+                        assignment.group("quoted") is not None
+                        and _looks_like_plaintext_value(assignment.group("quoted"))
+                    ):
+                        continue
                     value = assignment.group("quoted") or assignment.group("bare") or ""
                     if path.endswith(".py") and (
                         _python_reference_is_safe(content, assignment)
                         or (assignment.group("quoted") is None
-                            and PYTHON_ATTRIBUTE_RE.fullmatch(value))
+                            and (PYTHON_ATTRIBUTE_RE.fullmatch(value)
+                                 or PYTHON_NAME_RE.fullmatch(value)))
                     ):
                         continue
                     rust_safe, rust_literal = (
