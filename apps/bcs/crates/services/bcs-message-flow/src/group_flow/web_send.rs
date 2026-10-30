@@ -366,45 +366,6 @@ pub(super) async fn handle_web_send_with_result(
     // saturated with live captures) warns and continues: the message still
     // runs its ordinary course, and the relay-side stays fail-closed rather
     // than failing the Human's speech on housekeeping.
-    if let Some(relay) = flow.caller_relay.as_ref() {
-        // Presence counts either way: an explicit mention OR the allowlisted
-        // middle bot just being a participant of this session — the real
-        // frontend speech path (handle_group_chat) forwards with no
-        // mentions, and requiring a hand-crafted @ would neuter capture for
-        // everyday messages. The from_bot must be allowlisted regardless:
-        // presence of a DECLARED middleman, never of an arbitrary bot.
-        let routed_hits_allowlist = cmd
-            .mentions
-            .iter()
-            .any(|mention| relay.policy.allow.iter().any(|rule| rule.from_bot == *mention))
-            || group.participants.iter().any(|participant| {
-                relay.policy.allow.iter().any(|rule| rule.from_bot == participant.bot_uuid)
-            });
-        if routed_hits_allowlist {
-            if let Some(ingress) = cmd.caller_ingress.as_ref() {
-                let capture_session = cmd.session_id.clone().unwrap_or_else(|| cmd.group_id.clone());
-                let capture_turn = cmd
-                    .source_im_message_id
-                    .clone()
-                    .or_else(|| cmd.idempotency_key.clone())
-                    .unwrap_or_else(|| capture_session.clone());
-                let captured = relay.ledger.record(
-                    &bcs_config::resolve_env_str(),
-                    &capture_session,
-                    &capture_turn,
-                    ingress.clone(),
-                    now_ms() as i64,
-                    relay.capture_ttl_ms,
-                );
-                if !captured {
-                    tracing::warn!(
-                        session = %capture_session,
-                        "caller relay capture refused (ledger saturated with live captures); later relays stay closed"
-                    );
-                }
-            }
-        }
-    }
     // P3.2 speaking lease (spec §6.1/§6.3): only Human speech in CALLER
     // groups is fenced — plain groups (no Human member, or no bot with a
     // caller-enabled configuration) never read or write the lease store.
@@ -417,6 +378,11 @@ pub(super) async fn handle_web_send_with_result(
     // configuration read failure is fail-closed (the mode is UNDECIDABLE,
     // not Plain); groups without Human members stay Plain without a single
     // configuration read.
+    // The relay capture decision reuses this scan: the accumulators stay in
+    // scope beyond the fence below (whose per-participant reads the
+    // caller-config cache already bounds).
+    let mut any_bot_caller_enabled = false;
+    let mut mode_undecidable = false;
     let speaking_fence = if sender_type == SenderType::Human
         && group.group_kind != GroupKind::Dm
     {
@@ -424,8 +390,6 @@ pub(super) async fn handle_web_send_with_result(
             .participants
             .iter()
             .any(|participant| participant.actor_kind == ActorKind::Human);
-        let mut any_bot_caller_enabled = false;
-        let mut mode_undecidable = false;
         if has_human_member {
             let env = bcs_config::resolve_env_str();
             if let Some(deps) = flow.caller_admission.as_ref() {
@@ -487,6 +451,51 @@ pub(super) async fn handle_web_send_with_result(
     } else {
         None
     };
+    // Owner→caller identity relay (spec L62 direction, DEFAULT-ON): any
+    // session that carries at least one caller-enabled member becomes
+    // relay-capable — the authenticated Human's ingress is captured into
+    // the session-keyed ledger and the two trusted exchange points (the
+    // task-assign edge, orchestration submission) are the only redeemers.
+    // No per-edge policy exists: the target side is governed by the bot's
+    // own caller-enabled configuration and the capture is bounded by TTL,
+    // per-turn budget and epoch seals. A refused capture (ledger saturated
+    // with live captures) warns and continues — the message runs its
+    // ordinary course and the relay-side stays fail-closed.
+    if let (Some(relay), true) = (
+        flow.caller_relay.as_ref(),
+        sender_type == SenderType::Human
+            && group.group_kind != GroupKind::Dm
+            && any_bot_caller_enabled,
+    ) {
+        if let Some(ingress) = cmd.caller_ingress.as_ref() {
+            let capture_session = cmd.session_id.clone().unwrap_or_else(|| cmd.group_id.clone());
+            let capture_turn = cmd
+                .source_im_message_id
+                .clone()
+                .or_else(|| cmd.idempotency_key.clone())
+                .unwrap_or_else(|| capture_session.clone());
+            let captured = relay.ledger.record(
+                &bcs_config::resolve_env_str(),
+                &capture_session,
+                &capture_turn,
+                ingress.clone(),
+                now_ms() as i64,
+                relay.capture_ttl_ms,
+            );
+            if captured {
+                tracing::info!(
+                    session = %capture_session,
+                    turn = %capture_turn,
+                    "caller relay captured the session's human ingress (bounded by TTL and per-turn redeem budget)"
+                );
+            } else {
+                tracing::warn!(
+                    session = %capture_session,
+                    "caller relay capture refused (ledger saturated with live captures); later relays stay closed"
+                );
+            }
+        }
+    }
     // Submission eligibility fence BEFORE durable acceptance (spec §6.3
     // rule 2): a message that passed the fence before a preemption
     // boundary stays legal; a claim losing the race is refused entry.

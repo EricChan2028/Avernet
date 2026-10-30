@@ -298,23 +298,30 @@ pub async fn wire_with_caller_assembly(
             caller_term.lineage = Some(index.clone());
             flow = flow.with_caller_derivation(index.clone());
             let pipeline = pipeline.with_root_lineage(index);
-            // Owner→caller relay (spec L62 direction): assembled ONLY when
-            // the deployment opted in via `caller_identity.relay`. The
-            // capture TTL reuses the credential-scale horizon already
-            // computed for handoff reaping (2× the JWT max_ttl, floor
-            // 600s) so a captured identity never outlives the credential
-            // window it would mint. Absent/disabled sections assemble no
-            // relay state at all — every session keeps the fail-closed
-            // Owner-middle-hop behavior.
-            if let Some(relay_config) = config.caller_identity.as_ref().and_then(|identity| identity.relay.clone()) {
-                if relay_config.enabled {
-                    let relay_state = bcs_message_flow::caller_relay::CallerRelayState::new(
-                        relay_config,
-                        identity_reap_horizon_ms,
-                    );
-                    caller_term.relay = Some(relay_state.ledger.clone());
-                    flow = flow.with_caller_relay(relay_state);
-                }
+            // Owner→caller relay (spec L62 direction, DEFAULT-ON with a
+            // single opt-out): assembled for every caller-enabled identity
+            // section unless the deployment writes an explicit
+            // `caller_identity.relay.enabled = false`. The capture TTL
+            // reuses the credential-scale horizon already computed for
+            // handoff reaping (2× the JWT max_ttl, floor 600s) so a
+            // captured identity never outlives the credential window it
+            // would mint. No per-edge policy is configured anywhere: the
+            // target side is gated by each bot's own caller configuration
+            // and the capture is bounded by TTL, per-turn budget and the
+            // epoch seals. A disabled relay assembles no state at all —
+            // every session keeps the fail-closed Owner-middle-hop
+            // behavior.
+            let relay_on = config
+                .caller_identity
+                .as_ref()
+                .map(bcs_config_api::caller_relay_enabled)
+                .unwrap_or(false);
+            if relay_on {
+                let relay_state = bcs_message_flow::caller_relay::CallerRelayState::new(
+                    identity_reap_horizon_ms,
+                );
+                caller_term.relay = Some(relay_state.ledger.clone());
+                flow = flow.with_caller_relay(relay_state);
             }
             // Reply-side observe sync (spec §6.4, L243③): the SAME observe
             // assembly the runtime pipeline uses — the reply commit path

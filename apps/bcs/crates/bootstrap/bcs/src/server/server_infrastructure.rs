@@ -720,13 +720,12 @@ impl BcsServer {
         let caller_orchestration_pipeline = wired_message_flow.caller_dispatch_pipeline.clone();
         // Owner→caller relay (design 2026-10-30): the same CallerRelayState
         // the admission seam captured into — bot-submitted caller-aware runs
-        // redeem here. Absent relay state (relay disabled/unconfigured)
+        // redeem here. Absent relay state (an explicit deployment opt-out)
         // stays None and every bot submission keeps caller-closed behavior.
         let caller_relay_redeemer = wired_message_flow.caller_relay.as_ref().map(|relay| {
             std::sync::Arc::new(
                 bcs_message_flow::caller_relay::CallerRelaySubmissionRedeemer::new(
                     relay.ledger.clone(),
-                    relay.policy.clone(),
                 ),
             ) as std::sync::Arc<dyn bcs_service_api::port::CallerRelayRedeemerPort>
         });

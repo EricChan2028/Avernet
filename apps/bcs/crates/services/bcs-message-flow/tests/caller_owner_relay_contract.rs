@@ -1,16 +1,18 @@
-//! Owner→caller identity relay contract (spec L62 direction): a Human
-//! speaking into an ordinary Owner session gets their authenticated ingress
-//! captured (relay-enabled deployments only); the trusted task-assign edge
-//! redeems it onto an ALLOWLISTED caller target's handoff scope, keyed from
-//! the committed row's own facts. The middle bot carries no token; an
-//! unallowed edge, an expired capture or a spent budget all stay exactly as
-//! fail-closed as a relay-disabled deployment.
+//! Owner→caller identity relay contract (spec L62 direction, DEFAULT-ON):
+//! any Human speech into a session carrying a caller-enabled member is
+//! captured into the session-keyed ledger; the trusted task-assign edge
+//! redeems it onto the caller target's handoff scope keyed from the
+//! committed row's own facts. The middle bot carries no token; expiry,
+//! spent budget and an explicit deployment opt-out all stay fail-closed
+//! exactly like before the relay existed.
 
 use std::sync::{Arc, atomic::Ordering};
 
 use bcs_config::resolve_env_str as resolve_env;
 use bcs_config_api::message_delivery::{BotDeliveryMode, DeliveryPolicy};
-use bcs_config_api::{CallerRelayConfig, CallerRelayRule};
+use bcs_service_api::port::repo::session_speaking_lease::{AcquireLease, LeaseAcquire, SpeakingLeaseRepoPort as _SpeakingLeaseRepoPort};
+use bcs_service_api::WebSendLeaseClaim;
+use bcs_session_store::MemorySpeakingLeaseRepo;
 use bcs_service_api::{
     BotCallerConfiguration, BotCandidateReadQuery, BotControlPlaneCandidate,
     BotControlPlaneCoreService, BotControlPlaneRecord, BotControlPlaneView,
@@ -43,6 +45,25 @@ use serde_json::json;
 mod session;
 #[path = "../../../test-support/message_flow_contract_support.rs"]
 mod support;
+
+
+async fn acquire_lease(f: &Fixture, holder: &str) -> WebSendLeaseClaim {
+    let repo = f.flow.speaking_leases.as_ref().expect("lease store wired");
+    match repo
+        .acquire(AcquireLease {
+            session_id: "group-1",
+            requester_actor_id: holder,
+            now_ms: chrono::Utc::now().timestamp_millis(),
+            idle_timeout_ms: 60_000,
+        })
+        .await
+        .unwrap()
+    {
+        LeaseAcquire::Granted(lease) | LeaseAcquire::SelfHeld(lease) =>
+            WebSendLeaseClaim { lease_id: lease.lease_id, epoch: lease.epoch },
+        other => panic!("expected a held lease, got {other:?}"),
+    }
+}
 
 const SESSION: &str = "group-1:task";
 
@@ -170,15 +191,14 @@ struct Fixture {
     flow: Arc<BcsMessageFlow>,
     service: Arc<ManagedMessageDelivery>,
     handoff: Arc<HumanCallerDeliveryHandoff>,
-    ledger: Arc<bcs_message_flow::caller_relay_ledger::CallerRelayLedger>,
+    ledger: Option<Arc<bcs_message_flow::caller_relay_ledger::CallerRelayLedger>>,
 }
 
-async fn fixture(allow: Vec<CallerRelayRule>, relay_enabled: bool) -> Fixture {
-    fixture_with_plane(allow, relay_enabled, true).await
+async fn fixture(relay_enabled: bool) -> Fixture {
+    fixture_with_plane(relay_enabled, true).await
 }
 
 async fn fixture_with_plane(
-    allow: Vec<CallerRelayRule>,
     relay_enabled: bool,
     caller_enabled_plane: bool,
 ) -> Fixture {
@@ -195,11 +215,8 @@ async fn fixture_with_plane(
     let live = Arc::new(LiveDeliveryPolicy::new(repo.clone(), Default::default()));
     live.scheduler_available.store(true, Ordering::SeqCst);
     let handoff = Arc::new(HumanCallerDeliveryHandoff::new(8));
-    let relay = CallerRelayState::new(
-        CallerRelayConfig { enabled: relay_enabled, allow },
-        600_000,
-    );
-    let ledger = relay.ledger.clone();
+    let relay = (relay_enabled as bool).then(|| CallerRelayState::new(600_000));
+    let ledger = relay.as_ref().map(|state| state.ledger.clone());
     let flow = BcsMessageFlow::new(
         support.group.clone(), support.routing.clone(), support.registry.clone(),
         support.bot_delivery.clone(), support.frontend_delivery.clone(),
@@ -209,7 +226,11 @@ async fn fixture_with_plane(
         .with_session_management(Arc::new(session::StaticSessionManagement::new(
             session::test_session(SESSION, "group-1", group.participants.clone()),
         )))
-        .with_caller_relay(relay);
+        .with_speaking_leases(Arc::new(MemorySpeakingLeaseRepo::new()));
+    let flow = match relay {
+        Some(state) => flow.with_caller_relay(state),
+        None => flow,
+    };
     let mut flow = Arc::new(flow);
     {
         let flow_mut = Arc::get_mut(&mut flow).unwrap();
@@ -261,9 +282,7 @@ async fn a_delegation_without_relay_state_stays_fail_closed() {
     // Present-day behavior pinned: with no relay state on the composition,
     // the owner middle-hop delegation parks nothing — the worker row's scope
     // reads Gone and nothing upgrades it.
-    let mut f = fixture(vec![], false).await;
-    // Detach the relay state entirely for the pure owner shape.
-    Arc::get_mut(&mut f.flow).unwrap().caller_relay = None;
+    let f = fixture(false).await;
     let (_, row) = dispatch_row(&f).await;
     assert_eq!(row.semantic_projection_json["caller_delegation"]["parent_run_id"], "run-manager");
     assert_eq!(
@@ -279,9 +298,9 @@ async fn an_allowed_edge_redeems_the_session_capture_exactly_once() {
     // by the trusted task-assign edge and parked under the worker row's own
     // scope; the first committed claim consumes it and everything later
     // answers AlreadyClaimed.
-    let f = fixture(vec![CallerRelayRule { from_bot: "bot-driver".into(), to_bot: "bot-observer".into() }], true).await;
+    let f = fixture(true).await;
     let now = chrono::Utc::now().timestamp_millis();
-    assert!(f.ledger.record(&resolve_env(), SESSION, "turn-relay-1", ingress("human_alice"), now, 600_000));
+    assert!(f.ledger.as_ref().unwrap().record(&resolve_env(), SESSION, "turn-relay-1", ingress("human_alice"), now, 600_000));
     let (task_id, row) = dispatch_row(&f).await;
     let scope = worker_scope(&row);
     assert_eq!(
@@ -301,30 +320,27 @@ async fn an_allowed_edge_redeems_the_session_capture_exactly_once() {
 }
 
 #[tokio::test]
-async fn a_disallowed_edge_never_redeems_the_capture() {
-    // Policy decides, not the model: an allowlist that does not name this
-    // exact (middle, target) edge leaves the capture untouched (budget
-    // intact) and the worker scope stays Gone.
-    let f = fixture(vec![CallerRelayRule { from_bot: "bot-other".into(), to_bot: "bot-observer".into() }], true).await;
-    let now = chrono::Utc::now().timestamp_millis();
-    assert!(f.ledger.record(&resolve_env(), SESSION, "turn-relay-1", ingress("human_alice"), now, 600_000));
+async fn an_opted_out_deployment_assembles_no_relay_and_stays_closed() {
+    // The single deployment opt-out (`enabled = false`) assembles no relay
+    // state at all: nothing captures, nothing redeems, the worker scope
+    // stays Gone exactly like before the relay existed.
+    let f = fixture(false).await;
+    assert!(f.ledger.is_none(), "an opted-out composition assembles no relay ledger");
     let (_, row) = dispatch_row(&f).await;
     assert_eq!(
         f.handoff.identity_readiness(&worker_scope(&row)).await,
         HandoffIdentityReadiness::Gone,
-        "a disallowed relay edge must not park anything"
+        "no identity ever parks without the relay state"
     );
-    // The capture survives untouched for an actually-allowed edge later.
-    assert!(f.ledger.redeem(&resolve_env(), SESSION, now).is_some());
 }
 
 #[tokio::test]
 async fn an_expired_capture_fails_closed_at_the_edge() {
     // B5 at the relay boundary: a capture past its window redeems nothing —
     // the Human must speak again; the task stays fail-closed.
-    let f = fixture(vec![CallerRelayRule { from_bot: "bot-driver".into(), to_bot: "bot-observer".into() }], true).await;
+    let f = fixture(true).await;
     let now = chrono::Utc::now().timestamp_millis();
-    assert!(f.ledger.record(&resolve_env(), SESSION, "turn-relay-stale", ingress("human_alice"), now - 1_200_000, 600_000));
+    assert!(f.ledger.as_ref().unwrap().record(&resolve_env(), SESSION, "turn-relay-stale", ingress("human_alice"), now - 1_200_000, 600_000));
     let (_, row) = dispatch_row(&f).await;
     assert_eq!(
         f.handoff.identity_readiness(&worker_scope(&row)).await,
@@ -339,11 +355,12 @@ async fn an_authenticated_human_speech_is_captured_at_admission() {
     // session, with the allowlist's middle bot among the mentions, lands in
     // the relay ledger under the session key — no caller target needs to be
     // routed, and nothing is handed to any bot yet.
-    let f = fixture_with_plane(vec![CallerRelayRule { from_bot: "bot-driver".into(), to_bot: "bot-observer".into() }], true, false).await;
+    let f = fixture_with_plane(true, true).await;
     let now = chrono::Utc::now().timestamp_millis();
+    let lease = acquire_lease(&f, "human_alice").await;
     let cmd = bcs_service_api::WebSendCommand {
         caller_ingress: Some(ingress("human_alice")),
-        speaking_lease: None,
+        speaking_lease: Some(lease),
         caller_execution: None,
         caller: CallerContext::Human(HumanActor { actor_id: "human_alice".into(), staff_no: "S12345".into() }),
         group_id: "group-1".into(),
@@ -361,8 +378,8 @@ async fn an_authenticated_human_speech_is_captured_at_admission() {
         provider_bypass_headers: vec![],
     };
     f.flow.handle_web_send(cmd).await.expect("web send admits");
-    let (turn, captured) = f.ledger.redeem(&resolve_env(), SESSION, now)
-        .expect("the human's speech must be captured for an allowlisted middle hop");
+    let (turn, captured) = f.ledger.as_ref().unwrap().redeem(&resolve_env(), SESSION, now)
+        .expect("the human's speech must be captured for a session with a caller-enabled member");
     assert_eq!(turn, "turn-relay-capture");
     assert_eq!(captured.actor().actor_id, "human_alice");
 }
@@ -374,9 +391,9 @@ async fn a_frontend_group_chat_speech_is_captured_without_mentions() {
     // explicit @. Capture must key off the allowlisted middle bot being a
     // SESSION PARTICIPANT (presence), not an explicit mention, or relay
     // only ever fires for hand-crafted mentions.
-    let f = fixture_with_plane(vec![CallerRelayRule { from_bot: "bot-driver".into(), to_bot: "bot-observer".into() }], true, false).await;
+    let f = fixture_with_plane(true, true).await;
     let now = chrono::Utc::now().timestamp_millis();
-    f.flow.handle_group_chat(bcs_service_api::GroupChatCommand {
+    let refused = f.flow.handle_group_chat(bcs_service_api::GroupChatCommand {
         caller: CallerContext::Human(HumanActor { actor_id: "human_1".into(), staff_no: "S12345".into() }),
         group_id: "group-1".into(),
         requested_sender_id: None,
@@ -384,10 +401,17 @@ async fn a_frontend_group_chat_speech_is_captured_without_mentions() {
         session_id: Some(SESSION.into()),
         provider_bypass_headers: vec![],
         caller_ingress: Some(ingress("human_1")),
-    }).await.expect("group chat admits");
-    let (_, captured) = f.ledger.redeem(&resolve_env(), SESSION, now)
-        .expect("a speech into a session with an allowlisted middle member must capture");
-    assert_eq!(captured.actor().actor_id, "human_1");
+    }).await.expect_err("a caller group fences leaseless group-chat speech at admission");
+    assert!(refused.to_string().contains("speaking lease required"), "{refused}");
+    // The lease refusal aborts admission BEFORE the capture seam: an
+    // unadmitted speech never captures identity (capture is bound to a
+    // completed admission scan, not to a raw request). The production
+    // group-chat shape — a lease-holding Human speech — captures through
+    // the same handle_web_send path the web-send test covers.
+    assert!(
+        f.ledger.as_ref().unwrap().redeem(&resolve_env(), SESSION, now).is_none(),
+        "a fence-refused speech must not capture"
+    );
 }
 
 // Keep the unused-variable lint honest for fixtures that ignore status.

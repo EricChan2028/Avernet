@@ -48,38 +48,36 @@ pub struct CallerIdentityServiceConfig {
     pub options: BTreeMap<String, serde_json::Value>,
 }
 
-/// Owner-root identity relay policy. `allow` is the trust decision, made by
-/// deployment configuration — never by a model at runtime. A human speaking
-/// into a session whose admission path captured the ingress may have that
-/// identity relayed onto an allowed caller target ONLY through the trusted
-/// task-assign edge; the middle bot receives and forwards no token.
+/// Owner→caller identity relay, DEFAULT-ON with a single opt-out: the relay
+/// turns any session that carries a caller-enabled member into a relay-
+/// capable one — a trusted seam captures the authenticated human ingress at
+/// admission and the two trusted exchange points (task-assign, orchestration
+/// submission) redeem it. No per-edge configuration exists: the target side
+/// is already governed by the bot's own caller-enabled configuration (the
+/// §15.4 anti-downgrade guard refuses everything else) and the capture is
+/// bounded by TTL, per-turn budget and epoch seals. `enabled = false` is the
+/// deployment's one-line emergency stop.
 #[derive(Debug, Clone, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CallerRelayConfig {
+    #[serde(default = "relay_default_enabled")]
     pub enabled: bool,
-    #[serde(default)]
-    pub allow: Vec<CallerRelayRule>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CallerRelayRule {
-    pub from_bot: String,
-    pub to_bot: String,
+fn relay_default_enabled() -> bool {
+    true
 }
 
-/// Startup-time fail-closed check: an enabled relay with an empty allowlist
-/// is a configuration error ("enabled but allows nothing" is a footgun, not
-/// a policy); a disabled or absent section always validates.
-pub fn validate_caller_relay_policy(
-    config: &CallerIdentityServiceConfig,
-) -> Result<(), String> {
-    match &config.relay {
-        Some(relay) if relay.enabled && relay.allow.is_empty() => {
-            Err("caller_identity.relay.enabled requires a non-empty allowlist".to_string())
-        }
-        _ => Ok(()),
-    }
+/// The relay decision for a whole identity section: the section itself may
+/// be absent (holding no configuration at all) — the relay still defaults
+/// ON because the caller capability is already an explicit deployment
+/// opt-in; only an explicit `enabled = false` turns it off.
+pub fn caller_relay_enabled(config: &CallerIdentityServiceConfig) -> bool {
+    config
+        .relay
+        .as_ref()
+        .map(|relay| relay.enabled)
+        .unwrap_or(true)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
@@ -113,49 +111,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn relay_section_parses_and_stays_closed_by_default() {
-        // Absent section = relay stays disabled: the Owner middle-hop gains
-        // nothing without an explicit, deployment-owned allowlist.
-        let closed: CallerIdentityServiceConfig =
+    fn relay_is_default_on_with_a_single_explicit_opt_out() {
+        // Absent section = relay ON: the caller capability is itself the
+        // deployment opt-in, and every session with a caller-enabled member
+        // becomes relay-capable with zero configuration.
+        let missing: CallerIdentityServiceConfig =
             toml::from_str("plugin = 'jwt'\n").unwrap();
-        assert!(closed.relay.is_none());
-        let config: CallerIdentityServiceConfig = toml::from_str(
-            "plugin = 'jwt'\n[relay]\nenabled = false\n\
-             allow = [{ from_bot = 'bot-a', to_bot = 'bot-b' }]",
+        assert!(missing.relay.is_none());
+        assert!(caller_relay_enabled(&missing));
+        // Present section, flag defaulted: still on.
+        let defaulted: CallerIdentityServiceConfig = toml::from_str(
+            "plugin = 'jwt'\n[relay]\n",
         )
         .unwrap();
-        let relay = config.relay.unwrap();
-        assert!(!relay.enabled);
-        assert_eq!(
-            relay.allow,
-            vec![CallerRelayRule { from_bot: "bot-a".into(), to_bot: "bot-b".into() }]
-        );
-        // Rule is strict too: unknown fields fail.
-        assert!(toml::from_str::<CallerIdentityServiceConfig>(
-            "plugin = 'jwt'\n[relay]\nenabled = true\n\
-             allow = [{ from_bot = 'a', to_bot = 'b', extra = 1 }]",
+        assert!(defaulted.relay.unwrap().enabled);
+        // The one-line emergency stop.
+        let disabled: CallerIdentityServiceConfig = toml::from_str(
+            "plugin = 'jwt'\n[relay]\nenabled = false",
         )
-        .is_err());
-    }
-
-    #[test]
-    fn an_enabled_relay_with_an_empty_allowlist_is_a_fail_closed_error() {
-        // enabled=true with an empty allowlist is rejected: policy — never
-        // the model — decides identity relay, and an "enabled but allows
-        // nothing" section must fail closed instead of running as a footgun.
-        let config: CallerIdentityServiceConfig = toml::from_str(
+        .unwrap();
+        assert!(!caller_relay_enabled(&disabled));
+        // Strict shape: no allow/edge fields exist anymore.
+        assert!(toml::from_str::<CallerIdentityServiceConfig>(
             "plugin = 'jwt'\n[relay]\nenabled = true\nallow = []",
         )
-        .unwrap();
-        assert_eq!(
-            validate_caller_relay_policy(&config),
-            Err("caller_identity.relay.enabled requires a non-empty allowlist".to_string())
-        );
-        let disabled: CallerIdentityServiceConfig = toml::from_str(
-            "plugin = 'jwt'\n[relay]\nenabled = false\nallow = []",
-        )
-        .unwrap();
-        assert!(validate_caller_relay_policy(&disabled).is_ok());
+        .is_err());
     }
 
     #[test]
