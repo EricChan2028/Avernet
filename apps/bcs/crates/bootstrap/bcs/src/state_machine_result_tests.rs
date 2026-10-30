@@ -542,14 +542,18 @@ async fn run_result_is_skipped_when_the_manager_left_the_session() {
     assert_eq!(messages.get_current_seq("group-1:result").await.unwrap(), 0);
 }
 
-#[tokio::test]
-async fn run_result_is_skipped_when_the_session_is_no_longer_running() {
+/// Publishes a RunResult for `bot-driver` while the Group and the Session carry the given statuses.
+async fn run_result_at_boundary(
+    group_status: bcs_domain::GroupStatus,
+    session_status: bcs_service_api::SessionStatus,
+) -> (bcs_service_api::StateMachineRunResultOutcome, Arc<flow_support::RecordingBotDelivery>, Arc<MemoryMessageRepo>) {
     let support = flow_support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let mut group = support.group.get("group-1").await.unwrap();
     group.group_strategy = GroupStrategy::ManagerWorker;
+    group.status = group_status;
     support.group.upsert(group.clone()).await.unwrap();
     let mut session = session_support::test_session("group-1:result", "group-1", group.participants);
-    session.status = bcs_service_api::SessionStatus::Completed;
+    session.status = session_status;
     let messages = Arc::new(MemoryMessageRepo::new());
     let flow = Arc::new(bcs_message_flow::BcsMessageFlow::new(
         support.group, Arc::new(bcs_routing::MessageRouter::new()), support.registry,
@@ -559,6 +563,26 @@ async fn run_result_is_skipped_when_the_session_is_no_longer_running() {
         .with_session_management(Arc::new(session_support::StaticSessionManagement::new(session))));
     let publisher = MessageFlowStateMachineResultPublisher::new(flow);
     let outcome = publisher.publish_state_machine_run_result(run_result_payload("bot-driver")).await.unwrap();
-    assert!(matches!(outcome, bcs_service_api::StateMachineRunResultOutcome::Skipped { .. }));
-    assert!(support.bot_delivery.targets().await.is_empty());
+    (outcome, support.bot_delivery, messages)
+}
+
+fn skipped_because(reason: &str) -> bcs_service_api::StateMachineRunResultOutcome {
+    bcs_service_api::StateMachineRunResultOutcome::Skipped { reason: reason.into() }
+}
+
+#[tokio::test]
+async fn run_result_is_skipped_when_the_session_is_no_longer_running() {
+    let (outcome, delivery, _) =
+        run_result_at_boundary(bcs_domain::GroupStatus::Active, bcs_service_api::SessionStatus::Completed).await;
+    assert_eq!(outcome, skipped_because("session is not running"));
+    assert!(delivery.targets().await.is_empty());
+}
+
+#[tokio::test]
+async fn run_result_is_skipped_when_the_group_is_closed() {
+    let (outcome, delivery, messages) =
+        run_result_at_boundary(bcs_domain::GroupStatus::Closed, bcs_service_api::SessionStatus::Running).await;
+    assert_eq!(outcome, skipped_because("group is not active"));
+    assert!(delivery.targets().await.is_empty());
+    assert_eq!(messages.get_current_seq("group-1:result").await.unwrap(), 0);
 }
