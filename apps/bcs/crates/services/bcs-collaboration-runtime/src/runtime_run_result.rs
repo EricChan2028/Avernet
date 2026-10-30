@@ -306,7 +306,8 @@ impl CollaborationRuntime {
     }
 }
 
-/// A HumanInput Node that failed at or after its deadline timed out.
+/// A HumanInput Node that failed at or after its deadline timed out. Human Nodes
+/// keep only their timeout and start time, so the deadline is derived from them.
 fn human_node_timed_out(definition: Option<&CollaborationDefinition>, nodes: &[StateMachineNodeRun], node_id: &str) -> bool {
     let human = match definition.map(|definition| &definition.runtime) {
         Some(CollaborationRuntimeDefinition::StateMachine(machine)) => machine
@@ -317,7 +318,10 @@ fn human_node_timed_out(definition: Option<&CollaborationDefinition>, nodes: &[S
     };
     human
         && nodes.iter().find(|node| node.node_id == node_id).is_some_and(|node| {
-            node.timeout_deadline_ms
-                .is_some_and(|deadline| node.completed_at.is_some_and(|completed| completed >= deadline))
+            let deadline = node.timeout_deadline_ms.or_else(|| match (node.started_at, node.node_timeout_ms) {
+                (Some(started), Some(timeout)) if timeout > 0 => started.checked_add(timeout),
+                _ => None,
+            });
+            deadline.is_some_and(|deadline| node.completed_at.is_some_and(|completed| completed >= deadline))
         })
 }

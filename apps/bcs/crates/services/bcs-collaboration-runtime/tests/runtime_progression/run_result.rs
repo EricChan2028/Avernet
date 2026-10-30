@@ -4,9 +4,11 @@ use super::{
     CreateOrReactivateCommand, GroupCoreService, GroupStore, MemoryCollaborationStore, MemoryMessageRepo, MessageViewScope,
     Mutex, NewSessionParams, Participant, ParticipantMode, ParticipantRole, RecordingDelivery,
     RuntimeParticipantBinding, SessionKind, SessionManagementService, StartSessionStateMachineRunCommand,
-    StateMachineRunRepoPort, StateMachineRunStatus, async_trait, json, noop_judge, one_shot_authoring_yaml,
-    test_group, test_sessions,
+    StateMachineRunRepoPort, StateMachineRunStatus, Value, async_trait, json, noop_judge, one_shot_authoring_yaml,
+    one_shot_human_input_authoring_yaml, session_collaboration_group, test_group, test_sessions,
 };
+use bcs_domain::GroupStrategy;
+use std::time::Duration;
 use bcs_domain::{StateMachineNodeStatus, StateMachineRun};
 use bcs_service_api::{
     CancelStateMachineRunCommand, CollaborationRuntimeError, HandleBotTerminalEventCommand,
@@ -179,6 +181,64 @@ async fn node_failure_wakes_manager_once_without_artifacts_or_raw_errors() {
     let page = f.runtime.recover_state_machine_run_results(None, 10).await.expect("scan");
     assert_eq!(page.scanned, 0);
     assert_eq!(f.publisher.results.lock().await.len(), 1);
+}
+
+#[tokio::test]
+async fn human_timeout_is_reported_with_its_own_reason() {
+    let group_store = Arc::new(GroupStore::new());
+    let group = session_collaboration_group(GroupStrategy::ManagerWorker);
+    group_store.upsert(group.clone()).await.expect("seed group");
+    let mut participants = group.participants.clone();
+    let mut human = Participant::human("human_1001", ParticipantRole::Observer);
+    human.mode = Some(ParticipantMode::Present);
+    human.message_view_scope = MessageViewScope::Participant;
+    participants.push(human);
+    let sessions = test_sessions();
+    let session = sessions
+        .create_or_reactivate(CreateOrReactivateCommand {
+            group_id: group.id.clone(),
+            session_id: None,
+            params: NewSessionParams {
+                session_kind: SessionKind::Chat,
+                participants,
+                message_visibility_version: 1,
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("seed session")
+        .session;
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let publisher = Arc::new(RunResultPublisher::default());
+    let runtime = test_runtime!(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group_store,
+        sessions,
+        Arc::new(RecordingDelivery::default()),
+        noop_judge(),
+    )
+    .with_result_publisher(publisher.clone());
+    runtime
+        .start_session_state_machine_run(StartSessionStateMachineRunCommand {
+            session_id: session.id.clone(),
+            caller_bot_id: "driver-bot".to_string(),
+            definition_yaml: one_shot_human_input_authoring_yaml().replace("60000", "1"),
+            participant_bindings: BTreeMap::new(),
+            opening_message: None,
+            input: Value::Null,
+            judge_available: false,
+        })
+        .await
+        .expect("start one-shot HumanInput run");
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    assert_eq!(runtime.process_expired_node_timeouts(10, 0).await.expect("scan timeouts"), 1);
+    let results = publisher.results.lock().await.clone();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].reason, StateMachineRunTerminalReason::HumanTimeout);
+    assert_eq!(results[0].failed_node.as_ref().map(|node| node.node_id.as_str()), Some("review"));
 }
 
 #[tokio::test]
