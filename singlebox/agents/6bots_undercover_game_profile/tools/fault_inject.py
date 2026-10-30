@@ -8,6 +8,10 @@ measures whether the referee re-opens the phase without any human message.
 * Recovered: a new Run appears in the Session within ``--sla`` seconds of the failure.
 * Stuck: no new Run appears within ``--stuck-after`` seconds.
 
+Game setup only: when no Run exists ``--start-nudge`` seconds after 开始 (the referee dealt
+but did not open round 1), the human says 开始 again, at most twice per game. Recovery from a
+failed Run never gets a human message.
+
 The killed OpenClaw gateway is restarted with the singlebox start command, its original
 environment and working directory as soon as the Run fails, like a process supervisor would.
 Run state is read from the local BCS SQLite database in read-only mode.
@@ -228,6 +232,8 @@ def main() -> None:
     parser.add_argument("--injections", type=int, default=10)
     parser.add_argument("--sla", type=float, default=60.0, help="seconds from Run failure to the re-opened Run")
     parser.add_argument("--stuck-after", type=float, default=300.0)
+    parser.add_argument("--start-nudge", type=float, default=120.0,
+                        help="seconds without any Run after 开始 before the human repeats it (setup only)")
     parser.add_argument("--stages", default="speak,vote", help="comma-separated stages to inject into")
     parser.add_argument("--out", type=Path, default=Path("fault-injection.csv"))
     parser.add_argument("--seed", type=int, default=None)
@@ -247,6 +253,7 @@ def main() -> None:
     session_id, games, started = None, 0, time.time()
     current: Injection | None = None
     injected_runs: set[str] = set()
+    start_said, start_nudges, nudges_total = 0.0, 0, 0
 
     while len([r for r in results if r.outcome != "pending"]) < args.injections:
         if session_id is None or (current is None and bcs.session_status(session_id) not in ("running", "")):
@@ -255,7 +262,12 @@ def main() -> None:
             log(f"game {games}: session {session_id}")
             time.sleep(20)  # the referee answers the Group context with its opening first
             bcs.say(session_id, "开始")
+            start_said, start_nudges = time.time(), 0
         session_runs = runs.runs(session_id)
+        if not session_runs and start_nudges < 2 and time.time() - start_said > args.start_nudge:
+            bcs.say(session_id, "开始")
+            start_said, start_nudges, nudges_total = time.time(), start_nudges + 1, nudges_total + 1
+            log(f"game {games}: no Run {args.start_nudge:.0f}s after 开始; the human says 开始 again (setup only)")
         active = next((run for run in reversed(session_runs) if run["status"] == "running"), None)
         if active:
             play_human(bcs, active["run_id"], answered)
@@ -319,7 +331,7 @@ def main() -> None:
         "stuck": sum(r.outcome == "stuck" for r in results), "late": sum(r.outcome == "late" for r in results),
         "median_latency_s": round(statistics.median(latencies), 1) if latencies else None,
         "max_latency_s": round(max(latencies), 1) if latencies else None,
-        "elapsed_min": round((time.time() - started) / 60, 1), "csv": str(args.out),
+        "start_nudges": nudges_total, "elapsed_min": round((time.time() - started) / 60, 1), "csv": str(args.out),
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
