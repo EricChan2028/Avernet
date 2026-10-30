@@ -314,6 +314,39 @@ class TestUpdateDevice:
             await service.update_device("bot-abc123", "not-a-config")
         assert exc_info.value.code == ErrorCode.CONFIG_INVALID
 
+    @pytest.mark.asyncio
+    async def test_returns_true_when_plugin_recovers_from_retry(
+        self, service, mock_plugin, callback_context
+    ):
+        """Plugin transparently retries and succeeds -> service returns True."""
+        mock_plugin.update_bot.return_value = BotUpdateResult(
+            teclaw_bot_id="bot-abc123",
+            status="ONLINE",
+            teclaw_bot_config={},
+        )
+        config = TeClawCreateConfig(
+            teclaw_bot_config={}, callback_context=callback_context
+        )
+        result = await service.update_device("bot-abc123", config)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_propagates_platform_unavailable_after_retry_exhaustion(
+        self, service, mock_plugin, callback_context
+    ):
+        """Exhausted retries surface preserved PLATFORM_UNAVAILABLE to caller."""
+        mock_plugin.update_bot.side_effect = PaasError(
+            ErrorCode.PLATFORM_UNAVAILABLE,
+            "TeClaw _post_emergency_online request failed after 3 attempts: reset",
+        )
+        config = TeClawCreateConfig(
+            teclaw_bot_config={}, callback_context=callback_context
+        )
+        with pytest.raises(PaasError) as exc_info:
+            await service.update_device("bot-abc123", config)
+        assert exc_info.value.code == ErrorCode.PLATFORM_UNAVAILABLE
+        assert "3 attempts" in exc_info.value.message
+
 
 # ---------------------------------------------------------------------------
 # Test update_device async-mode (callback_context present)
